@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-hand: var(--font-caveat);
+  --color-bg: #070708;
+  --color-panel: #0e0e10;
+  --color-card: #141416;
+  --color-card-2: #1b1b1f;
+  --color-line: #2a2a2e;
+  --color-muted: #a1a1aa;
+  --color-faint: #71717a;
+  --color-ink: #f7f7f8;
+  --color-gold: #e6c15a;
+  --color-cream: #f6e7a8;
+}
+
+* { box-sizing: border-box; }
+html, body { background: #070708; color: #f7f7f8; min-height: 100%; }
+body { font-family: var(--font-geist-sans), sans-serif; }
+button, input, select, textarea { font: inherit; }
+::selection { background: #f6e7a8; color: #111; }
+
+.hand { font-family: var(--font-caveat), cursive; }
+
+.app-scroll::-webkit-scrollbar { height: 10px; width: 10px; }
+.app-scroll::-webkit-scrollbar-thumb { background: #2e2e33; border-radius: 99px; }
+
+.status-replied { color: #b6e2a8; background: #1a2a1c; border: 1px solid #315c38; }
+.status-contacted { color: #d4d4d8; background: #222226; border: 1px solid #3a3a40; }
+.status-follow_up_needed { color: #f3e2a2; background: #2a2618; border: 1px solid #6d5b2a; }
+.status-not_contacted { color: #a1a1aa; background: #1a1a1d; border: 1px solid #333; }
+.status-interested { color: #b6e2a8; background: #1a2a1c; border: 1px solid #315c38; }
+.status-interview_scheduled { color: #c7d7ff; background: #1a2030; border: 1px solid #3a4d7a; }
+.status-closed { color: #f0b4b4; background: #2a1a1a; border: 1px solid #6a3030; }
+
+.field { width: 100%; border-radius: 0.75rem; border: 1px solid #2a2a2e; background: #101012; padding: 0.7rem 0.8rem; outline: none; color: #f7f7f8; }
+
+.app-scroll th,
+.app-scroll td { padding: 0.7rem 0.75rem; vertical-align: middle; }
