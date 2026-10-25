@@ -1,32 +1,31 @@
+import { readFileSync } from "node:fs";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { encryptSecret, randomToken } from "@/lib/security";
-import { serverConfig } from "@/lib/config";
 import { loginWithOAuth } from "@/lib/services/auth";
 
 type Provider = "google" | "microsoft" | "gmail" | "outlook";
 
 const LOGIN = new Set(["google", "microsoft"]);
 
-export async function beginOAuth(provider: Provider, userId: string | null) {
+export async function beginOAuth(provider: Provider, userId: string | null, origin: string) {
   const client = clientFor(provider);
-  if (!client.id) {
-    const message = LOGIN.has(provider)
-      ? `${label(provider)} sign-in is not connected yet. Create an account with your school email instead.`
-      : `${label(provider)} mailbox is not connected yet.`;
-    throw new ServiceError(message, "oauth_unconfigured", 400);
+  if (!client.id || !client.secret) {
+    throw new ServiceError(`${label(provider)} is not connected yet.`, "oauth_unconfigured", 400);
   }
   const state = randomToken();
+  const redirectOrigin = origin.replace(/\/$/, "");
   await repo.createOAuthState({
     id: id(),
     state,
     provider,
     userId,
     purpose: LOGIN.has(provider) ? "login" : "mailbox",
+    redirectOrigin,
     createdAt: nowIso(),
     expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
   });
-  const redirectUri = `${serverConfig().appUrl}/api/oauth/${provider}/callback`;
+  const redirectUri = `${redirectOrigin}/api/oauth/${provider}/callback`;
   const url = new URL(client.authorize);
   url.searchParams.set("client_id", client.id);
   url.searchParams.set("redirect_uri", redirectUri);
@@ -38,11 +37,20 @@ export async function beginOAuth(provider: Provider, userId: string | null) {
   return url.toString();
 }
 
-export async function finishOAuth(provider: Provider, code: string, state: string) {
+export function oauthReady() {
+  const google = clientFor("google");
+  const microsoft = clientFor("microsoft");
+  return {
+    google: Boolean(google.id && google.secret),
+    microsoft: Boolean(microsoft.id && microsoft.secret),
+  };
+}
+
+export async function finishOAuth(provider: Provider, code: string, state: string, origin: string) {
   const saved = await repo.consumeOAuthState(state);
   if (!saved || saved.provider !== provider) throw new ServiceError("This sign-in attempt expired. Start again.", "oauth_state");
   const client = clientFor(provider);
-  const redirectUri = `${serverConfig().appUrl}/api/oauth/${provider}/callback`;
+  const redirectUri = `${(saved.redirectOrigin || origin).replace(/\/$/, "")}/api/oauth/${provider}/callback`;
   const body = new URLSearchParams({
     client_id: client.id,
     client_secret: client.secret,
@@ -81,11 +89,24 @@ export async function finishOAuth(provider: Provider, code: string, state: strin
   return { mailbox: profile.email };
 }
 
+function envValue(name: string) {
+  if (process.env[name]) return process.env[name] || "";
+  if (process.env.NODE_ENV === "production") return "";
+  try {
+    const line = readFileSync(".env.local", "utf8")
+      .split("\n")
+      .find((item) => item.startsWith(`${name}=`));
+    return line ? line.slice(name.length + 1).trim().replace(/^["']|["']$/g, "") : "";
+  } catch {
+    return "";
+  }
+}
+
 function clientFor(provider: Provider) {
   if (provider === "google" || provider === "gmail") {
     return {
-      id: process.env.GOOGLE_CLIENT_ID || "",
-      secret: process.env.GOOGLE_CLIENT_SECRET || "",
+      id: envValue("GOOGLE_CLIENT_ID"),
+      secret: envValue("GOOGLE_CLIENT_SECRET"),
       authorize: "https://accounts.google.com/o/oauth2/v2/auth",
       token: "https://oauth2.googleapis.com/token",
       scope:
@@ -95,8 +116,8 @@ function clientFor(provider: Provider) {
     };
   }
   return {
-    id: process.env.MICROSOFT_CLIENT_ID || "",
-    secret: process.env.MICROSOFT_CLIENT_SECRET || "",
+    id: envValue("MICROSOFT_CLIENT_ID"),
+    secret: envValue("MICROSOFT_CLIENT_SECRET"),
     authorize: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
     token: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
     scope: provider === "outlook" ? "offline_access openid email profile User.Read Mail.Send Mail.Read" : "openid email profile User.Read",

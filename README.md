@@ -75,7 +75,7 @@ Subscribe to `checkout.session.completed`, `invoice.paid`, `customer.subscriptio
 
 ## OAuth
 
-Google and Microsoft are used both to sign in and to connect a mailbox.
+Google and Microsoft are used both to sign in and to connect a mailbox. School-email signup works without them. Open `/connect` for the setup steps. Put `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, and `MICROSOFT_CLIENT_SECRET` in `.env.local`. The redirect URI is the origin in the browser plus the path below, which is `APP_URL` in production.
 
 | Provider | Redirect URI |
 | --- | --- |

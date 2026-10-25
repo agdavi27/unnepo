@@ -372,6 +372,7 @@ create table if not exists oauth_states (
   provider text not null,
   user_id uuid,
   purpose text not null,
+  redirect_origin text,
   created_at timestamptz not null default now(),
   expires_at timestamptz not null
 );

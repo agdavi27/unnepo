@@ -388,6 +388,7 @@ export type OAuthState = {
   provider: string;
   userId: string | null;
   purpose: "login" | "mailbox";
+  redirectOrigin: string;
   createdAt: string;
   expiresAt: string;
 };

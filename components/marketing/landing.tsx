@@ -15,7 +15,7 @@ const HEADSHOTS = [
   { src: "/students/student-4.jpg", alt: "Student at a desk" },
 ];
 
-export function Landing() {
+export function Landing({ google = false, microsoft = false }: { google?: boolean; microsoft?: boolean }) {
   const router = useRouter();
   const params = useSearchParams();
   const [email, setEmail] = useState("");
@@ -63,7 +63,7 @@ export function Landing() {
         </form>
         <div className="mx-auto mt-3 max-w-xl">
           <p className="mb-2 text-xs uppercase tracking-[0.18em] text-faint">or</p>
-          <ProviderButtons compact />
+          <ProviderButtons compact google={google} microsoft={microsoft} />
         </div>
         {params.get("error") ? <p className="mt-3 text-sm text-red-300">{params.get("error")}</p> : null}
         <p className="mt-3 text-sm text-faint">Get 25 free credits. No subscription. Built for students.</p>

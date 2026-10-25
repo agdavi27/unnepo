@@ -27,11 +27,24 @@ export async function clearSessionCookie() {
   (await cookies()).delete("unnepo_session");
 }
 
+export function publicOrigin(request: Request) {
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  if (forwardedHost) return `${forwardedProto || "https"}://${forwardedHost}`;
+  return new URL(request.url).origin;
+}
+
 export function assertSameOrigin(request: Request) {
+  const site = request.headers.get("sec-fetch-site");
+  if (site === "same-origin" || site === "none") return;
   const origin = request.headers.get("origin");
   const host = request.headers.get("host");
   if (!origin || !host) return;
-  if (new URL(origin).host !== host) throw new ServiceError("Cross-origin request blocked.", "origin", 403);
+  const originHost = new URL(origin).host;
+  if (originHost === host) return;
+  const forwarded = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  if (forwarded && originHost === forwarded) return;
+  throw new ServiceError("Cross-origin request blocked.", "origin", 403);
 }
 
 export function json(data: unknown, status = 200) {

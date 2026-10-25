@@ -6,14 +6,15 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { isSchoolEmail } from "@/lib/schools";
 
 const signupSchema = z.object({
   name: z.string().min(1, "Add your name"),
-  email: z.string().email("Enter a valid email"),
+  email: z.string().email("Enter a valid email").refine(isSchoolEmail, "Use a school email such as name@college.edu. Gmail and Outlook.com are not eligible."),
   password: z.string().min(8, "Use at least 8 characters"),
 });
 
-export function SignupForm() {
+export function SignupForm({ google = false, microsoft = false }: { google?: boolean; microsoft?: boolean }) {
   const params = useSearchParams();
   const router = useRouter();
   const [error, setError] = useState(params.get("error") || "");
@@ -69,7 +70,8 @@ export function SignupForm() {
 
   return (
     <AuthShell title="Create your account" subtitle="Use a school email such as name@college.edu. Personal addresses like Gmail are not eligible.">
-      <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+      <form method="post" action="/api/auth/signup" onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+        <input type="hidden" name="referralCode" value={params.get("ref") || ""} />
         <input className="field" placeholder="Full name" autoComplete="name" {...form.register("name")} />
         {form.formState.errors.name ? <p className="text-sm text-red-300">{form.formState.errors.name.message}</p> : null}
         <input className="field" placeholder="School email" autoComplete="email" {...form.register("email")} />
@@ -80,12 +82,12 @@ export function SignupForm() {
         <button type="submit" disabled={busy} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Creating account…" : "Create account"}</button>
       </form>
       <p className="mt-4 text-center text-sm text-muted">Already have an account? <Link href="/login" className="text-white">Log in</Link></p>
-      <ProviderButtons />
+      <ProviderButtons google={google} microsoft={microsoft} />
     </AuthShell>
   );
 }
 
-export function LoginForm() {
+export function LoginForm({ google = false, microsoft = false }: { google?: boolean; microsoft?: boolean }) {
   const router = useRouter();
   const params = useSearchParams();
   const [error, setError] = useState(params.get("error") || "");
@@ -143,18 +145,18 @@ export function LoginForm() {
       </form>
       {unverified ? <button type="button" onClick={verifyAndLogin} disabled={busy} className="mt-3 h-11 w-full rounded-xl border border-line">Verify school email and continue</button> : null}
       <p className="mt-4 text-center text-sm text-muted"><Link href="/reset" className="text-white">Forgot password</Link> · <Link href="/signup">Create an account</Link></p>
-      <ProviderButtons />
+      <ProviderButtons google={google} microsoft={microsoft} />
     </AuthShell>
   );
 }
 
-export function ProviderButtons({ compact = false }: { compact?: boolean }) {
+export function ProviderButtons({ compact = false, google = false, microsoft = false }: { compact?: boolean; google?: boolean; microsoft?: boolean }) {
   return (
     <div className={compact ? "flex flex-col gap-2 sm:flex-row" : "mt-4 grid gap-2"}>
-      <a href="/api/oauth/google" className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-white text-sm font-medium text-black">
+      <a href={google ? "/api/oauth/google" : "/connect?provider=google"} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-white text-sm font-medium text-black">
         <GoogleMark /> Continue with Google
       </a>
-      <a href="/api/oauth/microsoft" className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-[#111113] text-sm font-medium text-white">
+      <a href={microsoft ? "/api/oauth/microsoft" : "/connect?provider=microsoft"} className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-[#111113] text-sm font-medium text-white">
         <MicrosoftMark /> Continue with Microsoft
       </a>
     </div>

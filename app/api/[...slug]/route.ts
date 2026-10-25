@@ -1,6 +1,6 @@
 import { createReadStream, existsSync } from "node:fs";
 import { Readable } from "node:stream";
-import { assertSameOrigin, clearSessionCookie, errorResponse, json, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
+import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { repo } from "@/lib/db/file-store";
 import { runSearch, unlockContact } from "@/lib/services/contacts";
@@ -11,7 +11,7 @@ import { listJobPostings } from "@/lib/services/jobs";
 import { confirmDemoPurchase, createStripeCheckout, applyVerifiedStripeEvent } from "@/lib/services/billing";
 import { profitability } from "@/lib/services/admin";
 import { dashboard } from "@/lib/services/dashboard";
-import { beginOAuth, finishOAuth } from "@/lib/services/oauth";
+import { beginOAuth, finishOAuth, oauthReady } from "@/lib/services/oauth";
 import { ServiceError } from "@/lib/errors";
 import { nowIso } from "@/lib/db/file-store";
 import type { OutreachStatus } from "@/lib/db/types";
@@ -23,6 +23,7 @@ async function handle(request: Request, slug: string[]) {
   if (request.method !== "GET") assertSameOrigin(request);
 
   if (root === "health" && request.method === "GET") {
+    const ready = oauthReady();
     return json({
       ok: true,
       database: process.env.SUPABASE_URL ? "supabase-configured" : "file",
@@ -32,8 +33,8 @@ async function handle(request: Request, slug: string[]) {
         hunter: Boolean(process.env.HUNTER_API_KEY),
         anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
         stripe: Boolean(process.env.STRIPE_SECRET_KEY),
-        gmail: Boolean(process.env.GOOGLE_CLIENT_ID),
-        microsoft: Boolean(process.env.MICROSOFT_CLIENT_ID),
+        gmail: ready.google,
+        microsoft: ready.microsoft,
         inngest: Boolean(process.env.INNGEST_EVENT_KEY),
         posthog: Boolean(process.env.POSTHOG_KEY),
         sentry: Boolean(process.env.SENTRY_DSN),
@@ -47,9 +48,32 @@ async function handle(request: Request, slug: string[]) {
     if (!rateLimit(`signup:${request.headers.get("x-forwarded-for") || "local"}`, 10, 60 * 60 * 1000)) {
       throw new ServiceError("Too many signup attempts. Try again later.", "rate", 429);
     }
-    const body = await request.json();
-    const result = await signUp(body);
-    return json(result);
+    const contentType = request.headers.get("content-type") || "";
+    const formPost = contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data");
+    const raw = formPost ? Object.fromEntries(await request.formData()) : await request.json();
+    const body = {
+      name: String(raw.name || ""),
+      email: String(raw.email || ""),
+      password: String(raw.password || ""),
+      referralCode: raw.referralCode ? String(raw.referralCode) : undefined,
+    };
+    try {
+      const result = await signUp(body);
+      if (!formPost) return json(result);
+      if (result.verifyToken) {
+        await verifyEmail(result.verifyToken);
+        const loggedIn = await login(body.email, body.password);
+        await setSessionCookie(loggedIn.token);
+        return Response.redirect(new URL("/onboarding", publicOrigin(request)), 303);
+      }
+      return Response.redirect(new URL("/login?check=1", publicOrigin(request)), 303);
+    } catch (error) {
+      if (!formPost) throw error;
+      const back = new URL("/signup", publicOrigin(request));
+      back.searchParams.set("error", error instanceof ServiceError ? error.message : "Could not create the account.");
+      if (body.email) back.searchParams.set("email", body.email);
+      return Response.redirect(back, 303);
+    }
   }
   if (root === "auth" && action === "login" && request.method === "POST") {
     const body = await request.json();
@@ -88,14 +112,14 @@ async function handle(request: Request, slug: string[]) {
     if ((action === "gmail" || action === "outlook") && !session?.user) {
       return Response.redirect(new URL("/login?next=/settings", request.url));
     }
-    const url = await beginOAuth(action as "google" | "microsoft" | "gmail" | "outlook", session?.user.id ?? null);
+    const url = await beginOAuth(action as "google" | "microsoft" | "gmail" | "outlook", session?.user.id ?? null, publicOrigin(request));
     return Response.redirect(url);
   }
   if (root === "oauth" && slug[2] === "callback" && request.method === "GET") {
     const url = new URL(request.url);
     const providerError = url.searchParams.get("error_description") || url.searchParams.get("error");
     if (providerError) return Response.redirect(oauthReturnUrl(request, "Sign-in was canceled. Try Google or Microsoft again."));
-    const result = await finishOAuth(action as "gmail" | "google" | "microsoft" | "outlook", url.searchParams.get("code") || "", url.searchParams.get("state") || "");
+    const result = await finishOAuth(action as "gmail" | "google" | "microsoft" | "outlook", url.searchParams.get("code") || "", url.searchParams.get("state") || "", publicOrigin(request));
     if ("token" in result && result.token) {
       await setSessionCookie(result.token);
       const step = result.user.onboardingStep;
@@ -338,7 +362,7 @@ function oauthReturnUrl(request: Request, message: string) {
       /* keep the default screen */
     }
   }
-  const back = new URL(path, request.url);
+  const back = new URL(path, publicOrigin(request));
   if (path === "/settings") back.searchParams.set("tab", "integrations");
   back.searchParams.set("error", message);
   return back;
@@ -350,6 +374,13 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     return await handle(request, slug);
   } catch (error) {
     if (slug[0] === "oauth" && error instanceof ServiceError) {
+      if (error.code === "oauth_unconfigured") {
+        const provider = new URL(request.url).pathname.split("/").filter(Boolean)[2] || "google";
+        const which = provider === "microsoft" || provider === "outlook" ? "microsoft" : "google";
+        const back = new URL("/connect", publicOrigin(request));
+        back.searchParams.set("provider", which);
+        return Response.redirect(back);
+      }
       return Response.redirect(oauthReturnUrl(request, error.message));
     }
     return errorResponse(error);
