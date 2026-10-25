@@ -1,7 +1,7 @@
 import { createReadStream, existsSync } from "node:fs";
 import { Readable } from "node:stream";
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
-import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
+import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { repo } from "@/lib/db/file-store";
 import { runSearch, unlockContact } from "@/lib/services/contacts";
 import { composerContext, generateEmail } from "@/lib/services/composer";
@@ -68,6 +68,10 @@ async function handle(request: Request, slug: string[]) {
     const body = await request.json();
     const user = await verifyEmail(body.token);
     return json({ user });
+  }
+  if (root === "auth" && action === "resend" && request.method === "POST") {
+    const body = await request.json();
+    return json(await resendVerification(body.email || ""));
   }
   if (root === "auth" && action === "forgot" && request.method === "POST") {
     const body = await request.json();
@@ -316,7 +320,11 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
   try {
     return await handle(request, (await context.params).slug);
   } catch (error) {
-    if (error instanceof ServiceError && error.code === "oauth_unconfigured") return json({ error: error.message }, 400);
+    if (error instanceof ServiceError && error.code === "oauth_unconfigured") {
+      const back = new URL("/signup", request.url);
+      back.searchParams.set("error", error.message);
+      return Response.redirect(back);
+    }
     return errorResponse(error);
   }
 }

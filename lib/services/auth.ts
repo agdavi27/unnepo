@@ -69,6 +69,13 @@ export async function signUp(input: { email: string; password: string; name: str
   return { user: publicUser(user), verifyToken: exposeDevToken(token) };
 }
 
+export async function resendVerification(email: string) {
+  const user = await repo.getUserByEmail(normalizeEmail(email));
+  if (!user || user.schoolEmailVerifiedAt) return { devToken: null as string | null };
+  const token = await issueToken(user.id, "verify_email");
+  return { devToken: exposeDevToken(token) };
+}
+
 export async function verifyEmail(rawToken: string) {
   const record = await repo.getTokenByHash(sha256(rawToken));
   if (!record || record.purpose !== "verify_email" || record.usedAt || new Date(record.expiresAt).getTime() < Date.now()) {

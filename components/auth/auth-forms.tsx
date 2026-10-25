@@ -16,8 +16,8 @@ const signupSchema = z.object({
 export function SignupForm() {
   const params = useSearchParams();
   const router = useRouter();
-  const [error, setError] = useState("");
-  const [verifyToken, setVerifyToken] = useState<string | null>(null);
+  const [error, setError] = useState(params.get("error") || "");
+  const [busy, setBusy] = useState(false);
   const form = useForm<z.infer<typeof signupSchema>>({
     resolver: zodResolver(signupSchema),
     defaultValues: { name: "", email: params.get("email") || "", password: "" },
@@ -25,36 +25,60 @@ export function SignupForm() {
 
   async function onSubmit(values: z.infer<typeof signupSchema>) {
     setError("");
+    setBusy(true);
     const response = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...values, referralCode: params.get("ref") }),
+      body: JSON.stringify({ ...values, referralCode: params.get("ref") || undefined }),
     });
     const data = await response.json();
-    if (!response.ok) return setError(data.error);
-    if (data.verifyToken) setVerifyToken(data.verifyToken);
-    else router.push("/login?check=1");
-  }
-
-  async function verify() {
-    const response = await fetch("/api/auth/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: verifyToken }) });
-    const data = await response.json();
-    if (!response.ok) return setError(data.error);
-    router.push("/login?verified=1");
+    if (!response.ok) {
+      setBusy(false);
+      if (data.code === "duplicate") {
+        setError("An account with this email already exists. Log in, and verify the email if you have not yet.");
+        return;
+      }
+      setError(data.error || "Could not create the account.");
+      return;
+    }
+    if (data.verifyToken) {
+      const verified = await fetch("/api/auth/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: data.verifyToken }) });
+      const verifiedData = await verified.json();
+      if (!verified.ok) {
+        setBusy(false);
+        setError(verifiedData.error || "Account created, but verification failed. Use Log in to finish.");
+        return;
+      }
+      const loggedIn = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: values.email, password: values.password }),
+      });
+      const loggedInData = await loggedIn.json();
+      setBusy(false);
+      if (!loggedIn.ok) {
+        setError(loggedInData.error || "Account created. Log in with the same password.");
+        return;
+      }
+      router.push("/onboarding");
+      return;
+    }
+    setBusy(false);
+    router.push("/login?check=1");
   }
 
   return (
-    <AuthShell title="Create your account" subtitle="Use your school email. You get 25 credits after it's verified, once.">
+    <AuthShell title="Create your account" subtitle="Use a school email such as name@college.edu. Personal addresses like Gmail are not eligible.">
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
-        <input className="field" placeholder="Full name" {...form.register("name")} />
-        <input className="field" placeholder="School email" {...form.register("email")} />
-        <input className="field" type="password" placeholder="Password" {...form.register("password")} />
+        <input className="field" placeholder="Full name" autoComplete="name" {...form.register("name")} />
+        {form.formState.errors.name ? <p className="text-sm text-red-300">{form.formState.errors.name.message}</p> : null}
+        <input className="field" placeholder="School email" autoComplete="email" {...form.register("email")} />
         {form.formState.errors.email ? <p className="text-sm text-red-300">{form.formState.errors.email.message}</p> : null}
+        <input className="field" type="password" placeholder="Password (8+ characters)" autoComplete="new-password" {...form.register("password")} />
         {form.formState.errors.password ? <p className="text-sm text-red-300">{form.formState.errors.password.message}</p> : null}
         {error ? <p className="text-sm text-red-300">{error}</p> : null}
-        <button className="h-11 w-full rounded-xl bg-white font-semibold text-black">Create account</button>
+        <button type="submit" disabled={busy} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Creating account…" : "Create account"}</button>
       </form>
-      {verifyToken ? <button onClick={verify} className="mt-3 h-11 w-full rounded-xl border border-line">Verify school email</button> : null}
       <p className="mt-4 text-center text-sm text-muted">Already have an account? <Link href="/login" className="text-white">Log in</Link></p>
       <div className="mt-4 grid gap-2">
         <a href="/api/oauth/google" className="rounded-xl border border-line py-2 text-center text-sm">Continue with Google</a>
@@ -70,23 +94,57 @@ export function LoginForm() {
   const [error, setError] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [unverified, setUnverified] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    setBusy(true);
+    setUnverified(false);
     const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
     const data = await response.json();
-    if (!response.ok) return setError(data.error);
+    setBusy(false);
+    if (!response.ok) {
+      setError(data.error || "Could not log in.");
+      if (data.code === "unverified") setUnverified(true);
+      return;
+    }
+    router.push(params.get("next") || "/home");
+  }
+
+  async function verifyAndLogin() {
+    setBusy(true);
+    setError("");
+    const resent = await fetch("/api/auth/resend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+    const resentData = await resent.json();
+    if (!resentData.devToken) {
+      setBusy(false);
+      setError("Check the school inbox for the verification link, then log in.");
+      return;
+    }
+    const verified = await fetch("/api/auth/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: resentData.devToken }) });
+    const verifiedData = await verified.json();
+    if (!verified.ok) {
+      setBusy(false);
+      setError(verifiedData.error || "Verification failed.");
+      return;
+    }
+    const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+    const data = await response.json();
+    setBusy(false);
+    if (!response.ok) return setError(data.error || "Verified. Try logging in again.");
     router.push(params.get("next") || "/home");
   }
 
   return (
-    <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your 25 credits are ready." : "Sign in with the school email you verified."}>
+    <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your 25 credits are ready." : "Sign in with the school email you used to sign up."}>
       <form onSubmit={submit} className="space-y-3">
         <input className="field" placeholder="School email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         <input className="field" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
         {error ? <p className="text-sm text-red-300">{error}</p> : null}
-        <button className="h-11 w-full rounded-xl bg-white font-semibold text-black">Log in</button>
+        <button type="submit" disabled={busy} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Working…" : "Log in"}</button>
       </form>
+      {unverified ? <button type="button" onClick={verifyAndLogin} disabled={busy} className="mt-3 h-11 w-full rounded-xl border border-line">Verify school email and continue</button> : null}
       <p className="mt-4 text-center text-sm text-muted"><Link href="/reset" className="text-white">Forgot password</Link> · <Link href="/signup">Create an account</Link></p>
     </AuthShell>
   );
