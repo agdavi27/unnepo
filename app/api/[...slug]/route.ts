@@ -93,10 +93,14 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "oauth" && slug[2] === "callback" && request.method === "GET") {
     const url = new URL(request.url);
+    const providerError = url.searchParams.get("error_description") || url.searchParams.get("error");
+    if (providerError) return Response.redirect(oauthReturnUrl(request, "Sign-in was canceled. Try Google or Microsoft again."));
     const result = await finishOAuth(action as "gmail" | "google" | "microsoft" | "outlook", url.searchParams.get("code") || "", url.searchParams.get("state") || "");
     if ("token" in result && result.token) {
       await setSessionCookie(result.token);
-      return Response.redirect(new URL("/home", request.url));
+      const step = result.user.onboardingStep;
+      const dest = step === "profile" || step === "goals" || step === "resume" ? "/onboarding" : "/home";
+      return Response.redirect(new URL(dest, request.url));
     }
     return Response.redirect(new URL("/settings?tab=integrations", request.url));
   }
@@ -316,14 +320,37 @@ async function handle(request: Request, slug: string[]) {
   throw new ServiceError("Not found.", "not_found", 404);
 }
 
+function oauthReturnUrl(request: Request, message: string) {
+  const current = new URL(request.url);
+  const provider = current.pathname.split("/").filter(Boolean)[2] || "";
+  const mailbox = provider === "gmail" || provider === "outlook";
+  let path = mailbox ? "/settings" : "/signup";
+  const referer = request.headers.get("referer");
+  if (referer) {
+    try {
+      const from = new URL(referer);
+      const local = new Set(["localhost", "127.0.0.1"]);
+      const sameSite = from.origin === current.origin || (local.has(from.hostname) && local.has(current.hostname) && from.port === current.port);
+      if (sameSite && (from.pathname === "/login" || from.pathname === "/signup" || from.pathname === "/" || from.pathname === "/settings")) {
+        path = from.pathname;
+      }
+    } catch {
+      /* keep the default screen */
+    }
+  }
+  const back = new URL(path, request.url);
+  if (path === "/settings") back.searchParams.set("tab", "integrations");
+  back.searchParams.set("error", message);
+  return back;
+}
+
 export async function GET(request: Request, context: { params: Promise<{ slug: string[] }> }) {
+  const slug = (await context.params).slug;
   try {
-    return await handle(request, (await context.params).slug);
+    return await handle(request, slug);
   } catch (error) {
-    if (error instanceof ServiceError && error.code === "oauth_unconfigured") {
-      const back = new URL("/signup", request.url);
-      back.searchParams.set("error", error.message);
-      return Response.redirect(back);
+    if (slug[0] === "oauth" && error instanceof ServiceError) {
+      return Response.redirect(oauthReturnUrl(request, error.message));
     }
     return errorResponse(error);
   }

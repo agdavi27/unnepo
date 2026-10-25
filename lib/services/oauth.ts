@@ -10,7 +10,12 @@ const LOGIN = new Set(["google", "microsoft"]);
 
 export async function beginOAuth(provider: Provider, userId: string | null) {
   const client = clientFor(provider);
-  if (!client.id) throw new ServiceError(`${label(provider)} is not configured yet.`, "oauth_unconfigured", 400);
+  if (!client.id) {
+    const message = LOGIN.has(provider)
+      ? `${label(provider)} sign-in is not connected yet. Create an account with your school email instead.`
+      : `${label(provider)} mailbox is not connected yet.`;
+    throw new ServiceError(message, "oauth_unconfigured", 400);
+  }
   const state = randomToken();
   await repo.createOAuthState({
     id: id(),

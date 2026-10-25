@@ -17,12 +17,12 @@ const profileSchema = z.object({
 
 type ProfileForm = z.infer<typeof profileSchema>;
 
-export function SettingsView({ initialTab = "profile" }: { initialTab?: string }) {
+export function SettingsView({ initialTab = "profile", initialMessage = "" }: { initialTab?: string; initialMessage?: string }) {
   const [tab, setTab] = useState(initialTab);
   const [me, setMe] = useState<{ user: { name: string; email: string; referralCode: string }; credits: { balance: number; includedAllowance: number; plan: string } | null; mailboxes: Array<{ provider: string; email: string }> } | null>(null);
   const [facts, setFacts] = useState<Array<{ id: string; category: string; detail: string }>>([]);
   const [history, setHistory] = useState<Array<{ id: string; kind: string; status: string; amountCents: number; creditsGranted: number; demo: boolean; createdAt: string }>>([]);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(initialMessage);
   const [resumeName, setResumeName] = useState("");
   const form = useForm<ProfileForm>({ resolver: zodResolver(profileSchema), defaultValues: { name: "", school: "", major: "", graduationYear: "", bio: "" } });
   const pricing = { referral: 50, grind: "$19", pack: "$50" };

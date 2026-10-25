@@ -80,10 +80,7 @@ export function SignupForm() {
         <button type="submit" disabled={busy} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Creating account…" : "Create account"}</button>
       </form>
       <p className="mt-4 text-center text-sm text-muted">Already have an account? <Link href="/login" className="text-white">Log in</Link></p>
-      <div className="mt-4 grid gap-2">
-        <a href="/api/oauth/google" className="rounded-xl border border-line py-2 text-center text-sm">Continue with Google</a>
-        <a href="/api/oauth/microsoft" className="rounded-xl border border-line py-2 text-center text-sm">Continue with Microsoft</a>
-      </div>
+      <ProviderButtons />
     </AuthShell>
   );
 }
@@ -91,7 +88,7 @@ export function SignupForm() {
 export function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const [error, setError] = useState("");
+  const [error, setError] = useState(params.get("error") || "");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [unverified, setUnverified] = useState(false);
@@ -146,7 +143,43 @@ export function LoginForm() {
       </form>
       {unverified ? <button type="button" onClick={verifyAndLogin} disabled={busy} className="mt-3 h-11 w-full rounded-xl border border-line">Verify school email and continue</button> : null}
       <p className="mt-4 text-center text-sm text-muted"><Link href="/reset" className="text-white">Forgot password</Link> · <Link href="/signup">Create an account</Link></p>
+      <ProviderButtons />
     </AuthShell>
+  );
+}
+
+export function ProviderButtons({ compact = false }: { compact?: boolean }) {
+  return (
+    <div className={compact ? "flex flex-col gap-2 sm:flex-row" : "mt-4 grid gap-2"}>
+      <a href="/api/oauth/google" className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-white text-sm font-medium text-black">
+        <GoogleMark /> Continue with Google
+      </a>
+      <a href="/api/oauth/microsoft" className="flex h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-line bg-[#111113] text-sm font-medium text-white">
+        <MicrosoftMark /> Continue with Microsoft
+      </a>
+    </div>
+  );
+}
+
+function GoogleMark() {
+  return (
+    <svg viewBox="0 0 18 18" className="h-4 w-4" aria-hidden="true">
+      <path fill="#4285F4" d="M17.6 9.2c0-.6-.1-1.2-.2-1.8H9v3.4h4.8a4.1 4.1 0 0 1-1.8 2.7v2.2h2.9c1.7-1.6 2.7-3.9 2.7-6.5Z" />
+      <path fill="#34A853" d="M9 18c2.4 0 4.5-.8 6-2.2l-2.9-2.2c-.8.6-1.9.9-3.1.9-2.4 0-4.4-1.6-5.1-3.8H.9v2.3A9 9 0 0 0 9 18Z" />
+      <path fill="#FBBC05" d="M3.9 10.7A5.4 5.4 0 0 1 3.6 9c0-.6.1-1.2.3-1.7V5H.9A9 9 0 0 0 0 9c0 1.4.3 2.8.9 4l3-2.3Z" />
+      <path fill="#EA4335" d="M9 3.6c1.3 0 2.5.5 3.4 1.3L15.1 2A9 9 0 0 0 .9 5l3 2.3C4.6 5.2 6.6 3.6 9 3.6Z" />
+    </svg>
+  );
+}
+
+function MicrosoftMark() {
+  return (
+    <svg viewBox="0 0 16 16" className="h-4 w-4" aria-hidden="true">
+      <path fill="#F25022" d="M0 0h7.5v7.5H0z" />
+      <path fill="#7FBA00" d="M8.5 0H16v7.5H8.5z" />
+      <path fill="#00A4EF" d="M0 8.5h7.5V16H0z" />
+      <path fill="#FFB900" d="M8.5 8.5H16V16H8.5z" />
+    </svg>
   );
 }
 

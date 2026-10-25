@@ -2,12 +2,22 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Mail, MessageSquare, Phone, Target } from "lucide-react";
 import { PUBLIC_PLANS } from "@/lib/config";
+import { ProviderButtons } from "@/components/auth/auth-forms";
+import { SchoolLogos } from "@/components/marketing/school-logos";
+
+const HEADSHOTS = [
+  { src: "/students/student-1.jpg", alt: "Student in a suit" },
+  { src: "/students/student-2.jpg", alt: "Student in a red shirt" },
+  { src: "/students/student-3.jpg", alt: "Student in a beige shirt" },
+  { src: "/students/student-4.jpg", alt: "Student at a desk" },
+];
 
 export function Landing() {
   const router = useRouter();
+  const params = useSearchParams();
   const [email, setEmail] = useState("");
 
   function start(event: React.FormEvent) {
@@ -37,7 +47,7 @@ export function Landing() {
         <h1 className="text-5xl font-bold uppercase leading-[0.95] tracking-tight md:text-7xl">
           They knew someone.
           <br />
-          Now you do too.
+          <span className="text-[#3D8BFF]">Now you do too.</span>
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-base text-muted md:text-lg">
           Find relevant professionals, write personalized outreach emails, and make your own opportunities — no connections required.
@@ -51,30 +61,23 @@ export function Landing() {
             Get started <ArrowRight className="h-4 w-4" />
           </button>
         </form>
+        <div className="mx-auto mt-3 max-w-xl">
+          <p className="mb-2 text-xs uppercase tracking-[0.18em] text-faint">or</p>
+          <ProviderButtons compact />
+        </div>
+        {params.get("error") ? <p className="mt-3 text-sm text-red-300">{params.get("error")}</p> : null}
         <p className="mt-3 text-sm text-faint">Get 25 free credits. No subscription. Built for students.</p>
         <div className="mt-6 flex items-center justify-center gap-3 text-sm text-muted">
           <div className="flex -space-x-2">
-            {["A", "J", "M", "S", "C"].map((letter) => (
-              <span key={letter} className="flex h-8 w-8 items-center justify-center rounded-full border border-black bg-zinc-300 text-xs font-semibold text-black">{letter}</span>
+            {HEADSHOTS.map((photo) => (
+              <img key={photo.src} src={photo.src} alt={photo.alt} className="h-11 w-11 rounded-full border-2 border-black object-cover object-top" />
             ))}
           </div>
           10,000+ students are finding opportunities with Unnepo.
         </div>
       </section>
 
-      <section className="border-y border-line/70 py-8">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-center gap-x-8 gap-y-4 px-5 text-zinc-300">
-          <span className="font-serif text-2xl tracking-wide">Colby</span>
-          <span className="text-faint">|</span>
-          <span className="font-serif text-2xl">Penn</span>
-          <span className="text-faint">|</span>
-          <span className="hand text-4xl text-amber-100">Pitt</span>
-          <span className="text-faint">|</span>
-          <span className="text-xl font-semibold">Cornell</span>
-          <span className="text-faint">|</span>
-          <span className="font-serif text-2xl">Columbia</span>
-        </div>
-      </section>
+      <SchoolLogos />
 
       <section id="how" className="mx-auto max-w-6xl px-5 py-20">
         <p className="text-center text-xs font-semibold tracking-[0.22em] text-faint">HOW IT WORKS</p>
