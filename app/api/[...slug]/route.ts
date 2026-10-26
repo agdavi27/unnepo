@@ -1,12 +1,10 @@
-import { createReadStream, existsSync } from "node:fs";
-import { Readable } from "node:stream";
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { persistenceMode, repo } from "@/lib/db/file-store";
 import { runSearch, unlockContact } from "@/lib/services/contacts";
 import { composerContext, generateEmail } from "@/lib/services/composer";
 import { outreachSummary, saveDraft, sendOutreach, syncReplies } from "@/lib/services/outreach";
-import { storeResume } from "@/lib/services/resume";
+import { readStoredResume, storeResume } from "@/lib/services/resume";
 import { listJobPostings } from "@/lib/services/jobs";
 import { confirmDemoPurchase, createStripeCheckout, applyVerifiedStripeEvent } from "@/lib/services/billing";
 import { applyReferralCode } from "@/lib/services/referrals";
@@ -202,6 +200,7 @@ async function handle(request: Request, slug: string[]) {
     const file = form.get("file");
     if (!(file instanceof File)) throw new ServiceError("Choose a resume file.", "file");
     const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!bytes.byteLength) throw new ServiceError("That file was empty. Choose the resume again.", "file");
     const result = await storeResume(user.id, file.name, file.type || "application/octet-stream", bytes);
     await repo.updateUser(user.id, { onboardingStep: "mailbox" });
     return json({ resume: { id: result.resume.id, fileName: result.resume.fileName, byteSize: result.resume.byteSize }, facts: result.facts, cached: result.cached });
@@ -366,9 +365,9 @@ async function handle(request: Request, slug: string[]) {
 
   if (root === "resume-file" && request.method === "GET") {
     const resume = await repo.getLatestResume(user.id);
-    if (!resume || !existsSync(resume.storagePath)) throw new ServiceError("No resume file.", "not_found", 404);
-    const stream = createReadStream(resume.storagePath);
-    return new Response(Readable.toWeb(stream) as ReadableStream, { headers: { "Content-Type": resume.mime, "Content-Disposition": `attachment; filename="${resume.fileName}"` } });
+    const bytes = resume ? await readStoredResume(resume.storagePath) : null;
+    if (!resume || !bytes) throw new ServiceError("No resume file.", "not_found", 404);
+    return new Response(Buffer.from(bytes), { headers: { "Content-Type": resume.mime, "Content-Disposition": `attachment; filename="${resume.fileName}"` } });
   }
 
   throw new ServiceError("Not found.", "not_found", 404);

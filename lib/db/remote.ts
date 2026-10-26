@@ -155,6 +155,39 @@ export async function saveRemote(db: Database, version: number | null) {
   if (!data?.length) throw new VersionConflict();
 }
 
+const RESUME_BUCKET = "resumes";
+let resumeBucketReady = false;
+
+export async function putResumeObject(objectPath: string, bytes: Uint8Array, mime: string) {
+  if (!supabaseConfig()) return false;
+  try {
+    const client = supabaseClient();
+    if (!resumeBucketReady) {
+      const existing = await client.storage.getBucket(RESUME_BUCKET);
+      if (existing.error) {
+        const created = await client.storage.createBucket(RESUME_BUCKET, { public: false });
+        if (created.error && !/already exists/i.test(created.error.message)) return false;
+      }
+      resumeBucketReady = true;
+    }
+    const uploaded = await client.storage.from(RESUME_BUCKET).upload(objectPath, Buffer.from(bytes), {
+      contentType: mime || "application/octet-stream",
+      upsert: true,
+    });
+    return !uploaded.error;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
+export async function getResumeObject(objectPath: string) {
+  if (!supabaseConfig()) return null;
+  const downloaded = await supabaseClient().storage.from(RESUME_BUCKET).download(objectPath);
+  if (downloaded.error || !downloaded.data) return null;
+  return new Uint8Array(await downloaded.data.arrayBuffer());
+}
+
 function missingTable(error: { code?: string; message?: string }) {
   if (error.code === "42P01" || error.code === "PGRST205" || /app_state/i.test(error.message || "")) {
     return new ServiceError(

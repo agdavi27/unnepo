@@ -1,6 +1,7 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { dataDir, id, nowIso, repo } from "@/lib/db/file-store";
+import { getResumeObject, putResumeObject } from "@/lib/db/remote";
 import { ServiceError } from "@/lib/errors";
 import { extractResumeText, parseResumeText } from "@/lib/resume/parse";
 import { sha256Buffer } from "@/lib/security";
@@ -19,12 +20,17 @@ export async function storeResume(userId: string, fileName: string, mime: string
     const facts = await repo.getFacts(userId);
     return { resume: cached, facts, cached: true };
   }
-  const text = await extractResumeText(fileName, bytes);
+  let text = "";
+  try {
+    text = await extractResumeText(fileName, bytes);
+  } catch (error) {
+    console.error(error);
+    throw new ServiceError("Could not read that file. Use a text-based PDF or DOCX, not a photo of a resume.", "parse");
+  }
   const parsed = parseResumeText(text);
   const resumeId = id();
-  const storagePath = path.join(dataDir(), "resumes", userId, `${resumeId}-${fileName.replace(/[^\w.\-]+/g, "_")}`);
-  mkdirSync(path.dirname(storagePath), { recursive: true });
-  writeFileSync(storagePath, bytes);
+  const safeName = fileName.replace(/[^\w.\-]+/g, "_");
+  const storagePath = await saveResumeBytes(dataDir(), `${userId}/${resumeId}-${safeName}`, bytes, mime);
   const resume = await repo.insertResume({
     id: resumeId,
     userId,
@@ -50,4 +56,25 @@ export async function storeResume(userId: string, fileName: string, mime: string
   const savedFacts = await repo.replaceFacts(userId, resumeId, facts);
   await repo.insertAudit({ userId, action: "resume_uploaded", metadata: { bytes: bytes.byteLength, facts: facts.length } });
   return { resume, facts: savedFacts, cached: false };
+}
+
+export async function saveResumeBytes(dir: string, relativePath: string, bytes: Uint8Array, mime: string) {
+  const storagePath = path.join(dir, "resumes", relativePath);
+  try {
+    mkdirSync(path.dirname(storagePath), { recursive: true });
+    writeFileSync(storagePath, bytes);
+    return storagePath;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "EROFS" && code !== "EPERM" && code !== "EACCES" && code !== "ENOENT" && code !== "ENOTDIR") throw error;
+    const saved = await putResumeObject(relativePath, bytes, mime);
+    return saved ? `supabase:${relativePath}` : "";
+  }
+}
+
+export async function readStoredResume(storagePath: string) {
+  if (!storagePath) return null;
+  if (storagePath.startsWith("supabase:")) return getResumeObject(storagePath.slice("supabase:".length));
+  if (!existsSync(storagePath)) return null;
+  return new Uint8Array(readFileSync(storagePath));
 }

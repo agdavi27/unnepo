@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { repo } from "@/lib/db/file-store";
 import { bodyUsesOnlyFacts, generateGroundedEmail } from "@/lib/email/grounded";
 import { classifyReply } from "@/lib/email/classify";
+import { writeFileSync } from "node:fs";
 import { parseResumeText } from "@/lib/resume/parse";
+import { saveResumeBytes } from "@/lib/services/resume";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { enrichPerson, searchPeople } from "@/lib/providers/contacts/router";
 import { applyVerifiedStripeEvent } from "@/lib/services/billing";
@@ -181,6 +183,22 @@ Outdoor, running
     expect(facts.map((fact) => fact.category).sort()).toEqual(["education", "experience", "interest", "skill"]);
     expect(facts.some((fact) => /mba|goldman|google/i.test(fact.detail))).toBe(false);
     expect(facts.find((fact) => fact.category === "skill")?.detail).toContain("SEO");
+  });
+
+  it("saves the resume record when the file folder cannot be written", async () => {
+    const blocker = "/tmp/unnepo-not-a-directory";
+    writeFileSync(blocker, "not a folder");
+    const previousUrl = process.env.SUPABASE_URL;
+    const previousKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    try {
+      const saved = await saveResumeBytes(blocker, "student/resume.docx", new Uint8Array([1, 2, 3]), "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+      expect(saved).toBe("");
+    } finally {
+      if (previousUrl) process.env.SUPABASE_URL = previousUrl;
+      if (previousKey) process.env.SUPABASE_SERVICE_ROLE_KEY = previousKey;
+    }
   });
 
   it("does not invent employers or mutual connections", () => {

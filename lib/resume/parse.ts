@@ -53,10 +53,33 @@ export async function extractResumeText(fileName: string, bytes: Uint8Array) {
     return result.value ?? "";
   }
   if (lower.endsWith(".pdf")) {
-    const { extractText, getDocumentProxy } = await import("unpdf");
-    const pdf = await getDocumentProxy(bytes);
-    const extracted = await extractText(pdf, { mergePages: true });
-    return Array.isArray(extracted.text) ? extracted.text.join("\n") : String(extracted.text ?? "");
+    const { extractTextItems } = await import("unpdf");
+    const extracted = await extractTextItems(bytes);
+    const lines: string[] = [];
+    for (const page of extracted.items) {
+      let current = "";
+      let lastY: number | null = null;
+      let lastEnd = 0;
+      for (const item of page) {
+        const wrapped = lastY !== null && (Math.abs(item.y - lastY) > 2 || item.x < lastEnd - 1);
+        if (wrapped && current.trim()) {
+          lines.push(current.trim());
+          current = "";
+        }
+        current = current ? `${current} ${item.str}` : item.str;
+        if (item.hasEOL) {
+          if (current.trim()) lines.push(current.trim());
+          current = "";
+          lastY = null;
+          lastEnd = 0;
+          continue;
+        }
+        lastY = item.y;
+        lastEnd = item.x + item.width;
+      }
+      if (current.trim()) lines.push(current.trim());
+    }
+    return lines.join("\n");
   }
   throw new Error("Upload a PDF or DOCX resume.");
 }
