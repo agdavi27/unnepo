@@ -136,15 +136,18 @@ export function LoginForm() {
   }
 
   return (
-    <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your 25 credits are ready." : "Sign in with the school email you used to sign up."}>
+    <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your 25 credits are ready." : params.get("reset") ? "Password updated. Sign in with the new password." : "Sign in with the school email you used to sign up."}>
       <form onSubmit={submit} className="space-y-3">
         <SchoolEmailField placeholder="School email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         <input className="field" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} suppressHydrationWarning />
+        <div className="flex justify-end">
+          <Link href="/reset" className="text-sm text-white hover:underline">Forgot password?</Link>
+        </div>
         {error ? <p className="text-sm text-red-300">{error}</p> : null}
         <button type="submit" disabled={busy} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Working…" : "Log in"}</button>
       </form>
       {unverified ? <button type="button" onClick={verifyAndLogin} disabled={busy} className="mt-3 h-11 w-full rounded-xl border border-line">Verify school email and continue</button> : null}
-      <p className="mt-4 text-center text-sm text-muted"><Link href="/reset" className="text-white">Forgot password</Link> · <Link href="/signup">Create an account</Link></p>
+      <p className="mt-4 text-center text-sm text-muted">Need an account? <Link href="/signup" className="text-white">Create one</Link></p>
     </AuthShell>
   );
 }
@@ -161,38 +164,84 @@ function SchoolEmailField({ value, ref, ...props }: { value: string; ref?: React
 
 export function ResetForm() {
   const params = useSearchParams();
+  const router = useRouter();
+  const token = params.get("token") || "";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState(params.get("token") || "");
+  const [confirm, setConfirm] = useState("");
+  const [resetUrl, setResetUrl] = useState("");
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
 
   async function request(event: React.FormEvent) {
     event.preventDefault();
+    setBusy(true);
+    setError("");
+    setMessage("");
+    setResetUrl("");
     const response = await fetch("/api/auth/forgot", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
     const data = await response.json();
-    if (data.devToken) setToken(data.devToken);
-    setMessage(data.devToken ? "Local mode: use the reset button below. In production this link is emailed." : "If that school email exists, a reset link is on the way.");
+    setBusy(false);
+    if (!response.ok) {
+      setError(data.error || "Could not send a reset link.");
+      return;
+    }
+    if (data.resetUrl) {
+      setResetUrl(data.resetUrl);
+      setMessage("Open the reset link to choose a new password.");
+      return;
+    }
+    setMessage("If that school email has an account, a reset link is on the way. Check the inbox and spam folder.");
   }
 
   async function reset(event: React.FormEvent) {
     event.preventDefault();
+    if (password !== confirm) {
+      setError("The passwords do not match.");
+      return;
+    }
+    setBusy(true);
+    setError("");
     const response = await fetch("/api/auth/reset", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, password }) });
     const data = await response.json();
-    setMessage(response.ok ? "Password updated. You can log in." : data.error);
+    setBusy(false);
+    if (!response.ok) {
+      setError(data.error || "This reset link is invalid or expired.");
+      return;
+    }
+    router.push("/login?reset=1");
+  }
+
+  if (token) {
+    return (
+      <AuthShell title="Choose a new password" subtitle="This link works once and expires after 24 hours.">
+        <form onSubmit={reset} className="space-y-3">
+          <input className="field" type="password" placeholder="New password (8+ characters)" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} suppressHydrationWarning />
+          <input className="field" type="password" placeholder="Confirm new password" autoComplete="new-password" value={confirm} onChange={(event) => setConfirm(event.target.value)} suppressHydrationWarning />
+          {error ? <p className="text-sm text-red-300">{error}</p> : null}
+          <button type="submit" disabled={busy} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Updating…" : "Update password"}</button>
+        </form>
+        <p className="mt-4 text-center text-sm text-muted"><Link href="/login" className="text-white">Back to log in</Link></p>
+      </AuthShell>
+    );
   }
 
   return (
-    <AuthShell title="Reset password" subtitle="We'll only email school addresses that already have an account.">
+    <AuthShell title="Forgot password" subtitle="Enter the school email on the account. We send a reset link only if that address already exists.">
       <form onSubmit={request} className="space-y-3">
-        <SchoolEmailField placeholder="School email" value={email} onChange={(event) => setEmail(event.target.value)} />
-        <button className="h-11 w-full rounded-xl bg-white font-semibold text-black">Send reset link</button>
+        <SchoolEmailField placeholder="School email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+        {error ? <p className="text-sm text-red-300">{error}</p> : null}
+        {message ? <p className="text-sm text-cream">{message}</p> : null}
+        {resetUrl ? (
+          <Link href={resetUrl} className="flex h-11 items-center justify-center rounded-xl bg-white font-semibold text-black">
+            Open reset link
+          </Link>
+        ) : (
+          <button type="submit" disabled={busy || !email} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Sending…" : "Email me a reset link"}</button>
+        )}
       </form>
-      <form onSubmit={reset} className="mt-4 space-y-3">
-        <input className="field" placeholder="Reset token" value={token} onChange={(event) => setToken(event.target.value)} />
-        <input className="field" type="password" placeholder="New password" value={password} onChange={(event) => setPassword(event.target.value)} />
-        <button className="h-11 w-full rounded-xl border border-line">Update password</button>
-      </form>
-      {message ? <p className="mt-3 text-sm text-cream">{message}</p> : null}
+      <p className="mt-4 text-center text-sm text-muted"><Link href="/login" className="text-white">Back to log in</Link></p>
     </AuthShell>
   );
 }

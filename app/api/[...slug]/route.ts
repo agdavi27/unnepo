@@ -98,7 +98,7 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "auth" && action === "forgot" && request.method === "POST") {
     const body = await request.json();
-    return json(await requestPasswordReset(body.email));
+    return json(await requestPasswordReset(body.email, publicOrigin(request)));
   }
   if (root === "auth" && action === "reset" && request.method === "POST") {
     const body = await request.json();

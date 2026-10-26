@@ -5,6 +5,7 @@ import type { User } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
 import { isSchoolEmail, normalizeEmail } from "@/lib/schools";
 import { randomToken, referralCode, sha256 } from "@/lib/security";
+import { appOrigin, sendPasswordResetEmail } from "@/lib/email/transactional";
 import { rewardReferralIfEligible } from "@/lib/services/referrals";
 
 const SESSION_DAYS = 30;
@@ -186,11 +187,13 @@ export async function logout(token: string | undefined | null) {
   if (session) await repo.deleteSession(session.id);
 }
 
-export async function requestPasswordReset(email: string) {
+export async function requestPasswordReset(email: string, origin?: string) {
   const user = await repo.getUserByEmail(normalizeEmail(email));
-  if (!user) return { devToken: null as string | null };
+  if (!user) return { sent: false, resetUrl: null as string | null };
   const token = await issueToken(user.id, "reset_password");
-  return { devToken: exposeDevToken(token) };
+  const resetUrl = `${appOrigin(origin)}/reset?token=${encodeURIComponent(token)}`;
+  const sent = await sendPasswordResetEmail(user.email, resetUrl);
+  return { sent, resetUrl: exposeDevToken(token) ? resetUrl : null };
 }
 
 export async function resetPassword(rawToken: string, password: string) {

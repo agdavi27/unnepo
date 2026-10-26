@@ -41,3 +41,30 @@ button, input, select, textarea { font: inherit; }
 
 .app-scroll th,
 .app-scroll td { padding: 0.7rem 0.75rem; vertical-align: middle; }
+
+.school-marquee {
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+}
+.school-track {
+  display: flex;
+  width: max-content;
+  gap: 0.75rem;
+  padding-inline: 0.75rem;
+  animation: school-scroll 38s linear infinite;
+}
+.school-track-reverse {
+  animation-direction: reverse;
+  animation-duration: 46s;
+}
+.school-marquee:hover .school-track {
+  animation-play-state: paused;
+}
+@keyframes school-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .school-track,
+  .school-track-reverse { animation: none; }
+}

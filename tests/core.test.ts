@@ -7,7 +7,7 @@ import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { enrichPerson, searchPeople } from "@/lib/providers/contacts/router";
 import { applyVerifiedStripeEvent } from "@/lib/services/billing";
 import { unlockContact, runSearch } from "@/lib/services/contacts";
-import { login, signUp, verifyEmail } from "@/lib/services/auth";
+import { login, requestPasswordReset, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { runIdempotent } from "@/lib/services/idempotency";
 import { rewardReferralIfEligible } from "@/lib/services/referrals";
 import { sendOutreach, setMailSenderForTests, syncReplies } from "@/lib/services/outreach";
@@ -61,6 +61,23 @@ describe("signup credits", () => {
     expect(again.granted).toBe(false);
     expect((await repo.getAccount(signed.user.id))?.balance).toBe(25);
     await expect(signUp({ email: "alex+alias@colby.edu", password: "password123", name: "Alex" })).rejects.toThrow(/already exists/);
+  });
+});
+
+describe("password reset", () => {
+  it("emails a one-time link and replaces the password", async () => {
+    await verifiedStudent("resetme@colby.edu", "Reset");
+    const missing = await requestPasswordReset("nobody@colby.edu");
+    expect(missing.resetUrl).toBeNull();
+    const asked = await requestPasswordReset("resetme@colby.edu", "http://127.0.0.1:43123");
+    expect(asked.resetUrl).toContain("/reset?token=");
+    const token = new URL(asked.resetUrl!).searchParams.get("token");
+    expect(token).toBeTruthy();
+    await resetPassword(token!, "newpass123");
+    await expect(login("resetme@colby.edu", "password123")).rejects.toThrow(/incorrect/);
+    const session = await login("resetme@colby.edu", "newpass123");
+    expect(session.user.email).toBe("resetme@colby.edu");
+    await expect(resetPassword(token!, "anotherpass")).rejects.toThrow(/invalid or expired/);
   });
 });
 
