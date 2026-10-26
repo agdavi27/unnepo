@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { PageLoading } from "@/components/product/bits";
 import { dollars } from "@/lib/format";
 
 export function AdminView() {
@@ -14,7 +15,7 @@ export function AdminView() {
     });
   }, []);
   if (error) return <div className="p-8 text-red-300">{error}</div>;
-  if (!data) return <div className="p-8 text-muted">Loading profitability…</div>;
+  if (!data) return <PageLoading label="Loading profitability…" />;
   const revenue = data.revenue as Record<string, number | boolean>;
   const expenses = data.expenses as Record<string, number | boolean>;
   const unit = data.unit as Record<string, number>;

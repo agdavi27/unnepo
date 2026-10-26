@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FileText } from "lucide-react";
 import { initials } from "@/lib/format";
 import { STATUS_LABEL } from "@/lib/catalog";
 
@@ -51,6 +52,32 @@ export function CompanyLogo({ company, src, className = "h-11 w-11" }: { company
   }
   const url = src || `https://www.google.com/s2/favicons?domain=${companyDomain(company)}&sz=128`;
   return <img src={url} alt="" className={`${className} rounded-lg bg-white object-contain p-1`} onError={() => setFailed(true)} />;
+}
+
+export function ResumeFile({ name }: { name: string }) {
+  const lower = name.toLowerCase();
+  const ext = lower.endsWith(".pdf") ? "PDF" : lower.endsWith(".docx") || lower.endsWith(".doc") ? "DOC" : "FILE";
+  return (
+    <span className="inline-flex min-w-0 items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2">
+      <span className="relative shrink-0 text-white">
+        <FileText className="h-9 w-9" strokeWidth={1.4} />
+        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 rounded bg-white px-1 text-[8px] font-bold leading-3 text-black">{ext}</span>
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-sm font-medium">{name}</span>
+        <span className="block text-[11px] text-faint">Resume file</span>
+      </span>
+    </span>
+  );
+}
+
+export function PageLoading({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-[40vh] flex-col items-center justify-center gap-4 p-8" role="status">
+      <span className="loader" aria-hidden />
+      <p className="text-sm text-muted">{label}</p>
+    </div>
+  );
 }
 
 export function StatusPill({ status }: { status: string }) {

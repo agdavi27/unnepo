@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Bell, Briefcase, CloudUpload, Search, Send } from "lucide-react";
-import { Avatar, CompanyLogo, CompanyMark, StatusPill } from "@/components/product/bits";
+import { Avatar, CompanyLogo, CompanyMark, PageLoading, StatusPill } from "@/components/product/bits";
 import { GoalChecklist } from "@/components/product/goal-checklist";
 import { greeting, timeAgo } from "@/lib/format";
 
@@ -41,7 +41,7 @@ export function HomeView() {
     load();
   }, []);
 
-  if (!data) return <div className="p-8 text-muted">{error || "Loading your workspace…"}</div>;
+  if (!data) return error ? <div className="p-8 text-red-300">{error}</div> : <PageLoading label="Loading your workspace…" />;
 
   return (
     <div className="px-4 py-5 lg:px-6">
@@ -70,7 +70,7 @@ export function HomeView() {
               <Link href="/saved" className="text-sm text-muted">View all →</Link>
             </div>
             {data.recent.length === 0 ? (
-              <p className="px-4 pb-6 text-sm text-muted">No unlocked contacts yet. Showing a list costs 1 credit. Revealing an email costs 1 more credit, and only when the lookup succeeds.</p>
+              <p className="px-4 pb-6 text-sm text-muted">No saved contacts yet. A search adds up to 20 people for 1 credit, and they show up here.</p>
             ) : (
               <div className="app-scroll overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-sm">

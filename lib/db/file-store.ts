@@ -633,6 +633,36 @@ export const repo = {
   async listSaved(userId: string) {
     return withLock((db) => db.saved.filter((item) => item.userId === userId));
   },
+  async saveFoundContacts(userId: string, contactIds: string[]) {
+    return withLock((db) => {
+      const stamp = nowIso();
+      const rows = [];
+      for (const contactId of contactIds) {
+        const existing = db.saved.find((item) => item.userId === userId && item.contactId === contactId);
+        if (existing) {
+          rows.push(existing);
+          continue;
+        }
+        const row: SavedContact = {
+          id: id(),
+          userId,
+          contactId,
+          status: "not_contacted",
+          notes: "",
+          followUpAt: null,
+          listName: "All",
+          creditCharged: false,
+          unlockedAt: stamp,
+          optOut: false,
+          autoFollowUpAuthorized: false,
+          updatedAt: stamp,
+        };
+        db.saved.push(row);
+        rows.push(row);
+      }
+      return rows;
+    });
+  },
   async listSavedDetailed(userId: string) {
     return withLock((db) =>
       db.saved

@@ -134,7 +134,7 @@ export function Landing() {
           ))}
         </div>
       </section>
-      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · Contact data is revealed only after a credit unlock.</footer>
+      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit shows a list of up to 20 people.</footer>
     </div>
   );
 }

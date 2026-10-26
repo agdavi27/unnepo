@@ -9,7 +9,7 @@ const TONES = new Set(["professional", "friendly", "casual", "direct"]);
 
 export async function composerContext(userId: string, contactId: string) {
   const saved = await repo.getSavedByUserAndContact(userId, contactId);
-  if (!saved) throw new ServiceError("Unlock this contact before writing an email.", "locked", 403);
+  if (!saved) throw new ServiceError("This person is not in your saved contacts yet.", "locked", 403);
   const contact = await repo.getContact(contactId);
   if (!contact) throw new ServiceError("Contact not found.", "not_found", 404);
   const profile = await repo.getProfile(userId);

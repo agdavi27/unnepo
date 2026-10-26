@@ -18,6 +18,7 @@ export type PublicContact = {
   emailAvailable: boolean;
   phoneAvailable: boolean;
   tags: string[];
+  emailed: boolean;
   seniority: string | null;
   department: string | null;
   industry: string | null;
@@ -27,7 +28,7 @@ export type PublicContact = {
   dataSource: Contact["dataSource"];
 };
 
-function present(contact: Contact, saved: SavedContact | null): PublicContact {
+function present(contact: Contact, saved: SavedContact | null, emailed = false): PublicContact {
   const unlocked = Boolean(saved);
   return {
     id: contact.id,
@@ -48,12 +49,14 @@ function present(contact: Contact, saved: SavedContact | null): PublicContact {
     unlocked,
     savedId: saved?.id ?? null,
     status: saved?.status ?? null,
+    emailed,
     dataSource: contact.dataSource,
   };
 }
 
 export async function runSearch(userId: string, filters: SearchFilters, page = 1, pageSize = 8) {
   const result = await searchPeople(userId, filters, page, pageSize);
+  await repo.saveFoundContacts(userId, result.people.map((person) => person.id));
   await repo.insertSearch({
     id: id(),
     userId,
@@ -63,11 +66,15 @@ export async function runSearch(userId: string, filters: SearchFilters, page = 1
     costCents: result.source === "apollo" ? serverConfig().apolloSearchCostCents : 0,
     createdAt: nowIso(),
   });
-  const saved = await repo.listSaved(userId);
+  const [saved, messages] = await Promise.all([repo.listSaved(userId), repo.listMessages(userId)]);
   const byContact = new Map(saved.map((item) => [item.contactId, item]));
+  const emailedSaved = new Set(messages.filter((message) => message.direction === "outbound" && message.deliveryConfirmed).map((message) => message.savedContactId));
   await repo.insertAnalytics({ userId, name: "search", properties: { source: result.source, count: result.total } });
   return {
-    people: result.people.map((person) => present(person, byContact.get(person.id) ?? null)),
+    people: result.people.map((person) => {
+      const row = byContact.get(person.id) ?? null;
+      return present(person, row, row ? emailedSaved.has(row.id) : false);
+    }),
     total: result.total,
     page,
     pageSize,

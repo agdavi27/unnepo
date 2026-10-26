@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Bookmark, ExternalLink } from "lucide-react";
-import { CompanyLogo, Notice } from "@/components/product/bits";
+import { CompanyLogo, Notice, PageLoading } from "@/components/product/bits";
 import { timeAgo } from "@/lib/format";
 
 type Job = {
@@ -113,10 +113,12 @@ export function JobsView() {
           <h2 className="text-lg font-semibold">{loading ? "Looking up live postings…" : "Open roles"}</h2>
           <Pager page={page} total={total} pageSize={pageSize} loading={loading} onPage={load} />
         </div>
+        {loading && jobs.length === 0 ? <PageLoading label="Looking up live postings…" /> : (
         <div className="mt-3 space-y-3">
           {feed.map((job) => <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onToggle={() => toggle(job)} />)}
           {!loading && feed.length === 0 ? <p className="text-sm text-muted">No new matches. Try another role on Home, or open LinkedIn and ZipRecruiter above.</p> : null}
         </div>
+        )}
         <div className="mt-4">
           <Pager page={page} total={total} pageSize={pageSize} loading={loading} onPage={load} />
         </div>

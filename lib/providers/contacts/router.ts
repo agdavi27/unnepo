@@ -147,7 +147,7 @@ export async function searchPeople(userId: string, filters: SearchFilters, page:
     source: "sample",
     notice: relaxed
       ? "No exact match for those filters. These are the closest people in the sample directory, so you can keep going. They are not live Apollo results."
-      : "Sample directory. These profiles are illustrative and are not live Apollo results. Emails stay hidden until you unlock a contact.",
+      : "Sample directory. These profiles are illustrative and are not live Apollo results. The list is saved to your contacts.",
     estimated: true,
   };
 }

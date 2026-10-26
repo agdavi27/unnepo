@@ -318,8 +318,11 @@ describe("isolation, spend limits, fallback, and retries", () => {
       companySizes: [],
     });
     const taylor = search.people.find((person) => person.id === "sample_taylor_kim");
-    expect(taylor?.email).toBeNull();
-    expect(taylor?.unlocked).toBe(false);
+    expect(taylor?.email).toBe("taylor.kim@patagonia.com");
+    expect(taylor?.unlocked).toBe(true);
+    expect(taylor?.savedId).toBeTruthy();
+    expect((await repo.listSaved(b.userId)).some((item) => item.contactId === "sample_taylor_kim")).toBe(true);
+    expect((await repo.listLedger(b.userId)).some((entry) => entry.entryType === "unlock_debit")).toBe(false);
     expect(search.source).toBe("sample");
   });
 

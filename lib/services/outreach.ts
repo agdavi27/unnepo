@@ -46,7 +46,7 @@ export async function sendOutreach(userId: string, input: {
   if (!saved) throw new ServiceError("Saved contact not found.", "not_found", 404);
   if (saved.optOut) throw new ServiceError("This person opted out. Unnepo will not email them.", "opt_out", 409);
   const contact = await repo.getContact(saved.contactId);
-  if (!contact?.email) throw new ServiceError("Unlock a verified email before sending.", "no_email");
+  if (!contact?.email) throw new ServiceError("There is no email on file for this person yet.", "no_email");
   const existing = (await repo.listMessages(userId)).find((message) => message.idempotencyKey === input.idempotencyKey);
   if (existing) return { message: existing, created: false, creditsCharged: 0 };
 

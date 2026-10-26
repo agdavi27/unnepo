@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { StatusPill } from "@/components/product/bits";
+import { PageLoading, StatusPill } from "@/components/product/bits";
 import { timeAgo } from "@/lib/format";
 
 type Payload = {
@@ -28,7 +28,7 @@ export function OutreachView() {
     load();
   }
 
-  if (!data?.summary) return <div className="p-8 text-muted">Loading outreach…</div>;
+  if (!data?.summary) return <PageLoading label="Loading outreach…" />;
   const cards = [
     ["Unlocked", data.summary.unlocked],
     ["Outreached", data.summary.outreached],

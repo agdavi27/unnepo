@@ -56,7 +56,19 @@ button, input, select, textarea { font: inherit; }
   from { transform: translateX(0); }
   to { transform: translateX(-33.333%); }
 }
+.loader {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 999px;
+  border: 2px solid #2a2a2e;
+  border-top-color: #f7f7f8;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 @media (prefers-reduced-motion: reduce) {
   .school-track,
   .school-track-reverse { animation: none; }
+  .loader { animation: none; border-top-color: #f6e7a8; }
 }

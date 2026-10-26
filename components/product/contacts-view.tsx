@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Checkbox from "@radix-ui/react-checkbox";
 import { Check, Filter, Mail, MapPin, RefreshCw, Search, Send, X } from "lucide-react";
-import { Avatar, Notice } from "@/components/product/bits";
+import { Avatar, Notice, PageLoading } from "@/components/product/bits";
 import { COMPANIES, COMPANY_SIZES, DEPARTMENTS, INDUSTRIES, JOB_TITLES, LOCATIONS, SENIORITIES } from "@/lib/catalog";
 import { SCHOOLS } from "@/lib/schools";
 import type { ComposerFact } from "@/lib/email/grounded";
@@ -23,6 +23,7 @@ type Person = {
   phoneAvailable: boolean;
   tags: string[];
   unlocked: boolean;
+  emailed?: boolean;
   savedId: string | null;
   dataSource: "sample" | "provider";
 };
@@ -41,7 +42,7 @@ type Filters = {
 
 const EMPTY: Filters = { titles: [], industries: [], locations: [], schools: [], includeSimilarSchools: true, companies: [], seniorities: [], departments: [], companySizes: [] };
 const PAGE_SIZE = 20;
-const SAMPLE_NOTICE = "Sample directory. These profiles are illustrative and are not live Apollo results. Emails stay hidden until you unlock a contact. Connect Apollo to search real professionals.";
+const SAMPLE_NOTICE = "Sample directory. These profiles are illustrative and are not live Apollo results. A search saves the list to your contacts.";
 
 export function ContactsView() {
   const params = useSearchParams();
@@ -99,20 +100,8 @@ export function ContactsView() {
     if (typeof data.balance === "number") window.dispatchEvent(new CustomEvent("unnepo-credits", { detail: data.balance }));
   }
 
-  async function unlock(person: Person) {
-    setError("");
-    const response = await fetch("/api/contacts/unlock", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contactId: person.id, idempotencyKey: `unlock:${person.id}:${crypto.randomUUID()}` }),
-    });
-    const data = await response.json();
-    if (!response.ok || data.ok === false) {
-      setError(data.message || data.error || "Unlock failed.");
-      return;
-    }
-    setPeople((current) => current.map((item) => (item.id === person.id ? data.contact : item)));
-    setComposerId(person.id);
+  function markEmailed(contactId: string) {
+    setPeople((current) => current.map((item) => (item.id === contactId ? { ...item, emailed: true } : item)));
   }
 
   const chips = useMemo(() => {
@@ -158,6 +147,7 @@ export function ContactsView() {
       </div>
       {searched ? (
       <>
+      {loading && people.length === 0 ? <PageLoading label="Finding people…" /> : null}
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">{loading ? "Searching…" : `${total} professional${total === 1 ? "" : "s"} found`}</h2>
         <div className="flex items-center gap-2">
@@ -207,10 +197,10 @@ export function ContactsView() {
                   </div>
                 </td>
                 <td className="pr-3 text-right">
-                  {person.unlocked ? (
-                    <button onClick={() => setComposerId(person.id)} className="rounded-lg border border-line px-3 py-2 text-xs font-semibold">Write email</button>
+                  {person.emailed ? (
+                    <span className="inline-flex rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted">Email sent</span>
                   ) : (
-                    <button onClick={() => unlock(person)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">Use 1 credit</button>
+                    <button onClick={() => setComposerId(person.id)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">Send personalized email</button>
                   )}
                 </td>
               </tr>
@@ -229,7 +219,7 @@ export function ContactsView() {
       </div>
       </>
       ) : null}
-      {composerId ? <Composer contactId={composerId} onClose={() => setComposerId(null)} /> : null}
+      {composerId ? <Composer contactId={composerId} onClose={() => setComposerId(null)} onSent={() => markEmailed(composerId)} /> : null}
     </div>
   );
 }
@@ -288,7 +278,7 @@ function FilterBox({ label, icon, options, selected, onChange }: { label: string
   );
 }
 
-export function Composer({ contactId, onClose }: { contactId: string; onClose: () => void }) {
+export function Composer({ contactId, onClose, onSent }: { contactId: string; onClose: () => void; onSent?: () => void }) {
   const [context, setContext] = useState<{ contact: Person; saved: { id: string }; you: ComposerFact[]; lead: ComposerFact[]; email: string | null } | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [tone, setTone] = useState("professional");
@@ -350,6 +340,7 @@ export function Composer({ contactId, onClose }: { contactId: string; onClose: (
       setMessage(data.error || "Send failed.");
       return;
     }
+    if (data.message?.deliveryConfirmed) onSent?.();
     setMessage(data.message?.deliveryConfirmed ? "Sent from your connected mailbox." : "Saved to the demo outbox. Connect Gmail or Outlook to deliver it. No credit was used.");
   }
 
@@ -372,7 +363,7 @@ export function Composer({ contactId, onClose }: { contactId: string; onClose: (
             </div>
             <Dialog.Close className="rounded-lg p-1 text-muted hover:bg-white/5" aria-label="Close"><X /></Dialog.Close>
           </div>
-          {!context ? <p className="mt-6 text-muted">{message || "Loading facts from your profile…"}</p> : (
+          {!context ? <PageLoading label={message || "Loading facts from your profile…"} /> : (
             <div className="mt-4 grid gap-4 lg:grid-cols-[1fr_1fr]">
               <div className="space-y-4">
                 <div className="flex items-center gap-3">
@@ -403,7 +394,7 @@ export function Composer({ contactId, onClose }: { contactId: string; onClose: (
                     <option value="direct">Tone: Direct</option>
                   </select>
                 </div>
-                <p className="mt-3 text-xs text-faint">To {context.email || "Unlock an email first"}</p>
+                <p className="mt-3 text-xs text-faint">To {context.email || "No email on file yet"}</p>
                 <input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Subject" className="mt-2 w-full rounded-lg border border-line bg-transparent px-3 py-2 text-sm outline-none" />
                 <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Generate a draft from the facts you selected." className="mt-2 h-64 w-full resize-none rounded-lg border border-line bg-transparent px-3 py-2 text-sm outline-none" />
                 {message ? <p className="mt-2 text-sm text-cream">{message}</p> : null}

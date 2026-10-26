@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
+import { ResumeFile } from "@/components/product/bits";
 
 type Goals = { roles: string[]; locations: string[]; industries: string[]; companies: string[]; tracks?: string[]; timing?: string } | null;
 type Suggestions = { fromResume: string[]; similar: string[] };
@@ -22,22 +23,25 @@ export function GoalChecklist({
 }) {
   const [selected, setSelected] = useState<string[]>(goals?.roles ?? []);
   const [custom, setCustom] = useState("");
-  const [location, setLocation] = useState(goals?.locations?.[0] ?? "");
+  const [location, setLocation] = useState(cityFrom(goals?.locations));
+  const [remote, setRemote] = useState(hasRemote(goals?.locations));
   const [tracks, setTracks] = useState<string[]>(goals?.tracks ?? []);
   const [timing, setTiming] = useState(goals?.timing ?? "");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pickedName, setPickedName] = useState("");
 
   useEffect(() => {
     setSelected(goals?.roles ?? []);
-    setLocation(goals?.locations?.[0] ?? "");
+    setLocation(cityFrom(goals?.locations));
+    setRemote(hasRemote(goals?.locations));
     setTracks(goals?.tracks ?? []);
     setTiming(goals?.timing ?? "");
   }, [goals]);
 
   const resumeDone = Boolean(resumeName);
   const rolesDone = (goals?.roles.length ?? 0) > 0;
-  const questionsDone = Boolean(goals?.locations?.[0]?.trim()) && (goals?.tracks?.length ?? 0) > 0;
+  const questionsDone = Boolean((goals?.locations ?? []).some((place) => place.trim())) && (goals?.tracks?.length ?? 0) > 0;
   const phase = !resumeDone ? "resume" : !rolesDone ? "roles" : !questionsDone ? "questions" : "done";
   const step = phase === "resume" ? 1 : phase === "roles" ? 2 : 3;
 
@@ -50,6 +54,10 @@ export function GoalChecklist({
     if (!role) return;
     setSelected((current) => (current.includes(role) ? current : [...current, role]));
     setCustom("");
+  }
+
+  function places() {
+    return [location.trim(), remote ? "Remote" : ""].filter(Boolean);
   }
 
   async function saveGoals(next: { roles: string[]; locations: string[]; tracks: string[]; timing: string }) {
@@ -70,6 +78,7 @@ export function GoalChecklist({
   }
 
   async function upload(file: File) {
+    setPickedName(file.name);
     setBusy(true);
     setMessage("");
     const body = new FormData();
@@ -90,6 +99,7 @@ export function GoalChecklist({
     }
     setSelected([]);
     setLocation("");
+    setRemote(false);
     setTracks([]);
     setTiming("");
     setCustom("");
@@ -114,11 +124,12 @@ export function GoalChecklist({
   }
 
   async function continueQuestions() {
-    if (!location.trim() || !tracks.length) return setMessage("Add a city and choose internship, full-time, or both.");
+    const nextPlaces = places();
+    if (!nextPlaces.length || !tracks.length) return setMessage("Add a city or choose Remote, and choose internship, full-time, or both.");
     setBusy(true);
     setMessage("");
     try {
-      await saveGoals({ roles: goals?.roles ?? selected, locations: [location.trim()], tracks, timing });
+      await saveGoals({ roles: goals?.roles ?? selected, locations: nextPlaces, tracks, timing });
     } catch (error) {
       setBusy(false);
       setMessage(error instanceof Error ? error.message : "Could not save.");
@@ -140,13 +151,14 @@ export function GoalChecklist({
       </div>
 
       <div className="mt-4 space-y-3">
-        {phase !== "resume" ? <DoneRow label="Resume uploaded" detail={resumeName || ""} /> : null}
+        {phase !== "resume" ? <DoneRow label="Resume uploaded" detail={resumeName || ""} file /> : null}
         {phase === "questions" || phase === "done" ? <DoneRow label="Roles you want" detail={(goals?.roles ?? []).join(", ")} /> : null}
-        {phase === "done" ? <DoneRow label="A few questions" detail={[goals?.locations?.[0], (goals?.tracks ?? []).join(" · "), goals?.timing].filter(Boolean).join(" · ")} /> : null}
+        {phase === "done" ? <DoneRow label="A few questions" detail={[...(goals?.locations ?? []), (goals?.tracks ?? []).join(" · "), goals?.timing].filter(Boolean).join(" · ")} /> : null}
 
         {phase === "resume" ? (
           <Step title="Upload your resume">
             <p className="text-sm text-faint">PDF or DOCX. Roles on the next step come from this file.</p>
+            {pickedName ? <div className="mt-3"><ResumeFile name={pickedName} /></div> : null}
             <FileButton label="Choose file" busy={busy} onFile={upload} />
           </Step>
         ) : null}
@@ -166,10 +178,11 @@ export function GoalChecklist({
 
         {phase === "questions" ? (
           <Step title="A few questions">
-            <label className="block text-sm text-muted">
-              Where do you want to work?
-              <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="New York, NY" className="field mt-1" />
-            </label>
+            <p className="text-sm text-muted">Where do you want to work?</p>
+            <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+              <input value={location} onChange={(event) => setLocation(event.target.value)} placeholder="New York, NY" className="field" />
+              <button type="button" onClick={() => setRemote((on) => !on)} className={`h-11 shrink-0 rounded-xl px-4 text-sm ${remote ? "bg-white font-semibold text-black" : "border border-line text-muted"}`}>Remote</button>
+            </div>
             <p className="mt-3 text-sm text-muted">Internship, full-time, or both?</p>
             <div className="mt-2 flex flex-wrap gap-2">
               {TRACKS.map((track) => {
@@ -213,16 +226,24 @@ function Step({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-function DoneRow({ label, detail }: { label: string; detail: string }) {
+function DoneRow({ label, detail, file = false }: { label: string; detail: string; file?: boolean }) {
   return (
     <div className="flex items-start gap-2 rounded-xl border border-line px-3 py-2 text-sm">
       <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-black"><Check className="h-3 w-3" /></span>
-      <span>
+      <span className="min-w-0 flex-1">
         <span className="font-medium">{label}</span>
-        {detail ? <span className="mt-0.5 block text-faint">{detail}</span> : null}
+        {file && detail ? <span className="mt-2 block"><ResumeFile name={detail} /></span> : detail ? <span className="mt-0.5 block text-faint">{detail}</span> : null}
       </span>
     </div>
   );
+}
+
+function cityFrom(locations: string[] | undefined) {
+  return (locations ?? []).find((place) => place.trim() && !/^remote$/i.test(place)) ?? "";
+}
+
+function hasRemote(locations: string[] | undefined) {
+  return (locations ?? []).some((place) => /^remote$/i.test(place.trim()));
 }
 
 function BubbleGroup({ label, roles, selected, onToggle }: { label: string; roles: string[]; selected: string[]; onToggle: (role: string) => void }) {

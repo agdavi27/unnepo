@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Bell, Copy, Gift } from "lucide-react";
+import { ResumeFile } from "@/components/product/bits";
 import { PUBLIC_PLANS } from "@/lib/config";
 import { SCHOOLS } from "@/lib/schools";
 
@@ -121,9 +122,10 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
             <section className="rounded-2xl border border-line bg-card p-5">
               <h2 className="font-semibold">Resume</h2>
               <p className="text-sm text-faint">Upload your resume to help generate personalized emails.</p>
+              {resumeName ? <div className="mt-4"><ResumeFile name={resumeName} /></div> : null}
               <label className="mt-4 flex cursor-pointer items-center justify-between rounded-xl border border-line bg-panel px-4 py-3 text-sm">
-                <span>{resumeName || "Upload resume (PDF or DOCX)"}</span>
-                <span className="rounded-lg border border-line px-3 py-1">Replace file</span>
+                <span>{resumeName ? "Replace resume" : "Upload resume (PDF or DOCX)"}</span>
+                <span className="rounded-lg border border-line px-3 py-1">{resumeName ? "Replace file" : "Choose file"}</span>
                 <input type="file" accept=".pdf,.docx,application/pdf" className="hidden" onChange={(event) => event.target.files?.[0] && upload(event.target.files[0])} />
               </label>
               <p className="mt-2 text-xs text-faint">Your resume is only used to personalize your emails and isn&apos;t shared with anyone.</p>
@@ -169,7 +171,7 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
           <p>Signed in as {me?.user.email}</p>
           <a className="block text-cream" href="/api/account/export">Download my data</a>
           <button className="text-red-300" onClick={async () => { if (confirm("Delete your Unnepo account and personal data?")) { await fetch("/api/account", { method: "DELETE" }); window.location.href = "/"; } }}>Delete account</button>
-          <p className="text-faint">Verified students receive signup credits once. Showing up to 20 people costs 1 credit. Revealing a contact costs 1 credit. Email generation and sending stay free.</p>
+          <p className="text-faint">Verified students receive signup credits once. Showing a list of up to 20 people costs 1 credit, and those people are saved. Email generation and sending stay free.</p>
         </section>
       ) : null}
       {tab === "integrations" ? (
