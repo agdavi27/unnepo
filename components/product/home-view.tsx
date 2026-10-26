@@ -90,7 +90,7 @@ export function HomeView() {
               <Link href="/saved" className="text-sm text-muted">View all →</Link>
             </div>
             {data.recent.length === 0 ? (
-              <p className="px-4 pb-6 text-sm text-muted">No unlocked contacts yet. Search is free. A credit is used only when a lookup succeeds.</p>
+              <p className="px-4 pb-6 text-sm text-muted">No unlocked contacts yet. Showing a list costs 1 credit. Revealing an email costs 1 more credit, and only when the lookup succeeds.</p>
             ) : (
               <div className="app-scroll overflow-x-auto">
                 <table className="w-full min-w-[720px] text-left text-sm">

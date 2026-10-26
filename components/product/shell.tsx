@@ -38,6 +38,16 @@ export function Shell({ children }: { children: React.ReactNode }) {
       .then((data) => data && setMe(data));
   }, [pathname, router]);
 
+  useEffect(() => {
+    function onCredits(event: Event) {
+      const balance = (event as CustomEvent<number>).detail;
+      if (typeof balance !== "number") return;
+      setMe((current) => (current?.credits ? { ...current, credits: { ...current.credits, balance } } : current));
+    }
+    window.addEventListener("unnepo-credits", onCredits);
+    return () => window.removeEventListener("unnepo-credits", onCredits);
+  }, []);
+
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/");

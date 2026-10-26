@@ -40,6 +40,8 @@ type Filters = {
 };
 
 const EMPTY: Filters = { titles: [], industries: [], locations: [], schools: [], includeSimilarSchools: true, companies: [], seniorities: [], departments: [], companySizes: [] };
+const PAGE_SIZE = 20;
+const SAMPLE_NOTICE = "Sample directory. These profiles are illustrative and are not live Apollo or Hunter results. Emails stay hidden until you unlock a contact. Connect Apollo to search real professionals.";
 
 export function ContactsView() {
   const params = useSearchParams();
@@ -54,15 +56,24 @@ export function ContactsView() {
   const [selected, setSelected] = useState<string[]>([]);
   const [composerId, setComposerId] = useState<string | null>(params.get("compose"));
   const [extraOpen, setExtraOpen] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [idleNotice, setIdleNotice] = useState(SAMPLE_NOTICE);
 
   useEffect(() => {
     const company = params.get("company");
-    const next = { ...EMPTY, companies: company ? [company] : [] };
-    setFilters(next);
-    void run(next, 1);
-    // The first search should follow the company deep link from job postings.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (company) setFilters((current) => ({ ...current, companies: [company] }));
   }, [params]);
+
+  useEffect(() => {
+    fetch("/api/health")
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.providers?.apollo) setIdleNotice("");
+        else if (data.sampleDirectory === false) setIdleNotice("Add an Apollo API key to search live professionals.");
+        else setIdleNotice(SAMPLE_NOTICE);
+      })
+      .catch(() => undefined);
+  }, []);
 
   async function run(next = filters, nextPage = page) {
     setLoading(true);
@@ -70,7 +81,7 @@ export function ContactsView() {
     const response = await fetch("/api/contacts/search", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...next, page: nextPage, pageSize: 8 }),
+      body: JSON.stringify({ ...next, page: nextPage, pageSize: PAGE_SIZE, idempotencyKey: nextPage === 1 ? crypto.randomUUID() : undefined }),
     });
     const data = await response.json();
     setLoading(false);
@@ -84,6 +95,8 @@ export function ContactsView() {
     setNotice(data.notice);
     setSource(data.source);
     setPage(nextPage);
+    setSearched(true);
+    if (typeof data.balance === "number") window.dispatchEvent(new CustomEvent("unnepo-credits", { detail: data.balance }));
   }
 
   async function unlock(person: Person) {
@@ -114,19 +127,18 @@ export function ContactsView() {
 
   function removeChip(key: keyof Filters, label: string) {
     const clean = label.replace(" (and similar)", "");
-    const next = { ...filters, [key]: (filters[key] as string[]).filter((item) => item !== clean) };
-    setFilters(next);
-    void run(next, 1);
+    setFilters({ ...filters, [key]: (filters[key] as string[]).filter((item) => item !== clean) });
   }
 
-  const pages = Math.max(1, Math.ceil(total / 8));
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const banner = searched ? notice : idleNotice;
 
   return (
     <div className="px-4 py-5 lg:px-6">
       <p className="text-[11px] font-semibold tracking-[0.18em] text-faint">FIND NEW CONTACTS</p>
       <h1 className="mt-2 text-4xl font-semibold tracking-tight md:text-5xl">Find the right people.</h1>
       <p className="mt-2 max-w-3xl text-muted">Search by job title, industry, location, school (or similar schools), and company to find relevant professionals and get their emails and phone numbers.</p>
-      {notice ? <div className="mt-4"><Notice>{notice}</Notice></div> : null}
+      {banner ? <div className="mt-4"><Notice>{banner}</Notice></div> : null}
       {error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}
       <div className="mt-5 grid gap-3 xl:grid-cols-5">
         <FilterBox label="JOB TITLE" icon={<Search className="h-3.5 w-3.5" />} options={JOB_TITLES} selected={filters.titles} onChange={(titles) => setFilters({ ...filters, titles })} />
@@ -141,9 +153,11 @@ export function ContactsView() {
             {chip.label} <X className="h-3 w-3" />
           </button>
         ))}
-        <button className="ml-auto text-sm text-muted" onClick={() => { setFilters(EMPTY); void run(EMPTY, 1); }}>Clear all</button>
-        <button onClick={() => run(filters, 1)} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black">Search →</button>
+        <button className="ml-auto text-sm text-muted" onClick={() => { setFilters(EMPTY); setSearched(false); setPeople([]); setTotal(0); setNotice(null); setError(""); }}>Clear all</button>
+        <button onClick={() => run(filters, 1)} disabled={loading} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-60">{loading ? "Searching…" : "Show me 20 people (1 credit)"}</button>
       </div>
+      {searched ? (
+      <>
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-lg font-semibold">{loading ? "Searching…" : `${total} professional${total === 1 ? "" : "s"} found`}</h2>
         <div className="flex items-center gap-2">
@@ -213,6 +227,8 @@ export function ContactsView() {
           <button disabled={page >= pages} onClick={() => run(filters, page + 1)} className="rounded-lg border border-line px-3 py-1 disabled:opacity-40">Next</button>
         </div>
       </div>
+      </>
+      ) : null}
       {composerId ? <Composer contactId={composerId} onClose={() => setComposerId(null)} /> : null}
     </div>
   );

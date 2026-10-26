@@ -447,6 +447,39 @@ export const repo = {
       return { released: true };
     });
   },
+  async spendCredits(input: { userId: string; amount: number; idempotencyKey: string; note: string; entryType: "search_debit" | "unlock_debit" }) {
+    return withLock((db) => {
+      const account = ensureAccount(db, input.userId);
+      const prior = db.ledger.find((entry) => entry.idempotencyKey === input.idempotencyKey || entry.idempotencyKey.startsWith(`${input.idempotencyKey}:`));
+      if (prior) return { charged: 0, balance: account.balance, duplicate: true, insufficient: false };
+      if (account.balance < input.amount) return { charged: 0, balance: account.balance, duplicate: false, insufficient: true };
+      const allowancePart = Math.min(account.allowanceBalance, input.amount);
+      const purchasedPart = input.amount - allowancePart;
+      account.allowanceBalance -= allowancePart;
+      account.purchasedBalance -= purchasedPart;
+      account.balance -= input.amount;
+      account.updatedAt = nowIso();
+      const stamp = nowIso();
+      const push = (amount: number, bucket: "allowance" | "purchased") => {
+        db.ledger.push({
+          id: id(),
+          userId: input.userId,
+          entryType: input.entryType,
+          amount: -amount,
+          bucket,
+          idempotencyKey: `${input.idempotencyKey}:${bucket}`,
+          referenceType: "search",
+          referenceId: null,
+          demo: false,
+          note: input.note,
+          createdAt: stamp,
+        });
+      };
+      if (allowancePart) push(allowancePart, "allowance");
+      if (purchasedPart) push(purchasedPart, "purchased");
+      return { charged: input.amount, balance: account.balance, duplicate: false, insufficient: false };
+    });
+  },
   async clawbackPurchased(input: { userId: string; amount: number; idempotencyKey: string; note: string }) {
     return withLock((db) => {
       if (db.ledger.some((entry) => entry.idempotencyKey === input.idempotencyKey)) {

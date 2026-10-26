@@ -25,6 +25,23 @@ async function verifiedStudent(email: string, name: string, referral?: string) {
   return { userId: session.user.id, email };
 }
 
+describe("search credits", () => {
+  it("charges one credit once for a people search and refuses a second when the balance is empty", async () => {
+    const student = await verifiedStudent("searcher@colby.edu", "Searcher");
+    const first = await repo.spendCredits({ userId: student.userId, amount: 1, idempotencyKey: "search-1", note: "Show up to 20 people", entryType: "search_debit" });
+    expect(first.charged).toBe(1);
+    expect(first.balance).toBe(24);
+    const again = await repo.spendCredits({ userId: student.userId, amount: 1, idempotencyKey: "search-1", note: "Show up to 20 people", entryType: "search_debit" });
+    expect(again.duplicate).toBe(true);
+    expect(again.charged).toBe(0);
+    expect((await repo.getAccount(student.userId))?.balance).toBe(24);
+    await repo.setAccountForTests(student.userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
+    const blocked = await repo.spendCredits({ userId: student.userId, amount: 1, idempotencyKey: "search-2", note: "Show up to 20 people", entryType: "search_debit" });
+    expect(blocked.insufficient).toBe(true);
+    expect(blocked.charged).toBe(0);
+  });
+});
+
 describe("signup credits", () => {
   it("grants 25 credits exactly once after verification", async () => {
     const signed = await signUp({ email: "alex@colby.edu", password: "password123", name: "Alex Chen" });

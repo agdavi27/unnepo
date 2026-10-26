@@ -50,7 +50,7 @@ export function SavedView() {
         </select>
       </div>
       <div className="mt-4 space-y-3">
-        {visible.length === 0 ? <p className="text-muted">Unlocked contacts land here automatically. Searches stay free.</p> : null}
+        {visible.length === 0 ? <p className="text-muted">Unlocked contacts land here automatically.</p> : null}
         {visible.map((row) => (
           <article key={row.saved.id} className="rounded-2xl border border-line bg-card p-4">
             <div className="flex flex-wrap items-center gap-3">

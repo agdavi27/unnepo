@@ -2,7 +2,7 @@
 
 Unnepo is a career networking workspace for college students. A student verifies a school email, uploads a resume, searches for professionals, spends one credit to unlock a verified work email or business phone, writes a grounded outreach email, sends it from their own mailbox, and tracks the reply.
 
-Search is free. Failed lookups cost nothing. Generating and sending email costs no contact credits.
+Showing a list of people costs 1 credit and returns up to 20. An empty or failed search costs nothing. Unlocking a verified work email or business phone costs one more credit, and only after the lookup succeeds. Generating and sending email costs no contact credits.
 
 ## Local development
 
@@ -60,6 +60,8 @@ This environment cannot attach the repository to your Vercel team. After you imp
 | Action | Credits |
 | --- | --- |
 | Verified school email | 25 once |
+| Search that returns people | 1, up to 20 people |
+| Empty or failed search | 0 |
 | Successful contact unlock | 1 |
 | Failed or duplicate unlock | 0 |
 | AI email and sending | 0 |

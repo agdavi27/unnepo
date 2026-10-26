@@ -18,7 +18,7 @@ export async function profitability() {
   const hostingCents = config.hostingMonthlyCents;
   const emailInfraCents = config.emailInfraMonthlyCents;
   const variableCents = contactCostCents + aiCostCents + stripeFeeCents + emailInfraCents;
-  const unlocks = db.ledger.filter((entry) => entry.entryType === "unlock_debit");
+  const unlocks = db.ledger.filter((entry) => entry.entryType === "unlock_debit" || entry.entryType === "search_debit");
   const successfulUnlocks = db.saved.filter((item) => item.creditCharged).length;
   const creditsRedeemed = unlocks.reduce((sum, entry) => sum + Math.abs(entry.amount), 0);
   const grossProfitCents = revenueCents - variableCents;

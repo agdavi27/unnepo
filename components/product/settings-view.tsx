@@ -162,7 +162,7 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
           <p>Signed in as {me?.user.email}</p>
           <a className="block text-cream" href="/api/account/export">Download my data</a>
           <button className="text-red-300" onClick={async () => { if (confirm("Delete your Unnepo account and personal data?")) { await fetch("/api/account", { method: "DELETE" }); window.location.href = "/"; } }}>Delete account</button>
-          <p className="text-faint">Verified students receive signup credits once. Contact unlocks cost 1 credit. Email generation and sending stay free.</p>
+          <p className="text-faint">Verified students receive signup credits once. Showing up to 20 people costs 1 credit. Revealing a contact costs 1 credit. Email generation and sending stay free.</p>
         </section>
       ) : null}
       {tab === "integrations" ? (

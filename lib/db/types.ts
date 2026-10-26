@@ -116,6 +116,7 @@ export type LedgerEntryType =
   | "subscription_grant"
   | "purchase_grant"
   | "unlock_debit"
+  | "search_debit"
   | "refund_clawback"
   | "demo_grant"
   | "adjustment";

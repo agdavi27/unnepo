@@ -214,7 +214,15 @@ async function handle(request: Request, slug: string[]) {
   if (root === "contacts" && action === "search" && request.method === "POST") {
     if (!rateLimit(`search:${user.id}`, 30, 60 * 1000)) throw new ServiceError("Search a little slower — limit is 30 a minute.", "rate", 429);
     const body = await request.json();
-    return json(await runSearch(user.id, {
+    const page = Number(body.page) || 1;
+    const pageSize = Math.min(20, Math.max(1, Number(body.pageSize) || 20));
+    if (page === 1) {
+      const account = await repo.getAccount(user.id);
+      if (!account || account.balance < 1) {
+        return json({ error: "You need 1 credit to see these people.", code: "insufficient_credits" }, 402);
+      }
+    }
+    const result = await runSearch(user.id, {
       titles: body.titles ?? [],
       industries: body.industries ?? [],
       locations: body.locations ?? [],
@@ -225,7 +233,20 @@ async function handle(request: Request, slug: string[]) {
       departments: body.departments ?? [],
       companySizes: body.companySizes ?? [],
       query: body.query,
-    }, Number(body.page) || 1, Number(body.pageSize) || 8));
+    }, page, pageSize);
+    if (page !== 1 || result.people.length === 0) {
+      const account = await repo.getAccount(user.id);
+      return json({ ...result, charged: 0, balance: account?.balance ?? 0 });
+    }
+    const spent = await repo.spendCredits({
+      userId: user.id,
+      amount: 1,
+      idempotencyKey: typeof body.idempotencyKey === "string" && body.idempotencyKey ? body.idempotencyKey : `search:${user.id}:${Date.now()}`,
+      note: "Show up to 20 people",
+      entryType: "search_debit",
+    });
+    if (spent.insufficient) return json({ error: "You need 1 credit to see these people.", code: "insufficient_credits" }, 402);
+    return json({ ...result, charged: spent.duplicate ? 0 : spent.charged, balance: spent.balance });
   }
 
   if (root === "contacts" && action === "unlock" && request.method === "POST") {
