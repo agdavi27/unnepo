@@ -43,7 +43,7 @@ export default function ForStudentsPage() {
         </p>
 
         <Link href="/signup" className="mt-8 inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black">
-          Get 25 free credits
+          Get 3 free credits (30 people)
         </Link>
       </main>
     </div>

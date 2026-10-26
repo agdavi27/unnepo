@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Bell, Copy, Gift } from "lucide-react";
+import { PUBLIC_PLANS } from "@/lib/config";
 import { SCHOOLS } from "@/lib/schools";
 
 const profileSchema = z.object({
@@ -25,7 +26,8 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
   const [message, setMessage] = useState(initialMessage);
   const [resumeName, setResumeName] = useState("");
   const form = useForm<ProfileForm>({ resolver: zodResolver(profileSchema), defaultValues: { name: "", school: "", major: "", graduationYear: "", bio: "" } });
-  const pricing = { referral: 50, grind: "$19", pack: "$50" };
+  const grind = PUBLIC_PLANS.find((plan) => plan.id === "grind")!;
+  const pack = PUBLIC_PLANS.find((plan) => plan.id === "pack")!;
 
   useEffect(() => {
     fetch("/api/me").then((response) => response.json()).then((data) => {
@@ -72,7 +74,7 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
   }
 
   const balance = me?.credits?.balance ?? 0;
-  const allowance = me?.credits?.includedAllowance || 25;
+  const allowance = me?.credits?.includedAllowance || 3;
 
   return (
     <div className="px-4 py-5 lg:px-8">
@@ -143,8 +145,8 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
               <div className="flex items-start justify-between">
                 <div>
                   <p className="flex items-center gap-2 font-semibold"><Gift className="h-4 w-4" /> Refer a friend</p>
-                  <p className="text-2xl font-semibold">Get {pricing.referral} free credits</p>
-                  <p className="mt-1 text-sm">Share your code. You get {pricing.referral} credits when a friend verifies their school email. They still receive their signup credits.</p>
+                  <p className="text-2xl font-semibold">Get 5 free credits</p>
+                  <p className="mt-1 text-sm">Share your code. You get 5 credits (50 people) when a friend verifies their school email. They still receive their signup credits.</p>
                 </div>
                 <span className="text-5xl">🎁</span>
               </div>
@@ -174,8 +176,8 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
       {tab === "billing" ? (
         <section className="mt-6 max-w-3xl space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
-            <button onClick={() => checkout("grind")} className="rounded-2xl border border-line p-5 text-left"><p className="text-xl font-semibold">The Grind</p><p className="text-3xl">{pricing.grind}<span className="text-base text-muted"> / month</span></p><p className="text-sm text-muted">200 credits every month</p></button>
-            <button onClick={() => checkout("pack")} className="rounded-2xl border border-gold p-5 text-left"><p className="text-xl font-semibold">I Hate Subscriptions</p><p className="text-3xl">{pricing.pack}</p><p className="text-sm text-muted">500 credits, one time</p></button>
+            <button onClick={() => checkout("grind")} className="rounded-2xl border border-line p-5 text-left"><p className="text-xl font-semibold">{grind.name}</p><p className="text-3xl">{grind.priceLabel}<span className="text-base text-muted"> / month</span></p><p className="text-sm text-[#3D8BFF]">{grind.peopleLabel}</p><p className="text-sm text-muted">{grind.credits} credits every month</p></button>
+            <button onClick={() => checkout("pack")} className="rounded-2xl border border-gold p-5 text-left"><p className="text-xl font-semibold">{pack.name}</p><p className="text-3xl">{pack.priceLabel}</p><p className="text-sm text-[#3D8BFF]">{pack.peopleLabel}</p><p className="text-sm text-muted">{pack.credits} credits, one time</p></button>
           </div>
           <div className="rounded-2xl border border-line">
             {history.length === 0 ? <p className="p-4 text-sm text-muted">No purchases yet. Demo checkout is labeled and is not revenue.</p> : history.map((payment) => (

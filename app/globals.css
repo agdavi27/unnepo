@@ -44,25 +44,31 @@ button, input, select, textarea { font: inherit; }
 
 .school-marquee {
   overflow: hidden;
-  mask-image: linear-gradient(to right, transparent, #000 6%, #000 94%, transparent);
+  width: 100%;
+  background: #141416;
 }
 .school-track {
   display: flex;
   width: max-content;
+  min-width: 400%;
+  animation: school-scroll 48s linear infinite;
+}
+.school-copy {
+  display: flex;
+  flex: 0 0 auto;
   gap: 0.75rem;
-  padding-inline: 0.75rem;
-  animation: school-scroll 38s linear infinite;
+  padding-right: 0.75rem;
 }
 .school-track-reverse {
   animation-direction: reverse;
-  animation-duration: 46s;
+  animation-duration: 56s;
 }
 .school-marquee:hover .school-track {
   animation-play-state: paused;
 }
 @keyframes school-scroll {
   from { transform: translateX(0); }
-  to { transform: translateX(-50%); }
+  to { transform: translateX(-25%); }
 }
 @media (prefers-reduced-motion: reduce) {
   .school-track,

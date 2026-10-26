@@ -22,7 +22,7 @@ function DemoCheckout() {
   return (
     <main className="mx-auto max-w-lg px-5 py-16">
       <p className="text-sm text-cream">Demo checkout</p>
-      <h1 className="mt-2 text-3xl font-semibold">{kind === "grind" ? "The Grind" : "500 credit pack"}</h1>
+      <h1 className="mt-2 text-3xl font-semibold">{kind === "grind" ? "The Grind · 30 credits (300 people)" : "75 credits (750 people)"}</h1>
       <p className="mt-3 text-muted">Stripe is not configured, so this screen does not charge a card. Credits are marked as demo credits and excluded from the profitability dashboard.</p>
       <button onClick={confirm} className="mt-6 rounded-xl bg-white px-4 py-2 font-semibold text-black">Add demo credits</button>
       {message ? <p className="mt-4 text-sm">{message}</p> : null}

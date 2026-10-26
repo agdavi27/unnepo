@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import path from "node:path";
+import { serverConfig } from "@/lib/config";
 import { ServiceError } from "@/lib/errors";
 import { loadRemote, remoteKind, saveRemote, VersionConflict } from "./remote";
 import { emptyDatabase, type CreditAccount, type Database, type LedgerEntry, type Reservation, type SavedContact } from "./types";
@@ -174,7 +175,7 @@ function ensureAccount(db: Database, userId: string): CreditAccount {
       reserved: 0,
       purchasedBalance: 0,
       allowanceBalance: 0,
-      includedAllowance: 25,
+      includedAllowance: serverConfig().signupCredits,
       plan: "free",
       updatedAt: nowIso(),
     };

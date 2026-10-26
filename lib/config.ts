@@ -8,14 +8,14 @@ function intEnv(name: string, fallback: number) {
 /** Pricing, credit rules, and spend caps. All of these are environment-configurable. */
 export function serverConfig() {
   return {
-    signupCredits: intEnv("SIGNUP_CREDITS", 25),
+    signupCredits: intEnv("SIGNUP_CREDITS", 3),
     unlockCreditCost: intEnv("UNLOCK_CREDIT_COST", 1),
-    referralCredits: intEnv("REFERRAL_CREDITS", 50),
+    referralCredits: intEnv("REFERRAL_CREDITS", 5),
     referralDailyCap: intEnv("REFERRAL_DAILY_CAP", 10),
-    grindPriceCents: intEnv("GRIND_PRICE_CENTS", 1900),
-    grindMonthlyCredits: intEnv("GRIND_MONTHLY_CREDITS", 200),
-    packPriceCents: intEnv("PACK_PRICE_CENTS", 5000),
-    packCredits: intEnv("PACK_CREDITS", 500),
+    grindPriceCents: intEnv("GRIND_PRICE_CENTS", 2900),
+    grindMonthlyCredits: intEnv("GRIND_MONTHLY_CREDITS", 30),
+    packPriceCents: intEnv("PACK_PRICE_CENTS", 6000),
+    packCredits: intEnv("PACK_CREDITS", 75),
     dailyGlobalSpendCents: intEnv("DAILY_GLOBAL_SPEND_CENTS", 2500),
     dailyUserSpendCents: intEnv("DAILY_USER_SPEND_CENTS", 200),
     aiHourlyLimit: intEnv("AI_HOURLY_LIMIT", 30),
@@ -33,6 +33,12 @@ export function serverConfig() {
   };
 }
 
+export const PEOPLE_PER_CREDIT = 10;
+
+export function peopleFromCredits(credits: number) {
+  return credits * PEOPLE_PER_CREDIT;
+}
+
 export const PUBLIC_PLANS = [
   {
     id: "free" as const,
@@ -42,28 +48,37 @@ export const PUBLIC_PLANS = [
     blurb: "Get started",
     cta: "Get started free",
     popular: false,
-    features: ["25 credits", "Find professional contacts", "Personalized AI emails", "Basic outreach tracking"],
+    credits: 3,
+    people: 30,
+    peopleLabel: "Reach 30 people",
+    features: ["3 credits", "Find professional contacts", "Personalized AI emails", "Basic outreach tracking"],
   },
   {
     id: "grind" as const,
     name: "The Grind",
-    priceLabel: "$19",
+    priceLabel: "$29",
     cadence: "Billed monthly",
     blurb: "For a few job hunters",
     cta: "Choose monthly",
     popular: false,
-    features: ["200 credits every month", "Everything in Free", "AI-powered outreach", "Full analytics and tracking", "Priority support"],
+    credits: 30,
+    people: 300,
+    peopleLabel: "Reach 300 people every month",
+    features: ["30 credits every month", "Everything in Free", "AI-powered outreach", "Full analytics and tracking", "Priority support"],
   },
   {
     id: "pack" as const,
     name: "I Hate Subscriptions",
-    priceLabel: "$50",
+    priceLabel: "$60",
     cadence: "One-time payment. That's it.",
     blurb: "Most popular",
-    cta: "Get 500 credits",
+    cta: "Get 75 credits",
     popular: true,
+    credits: 75,
+    people: 750,
+    peopleLabel: "Reach 750 people",
     features: [
-      "500 credits",
+      "75 credits",
       "Everything in The Grind",
       "No recurring charges",
       "Use credits at your own pace",

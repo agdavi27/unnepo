@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bell, Briefcase, Home, Link2, LogOut, Menu, Search, Send, Settings, Bookmark, X } from "lucide-react";
+import { Bell, Briefcase, Gift, Home, Link2, LogOut, Menu, Search, Send, Settings, Bookmark, X } from "lucide-react";
 import { Avatar } from "@/components/product/bits";
 
 type Me = {
@@ -53,7 +53,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     router.push("/");
   }
 
-  const allowance = me?.credits?.includedAllowance || 25;
+  const allowance = me?.credits?.includedAllowance || 3;
   const balance = me?.credits?.balance ?? 0;
   const width = Math.min(100, Math.round((balance / allowance) * 100));
 
@@ -74,6 +74,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+          <Link href="/refer" onClick={() => setOpen(false)} className={`mt-2 block rounded-xl border px-3 py-2.5 ${pathname === "/refer" ? "border-gold bg-gold/15" : "border-gold/35 bg-gold/10 hover:bg-gold/15"}`}>
+            <span className="flex items-center gap-2 text-sm font-medium text-cream"><Gift className="h-4 w-4" /> Refer a friend</span>
+            <span className="mt-0.5 block pl-6 text-xs text-muted">Code gets you 5 credits · 50 people</span>
+          </Link>
         </nav>
         <div className="space-y-1 px-3 pb-3">
           <Link href="/settings" className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${pathname === "/settings" ? "bg-card text-white" : "text-muted hover:bg-white/5"}`}><Settings className="h-4 w-4" /> Settings</Link>

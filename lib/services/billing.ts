@@ -227,7 +227,7 @@ export async function createStripeCheckout(userId: string, kind: "grind" | "pack
               currency: "usd",
               unit_amount: kind === "grind" ? config.grindPriceCents : config.packPriceCents,
               recurring: kind === "grind" ? { interval: "month" } : undefined,
-              product_data: { name: kind === "grind" ? "Unnepo The Grind" : "Unnepo 500 credits" },
+              product_data: { name: kind === "grind" ? "Unnepo The Grind" : `Unnepo ${config.packCredits} credits` },
             },
           },
         ],

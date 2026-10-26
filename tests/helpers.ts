@@ -18,7 +18,9 @@ export function useTempDb() {
   process.env.DAILY_GLOBAL_SPEND_CENTS = "2500";
   process.env.DAILY_USER_SPEND_CENTS = "200";
   process.env.UNNEPO_SAMPLE_DIRECTORY = "true";
-  process.env.SIGNUP_CREDITS = "25";
-  process.env.REFERRAL_CREDITS = "50";
+  process.env.SIGNUP_CREDITS = "3";
+  process.env.REFERRAL_CREDITS = "5";
+  process.env.PACK_CREDITS = "75";
+  process.env.GRIND_MONTHLY_CREDITS = "30";
   return dir;
 }

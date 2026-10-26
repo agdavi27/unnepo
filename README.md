@@ -103,15 +103,15 @@ This environment cannot attach the repository to your Vercel team. After you imp
 
 | Action | Credits |
 | --- | --- |
-| Verified school email | 25 once |
+| Verified school email | 3 once (30 people) |
 | Search that returns people | 1, up to 20 people |
 | Empty or failed search | 0 |
 | Successful contact unlock | 1 |
 | Failed or duplicate unlock | 0 |
 | AI email and sending | 0 |
-| Qualified referral | 50 to the referrer (`REFERRAL_CREDITS`) |
-| The Grind | $19/month, 200 allowance credits per paid invoice |
-| I Hate Subscriptions | $50 once, 500 purchased credits |
+| Qualified referral | 5 to the referrer (`REFERRAL_CREDITS`) |
+| The Grind | $29/month, 30 allowance credits per paid invoice |
+| I Hate Subscriptions | $60 once, 75 purchased credits |
 
 Purchased credits stay in a separate balance from signup, referral, and subscription allowance. Stripe retries use the event id and a ledger idempotency key, so they cannot grant credits twice. Refunds claw back unused purchased credits.
 

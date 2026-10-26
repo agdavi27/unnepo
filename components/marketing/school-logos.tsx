@@ -19,8 +19,8 @@ const SCHOOLS = [
   { name: "Georgetown", src: "/schools/georgetown.png" },
 ] as const;
 
-const ROW_ONE = SCHOOLS.filter((_, index) => index % 2 === 0);
-const ROW_TWO = SCHOOLS.filter((_, index) => index % 2 === 1);
+const ROW_ONE = SCHOOLS;
+const ROW_TWO = [...SCHOOLS].reverse();
 
 export function SchoolLogos() {
   return (
@@ -36,14 +36,18 @@ export function SchoolLogos() {
 }
 
 function LogoRow({ schools, reverse = false }: { schools: readonly { name: string; src: string }[]; reverse?: boolean }) {
-  const loop = [...schools, ...schools];
+  const copies = [0, 1, 2, 3];
   return (
     <div className="school-marquee">
       <div className={reverse ? "school-track school-track-reverse" : "school-track"}>
-        {loop.map((school, index) => (
-          <figure key={`${school.name}-${index}`} className="flex h-16 shrink-0 items-center rounded-xl bg-white px-5 py-2" aria-hidden={index >= schools.length}>
-            <img src={school.src} alt={index < schools.length ? school.name : ""} className="h-10 w-auto max-w-36 object-contain" loading="lazy" decoding="async" />
-          </figure>
+        {copies.map((copy) => (
+          <div key={copy} className="school-copy">
+            {schools.map((school) => (
+              <figure key={`${school.name}-${copy}`} className="flex h-16 w-40 shrink-0 items-center justify-center rounded-xl bg-white px-4 py-2" aria-hidden={copy > 0}>
+                <img src={school.src} alt={copy === 0 ? school.name : ""} className="h-10 w-auto max-w-32 object-contain" loading="lazy" decoding="async" />
+              </figure>
+            ))}
+          </div>
         ))}
       </div>
     </div>

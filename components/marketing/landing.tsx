@@ -71,14 +71,14 @@ export function Landing() {
           </button>
         </form>
         {params.get("error") ? <p className="mt-3 text-sm text-red-300">{params.get("error")}</p> : null}
-        <p className="mt-3 text-sm text-faint">Get 25 free credits. No subscription. Built for students.</p>
+        <p className="mt-3 text-sm text-faint">Get 3 free credits (30 people). No subscription. Built for students.</p>
         <div className="mt-6 flex items-center justify-center gap-3 text-sm text-muted">
           <div className="flex -space-x-2">
             {HEADSHOTS.map((photo) => (
               <img key={photo.src} src={photo.src} alt={photo.alt} className="h-11 w-11 rounded-full border-2 border-black object-cover object-top" />
             ))}
           </div>
-          10,000+ students are finding opportunities with Unnepo.
+          2500+ students are finding opportunities with Unnepo.
         </div>
       </section>
 
@@ -122,7 +122,8 @@ export function Landing() {
               </div>
               <h3 className="mt-4 text-2xl font-semibold">{plan.name}</h3>
               <p className="mt-2 text-4xl font-semibold">{plan.priceLabel}{plan.id === "grind" ? <span className="text-lg text-muted"> / month</span> : null}</p>
-              <p className="mt-1 text-sm text-faint">{plan.cadence}</p>
+              <p className="mt-2 text-lg font-semibold text-[#3D8BFF]">{plan.peopleLabel}</p>
+              <p className="mt-1 text-sm text-faint">{plan.cadence} · {plan.credits} credits</p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
                 {plan.features.map((feature) => <li key={feature}>✓ {feature}</li>)}
               </ul>

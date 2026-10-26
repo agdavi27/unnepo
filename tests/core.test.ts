@@ -30,11 +30,11 @@ describe("search credits", () => {
     const student = await verifiedStudent("searcher@colby.edu", "Searcher");
     const first = await repo.spendCredits({ userId: student.userId, amount: 1, idempotencyKey: "search-1", note: "Show up to 20 people", entryType: "search_debit" });
     expect(first.charged).toBe(1);
-    expect(first.balance).toBe(24);
+    expect(first.balance).toBe(2);
     const again = await repo.spendCredits({ userId: student.userId, amount: 1, idempotencyKey: "search-1", note: "Show up to 20 people", entryType: "search_debit" });
     expect(again.duplicate).toBe(true);
     expect(again.charged).toBe(0);
-    expect((await repo.getAccount(student.userId))?.balance).toBe(24);
+    expect((await repo.getAccount(student.userId))?.balance).toBe(2);
     await repo.setAccountForTests(student.userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
     const blocked = await repo.spendCredits({ userId: student.userId, amount: 1, idempotencyKey: "search-2", note: "Show up to 20 people", entryType: "search_debit" });
     expect(blocked.insufficient).toBe(true);
@@ -43,23 +43,23 @@ describe("search credits", () => {
 });
 
 describe("signup credits", () => {
-  it("grants 25 credits exactly once after verification", async () => {
+  it("grants 3 credits exactly once after verification", async () => {
     const signed = await signUp({ email: "alex@colby.edu", password: "password123", name: "Alex Chen" });
     const before = await repo.getAccount(signed.user.id);
     expect(before?.balance).toBe(0);
     await verifyEmail(signed.verifyToken!);
     const after = await repo.getAccount(signed.user.id);
-    expect(after?.balance).toBe(25);
+    expect(after?.balance).toBe(3);
     await expect(verifyEmail(signed.verifyToken!)).rejects.toThrow(/invalid or expired/);
     const again = await repo.grantCreditsOnce({
       userId: signed.user.id,
       entryType: "signup_grant",
-      amount: 25,
+      amount: 3,
       bucket: "allowance",
       idempotencyKey: `signup:${signed.user.id}`,
     });
     expect(again.granted).toBe(false);
-    expect((await repo.getAccount(signed.user.id))?.balance).toBe(25);
+    expect((await repo.getAccount(signed.user.id))?.balance).toBe(3);
     await expect(signUp({ email: "alex+alias@colby.edu", password: "password123", name: "Alex" })).rejects.toThrow(/already exists/);
   });
 });
@@ -86,7 +86,7 @@ describe("referrals", () => {
     const referrer = await verifiedStudent("drew@colby.edu", "Drew");
     const code = (await repo.getUserById(referrer.userId))!.referralCode;
     const referred = await verifiedStudent("sam@colby.edu", "Sam", code);
-    expect((await repo.getAccount(referrer.userId))?.balance).toBe(75);
+    expect((await repo.getAccount(referrer.userId))?.balance).toBe(8);
     const second = await rewardReferralIfEligible(referred.userId);
     expect(second.rewarded).toBe(false);
     const rewards = (await repo.listLedger(referrer.userId)).filter((entry) => entry.entryType === "referral_reward");
@@ -142,22 +142,22 @@ describe("stripe webhooks", () => {
           id: "cs_1",
           mode: "payment",
           payment_status: "paid",
-          amount_total: 5000,
+          amount_total: 6000,
           currency: "usd",
           payment_intent: "pi_1",
           client_reference_id: student.userId,
-          metadata: { userId: student.userId, credits: "500" },
+          metadata: { userId: student.userId, credits: "75" },
         },
       },
     };
     const first = await applyVerifiedStripeEvent(event);
     const second = await applyVerifiedStripeEvent(event);
-    expect(first.granted).toBe(500);
+    expect(first.granted).toBe(75);
     expect(second.duplicate).toBe(true);
     const purchases = (await repo.listLedger(student.userId)).filter((entry) => entry.entryType === "purchase_grant");
     expect(purchases).toHaveLength(1);
-    expect((await repo.getAccount(student.userId))?.purchasedBalance).toBe(500);
-    expect((await repo.getAccount(student.userId))?.balance).toBe(525);
+    expect((await repo.getAccount(student.userId))?.purchasedBalance).toBe(75);
+    expect((await repo.getAccount(student.userId))?.balance).toBe(78);
   });
 });
 
