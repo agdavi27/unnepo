@@ -36,12 +36,11 @@ export function SchoolLogos() {
 }
 
 function LogoRow({ schools, reverse = false }: { schools: readonly { name: string; src: string }[]; reverse?: boolean }) {
-  const copies = [0, 1, 2, 3];
   return (
-    <div className="school-marquee">
-      <div className={reverse ? "school-track school-track-reverse" : "school-track"}>
-        {copies.map((copy) => (
-          <div key={copy} className="school-copy">
+    <div className="overflow-hidden">
+      <div className={`flex w-max ${reverse ? "school-track school-track-reverse" : "school-track"}`}>
+        {[0, 1, 2].map((copy) => (
+          <div key={copy} className="flex shrink-0 flex-nowrap gap-3 pr-3">
             {schools.map((school) => (
               <figure key={`${school.name}-${copy}`} className="flex h-16 w-40 shrink-0 items-center justify-center rounded-xl bg-white px-4 py-2" aria-hidden={copy > 0}>
                 <img src={school.src} alt={copy === 0 ? school.name : ""} className="h-10 w-auto max-w-32 object-contain" loading="lazy" decoding="async" />

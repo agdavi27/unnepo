@@ -42,33 +42,19 @@ button, input, select, textarea { font: inherit; }
 .app-scroll th,
 .app-scroll td { padding: 0.7rem 0.75rem; vertical-align: middle; }
 
-.school-marquee {
-  overflow: hidden;
-  width: 100%;
-  background: #141416;
-}
 .school-track {
-  display: flex;
-  width: max-content;
-  min-width: 400%;
-  animation: school-scroll 48s linear infinite;
-}
-.school-copy {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 0.75rem;
-  padding-right: 0.75rem;
+  animation: school-scroll 42s linear infinite;
 }
 .school-track-reverse {
   animation-direction: reverse;
-  animation-duration: 56s;
+  animation-duration: 50s;
 }
-.school-marquee:hover .school-track {
+.school-track:hover {
   animation-play-state: paused;
 }
 @keyframes school-scroll {
   from { transform: translateX(0); }
-  to { transform: translateX(-25%); }
+  to { transform: translateX(-33.333%); }
 }
 @media (prefers-reduced-motion: reduce) {
   .school-track,
