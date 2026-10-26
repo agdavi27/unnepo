@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Mail, MessageSquare, Phone, Target } from "lucide-react";
+import { ArrowRight, Check, Mail, MessageSquare, Phone, Target } from "lucide-react";
 import { PUBLIC_PLANS } from "@/lib/config";
-import { ProviderButtons } from "@/components/auth/auth-forms";
+import { isSchoolEmail } from "@/lib/schools";
 import { SchoolLogos } from "@/components/marketing/school-logos";
 
 const HEADSHOTS = [
@@ -15,10 +15,18 @@ const HEADSHOTS = [
   { src: "/students/student-4.jpg", alt: "Student at a desk" },
 ];
 
-export function Landing({ google = false, microsoft = false }: { google?: boolean; microsoft?: boolean }) {
+export function Landing() {
   const router = useRouter();
   const params = useSearchParams();
   const [email, setEmail] = useState("");
+  const emailRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    const input = emailRef.current;
+    if (!input) return;
+    const handler = () => setEmail(input.value);
+    input.addEventListener("input", handler);
+    return () => input.removeEventListener("input", handler);
+  }, []);
 
   function start(event: React.FormEvent) {
     event.preventDefault();
@@ -55,16 +63,13 @@ export function Landing({ google = false, microsoft = false }: { google?: boolea
         <form onSubmit={start} className="mx-auto mt-8 flex max-w-xl flex-col gap-3 sm:flex-row">
           <label className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-card px-3">
             <Mail className="h-4 w-4 text-faint" />
-            <input value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="Enter your school email" className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-faint" />
+            <input ref={emailRef} value={email} onChange={(event) => setEmail(event.target.value)} type="email" required placeholder="Enter your school email" className="h-12 w-full bg-transparent text-sm outline-none placeholder:text-faint" suppressHydrationWarning />
+            {isSchoolEmail(email) ? <Check className="h-5 w-5 shrink-0 text-emerald-400" aria-hidden={false} aria-label="School email looks right" /> : null}
           </label>
           <button className="inline-flex h-12 items-center justify-center gap-2 rounded-xl bg-white px-5 text-sm font-semibold text-black">
             Get started <ArrowRight className="h-4 w-4" />
           </button>
         </form>
-        <div className="mx-auto mt-3 max-w-xl">
-          <p className="mb-2 text-xs uppercase tracking-[0.18em] text-faint">or</p>
-          <ProviderButtons compact google={google} microsoft={microsoft} />
-        </div>
         {params.get("error") ? <p className="mt-3 text-sm text-red-300">{params.get("error")}</p> : null}
         <p className="mt-3 text-sm text-faint">Get 25 free credits. No subscription. Built for students.</p>
         <div className="mt-6 flex items-center justify-center gap-3 text-sm text-muted">
@@ -168,7 +173,7 @@ function Slider({ label, value, min, max, onChange, display, accent = false }: {
   return (
     <label className="mt-5 block text-sm">
       <span className="flex items-center justify-between text-muted"><span>{label}</span><span className="text-ink">{display}</span></span>
-      <input type="range" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} className={accent ? "mt-2 w-full accent-lime-400" : "mt-2 w-full accent-sky-400"} />
+      <input type="range" min={min} max={max} value={value} onChange={(event) => onChange(Number(event.target.value))} className={accent ? "mt-2 w-full accent-lime-400" : "mt-2 w-full accent-sky-400"} suppressHydrationWarning />
     </label>
   );
 }

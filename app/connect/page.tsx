@@ -19,15 +19,15 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
       <div className="mx-auto max-w-2xl">
         <Link href="/" className="text-2xl font-semibold">unnepo.</Link>
         <p className="mt-8 text-xs font-semibold uppercase tracking-[0.18em] text-faint">{provider === "google" ? "Google" : "Microsoft"}</p>
-        <h1 className="mt-2 text-4xl font-semibold tracking-tight">This login needs an app you create.</h1>
+        <h1 className="mt-2 text-4xl font-semibold tracking-tight">Mailbox sending needs an app you create.</h1>
         <p className="mt-4 text-muted">
-          Unnepo cannot mint a Google or Microsoft client secret. Only the Google or Microsoft account that owns the app can do that. School-email signup does not need either one.
+          Sign-in is your school email and a password. Google and Microsoft are only for sending from your own inbox, and Unnepo cannot mint those client secrets. Only the account that owns the app can do that.
         </p>
         <Link href="/signup" className="mt-6 inline-flex h-11 items-center rounded-xl bg-white px-4 text-sm font-semibold text-black">Create an account with your school email</Link>
 
         {connected ? (
           <p className="mt-8 rounded-2xl border border-line bg-card p-4 text-sm">
-            {provider === "google" ? "Google" : "Microsoft"} credentials are present. <Link href={provider === "google" ? "/api/oauth/google" : "/api/oauth/microsoft"} className="text-white underline">Continue sign-in</Link>. The account Google or Microsoft returns still has to be a school email.
+            {provider === "google" ? "Google" : "Microsoft"} credentials are present. Connect the mailbox from Settings after you log in with your school email.
           </p>
         ) : (
           <ol className="mt-8 space-y-4">
@@ -63,11 +63,11 @@ function googleSteps(origin: string) {
       code: "",
     },
     {
-      title: "Register these redirect URIs",
-      body: "Paste both URIs exactly. Google rejects the login if the URI does not match the address in your browser.",
+      title: "Register this redirect URI",
+      body: "Paste this URI exactly. Google rejects the connection if it does not match the address in your browser.",
       href: "",
       hrefLabel: "",
-      code: `${origin}/api/oauth/google/callback\n${origin}/api/oauth/gmail/callback`,
+      code: `${origin}/api/oauth/gmail/callback`,
     },
     {
       title: "Save the client id and secret on the server",
@@ -89,11 +89,11 @@ function microsoftSteps(origin: string) {
       code: "",
     },
     {
-      title: "Add these redirect URIs",
-      body: "Under Authentication, add a Web platform and paste both URIs exactly.",
+      title: "Add this redirect URI",
+      body: "Under Authentication, add a Web platform and paste this URI exactly.",
       href: "",
       hrefLabel: "",
-      code: `${origin}/api/oauth/microsoft/callback\n${origin}/api/oauth/outlook/callback`,
+      code: `${origin}/api/oauth/outlook/callback`,
     },
     {
       title: "Create a client secret and save it",

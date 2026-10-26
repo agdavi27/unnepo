@@ -75,13 +75,11 @@ Subscribe to `checkout.session.completed`, `invoice.paid`, `customer.subscriptio
 
 ## OAuth
 
-Google and Microsoft are used both to sign in and to connect a mailbox. School-email signup works without them. Open `/connect` for the setup steps. Put `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, and `MICROSOFT_CLIENT_SECRET` in `.env.local`. The redirect URI is the origin in the browser plus the path below, which is `APP_URL` in production.
+Sign-in is school email and password. Google and Microsoft are only used to connect a mailbox so a student can send from their own inbox. Open `/connect` for the setup steps. Put `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, and `MICROSOFT_CLIENT_SECRET` in `.env.local`. The redirect URI is the origin in the browser plus the path below, which is `APP_URL` in production.
 
 | Provider | Redirect URI |
 | --- | --- |
-| Google login | `{APP_URL}/api/oauth/google/callback` |
 | Gmail send | `{APP_URL}/api/oauth/gmail/callback` |
-| Microsoft login | `{APP_URL}/api/oauth/microsoft/callback` |
 | Outlook send | `{APP_URL}/api/oauth/outlook/callback` |
 
 Gmail scopes: `gmail.send` and `gmail.readonly`. Outlook scopes: `Mail.Send` and `Mail.Read`. Tokens are encrypted with `SESSION_SECRET` and are not returned to the browser. A message is marked sent only after the provider returns a message id.

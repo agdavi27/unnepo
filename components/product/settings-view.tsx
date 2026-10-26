@@ -169,8 +169,6 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
         <section className="mt-6 grid max-w-2xl gap-3">
           <ConnectCard title="Gmail" detail={me?.mailboxes.find((item) => item.provider === "gmail")?.email || "Send from your own inbox"} href="/api/oauth/gmail" />
           <ConnectCard title="Outlook" detail={me?.mailboxes.find((item) => item.provider === "outlook")?.email || "Microsoft 365 mailbox"} href="/api/oauth/outlook" />
-          <ConnectCard title="Google login" detail="School Google account" href="/api/oauth/google" />
-          <ConnectCard title="Microsoft login" detail="School Microsoft account" href="/api/oauth/microsoft" />
         </section>
       ) : null}
       {tab === "billing" ? (
