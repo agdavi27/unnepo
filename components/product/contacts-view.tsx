@@ -3,8 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
-import * as Checkbox from "@radix-ui/react-checkbox";
-import { Check, Filter, Mail, MapPin, RefreshCw, Search, Send, X } from "lucide-react";
+import { Filter, Mail, MapPin, RefreshCw, Search, Send, X } from "lucide-react";
 import { Avatar, Notice, PageLoading } from "@/components/product/bits";
 import { COMPANIES, COMPANY_SIZES, DEPARTMENTS, INDUSTRIES, JOB_TITLES, LOCATIONS, SENIORITIES } from "@/lib/catalog";
 import { SCHOOLS } from "@/lib/schools";
@@ -297,7 +296,10 @@ export function Composer({ contactId, onClose, onSent }: { contactId: string; on
           return;
         }
         setContext(data);
-        const defaults = [...data.you, ...data.lead].filter((fact: ComposerFact) => fact.available && ["education", "experience", "interest", "current_role"].includes(fact.key)).map((fact: ComposerFact) => fact.id);
+        const defaults = [...data.you, ...data.lead]
+          .filter((fact: ComposerFact) => fact.available && (fact.shared || /^(education|experience|internship|interest|current_role|school)/.test(fact.key)))
+          .slice(0, 6)
+          .map((fact: ComposerFact) => fact.id);
         setSelected(defaults);
       });
   }, [contactId]);
@@ -396,7 +398,7 @@ export function Composer({ contactId, onClose, onSent }: { contactId: string; on
                 </div>
                 <p className="mt-3 text-xs text-faint">To {context.email || "No email on file yet"}</p>
                 <input value={subject} onChange={(event) => setSubject(event.target.value)} placeholder="Subject" className="mt-2 w-full rounded-lg border border-line bg-transparent px-3 py-2 text-sm outline-none" />
-                <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Generate a draft from the facts you selected." className="mt-2 h-64 w-full resize-none rounded-lg border border-line bg-transparent px-3 py-2 text-sm outline-none" />
+                <textarea value={body} onChange={(event) => setBody(event.target.value)} placeholder="Generate a short paragraph from the bubbles you selected." className="mt-2 h-40 w-full resize-none rounded-lg border border-line bg-transparent px-3 py-2 text-sm outline-none" />
                 {message ? <p className="mt-2 text-sm text-cream">{message}</p> : null}
                 <div className="mt-3 flex flex-wrap justify-end gap-2">
                   <button onClick={generate} disabled={busy} className="inline-flex items-center gap-2 rounded-lg border border-line px-3 py-2 text-sm"><RefreshCw className="h-4 w-4" /> {body ? "Regenerate" : "Generate"}</button>
@@ -419,16 +421,34 @@ function FactGroup({ title, copy, facts, selected, onToggle }: { title: string; 
     <section className="rounded-2xl border border-line p-3">
       <h3 className="font-semibold">{title}</h3>
       <p className="text-xs text-faint">{copy}</p>
-      <div className="mt-3 space-y-2">
-        {facts.map((fact) => (
-          <label key={fact.id} className={`flex items-start gap-2 text-sm ${fact.available ? "" : "opacity-50"}`}>
-            <Checkbox.Root checked={selected.includes(fact.id)} disabled={!fact.available} onCheckedChange={() => onToggle(fact.id, fact.available)} className="mt-0.5 flex h-4 w-4 items-center justify-center rounded border border-zinc-500 data-[state=checked]:bg-white">
-              <Checkbox.Indicator><Check className="h-3 w-3 text-black" /></Checkbox.Indicator>
-            </Checkbox.Root>
-            <span className="w-40 shrink-0 text-muted">{fact.label}</span>
-            <span>{fact.available ? fact.detail : "Not on file"}</span>
-          </label>
-        ))}
+      <div className="mt-3 flex flex-wrap gap-2">
+        {facts.map((fact) => {
+          const on = selected.includes(fact.id);
+          const shared = Boolean(fact.shared && fact.available);
+          return (
+            <button
+              key={fact.id}
+              type="button"
+              disabled={!fact.available}
+              onClick={() => onToggle(fact.id, fact.available)}
+              title={fact.available ? fact.detail : "Not on file"}
+              className={`max-w-full rounded-full border px-3 py-1.5 text-left text-sm ${
+                !fact.available
+                  ? "cursor-not-allowed border-line text-faint opacity-50"
+                  : shared
+                    ? on
+                      ? "border-[#e6c15a] bg-[#e6c15a]/20 text-cream"
+                      : "border-[#e6c15a] text-cream"
+                    : on
+                      ? "border-white bg-white text-black"
+                      : "border-line text-muted hover:border-zinc-500"
+              }`}
+            >
+              <span className="block">{fact.available ? fact.label : `${fact.label} · not on file`}</span>
+              {shared ? <span className="block text-[10px] leading-tight text-[#e6c15a]">You both share this</span> : null}
+            </button>
+          );
+        })}
       </div>
     </section>
   );

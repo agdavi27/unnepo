@@ -8,17 +8,18 @@ export type ComposerFact = {
   detail: string;
   source: string;
   available: boolean;
+  shared?: boolean;
 };
 
 export type EmailPurpose = "internship" | "full_time" | "informational" | "mentorship" | "networking";
 export type EmailTone = "professional" | "friendly" | "casual" | "direct";
 
 const ASKS: Record<EmailPurpose, string> = {
-  internship: "I am looking for an internship and would value 15 minutes to ask how you would approach breaking in.",
-  full_time: "I am preparing for full-time roles and would value a short conversation about your team.",
-  informational: "Would you be open to a 15-minute informational conversation about your path?",
-  mentorship: "If you have a few minutes, I would be grateful for any advice you would give a student in my position.",
-  networking: "I would be glad to introduce myself and hear how you think about the work.",
+  internship: "Would you have 15 minutes to talk about internships?",
+  full_time: "Would you have 15 minutes to talk about full-time roles?",
+  informational: "Would you have 15 minutes for a quick chat?",
+  mentorship: "Would you have a few minutes to share any advice?",
+  networking: "Would you be open to a short intro?",
 };
 
 const OPENS: Record<EmailTone, (first: string) => string> = {
@@ -38,42 +39,22 @@ export function generateGroundedEmail(input: {
   facts: ComposerFact[];
   attachResume: boolean;
 }) {
-  const selected = input.facts.filter((fact) => fact.available && fact.detail.trim());
-  const you = selected.filter((fact) => fact.group === "you");
-  const lead = selected.filter((fact) => fact.group === "lead");
-  const education = you.find((fact) => fact.key === "education");
-  const experience = you.find((fact) => fact.key === "experience" || fact.key === "internship");
-  const projects = you.find((fact) => fact.key === "project");
-  const skills = you.find((fact) => fact.key === "skill");
-  const interests = you.find((fact) => fact.key === "interest");
-  const goals = you.find((fact) => fact.key === "goal");
-  const shared = lead.find((fact) => fact.key === "shared_interests");
-  const companyUpdate = lead.find((fact) => fact.key === "company_updates");
-  const leadEducation = lead.find((fact) => fact.key === "education");
-  const currentRole = lead.find((fact) => fact.key === "current_role");
-
-  const sentences: string[] = [OPENS[input.tone](input.leadFirstName), ""];
-  const intro: string[] = [];
-  if (education) intro.push(`I'm a student — ${education.detail}`);
-  if (goals) intro.push(goals.detail);
-  if (intro.length === 0) intro.push(`I am a student reaching out about ${input.leadTitle} work at ${input.leadCompany}`);
-  const role = currentRole?.detail || `${input.leadTitle} at ${input.leadCompany}`;
-  sentences.push(`${intro.join(". ").replace(/\.$/, "")}. I am writing because of your role as ${role}.`);
-  if (experience) sentences.push(`From my own background: ${experience.detail}.`);
-  if (projects) sentences.push(`A related project: ${projects.detail}.`);
-  if (skills) sentences.push(`Skills I can speak to: ${skills.detail}.`);
-  if (interests) sentences.push(`Interests I listed on my profile: ${interests.detail}.`);
-  if (shared) sentences.push(`Overlap I can actually point to: ${shared.detail}.`);
-  if (companyUpdate) sentences.push(`From listings we have on file: ${companyUpdate.detail}.`);
-  if (leadEducation) sentences.push(`Your education on file: ${leadEducation.detail}.`);
-  sentences.push(ASKS[input.purpose]);
-  if (input.attachResume) sentences.push("I have attached my resume for context.");
+  const selected = input.facts.filter((fact) => fact.available && fact.detail.trim() && fact.key !== "resume");
+  const you = selected.filter((fact) => fact.group === "you").slice(0, 2);
+  const lead = selected.filter((fact) => fact.group === "lead" && !fact.shared).slice(0, 2);
+  const shared = unique(selected.filter((fact) => fact.shared).map(mention)).slice(0, 2);
+  const student = input.studentName.split(" ")[0] || "there";
+  const hello = OPENS[input.tone](input.leadFirstName).replace(/,$/, "");
+  const aboutYou = you.length ? `I'm ${student} — ${you.map(mention).join(", ")}.` : `I'm ${student}, a student.`;
+  const aboutLead = lead.length
+    ? ` I'm reaching out because of ${lead.map(mention).join(" and ")}.`
+    : ` I'm reaching out about your role as ${input.leadTitle} at ${input.leadCompany}.`;
+  const both = shared.length ? ` We both share ${shared.join(" and ")}.` : "";
+  const resume = input.attachResume ? " My resume is attached." : "";
+  const paragraph = `${hello}, ${aboutYou}${aboutLead}${both} ${ASKS[input.purpose]}${resume}`;
   const signOff = input.tone === "casual" ? "Thanks," : "Best,";
-  sentences.push("", signOff, input.studentName);
-
-  const body = sentences.join("\n").replace(/\n{3,}/g, "\n\n");
-  const subjectBits = [education ? "student" : "hello", input.leadTitle.split(" ")[0]?.toLowerCase(), input.leadCompany].filter(Boolean);
-  const subject = `${input.studentName.split(" ")[0]} — ${subjectBits.slice(1).join(" at ") || input.leadCompany}`;
+  const body = `${paragraph}\n\n${signOff}\n${input.studentName}`;
+  const subject = `${student} — ${input.leadCompany}`;
   return {
     subject: subject.slice(0, 120),
     body,
@@ -81,6 +62,15 @@ export function generateGroundedEmail(input: {
     usedFactIds: selected.map((fact) => fact.id),
     model: "grounded-template",
   };
+}
+
+function mention(fact: ComposerFact) {
+  const detail = fact.detail.trim();
+  return detail.length <= 80 ? detail : fact.label;
+}
+
+function unique(values: string[]) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 export function bodyUsesOnlyFacts(body: string, facts: ComposerFact[], allowedPhrases: string[]) {

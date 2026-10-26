@@ -16,67 +16,91 @@ export async function composerContext(userId: string, contactId: string) {
   const goals = await repo.getGoals(userId);
   const facts = await repo.getFacts(userId);
   const jobs = await repo.listJobs();
-  const user = await repo.getUserById(userId);
-  const you = studentFacts(profile, goals, facts, user?.name ?? "Student");
-  const lead = leadFacts(contact, you, jobs.filter((job) => job.company.toLowerCase() === contact.company.toLowerCase()));
-  return { saved, contact, you, lead, email: contact.email };
+  const you = studentFacts(profile, goals, facts);
+  const lead = leadFacts(contact, jobs.filter((job) => job.company.toLowerCase() === contact.company.toLowerCase()));
+  const marked = markShared(you, lead);
+  return { saved, contact, you: marked.you, lead: marked.lead, email: contact.email };
 }
 
 function studentFacts(
   profile: { school: string; major: string; bio: string; name: string } | null,
   goals: { roles: string[]; industries: string[]; locations: string[] } | null,
   facts: ResumeFact[],
-  name: string,
 ): ComposerFact[] {
-  const educationFact = facts.find((fact) => fact.category === "education");
-  const educationDetail = educationFact
-    ? factLine(educationFact)
-    : [profile?.school, profile?.major].filter(Boolean).join(" · ");
-  const experience = facts.filter((fact) => fact.category === "experience" || fact.category === "internship");
-  const projects = facts.filter((fact) => fact.category === "project");
-  const skills = facts.filter((fact) => fact.category === "skill");
-  const interests = facts.filter((fact) => fact.category === "interest");
-  const goalsText = goals ? [...goals.roles, ...goals.industries, ...goals.locations].filter(Boolean).join(", ") : "";
-  return [
-    fact("you", "education", "Current role / education", educationDetail, educationFact ? "Resume" : "Profile"),
-    fact("you", "experience", "Past experience", experience.map(factLine).join("; "), "Resume"),
-    fact("you", "project", "Projects", projects.map(factLine).join("; "), "Resume"),
-    fact("you", "skill", "Skills", skills.map(factLine).join(", "), "Resume"),
-    fact("you", "interest", "Interests", interests.map(factLine).join(", "), "Resume"),
-    fact("you", "goal", "Career goals", goalsText, "Career preferences"),
-    {
-      id: "you:resume",
-      group: "you",
-      key: "resume",
-      label: "Resume",
-      detail: "Attach the uploaded resume",
-      source: "Private resume file",
-      available: facts.length > 0,
-    },
-  ];
+  const bubbles: ComposerFact[] = [];
+  if (!facts.some((item) => item.category === "education") && profile?.school) {
+    addBubble(bubbles, "you", "education", profile.school, [profile.school, profile.major].filter(Boolean).join(", "), "Profile");
+  }
+  for (const item of facts) {
+    const pieces = item.category === "skill" || item.category === "interest" ? splitPieces(item.detail || item.label) : [shortLabel(item)];
+    for (const piece of pieces) {
+      addBubble(bubbles, "you", item.category, piece, factLine(item), "Resume");
+    }
+  }
+  for (const role of goals?.roles ?? []) addBubble(bubbles, "you", "goal", role, role, "Career preferences");
+  bubbles.push({
+    id: "you:resume",
+    group: "you",
+    key: "resume",
+    label: "Attach resume",
+    detail: "Attach the uploaded resume",
+    source: "Private resume file",
+    available: facts.length > 0,
+  });
+  return bubbles;
 }
 
-function leadFacts(contact: Contact, you: ComposerFact[], jobs: { title: string }[]): ComposerFact[] {
-  const studentTokens = new Set(
-    (you.find((item) => item.key === "interest")?.detail.toLowerCase() ?? "").split(/[^a-z0-9]+/).filter((token) => token.length > 3),
-  );
-  const overlap = contact.interests.filter((interest) =>
-    interest
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .some((token) => token.length > 3 && studentTokens.has(token)),
-  );
-  const companyUpdate = jobs[0] ? `${contact.company} has a listing on file: ${jobs[0].title}.` : "";
-  return [
-    fact("lead", "current_role", "Current role", `${contact.title} at ${contact.company}`, contact.dataSource === "sample" ? "Sample directory" : "Provider profile"),
-    fact("lead", "previous_roles", "Previous roles", contact.previousRoles.join("; "), contact.dataSource === "sample" ? "Sample directory" : "Provider profile"),
-    fact("lead", "education", "Education background", contact.school ?? "", contact.dataSource === "sample" ? "Sample directory" : "Provider profile"),
-    fact("lead", "public_posts", "Recent posts / activity", contact.publicPosts.map((item) => item.detail).join("; "), contact.publicPosts[0]?.source ?? "No public posts on file"),
-    fact("lead", "company_updates", "Company updates", companyUpdate, jobs[0] ? "Job listings on file" : "No company update on file"),
-    fact("lead", "achievements", "Relevant achievements", contact.achievements.join("; "), "Provider profile"),
-    fact("lead", "shared_interests", "Shared interests", overlap.length ? overlap.join(", ") : "", "Overlap between your interests and this profile"),
-    fact("lead", "mutuals", "Verified mutual connections", contact.verifiedMutuals.join(", "), "Verified connections"),
-  ];
+function leadFacts(contact: Contact, jobs: { title: string }[]): ComposerFact[] {
+  const source = contact.dataSource === "sample" ? "Sample directory" : "Provider profile";
+  const bubbles: ComposerFact[] = [];
+  addBubble(bubbles, "lead", "current_role", contact.title, `${contact.title} at ${contact.company}`, source);
+  addBubble(bubbles, "lead", "company", contact.company, contact.company, source);
+  if (contact.school) addBubble(bubbles, "lead", "school", contact.school, contact.school, source);
+  for (const role of contact.previousRoles) addBubble(bubbles, "lead", "previous_role", role, role, source);
+  for (const interest of contact.interests) addBubble(bubbles, "lead", "interest", interest, interest, source);
+  for (const achievement of contact.achievements) addBubble(bubbles, "lead", "achievement", achievement, achievement, source);
+  if (jobs[0]) addBubble(bubbles, "lead", "company_update", jobs[0].title, `${contact.company} listing: ${jobs[0].title}`, "Job listings on file");
+  return bubbles;
+}
+
+const SHARED_STOP = new Set(["intern", "internship", "manager", "student", "college", "university", "experience", "role", "work", "team", "with", "from", "that", "this", "your", "about", "have", "been"]);
+
+function markShared(you: ComposerFact[], lead: ComposerFact[]) {
+  const youTokens = you.map((item) => new Set(tokens(`${item.label} ${item.detail}`)));
+  const leadTokens = lead.map((item) => new Set(tokens(`${item.label} ${item.detail}`)));
+  return {
+    you: you.map((item, index) => ({ ...item, shared: item.key !== "resume" && shares(youTokens[index], leadTokens) })),
+    lead: lead.map((item, index) => ({ ...item, shared: shares(leadTokens[index], youTokens) })),
+  };
+}
+
+function shares(own: Set<string>, others: Array<Set<string>>) {
+  for (const token of own) {
+    if (others.some((set) => set.has(token))) return true;
+  }
+  return false;
+}
+
+function tokens(value: string) {
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 3 && !SHARED_STOP.has(word));
+}
+
+function splitPieces(value: string) {
+  const parts = value.split(/[,;•|/]|(?:\s+·\s+)/).map((part) => part.trim()).filter((part) => part.length > 1);
+  return parts.length ? parts : [value.trim()].filter(Boolean);
+}
+
+function shortLabel(item: ResumeFact) {
+  const label = item.label.trim();
+  if (label && label.length <= 42 && label.toLowerCase() !== item.detail.trim().toLowerCase()) return label.replace(/\s+[|–-]\s+.*$/, "");
+  return (item.detail || label).split(/[—,]/)[0]?.trim().slice(0, 42) || label;
+}
+
+function addBubble(out: ComposerFact[], group: "you" | "lead", key: string, label: string, detail: string, source: string) {
+  const text = label.trim();
+  if (!text || out.some((item) => item.group === group && item.label.toLowerCase() === text.toLowerCase())) return;
+  const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
+  out.push(fact(group, `${key}:${slug || out.length}`, text.slice(0, 48), detail.trim() || text, source));
 }
 
 function factLine(item: ResumeFact) {
@@ -162,18 +186,18 @@ async function maybeAnthropic(
   }
   const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
   const config = serverConfig();
-  const factBlock = facts.map((fact) => `- ${fact.label}: ${fact.detail} (source: ${fact.source})`).join("\n");
+  const factBlock = facts.map((fact) => `- ${fact.group === "you" ? "Student" : "Lead"} — ${fact.label}: ${fact.detail}`).join("\n");
   const started = Date.now();
   try {
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model,
-      max_tokens: 700,
+      max_tokens: 220,
       system: [
         {
           type: "text",
-          text: "You write short student outreach emails. Use only the facts provided. If a fact is absent, do not invent posts, mutual connections, employers, or interests. 80 to 150 words. Return JSON with subject and body.",
+          text: "You write student outreach emails. Use only the facts provided. Facts labeled as the student describe the sender. Facts labeled as the lead describe the recipient. Never give the recipient the student's school, jobs, or interests. If a fact is absent, do not invent posts, mutual connections, employers, or interests. The body is one short paragraph under 60 words, then a sign-off with the student's name. Return JSON with subject and body.",
           cache_control: { type: "ephemeral" },
         },
       ],
@@ -202,10 +226,11 @@ async function maybeAnthropic(
       error: null,
       createdAt: nowIso(),
     });
+    const body = oneShortEmail(parsed.body, grounded.body);
     return {
       subject: parsed.subject || grounded.subject,
-      body: parsed.body || grounded.body,
-      wordCount: (parsed.body || grounded.body).trim().split(/\s+/).length,
+      body,
+      wordCount: body.trim().split(/\s+/).length,
       model,
       inputTokens,
       outputTokens,
@@ -227,6 +252,14 @@ async function maybeAnthropic(
     });
     return { ...grounded, inputTokens: 0, outputTokens: 0, costCents: 0, estimated: true };
   }
+}
+
+function oneShortEmail(candidate: string, fallback: string) {
+  const body = candidate.trim();
+  if (!body) return fallback;
+  const prose = body.split(/\n\s*\n/).map((part) => part.trim()).filter((part) => part.split(/\s+/).length > 8);
+  if (prose.length > 1 || body.split(/\s+/).length > 90) return fallback;
+  return body;
 }
 
 function parseModelJson(text: string) {

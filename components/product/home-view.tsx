@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Bell, Briefcase, CloudUpload, Search, Send } from "lucide-react";
+import { Bell, Search } from "lucide-react";
 import { Avatar, CompanyLogo, CompanyMark, PageLoading, StatusPill } from "@/components/product/bits";
 import { GoalChecklist } from "@/components/product/goal-checklist";
 import { greeting, timeAgo } from "@/lib/format";
@@ -100,15 +100,6 @@ export function HomeView() {
               </div>
             )}
           </section>
-          <section>
-            <h2 className="mb-3 text-lg font-semibold">Quick Actions</h2>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Action href="/contacts" icon={<Search className="h-4 w-4" />} title="Find New Contact" copy="Search by role, company, or location." />
-              <Action href="/outreach" icon={<Send className="h-4 w-4" />} title="Send Outreach" copy="Create personalized emails with AI." />
-              <Action href="/jobs" icon={<Briefcase className="h-4 w-4" />} title="View Job Postings" copy="Discover new opportunities." />
-              <Action href="/settings" icon={<CloudUpload className="h-4 w-4" />} title="Upload Resume" copy="Update your profile and skills." />
-            </div>
-          </section>
         </div>
         <aside className="space-y-4">
           <section className="rounded-2xl border border-line bg-card p-4">
@@ -137,10 +128,8 @@ export function HomeView() {
             <p className="mt-4 text-3xl font-semibold">{data.contactsThisWeek}</p>
             <p className="text-sm text-muted">Contacts this week</p>
           </section>
-          <p className="hand hidden px-2 text-right text-2xl text-zinc-300 xl:block">Progress creates opportunity.</p>
         </aside>
       </div>
-      <p className="hand mt-6 max-w-xs text-2xl text-zinc-400">Better opportunities are a click away.</p>
     </div>
   );
 }
@@ -152,15 +141,5 @@ function Stat({ value, label, hint }: { value: string; label: string; hint: stri
       <p className="mt-1 text-sm text-muted">{label}</p>
       <p className="mt-2 text-xs text-faint">{hint}</p>
     </article>
-  );
-}
-
-function Action({ href, icon, title, copy }: { href: string; icon: React.ReactNode; title: string; copy: string }) {
-  return (
-    <Link href={href} className="rounded-2xl border border-line bg-card p-4 hover:border-zinc-500">
-      <span className="text-muted">{icon}</span>
-      <p className="mt-3 font-medium">{title}</p>
-      <p className="text-sm text-faint">{copy}</p>
-    </Link>
   );
 }

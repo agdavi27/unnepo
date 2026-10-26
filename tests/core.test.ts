@@ -224,6 +224,9 @@ Outdoor, running
       attachResume: false,
     });
     expect(email.body).toContain("Colby College");
+    const prose = email.body.split(/\n\s*\n/).map((part) => part.trim()).filter((part) => part.split(/\s+/).length > 8);
+    expect(prose).toHaveLength(1);
+    expect(email.wordCount).toBeLessThan(80);
     expect(email.body.toLowerCase()).not.toContain("goldman");
     expect(email.body.toLowerCase()).not.toContain("mutual connection");
     expect(email.body.toLowerCase()).not.toContain("i saw your post");
