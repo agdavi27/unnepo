@@ -2,7 +2,7 @@ import { createReadStream, existsSync } from "node:fs";
 import { Readable } from "node:stream";
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
-import { repo } from "@/lib/db/file-store";
+import { persistenceMode, repo } from "@/lib/db/file-store";
 import { runSearch, unlockContact } from "@/lib/services/contacts";
 import { composerContext, generateEmail } from "@/lib/services/composer";
 import { outreachSummary, saveDraft, sendOutreach, syncReplies } from "@/lib/services/outreach";
@@ -26,8 +26,8 @@ async function handle(request: Request, slug: string[]) {
     const ready = oauthReady();
     return json({
       ok: true,
-      database: process.env.SUPABASE_URL ? "supabase-configured" : "file",
-      persistence: process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY ? "supabase" : "local-file",
+      database: persistenceMode(),
+      persistence: persistenceMode(),
       providers: {
         apollo: Boolean(process.env.APOLLO_API_KEY),
         anthropic: Boolean(process.env.ANTHROPIC_API_KEY),

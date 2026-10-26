@@ -26,20 +26,64 @@ npm test
 npm run lint
 ```
 
-## Production database
+## Production database (Supabase)
 
-Apply `supabase/migrations/0001_init.sql` in the Supabase SQL editor, or with the Supabase CLI:
+Hosted signup writes to Postgres. The local file `.data/db.json` works on your laptop and fails on Vercel.
+
+### 1. Create the project
+
+1. Open [https://supabase.com/dashboard](https://supabase.com/dashboard) and sign in with GitHub.
+2. **New project**. Name it `unnepo`. Region: **East US (N. Virginia)** to match Vercel.
+3. Set a database password and store it. You cannot see it again.
+4. Wait until the project is ready.
+
+### 2. Copy the connection string (recommended)
+
+1. Open **Project Settings → Database → Connection string**.
+2. Choose **URI** and the **Session pooler** (port `6543`).
+3. Replace `[YOUR-PASSWORD]` with the password from step 1.
+4. Put it in `.env.local`:
 
 ```bash
-supabase db push
+DATABASE_URL=postgresql://postgres.xxxx:YOUR_PASSWORD@aws-0-us-east-1.pooler.supabase.com:6543/postgres
 ```
 
-Create a private Storage bucket named `resumes`. Put these on the server only:
+5. Confirm it from this repo:
 
-- `SUPABASE_URL`
-- `SUPABASE_SERVICE_ROLE_KEY`
+```bash
+npm run setup:db
+```
 
-Do not expose the service role with `NEXT_PUBLIC_`. Row Level Security is enabled and no anon policies are granted, so the browser cannot read tables with the anon key. The local file store is what `npm run dev` uses until a Supabase-backed repository is pointed at this schema. On Vercel, set `UNNEPO_DATA_DIR` only for a single long-running Node server; serverless instances need Supabase (or another Postgres) for durable data.
+The first successful save creates the `app_state` table. You do not need to paste SQL if `DATABASE_URL` works.
+
+### 3. Or use API keys only
+
+If you do not have the database password, use the API keys instead:
+
+1. **Project Settings → API**.
+2. Copy **Project URL** into `SUPABASE_URL`.
+3. Copy **`service_role`** (secret) into `SUPABASE_SERVICE_ROLE_KEY`. Never prefix it with `NEXT_PUBLIC_`.
+4. Open **SQL Editor → New query**, paste `supabase/setup.sql`, and click **Run**.
+5. Run `npm run setup:db`.
+
+The anon key is not used for signup. Leave `NEXT_PUBLIC_SUPABASE_ANON_KEY` empty.
+
+### 4. Put the same values on Vercel
+
+In the Vercel project → **Settings → Environment Variables**, add these for Production and Preview:
+
+| Name | Value |
+| --- | --- |
+| `DATABASE_URL` | the URI from step 2, **or** skip this and set the two Supabase keys |
+| `SUPABASE_URL` | `https://<ref>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | the `service_role` secret |
+| `SESSION_SECRET` | a long random string |
+| `APP_URL` | `https://unneponew.vercel.app` |
+| `NEXT_PUBLIC_APP_URL` | same as `APP_URL` |
+
+Redeploy after saving. `/api/health` should show `"persistence":"postgres"` or `"persistence":"supabase"`. Then Create account can save a user.
+
+Create a private Storage bucket named `resumes` later, when resume uploads go to Supabase Storage. Row Level Security is on and no anon policies are granted, so a leaked anon key cannot read rows.
 
 ## Vercel
 

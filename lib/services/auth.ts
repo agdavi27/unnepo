@@ -216,7 +216,9 @@ async function issueToken(userId: string, purpose: "verify_email" | "reset_passw
 }
 
 function exposeDevToken(token: string) {
-  if (process.env.NODE_ENV === "production" && process.env.UNNEPO_DEV_VERIFY !== "true") return null;
+  if (process.env.UNNEPO_DEV_VERIFY === "true") return token;
+  // No mail provider is configured, so the browser that just signed up finishes verification itself.
+  if (process.env.RESEND_API_KEY && process.env.NODE_ENV === "production") return null;
   return token;
 }
 

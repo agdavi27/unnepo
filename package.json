@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start -p 43123",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "setup:db": "node scripts/setup-db.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",
@@ -32,6 +33,7 @@
     "lucide-react": "^1.61.0",
     "mammoth": "^1.13.0",
     "next": "16.4.3",
+    "postgres": "^3.4.9",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-hook-form": "^7.91.0",

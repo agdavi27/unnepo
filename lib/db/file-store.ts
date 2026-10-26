@@ -1,5 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import path from "node:path";
+import { ServiceError } from "@/lib/errors";
+import { loadRemote, remoteKind, saveRemote, VersionConflict } from "./remote";
 import { emptyDatabase, type CreditAccount, type Database, type LedgerEntry, type Reservation, type SavedContact } from "./types";
 
 type GlobalStore = {
@@ -47,17 +49,40 @@ function load(): Database {
   return current.memory;
 }
 
+function remoteActive() {
+  // Tests pin a directory with setDataDir. Production leaves it unset and uses Postgres when configured.
+  if (state().dir) return false;
+  return remoteKind() !== null;
+}
+
+export function persistenceMode(): "postgres" | "supabase" | "local-file" {
+  if (!remoteActive()) return "local-file";
+  return remoteKind() === "supabase" ? "supabase" : "postgres";
+}
+
 function persist(db: Database) {
   const dir = dataDir();
-  mkdirSync(dir, { recursive: true });
-  const file = dbFile();
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(db));
-  renameSync(tmp, file);
+  try {
+    mkdirSync(dir, { recursive: true });
+    const file = dbFile();
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(db));
+    renameSync(tmp, file);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EROFS" || code === "EPERM" || code === "EACCES" || code === "ENOENT") {
+      throw new ServiceError(
+        "This host cannot save accounts to a local file. Add DATABASE_URL, or SUPABASE_URL plus SUPABASE_SERVICE_ROLE_KEY, in the Vercel project settings and redeploy.",
+        "database",
+        500,
+      );
+    }
+    throw error;
+  }
   state().memory = db;
 }
 
-function enqueue<T>(fn: () => T): Promise<T> {
+function enqueue<T>(fn: () => T | Promise<T>): Promise<T> {
   const current = state();
   const run = current.queue.then(() => fn());
   current.queue = run.then(
@@ -68,18 +93,40 @@ function enqueue<T>(fn: () => T): Promise<T> {
 }
 
 export function withLock<T>(fn: (db: Database) => T): Promise<T> {
-  return enqueue(() => {
-    const db = load();
-    const snapshot = structuredClone(db);
+  return enqueue(() => (remoteActive() ? withRemoteLock(fn) : withFileLock(fn)));
+}
+
+function withFileLock<T>(fn: (db: Database) => T): T {
+  const db = load();
+  const snapshot = structuredClone(db);
+  try {
+    const result = fn(db);
+    persist(db);
+    return structuredClone(result) as T;
+  } catch (error) {
+    try {
+      persist(snapshot);
+    } catch {
+      // Keep the original failure. A second write error would hide it.
+    }
+    throw error;
+  }
+}
+
+async function withRemoteLock<T>(fn: (db: Database) => T): Promise<T> {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const loaded = await loadRemote();
+    const db = loaded.db;
     try {
       const result = fn(db);
-      persist(db);
+      await saveRemote(db, loaded.version);
       return structuredClone(result) as T;
     } catch (error) {
-      persist(snapshot);
+      if (error instanceof VersionConflict) continue;
       throw error;
     }
-  });
+  }
+  throw new ServiceError("Could not save. Try again.", "conflict", 503);
 }
 
 export function nowIso() {
