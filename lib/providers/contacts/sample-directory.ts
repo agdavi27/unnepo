@@ -61,7 +61,7 @@ function person(seed: Seed): Contact {
   };
 }
 
-/** Illustrative directory so the product workflow runs without Apollo or Hunter keys. */
+/** Illustrative directory so the product workflow runs without an Apollo key. */
 export const SAMPLE_CONTACTS: Contact[] = [
   person({
     id: "sample_taylor_kim",

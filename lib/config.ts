@@ -22,8 +22,6 @@ export function serverConfig() {
     aiDailyLimit: intEnv("AI_DAILY_LIMIT", 100),
     apolloSearchCostCents: intEnv("APOLLO_SEARCH_COST_CENTS", 1),
     apolloEnrichCostCents: intEnv("APOLLO_ENRICH_COST_CENTS", 8),
-    hunterFindCostCents: intEnv("HUNTER_FIND_COST_CENTS", 3),
-    hunterVerifyCostCents: intEnv("HUNTER_VERIFY_COST_CENTS", 1),
     hostingMonthlyCents: intEnv("HOSTING_MONTHLY_CENTS", 0),
     emailInfraMonthlyCents: intEnv("EMAIL_INFRA_MONTHLY_CENTS", 0),
     fastInputCentsPerMillion: intEnv("AI_FAST_INPUT_CENTS_PER_MILLION", 100),

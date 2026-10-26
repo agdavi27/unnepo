@@ -72,12 +72,10 @@ export async function assertSpendAllowed(userId: string | null, additionalCents:
   }
 }
 
-export function estimateRequestCost(operation: "search" | "enrich" | "find_email" | "verify_email") {
+export function estimateRequestCost(operation: "search" | "enrich") {
   const config = serverConfig();
   if (operation === "search") return { cents: config.apolloSearchCostCents, provider: "apollo", estimated: true };
-  if (operation === "enrich") return { cents: config.apolloEnrichCostCents, provider: "apollo", estimated: true };
-  if (operation === "find_email") return { cents: config.hunterFindCostCents, provider: "hunter", estimated: true };
-  return { cents: config.hunterVerifyCostCents, provider: "hunter", estimated: true };
+  return { cents: config.apolloEnrichCostCents, provider: "apollo", estimated: true };
 }
 
 export async function searchPeople(userId: string, filters: SearchFilters, page: number, pageSize: number): Promise<PeopleSearchResult> {
@@ -143,7 +141,7 @@ export async function searchPeople(userId: string, filters: SearchFilters, page:
     total: matched.length,
     source: "sample",
     notice:
-      "Sample directory. These profiles are illustrative and are not live Apollo or Hunter results. Emails stay hidden until you unlock a contact. Connect Apollo to search real professionals.",
+      "Sample directory. These profiles are illustrative and are not live Apollo results. Emails stay hidden until you unlock a contact. Connect Apollo to search real professionals.",
     estimated: true,
   };
 }
@@ -278,20 +276,6 @@ export async function enrichPerson(contact: Contact, userId: string): Promise<En
     }
   }
 
-  if (!email && process.env.HUNTER_API_KEY && contact.companyDomain) {
-    const found = await hunterFindEmail(process.env.HUNTER_API_KEY, contact, userId);
-    cost += found.costCents;
-    if (found.email) {
-      email = found.email;
-      emailStatus = found.verified ? "verified" : "unverified";
-      provider = "hunter";
-    }
-  } else if (email && process.env.HUNTER_API_KEY) {
-    const verified = await hunterVerify(process.env.HUNTER_API_KEY, email, userId);
-    cost += verified.costCents;
-    if (verified.checked) emailStatus = verified.verified ? "verified" : "unverified";
-  }
-
   if (!email && !phone) {
     return {
       ok: false,
@@ -333,78 +317,6 @@ async function apolloMatch(apiKey: string, contact: Contact) {
     emailStatus: email ? (person.email_status === "verified" ? "verified" : "unverified") : "unavailable",
     phoneStatus: phone ? "verified" : "unavailable",
   } as const;
-}
-
-async function hunterFindEmail(apiKey: string, contact: Contact, userId: string) {
-  const estimate = estimateRequestCost("find_email");
-  await assertSpendAllowed(userId, estimate.cents);
-  const started = Date.now();
-  const url = new URL("https://api.hunter.io/v2/email-finder");
-  url.searchParams.set("domain", contact.companyDomain ?? "");
-  url.searchParams.set("first_name", contact.firstName);
-  url.searchParams.set("last_name", contact.lastName);
-  url.searchParams.set("api_key", apiKey);
-  const response = await contactFetch(url);
-  if (!response.ok) {
-    await recordUsage({
-      userId,
-      provider: "hunter",
-      operation: "find_email",
-      success: false,
-      latencyMs: Date.now() - started,
-      costCents: 0,
-      estimated: true,
-      error: `hunter_${response.status}`,
-    });
-    return { email: null, verified: false, costCents: 0 };
-  }
-  const body = (await response.json()) as { data?: { email?: string; verification?: { status?: string } } };
-  const email = body.data?.email ?? null;
-  const verified = body.data?.verification?.status === "valid";
-  await recordUsage({
-    userId,
-    provider: "hunter",
-    operation: "find_email",
-    success: Boolean(email),
-    latencyMs: Date.now() - started,
-    costCents: estimate.cents,
-    estimated: true,
-  });
-  return { email, verified, costCents: estimate.cents };
-}
-
-async function hunterVerify(apiKey: string, email: string, userId: string) {
-  const estimate = estimateRequestCost("verify_email");
-  await assertSpendAllowed(userId, estimate.cents);
-  const started = Date.now();
-  const url = new URL("https://api.hunter.io/v2/email-verifier");
-  url.searchParams.set("email", email);
-  url.searchParams.set("api_key", apiKey);
-  const response = await contactFetch(url);
-  if (!response.ok) {
-    await recordUsage({
-      userId,
-      provider: "hunter",
-      operation: "verify_email",
-      success: false,
-      latencyMs: Date.now() - started,
-      costCents: 0,
-      estimated: true,
-      error: `hunter_${response.status}`,
-    });
-    return { checked: false, verified: false, costCents: 0 };
-  }
-  const body = (await response.json()) as { data?: { status?: string } };
-  await recordUsage({
-    userId,
-    provider: "hunter",
-    operation: "verify_email",
-    success: true,
-    latencyMs: Date.now() - started,
-    costCents: estimate.cents,
-    estimated: true,
-  });
-  return { checked: true, verified: body.data?.status === "valid", costCents: estimate.cents };
 }
 
 export function findSampleById(contactId: string) {

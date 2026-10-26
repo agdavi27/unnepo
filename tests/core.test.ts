@@ -300,7 +300,7 @@ describe("isolation, spend limits, fallback, and retries", () => {
     ).rejects.toThrow(/temporarily unavailable/);
   });
 
-  it("uses Hunter when Apollo enrichment returns no email", async () => {
+  it("does not invent an email when Apollo enrichment returns none", async () => {
     process.env.APOLLO_API_KEY = "test-key";
     process.env.HUNTER_API_KEY = "hunter-key";
     process.env.DAILY_GLOBAL_SPEND_CENTS = "100000";
@@ -342,16 +342,18 @@ describe("isolation, spend limits, fallback, and retries", () => {
         costEstimated: true,
       },
     ]);
+    const calls: string[] = [];
     setContactFetcher(async (input) => {
       const url = String(input);
+      calls.push(url);
       if (url.includes("people/match")) return Response.json({ person: { email: null, phone_numbers: [] } });
-      if (url.includes("email-finder")) return Response.json({ data: { email: "taylor.kim@patagonia.com", verification: { status: "valid" } } });
       return new Response("missing", { status: 404 });
     });
     const contact = await repo.getContact("apollo_1");
     const enriched = await enrichPerson(contact!, "user");
-    expect(enriched.ok).toBe(true);
-    if (enriched.ok) expect(enriched.email).toBe("taylor.kim@patagonia.com");
+    expect(enriched.ok).toBe(false);
+    if (!enriched.ok) expect(enriched.reason).toBe("no_contact_method");
+    expect(calls.some((url) => url.includes("hunter.io"))).toBe(false);
   });
 
   it("does not run a background job twice", async () => {

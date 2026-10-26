@@ -16,7 +16,7 @@ Open [http://127.0.0.1:43123](http://127.0.0.1:43123).
 Copy `.env.example` to `.env.local` when you add provider keys. Without keys, the app runs in local mode:
 
 - Accounts, credits, resumes, and outreach live in `.data/db.json`.
-- Professional search uses a **labeled sample directory**. Those people are not live Apollo or Hunter results, and emails stay hidden until a credit unlock.
+- Professional search uses a **labeled sample directory**. Those people are not live Apollo results, and emails stay hidden until a credit unlock.
 - Checkout is a demo screen. It does not charge a card, and demo credits are excluded from revenue.
 - “Demo outbox” records a message without claiming it was sent. Connect Gmail or Outlook before a message can be marked sent.
 - School-email verification links are returned to the signup screen so you can finish onboarding without an email provider.
@@ -90,13 +90,13 @@ Automated follow-up sends only when the student explicitly authorizes one, a mai
 
 ## Contact providers
 
-`ContactProviderRouter` searches with Apollo and finds or verifies work email with Hunter. It does not enrich a person until that student clicks **Use 1 credit**. Apollo results are not replaced with sample profiles when Apollo fails.
+`ContactProviderRouter` searches and unlocks with Apollo. It does not enrich a person until that student clicks **Use 1 credit**. If Apollo returns no email and no phone, the unlock fails and the credit is returned. Apollo results are not replaced with sample profiles when Apollo fails.
 
-Set `APOLLO_API_KEY` and `HUNTER_API_KEY`. Estimated unit costs are configured with `APOLLO_*_COST_CENTS` and `HUNTER_*_COST_CENTS` and are labeled as estimates in the admin dashboard until a provider invoice reports an actual charge. Cache provider rows with `shareable = false` unless your contract allows a shared cache.
+Set `APOLLO_API_KEY`. Estimated unit costs are configured with `APOLLO_*_COST_CENTS` and are labeled as estimates in the admin dashboard until a provider invoice reports an actual charge. Cache provider rows with `shareable = false` unless your contract allows a shared cache.
 
 ## Anthropic, jobs, analytics
 
-- `ANTHROPIC_API_KEY` turns on email generation. Without it, a grounded template uses only the facts the student selected. The fast model is `ANTHROPIC_FAST_MODEL`.
+- `ANTHROPIC_API_KEY` turns on email generation. Without it, a grounded template uses only the facts the student selected. The model is `ANTHROPIC_FAST_MODEL`, which defaults to `claude-haiku-4-5`. Create a key at [console.anthropic.com](https://console.anthropic.com/settings/keys), put it in `.env.local`, and restart `npm run dev`. On the website, add the same variable in the host's environment settings.
 - Jobs use Adzuna when `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` are set. Otherwise the jobs page shows labeled sample listings and links to public careers pages.
 - `POSTHOG_KEY` and `SENTRY_DSN` are read on the server. Product analytics stored in the app omit resume text and email bodies.
 - Inngest: set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`, then point Inngest at `{APP_URL}/api/inngest`. Functions cover resume processing, hourly reply sync, daily authorized follow-ups, and referral checks.
@@ -107,4 +107,4 @@ Set `ADMIN_EMAILS` to a comma-separated list. Open `/admin` while signed in with
 
 ## Tests
 
-`npm test` covers signup credits granted once, duplicate referrals, successful and failed unlocks, concurrent credit races, Stripe webhook idempotency, resume parsing, email grounding, send confirmation, reply sync, cross-user isolation, spend limits, Hunter fallback, and background-job idempotency.
+`npm test` covers signup credits granted once, duplicate referrals, successful and failed unlocks, concurrent credit races, Stripe webhook idempotency, resume parsing, email grounding, send confirmation, reply sync, cross-user isolation, spend limits, Apollo-only enrichment, and background-job idempotency.

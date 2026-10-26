@@ -30,7 +30,6 @@ async function handle(request: Request, slug: string[]) {
       persistence: process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY ? "supabase" : "local-file",
       providers: {
         apollo: Boolean(process.env.APOLLO_API_KEY),
-        hunter: Boolean(process.env.HUNTER_API_KEY),
         anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
         stripe: Boolean(process.env.STRIPE_SECRET_KEY),
         gmail: ready.google,

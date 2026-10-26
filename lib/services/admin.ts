@@ -10,7 +10,7 @@ export async function profitability() {
   const mrrCents = activeSubs.reduce((sum, subscription) => sum + subscription.priceCents, 0);
   const payingUsers = new Set([...realPayments.map((payment) => payment.userId), ...activeSubs.map((subscription) => subscription.userId)]);
   const users = db.users.filter((user) => !user.deletedAt);
-  const contactCosts = db.usage.filter((item) => item.provider === "apollo" || item.provider === "hunter");
+  const contactCosts = db.usage.filter((item) => item.provider === "apollo");
   const contactCostCents = contactCosts.reduce((sum, item) => sum + item.costCents, 0);
   const aiCostCents = db.generations.reduce((sum, item) => sum + item.costCents, 0) + db.usage.filter((item) => item.provider === "anthropic").reduce((sum, item) => sum + item.costCents, 0);
   const stripeFeeCents = realPayments.reduce((sum, payment) => sum + Math.round(payment.amountCents * 0.029 + 30), 0);
@@ -24,7 +24,7 @@ export async function profitability() {
   const grossProfitCents = revenueCents - variableCents;
   const grossMargin = revenueCents > 0 ? grossProfitCents / revenueCents : 0;
 
-  const providers = ["apollo", "hunter", "anthropic", "sample"].map((provider) => {
+  const providers = ["apollo", "anthropic", "sample"].map((provider) => {
     const rows = db.usage.filter((item) => item.provider === provider);
     const success = rows.filter((item) => item.success).length;
     const cost = rows.reduce((sum, item) => sum + item.costCents, 0);

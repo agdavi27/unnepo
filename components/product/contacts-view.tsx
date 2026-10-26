@@ -41,7 +41,7 @@ type Filters = {
 
 const EMPTY: Filters = { titles: [], industries: [], locations: [], schools: [], includeSimilarSchools: true, companies: [], seniorities: [], departments: [], companySizes: [] };
 const PAGE_SIZE = 20;
-const SAMPLE_NOTICE = "Sample directory. These profiles are illustrative and are not live Apollo or Hunter results. Emails stay hidden until you unlock a contact. Connect Apollo to search real professionals.";
+const SAMPLE_NOTICE = "Sample directory. These profiles are illustrative and are not live Apollo results. Emails stay hidden until you unlock a contact. Connect Apollo to search real professionals.";
 
 export function ContactsView() {
   const params = useSearchParams();
