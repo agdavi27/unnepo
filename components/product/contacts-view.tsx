@@ -25,6 +25,7 @@ type Person = {
   emailed?: boolean;
   savedId: string | null;
   dataSource: "sample" | "provider";
+  reasons?: string[];
 };
 
 type Filters = {
@@ -58,6 +59,9 @@ export function ContactsView() {
   const [extraOpen, setExtraOpen] = useState(false);
   const [searched, setSearched] = useState(false);
   const [idleNotice, setIdleNotice] = useState(SAMPLE_NOTICE);
+  const [mode, setMode] = useState<"choose" | "filters">(params.get("company") || params.get("compose") ? "filters" : "choose");
+  const [prompt, setPrompt] = useState("");
+  const [unsupported, setUnsupported] = useState<string[]>([]);
 
   useEffect(() => {
     const company = params.get("company");
@@ -99,6 +103,43 @@ export function ContactsView() {
     if (typeof data.balance === "number") window.dispatchEvent(new CustomEvent("unnepo-credits", { detail: data.balance }));
   }
 
+  async function interpret(nextMode: "profile" | "custom") {
+    setLoading(true);
+    setError("");
+    const response = await fetch("/api/contacts/interpret", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: nextMode, prompt }),
+    });
+    const data = await response.json();
+    setLoading(false);
+    if (!response.ok) {
+      setError(data.error || "Could not read that search.");
+      return;
+    }
+    const next = { ...EMPTY, ...data.filters };
+    setFilters(next);
+    setUnsupported(data.unsupported ?? []);
+    setMode("filters");
+    if (data.note) setNotice(data.note);
+  }
+
+  async function unlock(contactId: string) {
+    setError("");
+    const response = await fetch("/api/contacts/unlock", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contactId, idempotencyKey: `unlock:${contactId}` }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok === false) {
+      setError(data.message || data.error || "No verified work email came back. You were not charged.");
+      return;
+    }
+    setPeople((current) => current.map((person) => (person.id === contactId ? { ...person, ...data.contact } : person)));
+    if (typeof data.balance === "number") window.dispatchEvent(new CustomEvent("unnepo-credits", { detail: data.balance }));
+  }
+
   function markEmailed(contactId: string) {
     setPeople((current) => current.map((item) => (item.id === contactId ? { ...item, emailed: true } : item)));
   }
@@ -125,9 +166,28 @@ export function ContactsView() {
     <div className="px-4 py-5 lg:px-6">
       <p className="text-[11px] font-semibold tracking-[0.18em] text-faint">FIND NEW CONTACTS</p>
       <h1 className="mt-2 text-4xl font-semibold tracking-tight md:text-5xl">Find the right people.</h1>
-      <p className="mt-2 max-w-3xl text-muted">Search by job title, industry, location, school (or similar schools), and company to find relevant professionals and get their emails and phone numbers.</p>
+      <p className="mt-2 max-w-3xl text-muted">One credit shows up to 20 real people and saves them. A verified work email is a separate credit, and only if the lookup returns one.</p>
       {banner ? <div className="mt-4"><Notice>{banner}</Notice></div> : null}
       {error ? <p className="mt-3 text-sm text-red-300">{error}</p> : null}
+      {unsupported.map((item) => <p key={item} className="mt-2 text-sm text-cream">{item}</p>)}
+      {mode === "choose" ? (
+        <div className="mt-6 grid gap-3 md:grid-cols-2">
+          <section className="rounded-2xl border border-line bg-card p-5">
+            <h2 className="text-xl font-semibold">Find based on my interests</h2>
+            <p className="mt-2 text-sm text-muted">Uses the roles, industries, and places from your profile. Alumni only counts when a school is actually on both records.</p>
+            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Anything specific you want us to look for?" className="mt-4 h-24 w-full rounded-xl border border-line bg-transparent px-3 py-2 text-sm outline-none" />
+            <button onClick={() => interpret("profile")} disabled={loading} className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black">Review my criteria</button>
+          </section>
+          <section className="rounded-2xl border border-line bg-card p-5">
+            <h2 className="text-xl font-semibold">Custom search</h2>
+            <p className="mt-2 text-sm text-muted">Write it in a sentence. Unnepo turns it into filters Apollo can actually use.</p>
+            <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Marketing managers at outdoor brands who attended a NESCAC school and work in New York." className="mt-4 h-24 w-full rounded-xl border border-line bg-transparent px-3 py-2 text-sm outline-none" />
+            <button onClick={() => interpret("custom")} disabled={loading} className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black">Turn this into filters</button>
+          </section>
+        </div>
+      ) : null}
+      {mode === "filters" ? (
+      <>
       <div className="mt-5 grid gap-3 xl:grid-cols-5">
         <FilterBox label="JOB TITLE" icon={<Search className="h-3.5 w-3.5" />} options={JOB_TITLES} selected={filters.titles} onChange={(titles) => setFilters({ ...filters, titles })} />
         <FilterBox label="INDUSTRY" options={INDUSTRIES} selected={filters.industries} onChange={(industries) => setFilters({ ...filters, industries })} />
@@ -141,10 +201,13 @@ export function ContactsView() {
             {chip.label} <X className="h-3 w-3" />
           </button>
         ))}
+        <button className="text-sm text-muted" onClick={() => { setMode("choose"); setSearched(false); setPeople([]); setNotice(null); setError(""); }}>Back</button>
         <button className="ml-auto text-sm text-muted" onClick={() => { setFilters(EMPTY); setSearched(false); setPeople([]); setTotal(0); setNotice(null); setError(""); }}>Clear all</button>
         <button onClick={() => run(filters, 1)} disabled={loading} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black disabled:opacity-60">{loading ? "Searching…" : "Show me 20 people (1 credit)"}</button>
       </div>
-      {searched ? (
+      </>
+      ) : null}
+      {mode === "filters" && searched ? (
       <>
       {loading && people.length === 0 ? <PageLoading label="Finding people…" /> : null}
       <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
@@ -179,6 +242,7 @@ export function ContactsView() {
                     <div>
                       <p className="font-medium">{person.fullName}</p>
                       <p className="text-xs text-faint">{person.title}</p>
+                      {person.reasons?.slice(0, 2).map((reason) => <p key={reason} className="text-[11px] text-cream">{reason}</p>)}
                     </div>
                   </div>
                 </td>
@@ -186,8 +250,7 @@ export function ContactsView() {
                 <td className="text-muted">{person.location}</td>
                 <td className="text-muted">{person.school || "—"}</td>
                 <td>
-                  <p className="flex items-center gap-1 text-xs"><Mail className="h-3 w-3" /> {person.unlocked ? person.email || "No email on file" : person.emailAvailable ? "Work email on file" : "Email unavailable"}</p>
-                  <p className="mt-1 text-xs text-faint">{person.unlocked ? person.phone || "No phone on file" : person.phoneAvailable ? "Business phone on file" : "Phone unavailable"}</p>
+                  <p className="flex items-center gap-1 text-xs"><Mail className="h-3 w-3" /> {person.email || (person.emailAvailable ? "Work email locked" : "No verified work email")}</p>
                 </td>
                 <td>
                   <div className="flex flex-wrap gap-1">
@@ -196,11 +259,14 @@ export function ContactsView() {
                   </div>
                 </td>
                 <td className="pr-3 text-right">
-                  {person.emailed ? (
-                    <span className="inline-flex rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted">Email sent</span>
-                  ) : (
-                    <button onClick={() => setComposerId(person.id)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">Send personalized email</button>
-                  )}
+                  <div className="flex flex-col items-end gap-2">
+                    {!person.email ? <button onClick={() => unlock(person.id)} className="rounded-lg border border-line px-3 py-2 text-xs">Unlock email · 1 credit</button> : null}
+                    {person.emailed ? (
+                      <span className="inline-flex rounded-lg border border-line px-3 py-2 text-xs font-semibold text-muted">Email sent</span>
+                    ) : (
+                      <button onClick={() => setComposerId(person.id)} className="rounded-lg bg-white px-3 py-2 text-xs font-semibold text-black">Send personalized email</button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -361,7 +427,7 @@ export function Composer({ contactId, onClose, onSent }: { contactId: string; on
           <div className="flex items-start justify-between gap-4">
             <div>
               <Dialog.Title className="text-2xl font-semibold">Write your email</Dialog.Title>
-              <Dialog.Description className="text-sm text-muted">Use AI to generate a personalized outreach email. It&apos;s free to send.</Dialog.Description>
+              <Dialog.Description className="text-sm text-muted">AI drafts are included with Pro and Premium. Sending from your mailbox does not use a credit.</Dialog.Description>
             </div>
             <Dialog.Close className="rounded-lg p-1 text-muted hover:bg-white/5" aria-label="Close"><X /></Dialog.Close>
           </div>

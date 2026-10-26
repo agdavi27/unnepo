@@ -76,7 +76,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
           })}
           <Link href="/refer" onClick={() => setOpen(false)} className={`mt-2 block rounded-xl border px-3 py-2.5 ${pathname === "/refer" ? "border-gold bg-gold/15" : "border-gold/35 bg-gold/10 hover:bg-gold/15"}`}>
             <span className="flex items-center gap-2 text-sm font-medium text-cream"><Gift className="h-4 w-4" /> Refer a friend</span>
-            <span className="mt-0.5 block pl-6 text-xs text-muted">Code gets you 5 credits · 50 people</span>
+            <span className="mt-0.5 block pl-6 text-xs text-muted">A verified friend gives you 25 credits</span>
           </Link>
         </nav>
         <div className="space-y-1 px-3 pb-3">

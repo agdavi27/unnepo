@@ -4,6 +4,7 @@ import type { Contact, SavedContact } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
 import { enrichPerson, findSampleById, searchPeople } from "@/lib/providers/contacts/router";
 import type { SearchFilters } from "@/lib/providers/contacts/sample-directory";
+import { matchReasons } from "@/lib/search/interpret";
 
 export type PublicContact = {
   id: string;
@@ -26,10 +27,11 @@ export type PublicContact = {
   savedId: string | null;
   status: SavedContact["status"] | null;
   dataSource: Contact["dataSource"];
+  reasons?: string[];
 };
 
-function present(contact: Contact, saved: SavedContact | null, emailed = false): PublicContact {
-  const unlocked = Boolean(saved);
+function present(contact: Contact, saved: SavedContact | null, emailed = false, reasons: string[] = []): PublicContact {
+  const unlocked = Boolean(saved?.creditCharged);
   return {
     id: contact.id,
     fullName: contact.fullName,
@@ -51,12 +53,14 @@ function present(contact: Contact, saved: SavedContact | null, emailed = false):
     status: saved?.status ?? null,
     emailed,
     dataSource: contact.dataSource,
+    reasons,
   };
 }
 
 export async function runSearch(userId: string, filters: SearchFilters, page = 1, pageSize = 8) {
   const result = await searchPeople(userId, filters, page, pageSize);
   await repo.saveFoundContacts(userId, result.people.map((person) => person.id));
+  const [profile, goals] = await Promise.all([repo.getProfile(userId), repo.getGoals(userId)]);
   await repo.insertSearch({
     id: id(),
     userId,
@@ -73,7 +77,7 @@ export async function runSearch(userId: string, filters: SearchFilters, page = 1
   return {
     people: result.people.map((person) => {
       const row = byContact.get(person.id) ?? null;
-      return present(person, row, row ? emailedSaved.has(row.id) : false);
+      return present(person, row, row ? emailedSaved.has(row.id) : false, matchReasons(person, goals, profile?.school || null));
     }),
     total: result.total,
     page,

@@ -2,7 +2,9 @@
 
 Unnepo is a career networking workspace for college students. A student verifies a school email, uploads a resume, searches for professionals, spends one credit to unlock a verified work email or business phone, writes a grounded outreach email, sends it from their own mailbox, and tracks the reply.
 
-Showing a list of people costs 1 credit and returns up to 20. An empty or failed search costs nothing. Unlocking a verified work email or business phone costs one more credit, and only after the lookup succeeds. Generating and sending email costs no contact credits.
+Showing a list of people costs 1 credit and returns up to 20. The same search is not charged again. An empty or failed search costs nothing. Unlocking a verified work email costs one more credit, and only after a real email comes back. Phone unlocking is not offered. AI email and cover letters are on Pro and Premium. Sending from a connected mailbox does not spend a contact credit.
+
+Production does not show sample people. Without `APOLLO_API_KEY` the search page says the live directory is unavailable.
 
 ## Local development
 
@@ -16,7 +18,7 @@ Open [http://127.0.0.1:43123](http://127.0.0.1:43123).
 Copy `.env.example` to `.env.local` when you add provider keys. Without keys, the app runs in local mode:
 
 - Accounts, credits, resumes, and outreach live in `.data/db.json`.
-- Professional search uses a **labeled sample directory**. Those people are not live Apollo results, and emails stay hidden until a credit unlock.
+- Professional search uses a **labeled sample directory** on your laptop. Production never does. Emails stay hidden until a successful unlock.
 - Checkout is a demo screen. It does not charge a card, and demo credits are excluded from revenue.
 - “Demo outbox” records a message without claiming it was sent. Connect Gmail or Outlook before a message can be marked sent.
 - School-email verification links are returned to the signup screen so you can finish onboarding without an email provider.
@@ -103,15 +105,17 @@ This environment cannot attach the repository to your Vercel team. After you imp
 
 | Action | Credits |
 | --- | --- |
-| Verified school email | 3 once (30 people) |
-| Search that returns people | 1, up to 20 people |
+| Verified school email | 25 once, unless `SIGNUP_CREDITS` overrides it |
+| Search that returns people | 1, up to 20 people, once per filter set |
 | Empty or failed search | 0 |
-| Successful contact unlock | 1 |
+| Successful work-email unlock | 1 |
 | Failed or duplicate unlock | 0 |
-| AI email and sending | 0 |
-| Qualified referral | 5 to the referrer (`REFERRAL_CREDITS`) |
-| The Grind | $29/month, 30 allowance credits per paid invoice |
-| I Hate Subscriptions | $60 once, 75 purchased credits |
+| AI email, follow-up draft, cover letter | Pro 200/month, Premium 600/month, free 0 |
+| Sending | 0 contact credits, and only after you approve |
+| Qualified referral | 25 promotional credits to the referrer |
+| Pro | $30/month, 200 credits. New purchases. |
+| Premium | $60/month, 500 credits. New purchases. |
+| Legacy Grind and credit pack | Kept for accounts that already bought them |
 
 Purchased credits stay in a separate balance from signup, referral, and subscription allowance. Stripe retries use the event id and a ledger idempotency key, so they cannot grant credits twice. Refunds claw back unused purchased credits.
 
@@ -130,7 +134,7 @@ Sign-in is school email and password. Google and Microsoft are only used to conn
 
 Gmail scopes: `gmail.send` and `gmail.readonly`. Outlook scopes: `Mail.Send` and `Mail.Read`. Tokens are encrypted with `SESSION_SECRET` and are not returned to the browser. A message is marked sent only after the provider returns a message id.
 
-Automated follow-up sends only when the student explicitly authorizes one, a mailbox is connected, and no reply or opt-out has arrived. The daily Inngest job uses a stable idempotency key so a retry cannot send the follow-up twice.
+Follow-ups are reminders. Unnepo does not send them automatically. A reply sync still runs when Inngest is configured.
 
 ## Contact providers
 
@@ -140,7 +144,11 @@ Set `APOLLO_API_KEY`. Search uses Apollo's people API search (`mixed_people/api_
 
 ## Anthropic, jobs, analytics
 
-- `ANTHROPIC_API_KEY` turns on email generation. Without it, a grounded template uses only the facts the student selected. The model is `ANTHROPIC_FAST_MODEL`, which defaults to `claude-haiku-4-5`. Create a key at [console.anthropic.com](https://console.anthropic.com/settings/keys), put it in `.env.local`, and restart `npm run dev`. On the website, add the same variable in the host's environment settings.
+- `ANTHROPIC_API_KEY` turns on email and cover-letter writing for Pro, Premium, and legacy paid plans. Free accounts get a clear paywall. Without the key, a paid account still gets a grounded draft that uses only selected facts. The model is `ANTHROPIC_FAST_MODEL`, which defaults to `claude-haiku-4-5`.
+
+Follow-up reminders are manual. The daily job does not send email.
+
+Ashby, Greenhouse, and Lever listings come from a small set of public company boards, not a global job index. Adzuna runs only when `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` are set. Gmail and Outlook still need their OAuth client ids. Stripe Pro and Premium need `STRIPE_PRICE_PRO` and `STRIPE_PRICE_PREMIUM` if you do not want inline prices. None of those missing keys are simulated as success.
 - Jobs use Adzuna when `ADZUNA_APP_ID` and `ADZUNA_APP_KEY` are set. Otherwise the jobs page shows labeled sample listings and links to public careers pages.
 - `POSTHOG_KEY` and `SENTRY_DSN` are read on the server. Product analytics stored in the app omit resume text and email bodies.
 - Inngest: set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`, then point Inngest at `{APP_URL}/api/inngest`. Functions cover resume processing, hourly reply sync, daily authorized follow-ups, and referral checks.

@@ -3,6 +3,7 @@ import { id, nowIso, repo } from "@/lib/db/file-store";
 import type { Contact, ResumeFact } from "@/lib/db/types";
 import { generateGroundedEmail, type ComposerFact, type EmailPurpose, type EmailTone } from "@/lib/email/grounded";
 import { ServiceError } from "@/lib/errors";
+import { assertAiAllowed } from "@/lib/services/entitlements";
 
 const PURPOSES = new Set(["internship", "full_time", "informational", "mentorship", "networking"]);
 const TONES = new Set(["professional", "friendly", "casual", "direct"]);
@@ -19,7 +20,7 @@ export async function composerContext(userId: string, contactId: string) {
   const you = studentFacts(profile, goals, facts);
   const lead = leadFacts(contact, jobs.filter((job) => job.company.toLowerCase() === contact.company.toLowerCase()));
   const marked = markShared(you, lead);
-  return { saved, contact, you: marked.you, lead: marked.lead, email: contact.email };
+  return { saved, contact, you: marked.you, lead: marked.lead, email: saved.creditCharged ? contact.email : null };
 }
 
 function studentFacts(
@@ -123,6 +124,7 @@ function fact(group: "you" | "lead", key: string, label: string, detail: string,
 export async function generateEmail(userId: string, input: { contactId: string; factIds: string[]; tone: string; purpose: string; attachResume: boolean }) {
   if (!TONES.has(input.tone)) throw new ServiceError("Choose a tone.", "tone");
   if (!PURPOSES.has(input.purpose)) throw new ServiceError("Choose an email purpose.", "purpose");
+  await assertAiAllowed(userId, "email");
   const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const recent = await repo.listGenerations(userId, hourAgo);

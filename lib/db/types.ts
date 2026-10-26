@@ -7,7 +7,21 @@ export type OutreachStatus =
   | "interview_scheduled"
   | "closed";
 
-export type OnboardingStep = "profile" | "goals" | "resume" | "mailbox" | "done";
+export type OnboardingStep =
+  | "profile"
+  | "goals"
+  | "resume"
+  | "interests"
+  | "roles"
+  | "location"
+  | "employment"
+  | "timing"
+  | "contacts"
+  | "networking"
+  | "extra"
+  | "story"
+  | "mailbox"
+  | "done";
 
 export type User = {
   id: string;
@@ -65,6 +79,12 @@ export type CareerGoals = {
   tracks?: string[];
   /** When the student wants to start, in their words. */
   timing?: string;
+  workModes?: string[];
+  relocate?: boolean;
+  contactTypes?: string[];
+  networkingGoals?: string[];
+  extraNote?: string;
+  originStory?: string;
   updatedAt: string;
 };
 
@@ -110,7 +130,7 @@ export type CreditAccount = {
   purchasedBalance: number;
   allowanceBalance: number;
   includedAllowance: number;
-  plan: "free" | "grind" | "pack";
+  plan: "free" | "grind" | "pack" | "pro" | "premium";
   updatedAt: string;
 };
 
@@ -336,7 +356,17 @@ export type Referral = {
   rewardedAt: string | null;
 };
 
-export type JobProvider = "sample" | "adzuna" | "linkedin" | "ziprecruiter" | "greenhouse" | "lever" | "remotive" | "arbeitnow";
+export type JobProvider = "sample" | "adzuna" | "linkedin" | "ziprecruiter" | "greenhouse" | "lever" | "remotive" | "arbeitnow" | "ashby";
+
+export type CoverLetter = {
+  id: string;
+  userId: string;
+  jobId: string | null;
+  company: string;
+  role: string;
+  body: string;
+  createdAt: string;
+};
 
 export type JobPosting = {
   id: string;
@@ -426,6 +456,7 @@ export type Database = {
   referrals: Referral[];
   jobs: JobPosting[];
   savedJobs: SavedJob[];
+  coverLetters: CoverLetter[];
   audits: AuditLog[];
   analytics: AnalyticsEvent[];
   webhooks: WebhookEvent[];
@@ -459,6 +490,7 @@ export function emptyDatabase(): Database {
     referrals: [],
     jobs: [],
     savedJobs: [],
+    coverLetters: [],
     audits: [],
     analytics: [],
     webhooks: [],

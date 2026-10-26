@@ -5,7 +5,9 @@ import { Suspense, useState } from "react";
 
 function DemoCheckout() {
   const params = useSearchParams();
-  const kind = params.get("kind") === "grind" ? "grind" : "pack";
+  const raw = params.get("kind") || "pro";
+  const kind = raw === "grind" || raw === "pack" || raw === "premium" || raw === "pro" ? raw : "pro";
+  const title = kind === "premium" ? "Premium · 500 credits" : kind === "pro" ? "Pro · 200 credits" : kind === "grind" ? "Legacy Grind" : "Legacy credit pack";
   const [message, setMessage] = useState("");
   const [code, setCode] = useState("");
 
@@ -23,7 +25,7 @@ function DemoCheckout() {
   return (
     <main className="mx-auto max-w-lg px-5 py-16">
       <p className="text-sm text-cream">Demo checkout</p>
-      <h1 className="mt-2 text-3xl font-semibold">{kind === "grind" ? "The Grind · 30 credits (300 people)" : "75 credits (750 people)"}</h1>
+      <h1 className="mt-2 text-3xl font-semibold">{title}</h1>
       <p className="mt-3 text-muted">Stripe is not configured, so this screen does not charge a card. Credits are marked as demo credits and excluded from the profitability dashboard.</p>
       <label className="mt-6 block text-sm text-muted">
         Referral code, if a friend sent you one

@@ -392,6 +392,15 @@ export const repo = {
       return { granted: true, account: structuredClone(account) };
     });
   },
+  async replaceAllowance(userId: string, amount: number) {
+    return withLock((db) => {
+      const account = ensureAccount(db, userId);
+      account.allowanceBalance = Math.max(0, amount);
+      account.balance = account.purchasedBalance + account.allowanceBalance;
+      account.updatedAt = nowIso();
+      return structuredClone(account);
+    });
+  },
   async reserveCredit(input: { userId: string; contactId: string; idempotencyKey: string; amount: number }) {
     return withLock((db) => {
       sweep(db);
@@ -847,6 +856,16 @@ export const repo = {
       const ids = new Set(db.savedJobs.filter((item) => item.userId === userId).map((item) => item.jobId));
       return db.jobs.filter((job) => ids.has(job.id));
     });
+  },
+  async insertCoverLetter(letter: Database["coverLetters"][number]) {
+    return withLock((db) => {
+      db.coverLetters = db.coverLetters ?? [];
+      db.coverLetters.push(letter);
+      return letter;
+    });
+  },
+  async getCoverLetter(userId: string, letterId: string) {
+    return withLock((db) => (db.coverLetters ?? []).find((letter) => letter.userId === userId && letter.id === letterId) ?? null);
   },
   async insertAudit(audit: Omit<Database["audits"][number], "id" | "createdAt">) {
     return withLock((db) => {

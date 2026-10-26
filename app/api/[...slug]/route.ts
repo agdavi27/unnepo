@@ -16,6 +16,11 @@ import { nowIso } from "@/lib/db/file-store";
 import type { OutreachStatus } from "@/lib/db/types";
 import { serverConfig } from "@/lib/config";
 import { usingDefaultSecret } from "@/lib/security";
+import { filtersFromProfile, interpretPrompt, searchChargeKey } from "@/lib/search/interpret";
+import { coverLetterPdf, generateCoverLetter, pdfForEditedLetter } from "@/lib/services/cover-letter";
+
+const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests", "roles", "location", "employment", "timing", "contacts", "networking", "extra", "story"]);
+const CHECKOUT_KINDS = new Set(["pro", "premium", "grind", "pack"]);
 
 async function handle(request: Request, slug: string[]) {
   const [root, action] = slug;
@@ -122,7 +127,7 @@ async function handle(request: Request, slug: string[]) {
     if ("token" in result && result.token) {
       await setSessionCookie(result.token);
       const step = result.user.onboardingStep;
-      const dest = step === "profile" || step === "goals" || step === "resume" ? "/onboarding" : "/home";
+      const dest = ONBOARDING_INCOMPLETE.has(step) ? "/onboarding" : "/home";
       return Response.redirect(new URL(dest, request.url));
     }
     return Response.redirect(new URL("/settings?tab=integrations", request.url));
@@ -189,6 +194,12 @@ async function handle(request: Request, slug: string[]) {
       companies: body.companies ?? current?.companies ?? [],
       tracks: body.tracks ?? current?.tracks ?? [],
       timing: body.timing ?? current?.timing ?? "",
+      workModes: body.workModes ?? current?.workModes ?? [],
+      relocate: body.relocate ?? current?.relocate ?? false,
+      contactTypes: body.contactTypes ?? current?.contactTypes ?? [],
+      networkingGoals: body.networkingGoals ?? current?.networkingGoals ?? [],
+      extraNote: body.extraNote ?? current?.extraNote ?? "",
+      originStory: body.originStory ?? current?.originStory ?? "",
       updatedAt: nowIso(),
     });
     if (body.onboardingStep) await repo.updateUser(user.id, { onboardingStep: body.onboardingStep });
@@ -202,7 +213,6 @@ async function handle(request: Request, slug: string[]) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     if (!bytes.byteLength) throw new ServiceError("That file was empty. Choose the resume again.", "file");
     const result = await storeResume(user.id, file.name, file.type || "application/octet-stream", bytes);
-    await repo.updateUser(user.id, { onboardingStep: "mailbox" });
     return json({ resume: { id: result.resume.id, fileName: result.resume.fileName, byteSize: result.resume.byteSize }, facts: result.facts, cached: result.cached });
   }
 
@@ -212,6 +222,18 @@ async function handle(request: Request, slug: string[]) {
     const fact = await repo.updateFact(user.id, body.id, { detail: body.detail, label: body.label });
     if (!fact) throw new ServiceError("Fact not found.", "not_found", 404);
     return json({ fact });
+  }
+
+  if (root === "contacts" && action === "interpret" && request.method === "POST") {
+    const body = await request.json();
+    const prompt = String(body.prompt || "");
+    if (body.mode === "profile") {
+      const [goals, profile] = await Promise.all([repo.getGoals(user.id), repo.getProfile(user.id)]);
+      const built = filtersFromProfile(goals, profile?.school || null, prompt);
+      return json({ ...built, model: process.env.ANTHROPIC_API_KEY ? "profile" : "profile" });
+    }
+    const built = interpretPrompt(prompt);
+    return json(built);
   }
 
   if (root === "contacts" && action === "search" && request.method === "POST") {
@@ -244,7 +266,18 @@ async function handle(request: Request, slug: string[]) {
     const spent = await repo.spendCredits({
       userId: user.id,
       amount: 1,
-      idempotencyKey: typeof body.idempotencyKey === "string" && body.idempotencyKey ? body.idempotencyKey : `search:${user.id}:${Date.now()}`,
+      idempotencyKey: searchChargeKey(user.id, page, {
+        titles: body.titles ?? [],
+        industries: body.industries ?? [],
+        locations: body.locations ?? [],
+        schools: body.schools ?? [],
+        includeSimilarSchools: body.includeSimilarSchools !== false,
+        companies: body.companies ?? [],
+        seniorities: body.seniorities ?? [],
+        departments: body.departments ?? [],
+        companySizes: body.companySizes ?? [],
+        query: body.query,
+      }),
       note: "Show up to 20 people",
       entryType: "search_debit",
     });
@@ -341,11 +374,40 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "billing" && action === "checkout" && request.method === "POST") {
     const body = await request.json();
+    if (!CHECKOUT_KINDS.has(body.kind)) throw new ServiceError("Choose Pro or Premium.", "plan");
     return json(await createStripeCheckout(user.id, body.kind));
   }
   if (root === "billing" && action === "demo" && request.method === "POST") {
     const body = await request.json();
+    if (!CHECKOUT_KINDS.has(body.kind)) throw new ServiceError("Choose Pro or Premium.", "plan");
     return json(await confirmDemoPurchase(user.id, body.kind));
+  }
+  if (root === "cover-letter" && action === "pdf" && request.method === "POST") {
+    const body = await request.json();
+    const bytes = pdfForEditedLetter({
+      name: user.name,
+      email: user.email,
+      company: String(body.company || ""),
+      role: String(body.role || ""),
+      body: String(body.body || ""),
+    });
+    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "attachment; filename=cover-letter.pdf" } });
+  }
+  if (root === "cover-letter" && request.method === "POST") {
+    const body = await request.json();
+    return json(await generateCoverLetter(user.id, {
+      jobId: body.jobId,
+      company: String(body.company || ""),
+      role: String(body.role || ""),
+      description: String(body.description || ""),
+      factIds: Array.isArray(body.factIds) ? body.factIds : [],
+      tone: String(body.tone || "professional"),
+    }));
+  }
+  if (root === "cover-letter" && request.method === "GET") {
+    const letterId = new URL(request.url).searchParams.get("id") || "";
+    const file = await coverLetterPdf(user.id, letterId);
+    return new Response(file.bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${file.filename}"` } });
   }
   if (root === "billing" && action === "history" && request.method === "GET") return json({ payments: await repo.listPayments(user.id) });
 

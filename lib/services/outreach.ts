@@ -132,24 +132,20 @@ export async function sendOutreach(userId: string, input: {
   return { message: inserted.message, created: inserted.created, creditsCharged: 0 };
 }
 
-async function maybeScheduleFollowUp(userId: string, savedContactId: string, days: number | null | undefined, autoSend: boolean) {
-  if (!days || days < 1) {
-    if (autoSend) await repo.updateSaved(userId, savedContactId, { autoFollowUpAuthorized: true });
-    return;
-  }
+async function maybeScheduleFollowUp(userId: string, savedContactId: string, days: number | null | undefined, _autoSend: boolean) {
+  if (!days || days < 1) return;
+  const followUpAt = new Date(Date.now() + days * 86400000).toISOString();
   await repo.insertFollowUp({
     id: id(),
     userId,
     savedContactId,
-    dueAt: new Date(Date.now() + days * 86400000).toISOString(),
-    note: autoSend ? "Authorized single follow-up if there is no reply." : "Reminder only. This will not send automatically.",
+    dueAt: followUpAt,
+    note: "Reminder only. This will not send automatically.",
     status: "open",
-    autoSend,
+    autoSend: false,
     createdAt: nowIso(),
   });
-  const followUpAt = new Date(Date.now() + days * 86400000).toISOString();
-  if (autoSend) await repo.updateSaved(userId, savedContactId, { autoFollowUpAuthorized: true, followUpAt, status: "follow_up_needed" });
-  else await repo.updateSaved(userId, savedContactId, { followUpAt });
+  await repo.updateSaved(userId, savedContactId, { followUpAt, autoFollowUpAuthorized: false });
 }
 
 export async function syncReplies(userId: string) {

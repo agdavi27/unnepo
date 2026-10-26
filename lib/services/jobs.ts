@@ -5,6 +5,7 @@ import { suggestRoles } from "@/lib/roles";
 
 const GREENHOUSE = ["stripe", "airbnb", "figma", "databricks", "robinhood", "discord", "hubspot", "instacart"];
 const LEVER = ["spotify", "palantir"];
+const ASHBY = ["notion", "ramp", "linear", "vercel"];
 
 type SearchLink = { source: "linkedin" | "ziprecruiter"; label: string; url: string; domain: string };
 
@@ -71,6 +72,7 @@ async function loadLive(queries: string[], where: string) {
     arbeitnow(queries),
     greenhouse(queries),
     lever(queries),
+    ashby(queries),
     adzuna(queries[0] || "intern", where),
   ]);
   const jobs = settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
@@ -205,6 +207,25 @@ async function lever(queries: string[]) {
       description: strip(String(job.descriptionPlain ?? "")).slice(0, 280) || `From the ${titleCase(board)} careers page.`,
       logoUrl: null,
     }));
+  }));
+  return boards.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+}
+
+async function ashby(queries: string[]) {
+  const needles = tokens(queries.join(" "));
+  const boards = await Promise.allSettled(ASHBY.map(async (board) => {
+    const body = await getJson<{ jobs?: Array<Record<string, unknown>> }>(`https://api.ashbyhq.com/posting-api/job-board/${board}`);
+    return (body.jobs ?? []).filter((job) => needles.some((needle) => String(job.title ?? "").toLowerCase().includes(needle))).slice(0, 8).map((job) => posting({
+      externalId: `${board}-${job.id}`,
+      provider: "ashby",
+      title: String(job.title ?? "Role"),
+      company: boardName(board),
+      location: String(job.location ?? ""),
+      postedAt: String(job.publishedAt ?? new Date().toISOString()),
+      url: String(job.jobUrl ?? job.applyUrl ?? ""),
+      description: strip(String(job.descriptionPlain ?? job.descriptionHtml ?? "")).slice(0, 280) || `From the ${titleCase(board)} careers page.`,
+      logoUrl: null,
+    })).filter((job) => job.url);
   }));
   return boards.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
 }

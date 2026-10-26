@@ -42,6 +42,15 @@ export async function dashboard(userId: string) {
       repliesToday: detailed.filter((item) => ["replied", "interested", "interview_scheduled"].includes(item.saved.status) && item.saved.updatedAt >= dayIso).length,
     },
     contactsThisWeek: detailed.filter((item) => item.saved.unlockedAt >= weekAgo).length,
+    milestones: [10, 20, 50].map((goal) => ({ goal, current: Math.min(goal, summary.confirmedSends) })),
+    metrics: {
+      contacts: detailed.length,
+      sends: summary.confirmedSends,
+      replies: summary.replies,
+      followUpsDue: followups.length,
+      interviews: summary.interviews,
+      offers: detailed.filter((item) => item.saved.status === "closed" && item.saved.notes.toLowerCase().includes("offer")).length,
+    },
     steps,
     completedSteps: completed,
     recent: detailed

@@ -8,10 +8,10 @@ import { GoalChecklist } from "@/components/product/goal-checklist";
 import { greeting, timeAgo } from "@/lib/format";
 
 type Dashboard = {
-  user: { name: string; email: string } | null;
+  user: { name: string; email: string; onboardingStep?: string } | null;
   resume: { fileName: string; byteSize: number; createdAt: string } | null;
   credits: { balance: number; plan: string } | null;
-  summary: { unlocked: number; confirmedSends: number; demoOutbox: number; replies: number };
+  summary: { unlocked: number; confirmedSends: number; demoOutbox: number; replies: number; replyRate?: number; interviews?: number };
   deltas: { contactsToday: number; sendsToday: number; repliesToday: number };
   contactsThisWeek: number;
   steps: { resume: boolean; goals: boolean; contacts: boolean; outreach: boolean };
@@ -20,6 +20,8 @@ type Dashboard = {
   roleSuggestions: { fromResume: string[]; similar: string[] };
   recent: Array<{ saved: { id: string; status: string; updatedAt: string }; contact: { fullName: string; title: string; company: string; location: string } | null }>;
   jobs: Array<{ id: string; title: string; company: string; location: string; postedAt: string }>;
+  milestones?: Array<{ goal: number; current: number }>;
+  metrics?: { contacts: number; sends: number; replies: number; followUpsDue: number; interviews: number; offers: number };
 };
 
 export function HomeView() {
@@ -57,13 +59,38 @@ export function HomeView() {
             <h1 className="text-4xl font-semibold tracking-tight">{greeting(data.user?.name || "there", hour)}</h1>
             <p className="mt-1 text-muted">Let&apos;s turn your resume into real opportunities.</p>
           </div>
-          <GoalChecklist resumeName={data.resume?.fileName ?? null} suggestions={data.roleSuggestions} goals={data.goals} onUpdated={load} />
-          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-            <Stat value={String(data.credits?.balance ?? 0)} label="Total Credits" hint={data.credits?.plan === "grind" ? "Pro plan" : "Free plan"} />
-            <Stat value={String(data.summary.unlocked)} label="Contacts Found" hint={`+${data.deltas.contactsToday} today`} />
-            <Stat value={String(data.summary.confirmedSends)} label="Emails Sent" hint={data.summary.demoOutbox ? `${data.summary.demoOutbox} in demo outbox` : `+${data.deltas.sendsToday} today`} />
-            <Stat value={String(data.summary.replies)} label="Replies" hint={`+${data.deltas.repliesToday} today`} />
+          {data.user?.onboardingStep && data.user.onboardingStep !== "done" && data.user.onboardingStep !== "mailbox" ? (
+            <Link href="/onboarding" className="block rounded-2xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm text-cream">Finish setup so search and jobs can use your resume and preferences.</Link>
+          ) : null}
+          <section className="grid gap-3 sm:grid-cols-3">
+            {(data.milestones ?? [10, 20, 50].map((goal) => ({ goal, current: Math.min(goal, data.summary.confirmedSends) }))).map((item) => (
+              <article key={item.goal} className="rounded-2xl border border-line bg-card p-4">
+                <p className="text-sm text-muted">First {item.goal} emails</p>
+                <p className="mt-1 text-2xl font-semibold">{item.current} / {item.goal}</p>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800"><div className="h-full bg-white" style={{ width: `${Math.min(100, (item.current / item.goal) * 100)}%` }} /></div>
+              </article>
+            ))}
           </section>
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            <Stat value={String(data.metrics?.contacts ?? data.summary.unlocked)} label="Contacts Found" hint={`+${data.deltas.contactsToday} today`} />
+            <Stat value={String(data.metrics?.sends ?? data.summary.confirmedSends)} label="Emails Sent" hint={data.summary.demoOutbox ? `${data.summary.demoOutbox} in demo outbox` : `+${data.deltas.sendsToday} today`} />
+            <Stat value={String(data.metrics?.replies ?? data.summary.replies)} label="Replies Received" hint={data.summary.confirmedSends ? `${Math.round((data.summary.replyRate ?? 0) * 100)}% reply rate` : "No sent mail yet"} />
+            <Stat value={String(data.metrics?.followUpsDue ?? 0)} label="Follow-Ups Due" hint="Reminders only" />
+            <Stat value={String(data.metrics?.interviews ?? data.summary.interviews ?? 0)} label="Interviews" hint="From replies you recorded" />
+            <Stat value={String(data.metrics?.offers ?? 0)} label="Offers" hint={(data.metrics?.offers ?? 0) ? "Noted on a saved contact" : "None recorded"} />
+          </section>
+          <nav className="flex flex-wrap gap-2 text-sm">
+            {[
+              ["/contacts", "Find Contacts"],
+              ["/saved", "Saved Contacts"],
+              ["/jobs", "Find Jobs"],
+              ["/outreach", "Analytics"],
+              ["/settings", "Profile & Preferences"],
+            ].map(([href, label]) => (
+              <Link key={href} href={href} className="rounded-full border border-line px-3 py-1.5 text-muted hover:text-white">{label}</Link>
+            ))}
+          </nav>
+          <GoalChecklist resumeName={data.resume?.fileName ?? null} suggestions={data.roleSuggestions} goals={data.goals} onUpdated={load} />
           <section className="rounded-2xl border border-line bg-card">
             <div className="flex items-center justify-between px-4 py-3">
               <h2 className="text-lg font-semibold">Recent Contacts</h2>

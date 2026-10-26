@@ -28,7 +28,8 @@ const SOURCE: Record<string, string> = {
   lever: "Career page",
   remotive: "Remotive",
   arbeitnow: "Career page",
-  adzuna: "Job board",
+        adzuna: "Job board",
+  ashby: "Career page",
   sample: "Sample",
 };
 
@@ -43,6 +44,8 @@ export function JobsView() {
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [pageSize, setPageSize] = useState(12);
+  const [letter, setLetter] = useState<{ id: string; body: string } | null>(null);
+  const [letterError, setLetterError] = useState("");
 
   function load(nextPage = page) {
     setLoading(true);
@@ -76,6 +79,40 @@ export function JobsView() {
     load();
   }
 
+  async function downloadLetter(body: string) {
+    const response = await fetch("/api/cover-letter/pdf", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body, company: "", role: "" }),
+    });
+    if (!response.ok) {
+      setLetterError("The PDF could not be created.");
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "cover-letter.pdf";
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function writeLetter(job: Job) {
+    setLetterError("");
+    const response = await fetch("/api/cover-letter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: job.id, company: job.company, role: job.title, description: job.description, tone: "professional" }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      setLetterError(data.error || "Cover letters are on Pro and Premium.");
+      return;
+    }
+    setLetter({ id: data.letter.id, body: data.letter.body });
+  }
+
   const savedIds = new Set(savedJobs.map((job) => job.id));
   const feed = jobs.filter((job) => !savedIds.has(job.id));
 
@@ -96,6 +133,16 @@ export function JobsView() {
         ))}
       </div>
       {notice ? <div className="mt-4"><Notice>{notice}</Notice></div> : null}
+      {letterError ? <p className="mt-3 text-sm text-cream">{letterError}</p> : null}
+      {letter ? (
+        <section className="mt-4 rounded-2xl border border-line bg-card p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="font-semibold">Cover letter</h2>
+            <button type="button" className="text-sm text-cream" onClick={() => downloadLetter(letter.body)}>Download PDF</button>
+          </div>
+          <textarea value={letter.body} onChange={(event) => setLetter({ ...letter, body: event.target.value })} className="mt-3 h-56 w-full rounded-xl border border-line bg-transparent px-3 py-2 text-sm outline-none" />
+        </section>
+      ) : null}
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold">Saved jobs</h2>
@@ -103,7 +150,7 @@ export function JobsView() {
           <p className="mt-2 text-sm text-muted">Nothing saved yet. Bookmark a role and it stays here.</p>
         ) : (
           <div className="mt-3 space-y-3">
-            {savedJobs.map((job) => <JobCard key={job.id} job={job} saved onToggle={() => toggle(job)} />)}
+            {savedJobs.map((job) => <JobCard key={job.id} job={job} saved onToggle={() => toggle(job)} onLetter={() => writeLetter(job)} />)}
           </div>
         )}
       </section>
@@ -115,7 +162,7 @@ export function JobsView() {
         </div>
         {loading && jobs.length === 0 ? <PageLoading label="Looking up live postings…" /> : (
         <div className="mt-3 space-y-3">
-          {feed.map((job) => <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onToggle={() => toggle(job)} />)}
+          {feed.map((job) => <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onToggle={() => toggle(job)} onLetter={() => writeLetter(job)} />)}
           {!loading && feed.length === 0 ? <p className="text-sm text-muted">No new matches. Try another role on Home, or open LinkedIn and ZipRecruiter above.</p> : null}
         </div>
         )}
@@ -139,7 +186,7 @@ function Pager({ page, total, pageSize, loading, onPage }: { page: number; total
   );
 }
 
-function JobCard({ job, saved, onToggle }: { job: Job; saved: boolean; onToggle: () => void }) {
+function JobCard({ job, saved, onToggle, onLetter }: { job: Job; saved: boolean; onToggle: () => void; onLetter: () => void }) {
   return (
     <article className="flex flex-col gap-3 rounded-2xl border border-line bg-card p-4 md:flex-row md:items-center">
       <CompanyLogo company={job.company} src={job.logoUrl} />
@@ -157,6 +204,7 @@ function JobCard({ job, saved, onToggle }: { job: Job; saved: boolean; onToggle:
         </button>
         <Link href={`/contacts?company=${encodeURIComponent(job.company)}`} className="rounded-lg bg-white px-3 py-2 text-sm font-semibold text-black">Find people</Link>
         <a href={job.url} target="_blank" rel="noreferrer" className="rounded-lg border border-line px-3 py-2 text-sm">Apply</a>
+        <button type="button" onClick={onLetter} className="rounded-lg border border-line px-3 py-2 text-sm">Cover letter</button>
       </div>
     </article>
   );

@@ -116,7 +116,14 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
   const userId = String(metadata.userId ?? nested.userId ?? object.client_reference_id ?? "");
   const subscriptionId = String(object.subscription ?? "");
   if (!userId) return { duplicate: false, granted: 0 };
-  const credits = serverConfig().grindMonthlyCredits;
+  const planName = String(metadata.plan ?? nested.plan ?? "grind");
+  const plan = planName === "pro" || planName === "premium" || planName === "grind" ? planName : "grind";
+  const config = serverConfig();
+  const fallback = plan === "premium" ? config.premiumMonthlyCredits : plan === "pro" ? config.proMonthlyCredits : config.grindMonthlyCredits;
+  const credits = Number(metadata.credits ?? nested.credits ?? fallback) || fallback;
+  if ((plan === "pro" || plan === "premium") && billingReason === "subscription_cycle") {
+    await repo.replaceAllowance(userId, 0);
+  }
   const grant = await repo.grantCreditsOnce({
     userId,
     entryType: "subscription_grant",
@@ -126,8 +133,8 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
     referenceType: "stripe_invoice",
     referenceId: String(object.id),
     includedAllowance: credits,
-    plan: "grind",
-    note: "Monthly allowance",
+    plan,
+    note: plan === "grind" ? "Legacy monthly allowance" : "Monthly allowance",
   });
   await repo.insertPayment({
     id: id(),
@@ -149,7 +156,7 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
       userId,
       stripeSubscriptionId: subscriptionId,
       status: "active",
-      priceCents: serverConfig().grindPriceCents,
+      priceCents: Number(object.amount_paid ?? config.grindPriceCents),
       currentPeriodEnd: null,
       createdAt: nowIso(),
     });
@@ -157,22 +164,21 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
   return { duplicate: false, granted: grant.granted ? credits : 0 };
 }
 
-export async function confirmDemoPurchase(userId: string, kind: "grind" | "pack") {
+export async function confirmDemoPurchase(userId: string, kind: CheckoutKind) {
   if (process.env.STRIPE_SECRET_KEY) {
     throw new ServiceError("Stripe is configured. Use Checkout instead of demo billing.", "stripe_live", 409);
   }
   const config = serverConfig();
-  const credits = kind === "grind" ? config.grindMonthlyCredits : config.packCredits;
-  const amount = kind === "grind" ? config.grindPriceCents : config.packPriceCents;
+  const offer = checkoutOffer(kind, config);
   const grant = await repo.grantCreditsOnce({
     userId,
     entryType: "demo_grant",
-    amount: credits,
-    bucket: kind === "grind" ? "allowance" : "purchased",
+    amount: offer.credits,
+    bucket: offer.bucket,
     idempotencyKey: `demo:${userId}:${kind}`,
     demo: true,
-    includedAllowance: kind === "grind" ? credits : undefined,
-    plan: kind === "grind" ? "grind" : "pack",
+    includedAllowance: offer.bucket === "allowance" ? offer.credits : undefined,
+    plan: offer.plan,
     note: "Demo checkout. No card was charged.",
   });
   if (grant.granted) {
@@ -182,52 +188,62 @@ export async function confirmDemoPurchase(userId: string, kind: "grind" | "pack"
       stripeEventId: `demo:${userId}:${kind}`,
       stripeCheckoutId: null,
       stripePaymentIntent: null,
-      amountCents: amount,
+      amountCents: offer.amount,
       currency: "usd",
-      kind: kind === "grind" ? "subscription" : "pack",
+      kind: offer.bucket === "allowance" ? "subscription" : "pack",
       status: "demo",
-      creditsGranted: credits,
+      creditsGranted: offer.credits,
       demo: true,
       createdAt: nowIso(),
     });
-    if (kind === "grind") {
+    if (offer.bucket === "allowance") {
       await repo.upsertSubscription({
         id: id(),
         userId,
         stripeSubscriptionId: `demo_${userId}`,
         status: "demo",
-        priceCents: amount,
+        priceCents: offer.amount,
         currentPeriodEnd: null,
         createdAt: nowIso(),
       });
     }
   }
-  return { granted: grant.granted, credits: grant.granted ? credits : 0, demo: true };
+  return { granted: grant.granted, credits: grant.granted ? offer.credits : 0, demo: true };
 }
 
-export async function createStripeCheckout(userId: string, kind: "grind" | "pack") {
+type CheckoutKind = "grind" | "pack" | "pro" | "premium";
+
+function checkoutOffer(kind: CheckoutKind, config: ReturnType<typeof serverConfig>) {
+  if (kind === "premium") return { credits: config.premiumMonthlyCredits, amount: config.premiumPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium", priceId: process.env.STRIPE_PRICE_PREMIUM, recurring: true };
+  if (kind === "pro") return { credits: config.proMonthlyCredits, amount: config.proPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro", priceId: process.env.STRIPE_PRICE_PRO, recurring: true };
+  if (kind === "grind") return { credits: config.grindMonthlyCredits, amount: config.grindPriceCents, bucket: "allowance" as const, plan: "grind" as const, name: "Unnepo The Grind", priceId: process.env.STRIPE_PRICE_GRIND, recurring: true };
+  return { credits: config.packCredits, amount: config.packPriceCents, bucket: "purchased" as const, plan: "pack" as const, name: `Unnepo ${config.packCredits} credits`, priceId: process.env.STRIPE_PRICE_PACK, recurring: false };
+}
+
+export async function createStripeCheckout(userId: string, kind: CheckoutKind) {
   const secret = process.env.STRIPE_SECRET_KEY;
   const config = serverConfig();
+  const offer = checkoutOffer(kind, config);
   if (!secret) return { demo: true as const, url: `/checkout/demo?kind=${kind}` };
   const Stripe = (await import("stripe")).default;
   const stripe = new Stripe(secret);
-  const price = kind === "grind" ? process.env.STRIPE_PRICE_GRIND : process.env.STRIPE_PRICE_PACK;
   const session = await stripe.checkout.sessions.create({
-    mode: kind === "grind" ? "subscription" : "payment",
+    mode: offer.recurring ? "subscription" : "payment",
     client_reference_id: userId,
     success_url: `${config.appUrl}/settings?billing=success`,
     cancel_url: `${config.appUrl}/settings?billing=cancelled`,
-    metadata: { userId, kind, credits: String(kind === "grind" ? config.grindMonthlyCredits : config.packCredits) },
-    line_items: price
-      ? [{ price, quantity: 1 }]
+    metadata: { userId, kind, plan: offer.plan, credits: String(offer.credits) },
+    subscription_data: offer.recurring ? { metadata: { userId, kind, plan: offer.plan, credits: String(offer.credits) } } : undefined,
+    line_items: offer.priceId
+      ? [{ price: offer.priceId, quantity: 1 }]
       : [
           {
             quantity: 1,
             price_data: {
               currency: "usd",
-              unit_amount: kind === "grind" ? config.grindPriceCents : config.packPriceCents,
-              recurring: kind === "grind" ? { interval: "month" } : undefined,
-              product_data: { name: kind === "grind" ? "Unnepo The Grind" : `Unnepo ${config.packCredits} credits` },
+              unit_amount: offer.amount,
+              recurring: offer.recurring ? { interval: "month" } : undefined,
+              product_data: { name: offer.name },
             },
           },
         ],

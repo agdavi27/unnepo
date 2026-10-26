@@ -111,7 +111,7 @@ export function Landing() {
         <p className="text-center text-xs font-semibold tracking-[0.22em] text-faint">PRICING</p>
         <h2 className="mt-3 text-center text-4xl font-semibold tracking-tight md:text-5xl">Find opportunities. On your terms.</h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-muted">
-          Start for free, upgrade if you need more, or pay once and skip subscriptions. All plans include AI-powered outreach, real contact information, and tools to track your progress.
+          Free includes search, unlocks, and sending from your own inbox. Pro and Premium add AI email and cover letters.
         </p>
         <div className="mt-10 grid gap-4 lg:grid-cols-3">
           {PUBLIC_PLANS.map((plan) => (
@@ -121,7 +121,7 @@ export function Landing() {
                 {plan.popular ? <span className="rounded-full bg-gold px-2 py-0.5 text-xs font-semibold text-black">Most popular</span> : null}
               </div>
               <h3 className="mt-4 text-2xl font-semibold">{plan.name}</h3>
-              <p className="mt-2 text-4xl font-semibold">{plan.priceLabel}{plan.id === "grind" ? <span className="text-lg text-muted"> / month</span> : null}</p>
+              <p className="mt-2 text-4xl font-semibold">{plan.priceLabel}{plan.monthly ? <span className="text-lg text-muted"> / month</span> : null}</p>
               <p className="mt-2 text-lg font-semibold text-[#3D8BFF]">{plan.peopleLabel}</p>
               <p className="mt-1 text-sm text-faint">{plan.cadence} · {plan.credits} credits</p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
@@ -134,7 +134,7 @@ export function Landing() {
           ))}
         </div>
       </section>
-      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit shows a list of up to 20 people.</footer>
+      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit shows up to 20 people, or unlocks one verified work email.</footer>
     </div>
   );
 }

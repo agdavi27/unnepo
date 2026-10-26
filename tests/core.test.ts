@@ -15,6 +15,9 @@ import { rewardReferralIfEligible } from "@/lib/services/referrals";
 import { sendOutreach, setMailSenderForTests, syncReplies } from "@/lib/services/outreach";
 import { parseLinkedInGuestHtml } from "@/lib/jobs/linkedin";
 import { suggestRoles } from "@/lib/roles";
+import { interpretPrompt, searchChargeKey } from "@/lib/search/interpret";
+import { aiMonthlyLimit } from "@/lib/services/entitlements";
+import { processDueFollowUps } from "@/lib/services/followups";
 import { useTempDb } from "./helpers";
 
 beforeEach(() => {
@@ -321,8 +324,8 @@ describe("isolation, spend limits, fallback, and retries", () => {
       companySizes: [],
     });
     const taylor = search.people.find((person) => person.id === "sample_taylor_kim");
-    expect(taylor?.email).toBe("taylor.kim@patagonia.com");
-    expect(taylor?.unlocked).toBe(true);
+    expect(taylor?.email).toBeNull();
+    expect(taylor?.unlocked).toBe(false);
     expect(taylor?.savedId).toBeTruthy();
     expect((await repo.listSaved(b.userId)).some((item) => item.contactId === "sample_taylor_kim")).toBe(true);
     expect((await repo.listLedger(b.userId)).some((entry) => entry.entryType === "unlock_debit")).toBe(false);
@@ -473,5 +476,40 @@ describe("job helpers", () => {
     ]);
     expect(roles.fromResume.some((role) => /marketing/i.test(role))).toBe(true);
     expect(roles.similar.some((role) => /marketing|brand|content|growth/i.test(role))).toBe(true);
+  });
+});
+
+describe("v2 search, reminders, and plans", () => {
+  it("turns a sentence into filters and refuses a conference as if it were a school", () => {
+    const parsed = interpretPrompt("Marketing managers at outdoor brands who attended a NESCAC school and work in New York.");
+    expect(parsed.filters.titles.some((title) => /marketing/i.test(title))).toBe(true);
+    expect(parsed.filters.locations.some((place) => /new york/i.test(place))).toBe(true);
+    expect(parsed.unsupported.some((item) => /alumni|school/i.test(item))).toBe(true);
+    const filters = { ...parsed.filters, query: "same" };
+    expect(searchChargeKey("user", 1, filters)).toBe(searchChargeKey("user", 1, filters));
+  });
+
+  it("does not send a follow-up from the reminder job", async () => {
+    const student = await verifiedStudent("follow@colby.edu", "Follow");
+    await repo.insertFollowUp({
+      id: "fu-1",
+      userId: student.userId,
+      savedContactId: "missing",
+      dueAt: new Date(Date.now() - 1000).toISOString(),
+      note: "send it",
+      status: "open",
+      autoSend: true,
+      createdAt: new Date().toISOString(),
+    });
+    const result = await processDueFollowUps();
+    expect(result.processed).toBe(0);
+    expect((await repo.listMessages(student.userId)).length).toBe(0);
+    expect((await repo.listFollowUps(student.userId))[0]?.autoSend).toBe(false);
+  });
+
+  it("keeps AI writing off the free plan", () => {
+    expect(aiMonthlyLimit("free")).toBe(0);
+    expect(aiMonthlyLimit("pro")).toBeGreaterThan(0);
+    expect(aiMonthlyLimit("grind")).toBeGreaterThan(0);
   });
 });

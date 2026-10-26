@@ -66,7 +66,7 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
     }
   }
 
-  async function checkout(kind: "grind" | "pack") {
+  async function checkout(kind: "pro" | "premium" | "grind" | "pack") {
     const response = await fetch("/api/billing/checkout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind }) });
     const data = await response.json();
     if (data.url) window.location.href = data.url;
@@ -152,8 +152,8 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
               <div className="flex items-start justify-between">
                 <div>
                   <p className="flex items-center gap-2 font-semibold"><Gift className="h-4 w-4" /> Refer a friend</p>
-                  <p className="text-2xl font-semibold">Get 5 free credits</p>
-                  <p className="mt-1 text-sm">Share your code. You get 5 credits (50 people) when a friend verifies their school email. They still receive their signup credits.</p>
+                  <p className="text-2xl font-semibold">Get 25 free credits</p>
+                  <p className="mt-1 text-sm">Share your code. You get 25 credits when a friend verifies their school email. They still receive their signup credits.</p>
                 </div>
                 <span className="text-5xl">🎁</span>
               </div>
@@ -171,7 +171,7 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
           <p>Signed in as {me?.user.email}</p>
           <a className="block text-cream" href="/api/account/export">Download my data</a>
           <button className="text-red-300" onClick={async () => { if (confirm("Delete your Unnepo account and personal data?")) { await fetch("/api/account", { method: "DELETE" }); window.location.href = "/"; } }}>Delete account</button>
-          <p className="text-faint">Verified students receive signup credits once. Showing a list of up to 20 people costs 1 credit, and those people are saved. Email generation and sending stay free.</p>
+          <p className="text-faint">A search that returns people costs 1 credit and saves them. Unlocking a verified work email costs 1 credit only when an email comes back. AI drafts are on Pro and Premium. Sending from your mailbox is included.</p>
         </section>
       ) : null}
       {tab === "integrations" ? (
@@ -194,13 +194,16 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
             </div>
             <div className="rounded-2xl border border-gold/40 bg-gold/10 p-5">
               <p className="font-semibold text-cream">Have a friend’s code?</p>
-              <p className="mt-1 text-sm text-muted">Apply it before you pay. A verified school email gives them 5 credits (50 people).</p>
+              <p className="mt-1 text-sm text-muted">Apply it before you pay. A verified school email gives them 25 credits.</p>
               <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                 <input value={referralCode} onChange={(event) => setReferralCode(event.target.value.toUpperCase())} placeholder="Referral code" className="field font-mono uppercase" />
                 <button type="button" onClick={applyReferral} className="h-11 rounded-xl bg-white px-4 text-sm font-semibold text-black">Apply code</button>
               </div>
             </div>
           </div>
+          {(me?.credits?.plan === "grind" || me?.credits?.plan === "pack") ? (
+            <p className="text-sm text-muted">You&apos;re on the legacy {me.credits.plan === "grind" ? "Grind" : "credit pack"} plan. That price and those credits stay as they are. New purchases use Pro and Premium.</p>
+          ) : null}
           <div className="grid gap-4 lg:grid-cols-3">
             {PUBLIC_PLANS.map((plan) => {
               const current = (me?.credits?.plan || "free") === plan.id;
@@ -211,7 +214,7 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
                     {current ? <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-black">Current</span> : plan.popular ? <span className="rounded-full bg-gold px-2 py-0.5 text-xs font-semibold text-black">Most popular</span> : null}
                   </div>
                   <h2 className="mt-4 text-2xl font-semibold">{plan.name}</h2>
-                  <p className="mt-2 text-4xl font-semibold">{plan.priceLabel}{plan.id === "grind" ? <span className="text-lg text-muted"> / month</span> : null}</p>
+                  <p className="mt-2 text-4xl font-semibold">{plan.priceLabel}{plan.monthly ? <span className="text-lg text-muted"> / month</span> : null}</p>
                   <p className="mt-2 font-semibold text-[#3D8BFF]">{plan.peopleLabel}</p>
                   <p className="mt-1 text-sm text-faint">{plan.cadence}</p>
                   <ul className="mt-4 flex-1 space-y-1.5 text-sm text-muted">

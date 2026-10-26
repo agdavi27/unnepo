@@ -136,7 +136,7 @@ export function LoginForm() {
   }
 
   return (
-    <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your 3 credits (30 people) are ready." : params.get("reset") ? "Password updated. Sign in with the new password." : "Sign in with the school email you used to sign up."}>
+    <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your monthly credits are ready." : params.get("reset") ? "Password updated. Sign in with the new password." : "Sign in with the school email you used to sign up."}>
       <form onSubmit={submit} className="space-y-3">
         <SchoolEmailField placeholder="School email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         <input className="field" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} suppressHydrationWarning />
