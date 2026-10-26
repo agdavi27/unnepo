@@ -19,10 +19,7 @@ function state(): GlobalStore {
   if (!globalStore.__unnepoStore) {
     globalStore.__unnepoStore = { memory: null, queue: Promise.resolve(), dir: null, remoteVersion: null, remoteAt: 0 };
   }
-  const current = globalStore.__unnepoStore;
-  if (!("remoteVersion" in current)) current.remoteVersion = null;
-  if (!("remoteAt" in current)) current.remoteAt = 0;
-  return current;
+  return globalStore.__unnepoStore;
 }
 
 export function dataDir() {
@@ -212,7 +209,7 @@ export async function snapshot() {
 
 export async function wipeDataDir() {
   const dir = dataDir();
-  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  if (existsSync(/* turbopackIgnore: true */ dir)) rmSync(/* turbopackIgnore: true */ dir, { recursive: true, force: true });
   resetMemory();
 }
 
