@@ -61,6 +61,10 @@ export type CareerGoals = {
   industries: string[];
   locations: string[];
   companies: string[];
+  /** Internship, full-time, or both. */
+  tracks?: string[];
+  /** When the student wants to start, in their words. */
+  timing?: string;
   updatedAt: string;
 };
 
@@ -332,10 +336,12 @@ export type Referral = {
   rewardedAt: string | null;
 };
 
+export type JobProvider = "sample" | "adzuna" | "linkedin" | "ziprecruiter" | "greenhouse" | "lever" | "remotive" | "arbeitnow";
+
 export type JobPosting = {
   id: string;
   externalId: string;
-  provider: "sample" | "adzuna";
+  provider: JobProvider;
   title: string;
   company: string;
   location: string;
@@ -344,6 +350,7 @@ export type JobPosting = {
   industry: string | null;
   dataSource: "sample" | "provider";
   description: string;
+  logoUrl?: string | null;
 };
 
 export type SavedJob = {

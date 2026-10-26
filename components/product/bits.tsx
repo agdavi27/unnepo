@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { initials } from "@/lib/format";
 import { STATUS_LABEL } from "@/lib/catalog";
 
@@ -19,6 +22,35 @@ export function CompanyMark({ company }: { company: string }) {
       {letter}
     </span>
   );
+}
+
+const DOMAINS: Record<string, string> = {
+  "the north face": "thenorthface.com",
+  "arc'teryx": "arcteryx.com",
+  patagonia: "patagonia.com",
+  lululemon: "lululemon.com",
+  "goldman sachs": "goldmansachs.com",
+  hubspot: "hubspot.com",
+};
+
+export function companyDomain(company: string) {
+  const key = company.toLowerCase().trim();
+  if (DOMAINS[key]) return DOMAINS[key];
+  const slug = key.replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+  return `${slug || "example"}.com`;
+}
+
+export function CompanyLogo({ company, src, className = "h-11 w-11" }: { company: string; src?: string | null; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span className={`inline-flex items-center justify-center rounded-lg bg-white text-[11px] font-black text-black ${className}`}>
+        {company.replace(/[^A-Za-z]/g, "").slice(0, 2).toUpperCase()}
+      </span>
+    );
+  }
+  const url = src || `https://www.google.com/s2/favicons?domain=${companyDomain(company)}&sz=128`;
+  return <img src={url} alt="" className={`${className} rounded-lg bg-white object-contain p-1`} onError={() => setFailed(true)} />;
 }
 
 export function StatusPill({ status }: { status: string }) {

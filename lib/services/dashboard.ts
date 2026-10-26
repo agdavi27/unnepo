@@ -1,10 +1,12 @@
 import { repo } from "@/lib/db/file-store";
+import { suggestRoles } from "@/lib/roles";
 import { outreachSummary } from "@/lib/services/outreach";
 
 export async function dashboard(userId: string) {
   const user = await repo.getUserById(userId);
   const profile = await repo.getProfile(userId);
   const goals = await repo.getGoals(userId);
+  const facts = await repo.getFacts(userId);
   const resume = await repo.getLatestResume(userId);
   const account = await repo.getAccount(userId);
   const detailed = await repo.listSavedDetailed(userId);
@@ -30,6 +32,7 @@ export async function dashboard(userId: string) {
     user: user ? { id: user.id, name: user.name, email: user.email, referralCode: user.referralCode, onboardingStep: user.onboardingStep } : null,
     profile,
     goals,
+    roleSuggestions: suggestRoles(facts, resume?.text ?? ""),
     resume: resume ? { id: resume.id, fileName: resume.fileName, byteSize: resume.byteSize, createdAt: resume.createdAt } : null,
     credits: account,
     summary,

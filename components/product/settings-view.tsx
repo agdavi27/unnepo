@@ -24,10 +24,9 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
   const [facts, setFacts] = useState<Array<{ id: string; category: string; detail: string }>>([]);
   const [history, setHistory] = useState<Array<{ id: string; kind: string; status: string; amountCents: number; creditsGranted: number; demo: boolean; createdAt: string }>>([]);
   const [message, setMessage] = useState(initialMessage);
+  const [referralCode, setReferralCode] = useState("");
   const [resumeName, setResumeName] = useState("");
   const form = useForm<ProfileForm>({ resolver: zodResolver(profileSchema), defaultValues: { name: "", school: "", major: "", graduationYear: "", bio: "" } });
-  const grind = PUBLIC_PLANS.find((plan) => plan.id === "grind")!;
-  const pack = PUBLIC_PLANS.find((plan) => plan.id === "pack")!;
 
   useEffect(() => {
     fetch("/api/me").then((response) => response.json()).then((data) => {
@@ -71,6 +70,12 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
     const data = await response.json();
     if (data.url) window.location.href = data.url;
     else setMessage(data.error || "Checkout could not start.");
+  }
+
+  async function applyReferral() {
+    const response = await fetch("/api/billing/referral", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: referralCode }) });
+    const data = await response.json();
+    setMessage(response.ok ? data.message : data.error || "Could not apply that code.");
   }
 
   const balance = me?.credits?.balance ?? 0;
@@ -174,13 +179,54 @@ export function SettingsView({ initialTab = "profile", initialMessage = "" }: { 
         </section>
       ) : null}
       {tab === "billing" ? (
-        <section className="mt-6 max-w-3xl space-y-4">
-          <div className="grid gap-3 md:grid-cols-2">
-            <button onClick={() => checkout("grind")} className="rounded-2xl border border-line p-5 text-left"><p className="text-xl font-semibold">{grind.name}</p><p className="text-3xl">{grind.priceLabel}<span className="text-base text-muted"> / month</span></p><p className="text-sm text-[#3D8BFF]">{grind.peopleLabel}</p><p className="text-sm text-muted">{grind.credits} credits every month</p></button>
-            <button onClick={() => checkout("pack")} className="rounded-2xl border border-gold p-5 text-left"><p className="text-xl font-semibold">{pack.name}</p><p className="text-3xl">{pack.priceLabel}</p><p className="text-sm text-[#3D8BFF]">{pack.peopleLabel}</p><p className="text-sm text-muted">{pack.credits} credits, one time</p></button>
+        <section className="mt-6 space-y-5">
+          <div className="grid gap-4 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <div className="rounded-2xl border border-line bg-card p-5">
+              <p className="text-xs font-semibold tracking-[0.16em] text-faint">YOUR BALANCE</p>
+              <p className="mt-3 text-5xl font-semibold tracking-tight">{balance}</p>
+              <p className="text-sm text-muted">credits · about {balance * 10} people</p>
+              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                <div className="h-full rounded-full bg-[#3D8BFF]" style={{ width: `${Math.min(100, (balance / allowance) * 100)}%` }} />
+              </div>
+              <p className="mt-3 text-sm capitalize text-faint">Plan: {me?.credits?.plan || "free"}</p>
+            </div>
+            <div className="rounded-2xl border border-gold/40 bg-gold/10 p-5">
+              <p className="font-semibold text-cream">Have a friend’s code?</p>
+              <p className="mt-1 text-sm text-muted">Apply it before you pay. A verified school email gives them 5 credits (50 people).</p>
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <input value={referralCode} onChange={(event) => setReferralCode(event.target.value.toUpperCase())} placeholder="Referral code" className="field font-mono uppercase" />
+                <button type="button" onClick={applyReferral} className="h-11 rounded-xl bg-white px-4 text-sm font-semibold text-black">Apply code</button>
+              </div>
+            </div>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            {PUBLIC_PLANS.map((plan) => {
+              const current = (me?.credits?.plan || "free") === plan.id;
+              return (
+                <article key={plan.id} className={`flex flex-col rounded-2xl border p-5 ${plan.popular ? "border-gold bg-card" : "border-line bg-card"} ${current ? "ring-1 ring-white" : ""}`}>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted">{plan.blurb}</span>
+                    {current ? <span className="rounded-full bg-white px-2 py-0.5 text-xs font-semibold text-black">Current</span> : plan.popular ? <span className="rounded-full bg-gold px-2 py-0.5 text-xs font-semibold text-black">Most popular</span> : null}
+                  </div>
+                  <h2 className="mt-4 text-2xl font-semibold">{plan.name}</h2>
+                  <p className="mt-2 text-4xl font-semibold">{plan.priceLabel}{plan.id === "grind" ? <span className="text-lg text-muted"> / month</span> : null}</p>
+                  <p className="mt-2 font-semibold text-[#3D8BFF]">{plan.peopleLabel}</p>
+                  <p className="mt-1 text-sm text-faint">{plan.cadence}</p>
+                  <ul className="mt-4 flex-1 space-y-1.5 text-sm text-muted">
+                    {plan.features.map((feature) => <li key={feature}>✓ {feature}</li>)}
+                  </ul>
+                  {plan.id === "free" ? (
+                    <p className="mt-5 text-sm text-faint">Included when you verify a school email.</p>
+                  ) : (
+                    <button onClick={() => checkout(plan.id)} className={`mt-5 h-11 rounded-xl text-sm font-semibold ${plan.popular ? "bg-cream text-black" : "bg-white text-black"}`}>{plan.cta}</button>
+                  )}
+                </article>
+              );
+            })}
           </div>
           <div className="rounded-2xl border border-line">
-            {history.length === 0 ? <p className="p-4 text-sm text-muted">No purchases yet. Demo checkout is labeled and is not revenue.</p> : history.map((payment) => (
+            <p className="border-b border-line px-4 py-3 text-sm font-semibold">Payments</p>
+            {history.length === 0 ? <p className="p-4 text-sm text-muted">No purchases yet. A demo checkout is labeled and is not revenue.</p> : history.map((payment) => (
               <div key={payment.id} className="flex items-center justify-between border-b border-line px-4 py-3 text-sm last:border-0">
                 <span>{payment.kind} · {payment.status}{payment.demo ? " · demo" : ""}</span>
                 <span>{payment.creditsGranted} credits · ${(payment.amountCents / 100).toFixed(0)}</span>

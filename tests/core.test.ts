@@ -11,6 +11,8 @@ import { login, requestPasswordReset, resetPassword, signUp, verifyEmail } from 
 import { runIdempotent } from "@/lib/services/idempotency";
 import { rewardReferralIfEligible } from "@/lib/services/referrals";
 import { sendOutreach, setMailSenderForTests, syncReplies } from "@/lib/services/outreach";
+import { parseLinkedInGuestHtml } from "@/lib/jobs/linkedin";
+import { suggestRoles } from "@/lib/roles";
 import { useTempDb } from "./helpers";
 
 beforeEach(() => {
@@ -385,5 +387,34 @@ describe("isolation, spend limits, fallback, and retries", () => {
     });
     expect(runs).toBe(1);
     expect(second).toEqual(first);
+  });
+});
+
+describe("job helpers", () => {
+  it("reads a LinkedIn guest card", () => {
+    const html = `<li><div data-entity-urn="urn:li:jobPosting:123"><a href="https://www.linkedin.com/jobs/view/role-at-co-123?trk=1"><h3>Marketing Intern</h3></a><h4><a class="hidden-nested-link" href="https://www.linkedin.com/company/co">Acme</a></h4><span class="job-search-card__location">New York, NY</span><time datetime="2026-09-08"></time><img data-delayed-url="https://media.licdn.com/logo.png"></div></li>`;
+    const jobs = parseLinkedInGuestHtml(html);
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]?.title).toBe("Marketing Intern");
+    expect(jobs[0]?.company).toBe("Acme");
+    expect(jobs[0]?.location).toBe("New York, NY");
+    expect(jobs[0]?.logoUrl).toContain("licdn");
+  });
+
+  it("suggests marketing roles from resume experience", () => {
+    const roles = suggestRoles([
+      {
+        id: "1",
+        userId: "u",
+        resumeId: "r",
+        category: "experience",
+        label: "Marketing intern",
+        detail: "Campus campaigns and SEO",
+        sourceExcerpt: "Marketing intern",
+        edited: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    ]);
+    expect(roles.some((role) => /marketing/i.test(role))).toBe(true);
   });
 });

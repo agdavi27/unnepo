@@ -9,6 +9,7 @@ import { outreachSummary, saveDraft, sendOutreach, syncReplies } from "@/lib/ser
 import { storeResume } from "@/lib/services/resume";
 import { listJobPostings } from "@/lib/services/jobs";
 import { confirmDemoPurchase, createStripeCheckout, applyVerifiedStripeEvent } from "@/lib/services/billing";
+import { applyReferralCode } from "@/lib/services/referrals";
 import { profitability } from "@/lib/services/admin";
 import { dashboard } from "@/lib/services/dashboard";
 import { beginOAuth, finishOAuth, oauthReady } from "@/lib/services/oauth";
@@ -181,12 +182,15 @@ async function handle(request: Request, slug: string[]) {
 
   if (root === "goals" && request.method === "PUT") {
     const body = await request.json();
+    const current = await repo.getGoals(user.id);
     const goals = await repo.upsertGoals({
       userId: user.id,
-      roles: body.roles ?? [],
-      industries: body.industries ?? [],
-      locations: body.locations ?? [],
-      companies: body.companies ?? [],
+      roles: body.roles ?? current?.roles ?? [],
+      industries: body.industries ?? current?.industries ?? [],
+      locations: body.locations ?? current?.locations ?? [],
+      companies: body.companies ?? current?.companies ?? [],
+      tracks: body.tracks ?? current?.tracks ?? [],
+      timing: body.timing ?? current?.timing ?? "",
       updatedAt: nowIso(),
     });
     if (body.onboardingStep) await repo.updateUser(user.id, { onboardingStep: body.onboardingStep });
@@ -325,12 +329,16 @@ async function handle(request: Request, slug: string[]) {
     return json({ ok: true });
   }
   if (root === "jobs" && request.method === "GET") {
-    const goals = await repo.getGoals(user.id);
-    const result = await listJobPostings(goals);
+    const [goals, facts] = await Promise.all([repo.getGoals(user.id), repo.getFacts(user.id)]);
+    const result = await listJobPostings(goals, facts);
     const saved = await repo.listSavedJobs(user.id);
-    return json({ ...result, savedIds: saved.map((job) => job.id) });
+    return json({ ...result, savedJobs: saved, savedIds: saved.map((job) => job.id) });
   }
 
+  if (root === "billing" && action === "referral" && request.method === "POST") {
+    const body = await request.json();
+    return json(await applyReferralCode(user.id, String(body.code || "")));
+  }
   if (root === "billing" && action === "checkout" && request.method === "POST") {
     const body = await request.json();
     return json(await createStripeCheckout(user.id, body.kind));

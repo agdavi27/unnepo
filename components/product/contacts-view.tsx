@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
 import * as Checkbox from "@radix-ui/react-checkbox";
-import { Check, ChevronDown, Filter, Mail, MapPin, RefreshCw, Search, Send, X } from "lucide-react";
+import { Check, Filter, Mail, MapPin, RefreshCw, Search, Send, X } from "lucide-react";
 import { Avatar, Notice } from "@/components/product/bits";
 import { COMPANIES, COMPANY_SIZES, DEPARTMENTS, INDUSTRIES, JOB_TITLES, LOCATIONS, SENIORITIES } from "@/lib/catalog";
 import { SCHOOLS } from "@/lib/schools";
@@ -235,25 +235,53 @@ export function ContactsView() {
 }
 
 function FilterBox({ label, icon, options, selected, onChange }: { label: string; icon?: React.ReactNode; options: string[]; selected: string[]; onChange: (values: string[]) => void }) {
+  const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const needle = query.trim().toLowerCase();
+  const matches = options.filter((option) => option.toLowerCase().includes(needle) && !selected.includes(option)).slice(0, 8);
+  const canAdd = needle.length > 1 && !options.some((option) => option.toLowerCase() === needle) && !selected.some((option) => option.toLowerCase() === needle);
+
+  function add(value: string) {
+    const next = value.trim();
+    if (!next || selected.includes(next)) return;
+    onChange([...selected, next]);
+    setQuery("");
+    setOpen(true);
+  }
+
   return (
     <div className="relative rounded-xl border border-line bg-card px-3 py-2">
       <p className="text-[10px] font-semibold tracking-[0.14em] text-faint">{label}</p>
-      <button onClick={() => setOpen((value) => !value)} className="mt-1 flex w-full items-center justify-between text-sm">
-        <span className="flex items-center gap-2 truncate text-left">{icon}{selected[0] || "Any"}{selected.length > 1 ? ` +${selected.length - 1}` : ""}</span>
-        <ChevronDown className="h-4 w-4 text-faint" />
-      </button>
-      {open ? (
-        <div className="absolute left-0 right-0 z-20 mt-2 max-h-56 overflow-auto rounded-xl border border-line bg-panel p-2 shadow-xl">
-          {options.map((option) => {
-            const checked = selected.includes(option);
-            return (
-              <label key={option} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm hover:bg-white/5">
-                <input type="checkbox" checked={checked} onChange={() => onChange(checked ? selected.filter((item) => item !== option) : [...selected, option])} />
-                {option}
-              </label>
-            );
-          })}
+      <div className="mt-1 flex items-center gap-2">
+        {icon}
+        <input
+          value={query}
+          placeholder={selected.length ? selected.join(", ") : "Type to search"}
+          onChange={(event) => { setQuery(event.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              add(matches[0] || query);
+            }
+          }}
+          className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
+        />
+      </div>
+      {open && (needle || matches.length) ? (
+        <div className="absolute left-0 right-0 z-20 mt-2 max-h-56 overflow-auto rounded-xl border border-line bg-panel p-1 shadow-xl">
+          {matches.map((option) => (
+            <button key={option} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => add(option)} className="block w-full rounded-lg px-2 py-1.5 text-left text-sm hover:bg-white/5">
+              {option}
+            </button>
+          ))}
+          {canAdd ? (
+            <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => add(query.trim())} className="block w-full rounded-lg px-2 py-1.5 text-left text-sm text-muted hover:bg-white/5">
+              Add “{query.trim()}”
+            </button>
+          ) : null}
+          {needle && matches.length === 0 && !canAdd ? <p className="px-2 py-1.5 text-sm text-faint">Already added</p> : null}
         </div>
       ) : null}
     </div>

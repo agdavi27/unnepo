@@ -781,12 +781,18 @@ export const repo = {
   },
   async upsertJobs(jobs: Database["jobs"]) {
     return withLock((db) => {
+      const saved: Database["jobs"] = [];
       for (const job of jobs) {
         const index = db.jobs.findIndex((item) => item.provider === job.provider && item.externalId === job.externalId);
-        if (index === -1) db.jobs.push(job);
-        else db.jobs[index] = { ...job, id: db.jobs[index].id };
+        if (index === -1) {
+          db.jobs.push(job);
+          saved.push(job);
+        } else {
+          db.jobs[index] = { ...job, id: db.jobs[index].id };
+          saved.push(db.jobs[index]);
+        }
       }
-      return db.jobs;
+      return saved;
     });
   },
   async listJobs() {

@@ -1,5 +1,26 @@
 import { serverConfig } from "@/lib/config";
 import { id, nowIso, repo } from "@/lib/db/file-store";
+import { ServiceError } from "@/lib/errors";
+
+export async function applyReferralCode(userId: string, rawCode: string) {
+  const code = rawCode.trim().toUpperCase();
+  if (!code) throw new ServiceError("Enter a referral code.", "referral");
+  const user = await repo.getUserById(userId);
+  if (!user) throw new ServiceError("Sign in again.", "auth", 401);
+  if (user.referredByUserId) return { applied: false, message: "A referral code is already on this account." };
+  const referrer = await repo.getUserByReferralCode(code);
+  if (!referrer) throw new ServiceError("That referral code was not found.", "referral", 404);
+  if (referrer.id === user.id || referrer.emailNormalized === user.emailNormalized) {
+    throw new ServiceError("You cannot use your own referral code.", "self_referral");
+  }
+  await repo.updateUser(user.id, { referredByUserId: referrer.id });
+  const reward = await rewardReferralIfEligible(user.id);
+  const credits = serverConfig().referralCredits;
+  return {
+    applied: true,
+    message: reward.rewarded ? `Code applied. Your friend receives ${credits} credits.` : "Code saved on your account.",
+  };
+}
 
 export async function rewardReferralIfEligible(referredUserId: string) {
   const user = await repo.getUserById(referredUserId);
