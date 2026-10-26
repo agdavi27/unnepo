@@ -42,7 +42,7 @@ function LogoRow({ schools, reverse = false }: { schools: readonly { name: strin
       <div className={reverse ? "school-track school-track-reverse" : "school-track"}>
         {loop.map((school, index) => (
           <figure key={`${school.name}-${index}`} className="flex h-16 shrink-0 items-center rounded-xl bg-white px-5 py-2" aria-hidden={index >= schools.length}>
-            <img src={school.src} alt={index < schools.length ? school.name : ""} className="h-10 w-auto max-w-36 object-contain" />
+            <img src={school.src} alt={index < schools.length ? school.name : ""} className="h-10 w-auto max-w-36 object-contain" loading="lazy" decoding="async" />
           </figure>
         ))}
       </div>

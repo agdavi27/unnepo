@@ -36,7 +36,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
         return response.json();
       })
       .then((data) => data && setMe(data));
-  }, [pathname, router]);
+  }, [router]);
 
   useEffect(() => {
     function onCredits(event: Event) {

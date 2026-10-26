@@ -8,15 +8,21 @@ type GlobalStore = {
   memory: Database | null;
   queue: Promise<unknown>;
   dir: string | null;
+  remoteVersion: number | null;
+  remoteAt: number;
 };
 
 const globalStore = globalThis as typeof globalThis & { __unnepoStore?: GlobalStore };
+const REMOTE_CACHE_MS = 8_000;
 
 function state(): GlobalStore {
   if (!globalStore.__unnepoStore) {
-    globalStore.__unnepoStore = { memory: null, queue: Promise.resolve(), dir: null };
+    globalStore.__unnepoStore = { memory: null, queue: Promise.resolve(), dir: null, remoteVersion: null, remoteAt: 0 };
   }
-  return globalStore.__unnepoStore;
+  const current = globalStore.__unnepoStore;
+  if (!("remoteVersion" in current)) current.remoteVersion = null;
+  if (!("remoteAt" in current)) current.remoteAt = 0;
+  return current;
 }
 
 export function dataDir() {
@@ -24,12 +30,18 @@ export function dataDir() {
 }
 
 export function setDataDir(dir: string) {
-  state().dir = dir;
-  state().memory = null;
+  const current = state();
+  current.dir = dir;
+  current.memory = null;
+  current.remoteVersion = null;
+  current.remoteAt = 0;
 }
 
 export function resetMemory() {
-  state().memory = null;
+  const current = state();
+  current.memory = null;
+  current.remoteVersion = null;
+  current.remoteAt = 0;
 }
 
 function dbFile() {
@@ -98,14 +110,15 @@ export function withLock<T>(fn: (db: Database) => T): Promise<T> {
 
 function withFileLock<T>(fn: (db: Database) => T): T {
   const db = load();
-  const snapshot = structuredClone(db);
+  const before = JSON.stringify(db);
   try {
     const result = fn(db);
-    persist(db);
+    if (JSON.stringify(db) !== before) persist(db);
+    else state().memory = db;
     return structuredClone(result) as T;
   } catch (error) {
     try {
-      persist(snapshot);
+      persist(JSON.parse(before) as Database);
     } catch {
       // Keep the original failure. A second write error would hide it.
     }
@@ -114,15 +127,33 @@ function withFileLock<T>(fn: (db: Database) => T): T {
 }
 
 async function withRemoteLock<T>(fn: (db: Database) => T): Promise<T> {
+  const current = state();
   for (let attempt = 0; attempt < 8; attempt++) {
-    const loaded = await loadRemote();
+    const stale = !current.memory || Date.now() - current.remoteAt > REMOTE_CACHE_MS;
+    const loaded = stale ? await loadRemote() : { db: current.memory as Database, version: current.remoteVersion };
+    if (stale) {
+      current.memory = loaded.db;
+      current.remoteVersion = loaded.version;
+      current.remoteAt = Date.now();
+    }
     const db = loaded.db;
+    const before = JSON.stringify(db);
     try {
       const result = fn(db);
-      await saveRemote(db, loaded.version);
+      if (JSON.stringify(db) !== before) {
+        await saveRemote(db, loaded.version);
+        current.memory = db;
+        current.remoteVersion = loaded.version === null ? 1 : Number(loaded.version) + 1;
+        current.remoteAt = Date.now();
+      }
       return structuredClone(result) as T;
     } catch (error) {
-      if (error instanceof VersionConflict) continue;
+      if (error instanceof VersionConflict) {
+        current.memory = null;
+        current.remoteVersion = null;
+        current.remoteAt = 0;
+        continue;
+      }
       throw error;
     }
   }
