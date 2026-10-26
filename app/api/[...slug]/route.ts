@@ -35,6 +35,7 @@ async function handle(request: Request, slug: string[]) {
         gmail: ready.google,
         microsoft: ready.microsoft,
         inngest: Boolean(process.env.INNGEST_EVENT_KEY),
+        resend: Boolean(process.env.RESEND_API_KEY),
         posthog: Boolean(process.env.POSTHOG_KEY),
         sentry: Boolean(process.env.SENTRY_DSN),
       },

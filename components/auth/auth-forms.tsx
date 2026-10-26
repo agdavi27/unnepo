@@ -187,12 +187,16 @@ export function ResetForm() {
       setError(data.error || "Could not send a reset link.");
       return;
     }
-    if (data.resetUrl) {
-      setResetUrl(data.resetUrl);
-      setMessage("Open the reset link to choose a new password.");
+    if (data.sent) {
+      setMessage("Check that school inbox for the reset link. It can land in spam.");
       return;
     }
-    setMessage("If that school email has an account, a reset link is on the way. Check the inbox and spam folder.");
+    if (data.resetUrl) {
+      setResetUrl(data.resetUrl);
+      setMessage("Email sending is not connected yet, so use this link to choose a new password.");
+      return;
+    }
+    setError("No account exists for that school email.");
   }
 
   async function reset(event: React.FormEvent) {
