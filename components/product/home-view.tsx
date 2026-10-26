@@ -17,7 +17,7 @@ type Dashboard = {
   steps: { resume: boolean; goals: boolean; contacts: boolean; outreach: boolean };
   completedSteps: number;
   goals: { roles: string[]; locations: string[]; industries: string[]; companies: string[]; tracks?: string[]; timing?: string } | null;
-  roleSuggestions: string[];
+  roleSuggestions: { fromResume: string[]; similar: string[] };
   recent: Array<{ saved: { id: string; status: string; updatedAt: string }; contact: { fullName: string; title: string; company: string; location: string } | null }>;
   jobs: Array<{ id: string; title: string; company: string; location: string; postedAt: string }>;
 };
@@ -31,7 +31,7 @@ export function HomeView() {
     Promise.all([fetch("/api/dashboard").then((response) => response.json()), fetch("/api/jobs").then((response) => response.json())])
       .then(([dashboard, jobs]) => {
         if (dashboard.error) setError(dashboard.error);
-        else setData({ ...dashboard, jobs: jobs.jobs ?? [], roleSuggestions: dashboard.roleSuggestions ?? [] });
+        else setData({ ...dashboard, jobs: jobs.jobs ?? [], roleSuggestions: dashboard.roleSuggestions ?? { fromResume: [], similar: [] } });
       })
       .catch(() => setError("The dashboard could not load."));
   }

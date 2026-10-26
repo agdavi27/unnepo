@@ -390,6 +390,38 @@ describe("isolation, spend limits, fallback, and retries", () => {
   });
 });
 
+describe("sample people search", () => {
+  it("matches a resume-style title and still returns people when nothing is exact", async () => {
+    const student = await verifiedStudent("matcher@colby.edu", "Matcher");
+    const filters = {
+      industries: [] as string[],
+      seniorities: [] as string[],
+      departments: [] as string[],
+      companySizes: [] as string[],
+      includeSimilarSchools: false,
+    };
+    const hit = await runSearch(student.userId, {
+      ...filters,
+      titles: ["Marketing Intern"],
+      locations: [],
+      schools: [],
+      companies: [],
+    });
+    expect(hit.people.some((person) => /marketing/i.test(person.title))).toBe(true);
+    expect(hit.people.length).toBeGreaterThan(0);
+
+    const miss = await runSearch(student.userId, {
+      ...filters,
+      titles: ["Underwater Basket Weaver"],
+      locations: ["Anchorage, AK"],
+      schools: ["Harvard University"],
+      companies: ["Not A Real Company"],
+    });
+    expect(miss.people.length).toBeGreaterThan(0);
+    expect(miss.notice).toMatch(/closest/i);
+  });
+});
+
 describe("job helpers", () => {
   it("reads a LinkedIn guest card", () => {
     const html = `<li><div data-entity-urn="urn:li:jobPosting:123"><a href="https://www.linkedin.com/jobs/view/role-at-co-123?trk=1"><h3>Marketing Intern</h3></a><h4><a class="hidden-nested-link" href="https://www.linkedin.com/company/co">Acme</a></h4><span class="job-search-card__location">New York, NY</span><time datetime="2026-09-08"></time><img data-delayed-url="https://media.licdn.com/logo.png"></div></li>`;
@@ -415,6 +447,7 @@ describe("job helpers", () => {
         createdAt: "2026-01-01T00:00:00.000Z",
       },
     ]);
-    expect(roles.some((role) => /marketing/i.test(role))).toBe(true);
+    expect(roles.fromResume.some((role) => /marketing/i.test(role))).toBe(true);
+    expect(roles.similar.some((role) => /marketing|brand|content|growth/i.test(role))).toBe(true);
   });
 });

@@ -40,10 +40,13 @@ export function JobsView() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [pageSize, setPageSize] = useState(12);
 
-  function load() {
+  function load(nextPage = page) {
     setLoading(true);
-    fetch("/api/jobs")
+    fetch(`/api/jobs?page=${nextPage}`)
       .then((response) => response.json())
       .then((data) => {
         setJobs(data.jobs ?? []);
@@ -52,10 +55,17 @@ export function JobsView() {
         setQueries(data.queries ?? []);
         setNotice(data.notice);
         setSaved(data.savedIds ?? []);
+        setPage(data.page || nextPage);
+        setTotal(data.total ?? (data.jobs?.length ?? 0));
+        setPageSize(data.pageSize || 12);
       })
       .finally(() => setLoading(false));
   }
-  useEffect(load, []);
+  useEffect(() => {
+    load(1);
+    // First page only. Later pages go through the pager.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function toggle(job: Job) {
     await fetch("/api/jobs/save", {
@@ -99,12 +109,30 @@ export function JobsView() {
       </section>
 
       <section className="mt-8">
-        <h2 className="text-lg font-semibold">{loading ? "Looking up live postings…" : "Open roles"}</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-semibold">{loading ? "Looking up live postings…" : "Open roles"}</h2>
+          <Pager page={page} total={total} pageSize={pageSize} loading={loading} onPage={load} />
+        </div>
         <div className="mt-3 space-y-3">
           {feed.map((job) => <JobCard key={job.id} job={job} saved={saved.includes(job.id)} onToggle={() => toggle(job)} />)}
           {!loading && feed.length === 0 ? <p className="text-sm text-muted">No new matches. Try another role on Home, or open LinkedIn and ZipRecruiter above.</p> : null}
         </div>
+        <div className="mt-4">
+          <Pager page={page} total={total} pageSize={pageSize} loading={loading} onPage={load} />
+        </div>
       </section>
+    </div>
+  );
+}
+
+function Pager({ page, total, pageSize, loading, onPage }: { page: number; total: number; pageSize: number; loading: boolean; onPage: (page: number) => void }) {
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted">
+      <span>{total} roles</span>
+      <button type="button" disabled={page <= 1 || loading} onClick={() => onPage(page - 1)} className="rounded-lg border border-line px-3 py-1 disabled:opacity-40">Previous</button>
+      <span>{page} / {pages}</span>
+      <button type="button" disabled={page >= pages || loading} onClick={() => onPage(page + 1)} className="rounded-lg border border-line px-3 py-1 disabled:opacity-40">Next</button>
     </div>
   );
 }

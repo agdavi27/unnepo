@@ -4,7 +4,7 @@ import type { Contact } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
 import { expandSchools } from "@/lib/schools";
 import { contactFetch } from "./http";
-import { filterSampleDirectory, SAMPLE_CONTACTS, type SearchFilters } from "./sample-directory";
+import { closestSampleContacts, filterSampleDirectory, SAMPLE_CONTACTS, type SearchFilters } from "./sample-directory";
 
 export type PeopleSearchResult = {
   people: Contact[];
@@ -123,7 +123,12 @@ export async function searchPeople(userId: string, filters: SearchFilters, page:
     };
   }
 
-  const matched = filterSampleDirectory(filters, schools);
+  let matched = filterSampleDirectory(filters, schools);
+  let relaxed = false;
+  if (!matched.length) {
+    matched = closestSampleContacts(filters, Math.max(pageSize, 12));
+    relaxed = true;
+  }
   const start = Math.max(0, (page - 1) * pageSize);
   const people = matched.slice(start, start + pageSize);
   await repo.upsertContacts(people);
@@ -140,8 +145,9 @@ export async function searchPeople(userId: string, filters: SearchFilters, page:
     people,
     total: matched.length,
     source: "sample",
-    notice:
-      "Sample directory. These profiles are illustrative and are not live Apollo results. Emails stay hidden until you unlock a contact. Connect Apollo to search real professionals.",
+    notice: relaxed
+      ? "No exact match for those filters. These are the closest people in the sample directory, so you can keep going. They are not live Apollo results."
+      : "Sample directory. These profiles are illustrative and are not live Apollo results. Emails stay hidden until you unlock a contact.",
     estimated: true,
   };
 }

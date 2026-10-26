@@ -12,16 +12,27 @@ type CacheEntry = { at: number; payload: Awaited<ReturnType<typeof loadLive>> };
 let cache: { key: string; entry: CacheEntry } | null = null;
 const CACHE_MS = 10 * 60 * 1000;
 
-export async function listJobPostings(goals: CareerGoals | null, facts: ResumeFact[] = []) {
+const PAGE_SIZE = 12;
+
+export async function listJobPostings(goals: CareerGoals | null, facts: ResumeFact[] = [], page = 1) {
   const queries = searchQueries(goals, facts);
   const where = goals?.locations?.[0] || "United States";
   const key = `${queries.join("|")}|${where}|${(goals?.tracks ?? []).join(",")}`;
-  if (cache && cache.key === key && Date.now() - cache.entry.at < CACHE_MS) {
-    return finish(cache.entry.payload.jobs, queries, where, cache.entry.payload.notice);
-  }
-  const live = await loadLive(queries, where);
-  if (live.jobs.length) cache = { key, entry: { at: Date.now(), ...{ payload: live } } };
-  return finish(live.jobs, queries, where, live.notice);
+  const hit = cache && cache.key === key && Date.now() - cache.entry.at < CACHE_MS ? cache.entry : null;
+  const live = hit ? hit.payload : await loadLive(queries, where);
+  if (live.jobs.length) cache = { key, entry: { at: hit?.at ?? Date.now(), payload: live } };
+  return paginate(live.jobs, queries, where, live.notice, page);
+}
+
+function paginate(jobs: JobPosting[], queries: string[], where: string, notice: string | null, page: number) {
+  const safe = Math.max(1, page);
+  const start = (safe - 1) * PAGE_SIZE;
+  return {
+    ...finish(jobs.slice(start, start + PAGE_SIZE), queries, where, notice),
+    total: jobs.length,
+    page: safe,
+    pageSize: PAGE_SIZE,
+  };
 }
 
 function finish(jobs: JobPosting[], queries: string[], where: string, notice: string | null) {
@@ -45,7 +56,8 @@ function finish(jobs: JobPosting[], queries: string[], where: string, notice: st
 
 function searchQueries(goals: CareerGoals | null, facts: ResumeFact[]) {
   const chosen = (goals?.roles ?? []).map((role) => role.trim()).filter(Boolean);
-  const fromResume = suggestRoles(facts);
+  const suggested = suggestRoles(facts);
+  const fromResume = [...suggested.fromResume, ...suggested.similar];
   const base = (chosen.length ? chosen : fromResume).slice(0, 3);
   const intern = (goals?.tracks ?? []).some((track) => /intern/i.test(track));
   return base.map((role) => (intern && !/intern/i.test(role) ? `${role} intern` : role));
@@ -53,8 +65,8 @@ function searchQueries(goals: CareerGoals | null, facts: ResumeFact[]) {
 
 async function loadLive(queries: string[], where: string) {
   const settled = await Promise.allSettled([
-    linkedIn(queries[0] || "intern", where),
-    queries[1] ? linkedIn(queries[1], where) : Promise.resolve([]),
+    linkedIn(queries[0] || "intern", where, [0, 10, 20, 30, 40, 50]),
+    queries[1] ? linkedIn(queries[1], where, [0, 10, 20]) : Promise.resolve([]),
     remotive(queries[0] || "intern"),
     arbeitnow(queries),
     greenhouse(queries),
@@ -62,7 +74,7 @@ async function loadLive(queries: string[], where: string) {
     adzuna(queries[0] || "intern", where),
   ]);
   const jobs = settled.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
-  const unique = rankLive(dedupe(jobs), queries, where).slice(0, 30);
+  const unique = rankLive(dedupe(jobs), queries, where).slice(0, 120);
   if (!unique.length) {
     return {
       jobs: [] as JobPosting[],
@@ -103,10 +115,15 @@ function rankLive(jobs: JobPosting[], queries: string[], where: string) {
   }
 }
 
-async function linkedIn(query: string, where: string) {
-  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent(where)}&start=0`;
+async function linkedIn(query: string, where: string, starts: number[]) {
+  const pages = await Promise.allSettled(starts.map((start) => linkedInPage(query, where, start)));
+  return pages.flatMap((result) => (result.status === "fulfilled" ? result.value : []));
+}
+
+async function linkedInPage(query: string, where: string, start: number) {
+  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(query)}&location=${encodeURIComponent(where)}&start=${start}`;
   const html = await getText(url);
-  return parseLinkedInGuestHtml(html).slice(0, 8).map((job) => posting({
+  return parseLinkedInGuestHtml(html).map((job) => posting({
     externalId: job.externalId,
     provider: "linkedin",
     title: job.title,
@@ -122,7 +139,7 @@ async function linkedIn(query: string, where: string) {
 async function remotive(query: string) {
   const url = `https://remotive.com/api/remote-jobs?search=${encodeURIComponent(query)}`;
   const body = await getJson<{ jobs?: Array<Record<string, unknown>> }>(url);
-  return (body.jobs ?? []).slice(0, 6).map((item) => posting({
+  return (body.jobs ?? []).slice(0, 15).map((item) => posting({
     externalId: String(item.id),
     provider: "remotive",
     title: String(item.title ?? "Role"),
@@ -141,7 +158,7 @@ async function arbeitnow(queries: string[]) {
   return (body.data ?? []).filter((item) => {
     const blob = `${item.title ?? ""} ${item.company_name ?? ""}`.toLowerCase();
     return needles.some((needle) => blob.includes(needle));
-  }).slice(0, 6).map((item) => posting({
+  }).slice(0, 12).map((item) => posting({
     externalId: String(item.slug ?? item.title),
     provider: "arbeitnow",
     title: String(item.title ?? "Role"),
@@ -158,7 +175,7 @@ async function greenhouse(queries: string[]) {
   const needles = tokens(queries.join(" "));
   const boards = await Promise.allSettled(GREENHOUSE.map(async (board) => {
     const body = await getJson<{ jobs?: Array<Record<string, unknown>> }>(`https://boards-api.greenhouse.io/v1/boards/${board}/jobs`);
-    return (body.jobs ?? []).filter((job) => needles.some((needle) => String(job.title ?? "").toLowerCase().includes(needle))).slice(0, 3).map((job) => posting({
+    return (body.jobs ?? []).filter((job) => needles.some((needle) => String(job.title ?? "").toLowerCase().includes(needle))).slice(0, 8).map((job) => posting({
       externalId: `${board}-${job.id}`,
       provider: "greenhouse",
       title: String(job.title ?? "Role"),
@@ -177,7 +194,7 @@ async function lever(queries: string[]) {
   const needles = tokens(queries.join(" "));
   const boards = await Promise.allSettled(LEVER.map(async (board) => {
     const rows = await getJson<Array<Record<string, unknown>>>(`https://api.lever.co/v0/postings/${board}?mode=json`);
-    return (Array.isArray(rows) ? rows : []).filter((job) => needles.some((needle) => String(job.text ?? "").toLowerCase().includes(needle))).slice(0, 3).map((job) => posting({
+    return (Array.isArray(rows) ? rows : []).filter((job) => needles.some((needle) => String(job.text ?? "").toLowerCase().includes(needle))).slice(0, 8).map((job) => posting({
       externalId: `${board}-${job.id}`,
       provider: "lever",
       title: String(job.text ?? "Role"),

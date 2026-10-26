@@ -330,7 +330,8 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "jobs" && request.method === "GET") {
     const [goals, facts] = await Promise.all([repo.getGoals(user.id), repo.getFacts(user.id)]);
-    const result = await listJobPostings(goals, facts);
+    const page = Number(new URL(request.url).searchParams.get("page") || 1);
+    const result = await listJobPostings(goals, facts, page);
     const saved = await repo.listSavedJobs(user.id);
     return json({ ...result, savedJobs: saved, savedIds: saved.map((job) => job.id) });
   }

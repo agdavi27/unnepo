@@ -215,7 +215,7 @@ export function ContactsView() {
                 </td>
               </tr>
             ))}
-            {people.length === 0 && !loading ? <tr><td colSpan={8} className="px-4 py-10 text-muted">No professionals matched. Clear a filter or connect Apollo for a live search.</td></tr> : null}
+            {people.length === 0 && !loading ? <tr><td colSpan={8} className="px-4 py-10 text-muted">{notice || "No professionals matched those filters. Try a shorter title or another city."}</td></tr> : null}
           </tbody>
         </table>
       </div>

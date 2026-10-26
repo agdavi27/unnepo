@@ -405,6 +405,12 @@ export type SearchFilters = {
   query?: string;
 };
 
+const TITLE_STOP = new Set(["intern", "internship", "manager", "senior", "junior", "associate", "specialist", "coordinator", "director", "analyst", "entry", "full", "time"]);
+
+function words(value: string) {
+  return value.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 3 && !TITLE_STOP.has(word));
+}
+
 function includesAny(value: string | null | undefined, selected: string[]) {
   if (selected.length === 0) return true;
   const hay = (value ?? "").toLowerCase();
@@ -415,13 +421,20 @@ function includesAny(value: string | null | undefined, selected: string[]) {
   });
 }
 
+function titleMatches(title: string, selected: string[]) {
+  if (selected.length === 0) return true;
+  if (includesAny(title, selected)) return true;
+  const hayWords = new Set(words(title));
+  return selected.some((item) => words(item).some((word) => title.toLowerCase().includes(word) || hayWords.has(word)));
+}
+
 export function filterSampleDirectory(filters: SearchFilters, schools: string[]) {
   return SAMPLE_CONTACTS.filter((contact) => {
     if (filters.query) {
       const blob = `${contact.fullName} ${contact.title} ${contact.company} ${contact.location}`.toLowerCase();
       if (!blob.includes(filters.query.toLowerCase())) return false;
     }
-    if (!includesAny(contact.title, filters.titles)) return false;
+    if (!titleMatches(contact.title, filters.titles)) return false;
     if (!includesAny(contact.industry, filters.industries)) return false;
     if (!includesAny(contact.location, filters.locations)) return false;
     if (schools.length && !schools.some((school) => (contact.school ?? "").toLowerCase() === school.toLowerCase())) return false;
@@ -435,9 +448,13 @@ export function filterSampleDirectory(filters: SearchFilters, schools: string[])
 
 function score(contact: Contact, filters: SearchFilters) {
   let value = 0;
-  if (filters.titles.some((item) => contact.title.toLowerCase().includes(item.toLowerCase()))) value += 3;
+  if (titleMatches(contact.title, filters.titles) && filters.titles.length) value += 3;
   if (filters.companies.some((item) => contact.company.toLowerCase().includes(item.toLowerCase()))) value += 2;
   if (filters.schools.some((item) => (contact.school ?? "").toLowerCase() === item.toLowerCase())) value += 2;
   if (filters.locations.some((item) => contact.location.toLowerCase().includes(item.toLowerCase()))) value += 1;
   return value;
+}
+
+export function closestSampleContacts(filters: SearchFilters, limit = 12) {
+  return [...SAMPLE_CONTACTS].sort((a, b) => score(b, filters) - score(a, filters) || SAMPLE_CONTACTS.indexOf(a) - SAMPLE_CONTACTS.indexOf(b)).slice(0, limit);
 }
