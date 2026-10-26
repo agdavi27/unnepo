@@ -92,7 +92,7 @@ Automated follow-up sends only when the student explicitly authorizes one, a mai
 
 `ContactProviderRouter` searches and unlocks with Apollo. It does not enrich a person until that student clicks **Use 1 credit**. If Apollo returns no email and no phone, the unlock fails and the credit is returned. Apollo results are not replaced with sample profiles when Apollo fails.
 
-Set `APOLLO_API_KEY`. Estimated unit costs are configured with `APOLLO_*_COST_CENTS` and are labeled as estimates in the admin dashboard until a provider invoice reports an actual charge. Cache provider rows with `shareable = false` unless your contract allows a shared cache.
+Set `APOLLO_API_KEY`. Search uses Apollo's people API search (`mixed_people/api_search`). Estimated unit costs are configured with `APOLLO_*_COST_CENTS` and are labeled as estimates in the admin dashboard until a provider invoice reports an actual charge. Cache provider rows with `shareable = false` unless your contract allows a shared cache.
 
 ## Anthropic, jobs, analytics
 

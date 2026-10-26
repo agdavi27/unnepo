@@ -147,14 +147,15 @@ export async function searchPeople(userId: string, filters: SearchFilters, page:
 }
 
 async function apolloSearch(apiKey: string, filters: SearchFilters, schools: string[], page: number, pageSize: number) {
-  const response = await contactFetch("https://api.apollo.io/api/v1/mixed_people/search", {
+  const keywords = [filters.companies.join(" "), filters.query].filter(Boolean).join(" ");
+  const response = await contactFetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-api-key": apiKey },
     body: JSON.stringify({
-      person_titles: filters.titles,
-      person_locations: filters.locations,
-      q_organization_name: filters.companies.join(" "),
-      person_seniorities: filters.seniorities.map((item) => item.toLowerCase()),
+      ...(filters.titles.length ? { person_titles: filters.titles } : {}),
+      ...(filters.locations.length ? { person_locations: filters.locations } : {}),
+      ...(filters.seniorities.length ? { person_seniorities: filters.seniorities.map((item) => item.toLowerCase()) } : {}),
+      ...(keywords ? { q_keywords: keywords } : {}),
       page,
       per_page: pageSize,
     }),
