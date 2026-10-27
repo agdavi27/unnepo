@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readAnthropicKey, id, nowIso, repo } from "@/lib/db/file-store";
-import type { Contact, ManualEmailDraft, PeopleSearchRequest, ProfileDocument } from "@/lib/db/types";
+import type { Contact, ManualEmailDraft, PeopleSearchRequest, ProfileDocument, SavedContact } from "@/lib/db/types";
 import { serverConfig } from "@/lib/config";
 import { PEOPLE_PER_CREDIT, creditsForPeople, prepareSearchDebit, prepareUnlockDebit } from "@/lib/credits/quote";
 import { enrichPeopleBatch, enrichPerson, searchPeople } from "@/lib/providers/contacts/router";
@@ -289,6 +289,7 @@ async function runLivePeopleSearch(
     filters: input.filters,
     status: "completed",
     resultCount: people.length,
+    contactIds: people.map((person) => person.id),
     creditsCharged: charged,
     idempotencyKey,
     createdAt: nowIso(),
@@ -324,6 +325,20 @@ export async function unlockWorkspaceEmail(userId: string, raw: unknown) {
   }
   await repo.upsertContacts([{ ...contact, email: enriched.email, emailStatus: "verified", fetchedAt: nowIso() }]);
   return { ok: true, code: "found", charged: 0, email: enriched.email, message: "Found a verified work email. No credits were used." };
+}
+
+const CONTACT_STATUSES = new Set<SavedContact["status"]>(["not_contacted", "contacted", "follow_up_needed", "replied", "interested", "interview_scheduled", "closed"]);
+
+/** Students mark outreach themselves while sending is not connected. */
+export async function updateWorkspaceContact(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { contactId?: unknown; status?: unknown };
+  const contactId = String(body.contactId ?? "").slice(0, 120);
+  const status = String(body.status ?? "") as SavedContact["status"];
+  if (!CONTACT_STATUSES.has(status)) throw new ServiceError("Choose a valid status.", "status", 400);
+  const saved = await repo.getSavedByUserAndContact(userId, contactId);
+  if (!saved) throw new ServiceError("That contact is not in your saved list.", "not_found", 404);
+  const updated = await repo.updateSaved(userId, saved.id, { status });
+  return { contactId, status: updated?.status ?? status };
 }
 
 export async function deleteWorkspaceContacts(userId: string, raw: unknown) {
@@ -525,7 +540,7 @@ export async function workspaceState(userId: string) {
     repo.listManualDrafts(userId),
   ]);
   const studentFacts = document ? profileIntelligence.approvedForOutreach(document.facts, document.form.excludedTopics) : [];
-  const contacts = saved.flatMap(({ contact }) => {
+  const contacts = saved.flatMap(({ saved: row, contact }) => {
     if (!contact) return [];
     const verifiedFacts = [
       contact.title ? { id: `${contact.id}:title`, text: contact.title, verified: contact.dataSource === "provider" } : null,
@@ -539,6 +554,8 @@ export async function workspaceState(userId: string) {
       title: contact.title,
       company: contact.company,
       email: contact.email && contact.emailStatus === "verified" ? contact.email : undefined,
+      status: row.status,
+      foundAt: row.unlockedAt,
       facts: verifiedFacts,
     }];
   });

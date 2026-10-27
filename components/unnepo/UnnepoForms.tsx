@@ -19,7 +19,7 @@ export const emptyProfile: Profile = {
   targetRoles: "", dreamCompanies: "", locations: "", workPreference: "either",
   goals: [], contactTypes: [], seniority: "balanced", bio: "", accomplishments: "", excludedTopics: "", emailTone: "friendly"
 };
-export type Contact = { id: string; name: string; title: string; company: string; email?: string; facts: { id: string; text: string; verified: boolean }[] };
+export type Contact = { id: string; name: string; title: string; company: string; email?: string; status?: string; foundAt?: string; facts: { id: string; text: string; verified: boolean }[] };
 export type SearchRequest = { mode: "automatic" | "custom"; quantity: number; credits: number; prompt?: string; filters?: Record<string, unknown> };
 
 const btn = "inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";

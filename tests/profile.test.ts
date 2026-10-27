@@ -3,7 +3,7 @@ import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
-import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail, deleteWorkspaceContacts, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
+import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail, deleteWorkspaceContacts, refreshProfileHighlights, updateWorkspaceContact, workspaceState } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { COLLEGE_SUGGESTIONS, brandsForInterests, rankSuggestions } from "@/lib/suggestions";
 import { formatLocation, joinProfileList, parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
@@ -160,6 +160,8 @@ describe("structured profile", () => {
     expect((await repo.getAccount(userId))?.balance).toBe(23);
     expect((await repo.listSaved(userId))).toHaveLength(30);
 
+    expect(first.request.contactIds).toHaveLength(30);
+    expect(first.request.contactIds?.[0]).toBe("apollo_p0");
     const second = await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
     expect(second.people).toHaveLength(0);
     expect(second.charged).toBe(0);
@@ -215,6 +217,27 @@ describe("structured profile", () => {
     expect(found.ok).toBe(true);
     expect(found.email).toBe("al@patagonia.com");
     expect((await repo.getAccount(userId))!.balance).toBe(balance);
+  });
+
+  it("lets a student mark a saved contact as contacted and reports when it was found", async () => {
+    const userId = await verifiedStudent("status@colby.edu", "Statuser");
+    const other = await verifiedStudent("status.other@colby.edu", "Other");
+    await saveStructuredProfile(userId, form, "Statuser");
+    await repo.upsertContacts([{
+      id: "status_person", externalId: "status_person", provider: "apollo", fullName: "Pat Doe", firstName: "Pat", lastName: "Doe",
+      title: "Recruiter", company: "REI", companyDomain: null, location: "", school: null, profileUrl: null, email: null, emailStatus: "unknown",
+      phone: null, phoneStatus: "unknown", tags: [], seniority: null, department: null, industry: null, companySize: null, interests: [],
+      previousRoles: [], achievements: [], publicPosts: [], verifiedMutuals: [], shareable: false, licenseNote: "test", dataSource: "provider",
+      fetchedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString(), costCents: 0, costEstimated: true,
+    }]);
+    await repo.saveFoundContacts(userId, ["status_person"]);
+    const before = (await workspaceState(userId)).contacts[0];
+    expect(before.status).toBe("not_contacted");
+    expect(before.foundAt).toBeTruthy();
+    await expect(updateWorkspaceContact(userId, { contactId: "status_person", status: "sent" })).rejects.toThrow(/valid status/);
+    await expect(updateWorkspaceContact(other, { contactId: "status_person", status: "contacted" })).rejects.toThrow(/not in your saved list/);
+    await updateWorkspaceContact(userId, { contactId: "status_person", status: "contacted" });
+    expect((await workspaceState(userId)).contacts[0].status).toBe("contacted");
   });
 
   it("deletes contacts from one student's list only", async () => {

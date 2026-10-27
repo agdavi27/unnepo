@@ -26,7 +26,7 @@ type Workspace = {
   highlights: Highlight[];
   resume: { id: string; fileName: string; byteSize: number } | null;
   contacts: Contact[];
-  searches: { id: string; mode: string; quantity: number; creditsQuoted: number; status: string; resultCount: number; creditsCharged: number; prompt: string; createdAt: string }[];
+  searches: { id: string; mode: string; quantity: number; creditsQuoted: number; status: string; resultCount: number; creditsCharged: number; prompt: string; createdAt: string; contactIds?: string[] }[];
   drafts: { id: string; contactId: string; subject: string; createdAt: string }[];
   integrations: { apollo: boolean; anthropic: boolean };
 };
@@ -45,6 +45,34 @@ const PROFILE_SECTIONS: { step: number; label: string; summary: (profile: Profil
   { step: 3, label: "Networking goals", summary: (profile) => [...profile.goals, ...profile.contactTypes].join(", ") },
   { step: 4, label: "Your story", summary: (profile) => profile.bio },
 ];
+const CONTACT_STATUS_OPTIONS: [string, string][] = [
+  ["not_contacted", "Not contacted"],
+  ["contacted", "Contacted"],
+  ["follow_up_needed", "Follow up"],
+  ["replied", "Replied"],
+  ["interested", "Interested"],
+  ["interview_scheduled", "Interview"],
+  ["closed", "Closed"],
+];
+type FoundFilter = "any" | "last_search" | "today" | "week" | "month";
+const FOUND_FILTERS: [FoundFilter, string][] = [["any", "Any time"], ["last_search", "Last search"], ["today", "Today"], ["week", "Last 7 days"], ["month", "Last 30 days"]];
+type StatusFilter = "all" | "not_contacted" | "contacted";
+const STATUS_FILTERS: [StatusFilter, string][] = [["all", "All"], ["not_contacted", "Not contacted"], ["contacted", "Contacted"]];
+
+/** Earliest "found" time a date filter keeps, worked out when the filter is picked. */
+function foundCutoff(filter: FoundFilter) {
+  if (filter === "today") return new Date().setHours(0, 0, 0, 0);
+  if (filter === "week") return Date.now() - 7 * 86400000;
+  if (filter === "month") return Date.now() - 30 * 86400000;
+  return 0;
+}
+
+function foundLabel(iso?: string) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(date.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
+}
+
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
 function ModelValue({ value }: { value: unknown }) {
@@ -99,6 +127,9 @@ export function AppHome() {
   const [unlocking, setUnlocking] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [foundFilter, setFoundFilter] = useState<FoundFilter>("any");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [foundSince, setFoundSince] = useState(0);
   const [highlightsLoading, setHighlightsLoading] = useState(false);
   const [highlightsError, setHighlightsError] = useState("");
 
@@ -254,6 +285,20 @@ export function AppHome() {
     }
   }
 
+  async function setContactStatus(contact: Contact, status: string) {
+    setData((current) => (current ? { ...current, contacts: current.contacts.map((item) => (item.id === contact.id ? { ...item, status } : item)) } : current));
+    const response = await fetch("/api/app/contacts", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contactId: contact.id, status }),
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      setNotice(payload.error || "Could not update that status.");
+      await load();
+    }
+  }
+
   function toggleSelected(contactId: string) {
     setSelected((current) => {
       const next = new Set(current);
@@ -338,7 +383,75 @@ export function AppHome() {
 
   const contacts = data?.contacts ?? [];
   const lastSearch = data?.searches.find((item) => item.status === "completed");
-  const allSelected = contacts.length > 0 && contacts.every((contact) => selected.has(contact.id));
+  const lastSearchIds = new Set(lastSearch?.contactIds ?? []);
+  const lastSearchPeople = (lastSearch?.contactIds ?? []).flatMap((contactId) => contacts.filter((contact) => contact.id === contactId));
+  const filteredContacts = contacts.filter((contact) => {
+    const found = contact.foundAt ? new Date(contact.foundAt).getTime() : 0;
+    if (foundFilter === "last_search" && !lastSearchIds.has(contact.id)) return false;
+    if ((foundFilter === "today" || foundFilter === "week" || foundFilter === "month") && found < foundSince) return false;
+    const contacted = (contact.status ?? "not_contacted") !== "not_contacted";
+    if (statusFilter === "contacted" && !contacted) return false;
+    if (statusFilter === "not_contacted" && contacted) return false;
+    return true;
+  });
+  const filtersOn = foundFilter !== "any" || statusFilter !== "all";
+  const allSelected = filteredContacts.length > 0 && filteredContacts.every((contact) => selected.has(contact.id));
+  const tableColumns = "lg:grid-cols-[2rem_minmax(0,1.1fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_9.5rem_4.5rem_12.5rem]";
+
+  const renderContactTable = (list: Contact[], selectable: boolean) => (
+    <section className="overflow-hidden rounded-2xl border border-line">
+      <div className={`hidden items-center gap-4 border-b border-line bg-panel px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-faint lg:grid ${tableColumns}`}>
+        {selectable ? (
+          <input type="checkbox" aria-label="Select all shown contacts" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(list.map((contact) => contact.id)))} />
+        ) : (
+          <span />
+        )}
+        <span>Name</span>
+        <span>Role</span>
+        <span>Email</span>
+        <span>Status</span>
+        <span>Found</span>
+        <span className="sr-only">Actions</span>
+      </div>
+      <ul className="divide-y divide-line">
+        {list.map((contact) => (
+          <li key={contact.id} className={`grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-4 py-3 ${tableColumns}`}>
+            {selectable ? (
+              <input type="checkbox" aria-label={`Select ${contact.name}`} checked={selected.has(contact.id)} onChange={() => toggleSelected(contact.id)} />
+            ) : (
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
+            )}
+            <p className="truncate font-medium">{contact.name}</p>
+            <p className="col-start-2 truncate text-sm text-muted lg:col-start-auto">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
+            <div className="col-start-2 min-w-0 text-sm lg:col-start-auto">
+              {contact.email ? (
+                <a href={`mailto:${contact.email}`} className="block truncate text-zinc-300 hover:text-white">{contact.email}</a>
+              ) : data?.integrations.apollo ? (
+                <button type="button" disabled={unlocking === contact.id} onClick={() => void findEmail(contact)} className="text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-50">
+                  {unlocking === contact.id ? "Looking up…" : "No verified email · Try again"}
+                </button>
+              ) : (
+                <span className="text-faint">No email yet</span>
+              )}
+            </div>
+            <select
+              aria-label={`Status for ${contact.name}`}
+              value={contact.status ?? "not_contacted"}
+              onChange={(event) => void setContactStatus(contact, event.target.value)}
+              className={`col-start-2 w-full rounded-lg border border-line bg-card px-2 py-1 text-xs outline-none lg:col-start-auto ${(contact.status ?? "not_contacted") === "not_contacted" ? "text-muted" : "text-white"}`}
+            >
+              {CONTACT_STATUS_OPTIONS.map(([value, text]) => <option key={value} value={value}>{text}</option>)}
+            </select>
+            <p className="col-start-2 text-xs text-faint lg:col-start-auto">{foundLabel(contact.foundAt)}</p>
+            <div className="col-start-2 flex gap-2 lg:col-start-auto lg:justify-end">
+              <button type="button" onClick={() => openComposer(contact)} className="whitespace-nowrap rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
+              <button type="button" disabled={deleting} onClick={() => void deleteContacts([contact.id])} aria-label={`Delete ${contact.name}`} className="rounded-xl border border-line px-3 py-1.5 text-sm text-muted hover:border-red-900/70 hover:text-red-300 disabled:opacity-50">Delete</button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
   const currentPlan = data?.credits.plan ?? "free";
 
   return (
@@ -397,7 +510,7 @@ export function AppHome() {
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h1 className="text-3xl font-bold tracking-tight md:text-4xl">My Contacts</h1>
-                <p className="mt-1 text-sm text-muted">{contacts.length} saved · {contacts.filter((contact) => contact.email).length} with a verified email</p>
+                <p className="mt-1 text-sm text-muted">{contacts.length} saved · {contacts.filter((contact) => contact.email).length} with a verified email · {contacts.filter((contact) => (contact.status ?? "not_contacted") !== "not_contacted").length} contacted</p>
               </div>
               {contacts.length > 0 && (
                 <div className="flex items-center gap-2">
@@ -416,39 +529,32 @@ export function AppHome() {
                 <button type="button" onClick={() => setView("find")} className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">Find new contacts</button>
               </div>
             ) : (
-              <section className="overflow-hidden rounded-2xl border border-line">
-                <div className="hidden grid-cols-[2rem_minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_12.5rem] items-center gap-4 border-b border-line bg-panel px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-faint md:grid">
-                  <input type="checkbox" aria-label="Select all contacts" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(contacts.map((contact) => contact.id)))} />
-                  <span>Name</span>
-                  <span>Role</span>
-                  <span>Email</span>
-                  <span className="sr-only">Actions</span>
+              <>
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.12em] text-faint">Found</span>
+                    {FOUND_FILTERS.map(([value, text]) => (
+                      <button key={value} type="button" onClick={() => { setFoundFilter(value); setFoundSince(foundCutoff(value)); setSelected(new Set()); }} disabled={value === "last_search" && !lastSearch} className={`rounded-full border px-3 py-1 text-xs disabled:opacity-40 ${foundFilter === value ? "border-white bg-white text-black" : "border-line text-zinc-300 hover:border-zinc-500"}`}>{text}</button>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-[0.12em] text-faint">Status</span>
+                    {STATUS_FILTERS.map(([value, text]) => (
+                      <button key={value} type="button" onClick={() => { setStatusFilter(value); setSelected(new Set()); }} className={`rounded-full border px-3 py-1 text-xs ${statusFilter === value ? "border-white bg-white text-black" : "border-line text-zinc-300 hover:border-zinc-500"}`}>{text}</button>
+                    ))}
+                  </div>
+                  {filtersOn && (
+                    <button type="button" onClick={() => { setFoundFilter("any"); setStatusFilter("all"); }} className="text-xs text-muted underline-offset-4 hover:text-white hover:underline">
+                      Clear filters · showing {filteredContacts.length} of {contacts.length}
+                    </button>
+                  )}
                 </div>
-                <ul className="divide-y divide-line">
-                  {contacts.map((contact) => (
-                    <li key={contact.id} className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-4 py-3 md:grid-cols-[2rem_minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_12.5rem]">
-                      <input type="checkbox" aria-label={`Select ${contact.name}`} checked={selected.has(contact.id)} onChange={() => toggleSelected(contact.id)} />
-                      <p className="truncate font-medium">{contact.name}</p>
-                      <p className="col-start-2 truncate text-sm text-muted md:col-start-auto">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
-                      <div className="col-start-2 min-w-0 text-sm md:col-start-auto">
-                        {contact.email ? (
-                          <a href={`mailto:${contact.email}`} className="truncate text-zinc-300 hover:text-white">{contact.email}</a>
-                        ) : data.integrations.apollo ? (
-                          <button type="button" disabled={unlocking === contact.id} onClick={() => void findEmail(contact)} className="text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-50">
-                            {unlocking === contact.id ? "Looking up…" : "No verified email · Try again"}
-                          </button>
-                        ) : (
-                          <span className="text-faint">No email yet</span>
-                        )}
-                      </div>
-                      <div className="col-start-2 flex gap-2 md:col-start-auto md:justify-end">
-                        <button type="button" onClick={() => openComposer(contact)} className="whitespace-nowrap rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
-                        <button type="button" disabled={deleting} onClick={() => void deleteContacts([contact.id])} aria-label={`Delete ${contact.name}`} className="rounded-xl border border-line px-3 py-1.5 text-sm text-muted hover:border-red-900/70 hover:text-red-300 disabled:opacity-50">Delete</button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </section>
+                {filteredContacts.length === 0 ? (
+                  <div className="rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">No contacts match these filters.</div>
+                ) : (
+                  renderContactTable(filteredContacts, true)
+                )}
+              </>
             )}
             {data.drafts.length > 0 && (
               <section className="border-t border-line pt-8">
@@ -499,7 +605,7 @@ export function AppHome() {
                         {lastSearch.prompt ? ` “${lastSearch.prompt}”` : ""}
                       </p>
                       {lastSearch.resultCount > 0 && (
-                        <button type="button" onClick={() => setView("contacts")} className="w-full rounded-xl border border-line px-3 py-2 text-sm hover:bg-white/5">View in My Contacts</button>
+                        <button type="button" onClick={() => { setFoundFilter("last_search"); setStatusFilter("all"); setView("contacts"); }} className="w-full rounded-xl border border-line px-3 py-2 text-sm hover:bg-white/5">Open in My Contacts</button>
                       )}
                     </div>
                   ) : (
@@ -519,6 +625,21 @@ export function AppHome() {
                 </details>
               </aside>
             </div>
+            {!searching && !searchError && lastSearch && (
+              <section className="space-y-3">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <h2 className="text-xl font-semibold tracking-tight">People found · {lastSearchPeople.length}</h2>
+                  <p className="text-xs text-faint">From your search on {foundLabel(lastSearch.createdAt)}{lastSearchPeople.length < lastSearch.resultCount ? ` · ${lastSearch.resultCount - lastSearchPeople.length} deleted since` : ""}</p>
+                </div>
+                {lastSearchPeople.length ? (
+                  renderContactTable(lastSearchPeople, false)
+                ) : (
+                  <div className="rounded-2xl border border-line bg-panel p-6 text-sm text-muted">
+                    {lastSearch.resultCount ? "These people are no longer in My Contacts." : "Apollo found no new people for that search. Try different roles, companies, or locations."}
+                  </div>
+                )}
+              </section>
+            )}
           </>
         )}
         {data && !showOnboarding && view === "analytics" && (

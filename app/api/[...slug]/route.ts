@@ -16,7 +16,7 @@ import { serverConfig } from "@/lib/config";
 import { usingDefaultSecret } from "@/lib/security";
 import { filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
-import { deleteWorkspaceContacts, generateWorkspaceEmail, recordPeopleSearch, refreshProfileHighlights, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, workspaceState } from "@/lib/services/workspace";
+import { deleteWorkspaceContacts, generateWorkspaceEmail, recordPeopleSearch, refreshProfileHighlights, updateWorkspaceContact, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, workspaceState } from "@/lib/services/workspace";
 
 const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests", "roles", "location", "employment", "timing", "contacts", "networking", "extra", "story"]);
 
@@ -197,6 +197,9 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "app" && action === "highlights" && request.method === "POST") {
     return json(await refreshProfileHighlights(user.id));
+  }
+  if (root === "app" && action === "contacts" && request.method === "PATCH") {
+    return json(await updateWorkspaceContact(user.id, await request.json()));
   }
   if (root === "app" && action === "contacts" && request.method === "DELETE") {
     return json(await deleteWorkspaceContacts(user.id, await request.json()));

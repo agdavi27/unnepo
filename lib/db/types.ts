@@ -499,6 +499,8 @@ export type PeopleSearchRequest = {
   filters: Record<string, unknown>;
   status: "not_connected" | "completed";
   resultCount: number;
+  /** People this search added, in the order Apollo returned them. */
+  contactIds?: string[];
   creditsCharged: number;
   idempotencyKey: string;
   createdAt: string;
