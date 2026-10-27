@@ -201,7 +201,7 @@ export class ProfileIntelligenceService {
       .map((part) => clean(part).toLowerCase())
       .filter((part) => part.length > 2);
     return facts
-      .filter((fact) => fact.approvalStatus === "approved" && fact.section !== "excluded_topics")
+      .filter((fact) => fact.approvalStatus === "approved" && fact.section !== "excluded_topics" && fact.section !== "email_preferences")
       .filter((fact) => !blocked.some((phrase) => fact.text.toLowerCase().includes(phrase)))
       .map((fact) => ({ id: fact.id, text: fact.text, verified: true as const }));
   }

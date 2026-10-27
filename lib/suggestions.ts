@@ -17,6 +17,43 @@ function merge(...lists: ReadonlyArray<readonly string[]>) {
   return out;
 }
 
+/** Brands to suggest for each onboarding interest. */
+export const INTEREST_BRANDS: Record<string, string[]> = {
+  Technology: ["Google", "Apple", "Microsoft", "Stripe", "Figma", "Nvidia", "OpenAI", "Anthropic", "Salesforce", "Shopify"],
+  Marketing: ["HubSpot", "Glossier", "Red Bull", "Nike", "Procter & Gamble", "Unilever", "Spotify", "Liquid Death"],
+  Finance: ["Goldman Sachs", "J.P. Morgan", "Morgan Stanley", "BlackRock", "Fidelity", "Visa", "Mastercard", "Citadel"],
+  Consulting: ["McKinsey", "Boston Consulting Group", "Bain & Company", "Deloitte", "Accenture", "PwC", "EY", "KPMG"],
+  Entrepreneurship: ["Stripe", "Shopify", "Airbnb", "Notion", "Ramp", "Brex", "Y Combinator", "Warby Parker"],
+  Music: ["Spotify", "Fender", "Sonos", "Universal Music Group", "Live Nation", "SoundCloud", "Gibson", "Apple"],
+  Sports: ["Nike", "Adidas", "ESPN", "Under Armour", "New Balance", "Peloton", "Hoka", "NBA"],
+  "Outdoor & Adventure": ["Patagonia", "REI", "The North Face", "Arc'teryx", "YETI", "Salomon", "Cotopaxi", "L.L.Bean", "Burton"],
+  Fashion: ["Lululemon", "Nike", "Glossier", "Vuori", "Warby Parker", "Gap", "Ralph Lauren", "Aritzia"],
+  Design: ["Figma", "Adobe", "Apple", "Airbnb", "IDEO", "Canva", "Pentagram", "Herman Miller"],
+  Healthcare: ["Johnson & Johnson", "Pfizer", "Mayo Clinic", "CVS Health", "UnitedHealth Group", "Moderna", "Medtronic"],
+  Media: ["Netflix", "Disney", "ESPN", "The New York Times", "Spotify", "Vox Media", "Condé Nast", "NBCUniversal"],
+  Engineering: ["Tesla", "SpaceX", "Boeing", "Nvidia", "GE", "Lockheed Martin", "Apple", "Rivian"],
+  "Real Estate": ["CBRE", "JLL", "Zillow", "Blackstone", "Compass", "Cushman & Wakefield", "Brookfield"],
+  Education: ["Khan Academy", "Duolingo", "Coursera", "Teach For America", "Chegg", "Pearson"],
+  Nonprofits: ["Teach For America", "charity: water", "The Nature Conservancy", "American Red Cross", "Habitat for Humanity", "Peace Corps"],
+  Government: ["U.S. Department of State", "Peace Corps", "Federal Reserve", "NASA", "U.S. Senate", "AmeriCorps"],
+  "Food & Beverage": ["Chobani", "Ben & Jerry's", "Starbucks", "PepsiCo", "Coca-Cola", "Whole Foods", "Sweetgreen", "Liquid Death"],
+  Gaming: ["Riot Games", "Electronic Arts", "Nintendo", "Epic Games", "Valve", "Roblox", "Activision Blizzard"],
+  Sustainability: ["Patagonia", "Tesla", "Allbirds", "The Nature Conservancy", "Beyond Meat", "Rivian", "Cotopaxi"],
+};
+
+/** Brand ideas from the interests picked earlier in onboarding, skipping ones already added. */
+export function brandsForInterests(interests: string[], exclude: string[] = [], limit = 16) {
+  const skip = new Set(exclude.map((item) => item.toLowerCase()));
+  const out: string[] = [];
+  for (const interest of interests) {
+    for (const brand of INTEREST_BRANDS[interest] ?? []) {
+      if (skip.has(brand.toLowerCase()) || out.includes(brand)) continue;
+      out.push(brand);
+    }
+  }
+  return out.slice(0, limit);
+}
+
 export const COLLEGE_SUGGESTIONS = merge(SCHOOLS, [
   "American University", "Arizona State University", "Auburn University", "Babson College", "Barnard College", "Baylor University",
   "Bentley University", "Binghamton University", "Boston University", "Brandeis University", "Bryant University", "Bucknell University",
@@ -68,7 +105,7 @@ export const ROLE_SUGGESTIONS = merge(JOB_TITLES, [
   "Sports Marketing", "Strategy & Operations", "Sustainability Manager", "Technical Program Manager", "UX Researcher", "Venture Capital",
 ]);
 
-export const COMPANY_SUGGESTIONS = merge(COMPANIES, [
+export const COMPANY_SUGGESTIONS = merge(COMPANIES, Object.values(INTEREST_BRANDS).flat(), [
   "Accenture", "Adidas", "Adobe", "Anthropic", "Apple", "Bain & Company", "Bank of America", "Ben & Jerry's", "BlackRock", "Boston Consulting Group",
   "Burton", "Canada Goose", "Chobani", "Cisco", "Coca-Cola", "Columbia Sportswear", "Disney", "Dropbox", "EY", "ESPN", "Fender", "Gap",
   "Glossier", "Goldman Sachs", "Hoka", "IBM", "J.P. Morgan", "Johnson & Johnson", "KPMG", "L.L.Bean", "LinkedIn", "Marmot", "Mastercard",

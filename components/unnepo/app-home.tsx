@@ -15,6 +15,7 @@ import {
   type SearchRequest,
 } from "@/components/unnepo/UnnepoForms";
 import { PUBLIC_PLANS } from "@/lib/config";
+import { splitProfileList } from "@/lib/profile/lists";
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
@@ -36,6 +37,13 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "find", label: "Find New Contacts" },
   { id: "analytics", label: "Analytics" },
   { id: "settings", label: "Settings" },
+];
+const PROFILE_SECTIONS: { step: number; label: string; summary: (profile: Profile) => string }[] = [
+  { step: 0, label: "School and majors", summary: (profile) => [profile.school, splitProfileList(profile.major).join(", ")].filter(Boolean).join(" · ") },
+  { step: 1, label: "Interests", summary: (profile) => profile.interests.join(", ") },
+  { step: 2, label: "Roles, dream companies, locations", summary: (profile) => [splitProfileList(profile.targetRoles).join(", "), splitProfileList(profile.dreamCompanies).join(", ")].filter(Boolean).join(" · ") },
+  { step: 3, label: "Networking goals", summary: (profile) => [...profile.goals, ...profile.contactTypes].join(", ") },
+  { step: 4, label: "Your story", summary: (profile) => profile.bio },
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
@@ -83,6 +91,7 @@ export function AppHome() {
   const [view, setView] = useState<View>("find");
   const [tab, setTab] = useState<"find" | "custom">("find");
   const [editing, setEditing] = useState(false);
+  const [editStep, setEditStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
@@ -291,6 +300,12 @@ export function AppHome() {
     if (data?.profile?.ready && !data.highlights.length && !highlightsLoading) void buildHighlights();
   }
 
+  function editProfile(step: number) {
+    setEditStep(step);
+    setEditing(true);
+    window.scrollTo({ top: 0 });
+  }
+
   async function generateDraft(contact: Contact, input: Omit<EmailDraft, "subject" | "body">) {
     const response = await fetch("/api/app/generate", {
       method: "POST",
@@ -366,8 +381,12 @@ export function AppHome() {
         {data && showOnboarding && (
           <div className="mx-auto w-full max-w-3xl">
             <ProfileOnboarding
+              key={`${editing}-${editStep}`}
               initialProfile={profile}
               saving={saving}
+              editing={Boolean(data.profile?.ready)}
+              initialStep={data.profile?.ready ? editStep : 0}
+              onCancel={() => setEditing(false)}
               onResumeUpload={uploadResume}
               onSave={saveProfile}
             />
@@ -460,7 +479,7 @@ export function AppHome() {
                   onSearch={search}
                   onEditProfile={(action) => {
                     if (action === "reset") void resetProfile();
-                    else setEditing(true);
+                    else editProfile(0);
                   }}
                 />
               ) : (
@@ -554,12 +573,22 @@ export function AppHome() {
                 <button type="button" onClick={logout} className="mt-4 rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Log out</button>
               </div>
               <div className="rounded-2xl border border-line bg-panel p-5">
-                <h2 className={sectionTitle}>Profile</h2>
-                <p className="mt-3 text-sm text-muted">Your profile powers Find for Me and the facts used in your emails.</p>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Edit profile</button>
-                  <button type="button" onClick={() => void resetProfile()} className="rounded-xl border border-line px-3 py-1.5 text-sm text-muted hover:bg-white/5">Start over</button>
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className={sectionTitle}>Profile</h2>
+                  <button type="button" onClick={() => void resetProfile()} className="text-xs text-muted hover:text-white">Start over</button>
                 </div>
+                <p className="mt-3 text-sm text-muted">Change one section at a time. Saving updates your highlights and Find for Me.</p>
+                <ul className="mt-3 divide-y divide-line">
+                  {PROFILE_SECTIONS.map((section) => (
+                    <li key={section.step} className="flex items-center justify-between gap-3 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{section.label}</p>
+                        <p className="truncate text-xs text-muted">{section.summary(profile) || "Not filled in yet"}</p>
+                      </div>
+                      <button type="button" onClick={() => editProfile(section.step)} className="shrink-0 rounded-xl border border-line px-3 py-1 text-sm hover:bg-white/5">Edit</button>
+                    </li>
+                  ))}
+                </ul>
               </div>
             </section>
             <section className="space-y-4">

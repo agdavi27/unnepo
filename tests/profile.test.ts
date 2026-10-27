@@ -5,7 +5,8 @@ import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, pars
 import { profileIntelligence } from "@/lib/profile/intelligence";
 import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail, deleteWorkspaceContacts, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
-import { COLLEGE_SUGGESTIONS, rankSuggestions } from "@/lib/suggestions";
+import { COLLEGE_SUGGESTIONS, brandsForInterests, rankSuggestions } from "@/lib/suggestions";
+import { formatLocation, joinProfileList, parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { integrations } from "@/lib/integrations/flags";
 import type { ResumeFact } from "@/lib/db/types";
@@ -250,6 +251,35 @@ describe("structured profile", () => {
     expect(rankSuggestions(["Patagonia", "Spotify", "Pinterest"], "p", ["Patagonia"])).toEqual(["Pinterest", "Spotify"]);
     expect(rankSuggestions(["Patagonia"], "  ")).toEqual([]);
     expect(rankSuggestions(COLLEGE_SUGGESTIONS, "u", [], 8)).toHaveLength(8);
+  });
+
+  it("stores bubble answers as a list and keeps commas inside places", () => {
+    expect(splitProfileList("Economics; Math ;economics")).toEqual(["Economics", "Math"]);
+    expect(splitProfileList("Patagonia, REI")).toEqual(["Patagonia", "REI"]);
+    expect(joinProfileList(["Patagonia", " REI "])).toBe("Patagonia; REI");
+    const stored = joinProfileList([formatLocation("New York, NY", 25), formatLocation("Boston, MA", null)]);
+    expect(splitLocations(stored).map((entry) => parseLocation(entry))).toEqual([
+      { place: "New York, NY", miles: 25 },
+      { place: "Boston, MA", miles: null },
+    ]);
+    expect(splitLocations("Boston, MA")).toEqual(["Boston, MA"]);
+  });
+
+  it("suggests brands from interests without repeating ones already added", () => {
+    const ideas = brandsForInterests(["Outdoor & Adventure", "Music"], ["Patagonia"]);
+    expect(ideas).toContain("REI");
+    expect(ideas).toContain("Fender");
+    expect(ideas).not.toContain("Patagonia");
+    expect(brandsForInterests(["Trail running"])).toEqual([]);
+  });
+
+  it("saves bubble answers as separate search goals", async () => {
+    const userId = await verifiedStudent("bubbles@colby.edu", "Bubbles");
+    await saveStructuredProfile(userId, { ...form, targetRoles: "Brand marketing; Product marketing", dreamCompanies: "Patagonia; REI", locations: "New York, NY (within 25 mi); Boston, MA" }, "Bubbles");
+    const goals = await repo.getGoals(userId);
+    expect(goals?.roles).toEqual(["Brand marketing", "Product marketing"]);
+    expect(goals?.companies).toEqual(["Patagonia", "REI"]);
+    expect(goals?.locations).toEqual(["New York, NY", "Boston, MA"]);
   });
 
   it("keeps at most 20 highlights, drops duplicates, and keeps job details only on experience", () => {

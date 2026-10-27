@@ -7,6 +7,7 @@ import { enrichPeopleBatch, enrichPerson, searchPeople } from "@/lib/providers/c
 import { emptyFilters, filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
 import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligence";
+import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
 import { highlightProfileWithModel, organizeQuizWithModel, quizSourceText } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
 
@@ -70,10 +71,10 @@ export async function saveStructuredProfile(userId: string, raw: unknown, name: 
   const currentGoals = await repo.getGoals(userId);
   await repo.upsertGoals({
     userId,
-    roles: form.targetRoles ? [form.targetRoles] : [],
+    roles: splitProfileList(form.targetRoles),
     industries: form.interests,
-    locations: form.locations ? [form.locations] : [],
-    companies: form.dreamCompanies ? [form.dreamCompanies] : [],
+    locations: splitLocations(form.locations).map((entry) => parseLocation(entry).place),
+    companies: splitProfileList(form.dreamCompanies),
     tracks: currentGoals?.tracks ?? [],
     timing: currentGoals?.timing ?? "",
     workModes: [form.workPreference],
@@ -182,9 +183,9 @@ async function profileSearchFilters(userId: string) {
   const expanded = goals
     ? {
         ...goals,
-        roles: goals.roles.flatMap(splitList),
-        companies: goals.companies.flatMap(splitList),
-        locations: goals.locations.flatMap(splitList),
+        roles: goals.roles.flatMap((entry) => splitProfileList(entry)),
+        companies: goals.companies.flatMap((entry) => splitProfileList(entry)),
+        locations: goals.locations.flatMap(splitLocations).map((entry) => parseLocation(entry).place),
       }
     : null;
   return filtersFromProfile(expanded, document?.form.school || null, "").filters;
