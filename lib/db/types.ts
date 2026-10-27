@@ -472,6 +472,8 @@ export type ProfileDocument = {
   facts: StoredProfileFact[];
   inconsistencies: string[];
   resumeId: string | null;
+  /** Anthropic's profile JSON, stored without renaming its fields. */
+  organizedProfile: unknown | null;
   ready: boolean;
   updatedAt: string;
 };

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
-import { acceptModelFacts, factIsGrounded, mergeQuizFacts } from "@/lib/profile/quiz-model";
+import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
 import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile } from "@/lib/services/workspace";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
@@ -89,6 +89,11 @@ describe("structured profile", () => {
       [{ section: "career_goals", label: "Target role", text: "Brand marketing", sourceField: "targetRoles" }],
     ));
     expect(partial.some((fact) => fact.text === "Brand marketing and eCommerce")).toBe(true);
+    expect(PROFILE_ORGANIZE_PROMPT.startsWith("Analyze the following text")).toBe(true);
+    expect(PROFILE_ORGANIZE_PROMPT).toContain("use null for unknown values");
+    expect(quizSourceText(form)).toContain("Colby College");
+    expect(quizSourceText(form, "Economics major")).toContain("Resume:");
+    expect(parseModelProfile('```json\n{"education":{"school":"Colby College"}}\n```')).toEqual({ education: { school: "Colby College" } });
   });
 
   it("saves a profile for the signed-in user and does not show it to someone else", async () => {
@@ -96,7 +101,8 @@ describe("structured profile", () => {
     const b = await verifiedStudent("b.profile@colby.edu", "B");
     const saved = await saveStructuredProfile(a, form, "A");
     expect(saved.document.ready).toBe(true);
-    expect(saved.organization).toBe("rules");
+    expect(saved.organization).toBe("unavailable");
+    expect(saved.document.organizedProfile).toBeNull();
     expect(saved.document.facts.some((fact) => fact.section === "projects" && fact.text === "Built a campus store")).toBe(true);
     expect(await repo.getProfileDocument(b)).toBeNull();
     expect((await repo.getProfile(a))?.school).toBe("Colby College");

@@ -129,7 +129,42 @@ export function mergeQuizFacts(base: StructuredFact[], modelFacts: StructuredFac
   return kept;
 }
 
-export async function organizeQuizWithModel(userId: string, profile: FormProfile, apiKey: string) {
+export const PROFILE_ORGANIZE_PROMPT = "Analyze the following text and intelligently organize all information into a clear, detailed, structured user profile. Categorize information into education, work experience, projects, skills, accomplishments, interests, career goals, and personal background. Preserve relationships between details—for example, each job should contain its own responsibilities, achievements, tools, and relevant skills rather than separating them into unrelated categories. Combine duplicate information, retain meaningful specifics, and organize everything so another AI can easily understand the person's background and retrieve relevant details later. Return the profile as structured JSON with consistent field names. Do not invent, assume, or omit information; use null for unknown values and keep uncertain details clearly identified.";
+
+export function quizSourceText(profile: FormProfile, resumeText = "") {
+  const list = (values: string[]) => (values.length ? values.join(", ") : "");
+  const lines = [
+    `College / University: ${profile.school}`,
+    `Major / Field of Study: ${profile.major}`,
+    `Graduation year: ${profile.graduationYear}`,
+    `Interests: ${list(profile.interests)}`,
+    `Other interests: ${profile.otherInterests}`,
+    `Roles that interest you: ${profile.targetRoles}`,
+    `Dream companies or brands: ${profile.dreamCompanies}`,
+    `Where you would like to work: ${profile.locations}`,
+    `Work location preference: ${profile.workPreference}`,
+    `Networking goals: ${list(profile.goals)}`,
+    `Who you would like to connect with: ${list(profile.contactTypes)}`,
+    `Preferred experience level: ${profile.seniority}`,
+    `About you: ${profile.bio}`,
+    `Experiences or accomplishments: ${profile.accomplishments}`,
+    `Topics not to mention: ${profile.excludedTopics}`,
+    `Email tone: ${profile.emailTone}`,
+  ];
+  if (resumeText.trim()) lines.push(`Resume:\n${resumeText.trim()}`);
+  return lines.join("\n");
+}
+
+export function parseModelProfile(text: string): unknown {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return text;
+  try {
+    return JSON.parse(match[0]) as unknown;
+  } catch {
+    return text;
+  }
+}
+export async function organizeQuizWithModel(userId: string, profile: FormProfile, apiKey: string, resumeText = "") {
   if (!integrations.profileOrganization || !apiKey) return null;
   const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
   const started = Date.now();
@@ -138,20 +173,12 @@ export async function organizeQuizWithModel(userId: string, profile: FormProfile
     const client = new Anthropic({ apiKey });
     const response = await client.messages.create({
       model,
-      max_tokens: 1200,
-      system: [
-        {
-          type: "text",
-          text: "You organize a student's onboarding answers into short profile facts. Use only details written in the answers. Do not invent schools, employers, skills, dates, or interests. Split lists and sentences into separate facts. Hobbies and personal interests go in interests. Skills are only work abilities. Topics they do not want mentioned belong only in excluded_topics. Return JSON {\"facts\":[{\"section\":\"personal_education|employment|skills|projects|interests|career_goals|industries_locations|networking|story|email_preferences|excluded_topics\",\"label\":\"short label\",\"text\":\"one short fact\",\"sourceField\":\"the answer field name\",\"uncertain\":false}]}.",
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: [{ role: "user", content: JSON.stringify(profile) }],
+      max_tokens: 4000,
+      system: [{ type: "text", text: PROFILE_ORGANIZE_PROMPT, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: quizSourceText(profile, resumeText) }],
     });
-    const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n");
-    const match = text.match(/\{[\s\S]*\}/);
-    const parsed = match ? (JSON.parse(match[0]) as { facts?: unknown }) : { facts: [] };
-    const facts = acceptModelFacts(profile, parsed.facts);
+    const raw = response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n").trim();
+    const organized = parseModelProfile(raw);
     const inputTokens = response.usage?.input_tokens ?? 0;
     const outputTokens = response.usage?.output_tokens ?? 0;
     const config = serverConfig();
@@ -168,7 +195,7 @@ export async function organizeQuizWithModel(userId: string, profile: FormProfile
       error: null,
       createdAt: nowIso(),
     });
-    return facts;
+    return { profile: organized, raw };
   } catch (error) {
     await repo.insertUsage({
       id: id(),

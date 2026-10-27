@@ -146,7 +146,7 @@ Set `APOLLO_API_KEY`. Search uses Apollo's people API search (`mixed_people/api_
 
 ## Anthropic, jobs, analytics
 
-- `ANTHROPIC_API_KEY` organizes onboarding answers into profile facts. It does not write or send email, and it does not run people search. The model is `ANTHROPIC_FAST_MODEL`, which defaults to `claude-haiku-4-5`. If the call fails, the answers are still saved as entered.
+- `ANTHROPIC_API_KEY` organizes onboarding answers into the profile facts section. The model is asked to return structured JSON and that response is shown as-is. It does not write or send email, and it does not run people search. The model is `ANTHROPIC_FAST_MODEL`, which defaults to `claude-haiku-4-5`.
 
 Follow-up reminders are manual. The daily job does not send email.
 

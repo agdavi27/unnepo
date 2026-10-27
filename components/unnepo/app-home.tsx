@@ -15,19 +15,9 @@ import {
 } from "@/components/unnepo/UnnepoForms";
 
 type StudentFact = { id: string; text: string; verified: boolean };
-type StoredFact = {
-  id: string;
-  section: string;
-  label: string;
-  text: string;
-  approvalStatus: "approved" | "pending_review";
-  verificationStatus: string;
-  uncertain: boolean;
-  inconsistencyNote: string | null;
-};
 type Workspace = {
   credits: { balance: number };
-  profile: { ready: boolean; form: Profile; facts: StoredFact[]; inconsistencies: string[] } | null;
+  profile: { ready: boolean; form: Profile; organizedProfile: unknown | null } | null;
   studentFacts: StudentFact[];
   resume: { id: string; fileName: string; byteSize: number } | null;
   contacts: Contact[];
@@ -35,19 +25,41 @@ type Workspace = {
   drafts: { id: string; contactId: string; subject: string; createdAt: string }[];
 };
 
-const SECTIONS: Record<string, string> = {
-  personal_education: "Education",
-  employment: "Employment",
-  skills: "Skills",
-  projects: "Projects and accomplishments",
-  interests: "Interests",
-  career_goals: "Career goals and target companies",
-  industries_locations: "Industries and locations",
-  networking: "Networking preferences",
-  story: "Personal story",
-  email_preferences: "Email tone",
-  excluded_topics: "Topics to leave out",
-};
+function ModelValue({ value }: { value: unknown }) {
+  if (value === null || value === undefined) return <span className="text-zinc-400">null</span>;
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return <span>{String(value)}</span>;
+  }
+  if (Array.isArray(value)) {
+    if (!value.length) return <span className="text-zinc-400">[]</span>;
+    return (
+      <ul className="mt-1 space-y-2 border-l border-zinc-200 pl-3">
+        {value.map((item, index) => (
+          <li key={index}>
+            <ModelValue value={item} />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (!entries.length) return <span className="text-zinc-400">{"{}"}</span>;
+    return (
+      <dl className="space-y-3">
+        {entries.map(([key, item]) => (
+          <div key={key}>
+            <dt className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{key}</dt>
+            <dd className="mt-0.5 text-sm text-zinc-800">
+              <ModelValue value={item} />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    );
+  }
+  return null;
+}
 
 export function AppHome() {
   const router = useRouter();
@@ -131,7 +143,7 @@ export function AppHome() {
         return;
       }
       setEditing(false);
-      setNotice(payload.organization === "anthropic" ? "Profile saved. Your answers were organized into profile facts." : "Profile saved.");
+      setNotice(payload.organization === "anthropic" ? "Profile saved." : "Profile saved. The organizer did not return a profile.");
       await load();
     } finally {
       setSaving(false);
@@ -273,35 +285,21 @@ export function AppHome() {
                 <h2 className="text-lg font-semibold">Profile facts</h2>
                 {data.resume && <p className="text-xs text-zinc-500">Resume file: {data.resume.fileName}</p>}
               </div>
-              {data.profile?.inconsistencies.length ? (
-                <ul className="mt-3 space-y-1 text-sm text-amber-800">
-                  {data.profile.inconsistencies.map((item) => <li key={item}>{item}</li>)}
-                </ul>
-              ) : null}
-              <div className="mt-3 space-y-4">
-                {Object.entries(SECTIONS).map(([key, label]) => {
-                  const facts = data.profile?.facts.filter((fact) => fact.section === key) ?? [];
-                  if (!facts.length) return null;
-                  return (
-                    <div key={key}>
-                      <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">{label}</h3>
-                      <ul className="mt-1 space-y-1 text-sm">
-                        {facts.map((fact) => (
-                          <li key={fact.id}>
-                            <span className="font-medium">{fact.label}:</span> {fact.text}
-                            {fact.approvalStatus === "pending_review" ? " · needs review" : ""}
-                            {fact.uncertain && fact.inconsistencyNote ? ` · ${fact.inconsistencyNote}` : ""}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  );
-                })}
+              <div className="mt-3">
+                {data.profile?.organizedProfile ? <ModelValue value={data.profile.organizedProfile} /> : <p className="text-sm text-zinc-600">Save your profile to create this section.</p>}
               </div>
             </section>
           </>
         )}
       </main>
+      {saving && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-6 text-center shadow-xl">
+            <img src="/creating-profile.gif" alt="A cat typing on a laptop" className="mx-auto h-52 w-full rounded-xl object-cover" />
+            <p className="mt-4 text-lg font-semibold">Creating user profile</p>
+          </div>
+        </div>
+      )}
       {emailContact && (
         <PersonalizedEmailModal
           key={emailContact.id}
