@@ -25,6 +25,13 @@ type Workspace = {
   drafts: { id: string; contactId: string; subject: string; createdAt: string }[];
 };
 
+type View = "contacts" | "find" | "analytics";
+const VIEWS: { id: View; label: string }[] = [
+  { id: "contacts", label: "My Contacts" },
+  { id: "find", label: "Find New Contacts" },
+  { id: "analytics", label: "Analytics" },
+];
+
 function ModelValue({ value }: { value: unknown }) {
   if (value === null || value === undefined) return <span className="text-faint">null</span>;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
@@ -66,6 +73,7 @@ export function AppHome() {
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [view, setView] = useState<View>("find");
   const [tab, setTab] = useState<"find" | "custom">("find");
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -199,16 +207,37 @@ export function AppHome() {
   const profile = data?.profile?.form ?? emptyProfile;
   const showOnboarding = !data?.profile?.ready || editing;
 
+  const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
+  const peopleRequested = data?.searches.reduce((sum, item) => sum + item.quantity, 0) ?? 0;
+  const creditsSpent = data?.searches.reduce((sum, item) => sum + item.creditsCharged, 0) ?? 0;
+
   return (
     <div className="min-h-screen bg-bg text-ink [color-scheme:dark]">
       <header className="sticky top-0 z-20 border-b border-line bg-bg/80 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 py-4">
+        <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 pt-4">
           <span className="text-2xl font-semibold tracking-tight">unnepo.</span>
           <div className="flex items-center gap-4 text-sm">
             {data && <span className="rounded-full border border-line px-3 py-1 text-muted"><span className="text-ink">{data.credits.balance}</span> credits</span>}
             <button type="button" onClick={logout} className="text-muted hover:text-white">Log out</button>
           </div>
         </div>
+        {data && !showOnboarding ? (
+          <nav className="mx-auto flex max-w-2xl gap-5 px-4 pt-4 text-sm sm:gap-6" aria-label="Main">
+            {VIEWS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setView(item.id)}
+                aria-current={view === item.id ? "page" : undefined}
+                className={`-mb-px shrink-0 border-b-2 pb-3 ${view === item.id ? "border-white text-white" : "border-transparent text-muted hover:text-white"}`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        ) : (
+          <div className="pb-4" />
+        )}
       </header>
       <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-10">
         {error && <p className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</p>}
@@ -227,7 +256,43 @@ export function AppHome() {
             onSave={saveProfile}
           />
         )}
-        {data && !showOnboarding && (
+        {data && !showOnboarding && view === "contacts" && (
+          <>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">My Contacts</h1>
+            <section>
+              <h2 className={sectionTitle}>Saved contacts · {data.contacts.length}</h2>
+              {data.contacts.length === 0 ? (
+                <div className="mt-3 space-y-4">
+                  <p className="text-sm text-muted">No saved contacts yet. People will show up here after a connected search.</p>
+                  <button type="button" onClick={() => setView("find")} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">Find new contacts</button>
+                </div>
+              ) : (
+                <ul className="mt-3 divide-y divide-line">
+                  {data.contacts.map((contact) => (
+                    <li key={contact.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                      <div>
+                        <p className="font-medium">{contact.name}</p>
+                        <p className="text-sm text-muted">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
+                      </div>
+                      <button type="button" onClick={() => setEmailContact(contact)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+            {data.drafts.length > 0 && (
+              <section className="border-t border-line pt-8">
+                <h2 className={sectionTitle}>Saved drafts · {data.drafts.length}</h2>
+                <ul className="mt-3 space-y-1 text-sm text-muted">
+                  {data.drafts.map((draft) => (
+                    <li key={draft.id}>{draft.subject || "Untitled draft"} · not sent</li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </>
+        )}
+        {data && !showOnboarding && view === "find" && (
           <>
             <div className="space-y-5">
               <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Who do you want to meet?</h1>
@@ -250,7 +315,7 @@ export function AppHome() {
               <CustomSearch loading={searching} onSearch={search} />
             )}
             <section>
-              <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-faint">Results</h2>
+              <h2 className={sectionTitle}>Results</h2>
               {data.searches[0] ? (
                 <p className="mt-3 text-sm text-muted">
                   Not connected yet. Your last request for up to {data.searches[0].quantity} people ({data.searches[0].creditsQuoted} {data.searches[0].creditsQuoted === 1 ? "credit" : "credits"}) was saved and did not charge anything.
@@ -260,37 +325,9 @@ export function AppHome() {
                 <p className="mt-3 text-sm text-muted">People search is not connected yet. A search saves your request and does not return people or spend credits.</p>
               )}
             </section>
-            <section className="border-t border-line pt-8">
-              <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-faint">Saved contacts</h2>
-              {data.contacts.length === 0 ? (
-                <p className="mt-3 text-sm text-muted">No saved contacts yet. People will show up here after a connected search.</p>
-              ) : (
-                <ul className="mt-3 divide-y divide-line">
-                  {data.contacts.map((contact) => (
-                    <li key={contact.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                      <div>
-                        <p className="font-medium">{contact.name}</p>
-                        <p className="text-sm text-muted">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
-                      </div>
-                      <button type="button" onClick={() => setEmailContact(contact)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {data.drafts.length > 0 && (
-                <div className="mt-4 border-t border-line pt-3">
-                  <h3 className="text-sm font-medium">Saved drafts</h3>
-                  <ul className="mt-2 space-y-1 text-sm text-muted">
-                    {data.drafts.map((draft) => (
-                      <li key={draft.id}>{draft.subject || "Untitled draft"} · not sent</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </section>
             <details className="group border-t border-line pt-8">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-faint">Profile facts</h2>
+                <h2 className={sectionTitle}>Profile facts</h2>
                 <span className="text-xs text-muted group-open:hidden">Show</span>
                 <span className="hidden text-xs text-muted group-open:inline">Hide</span>
               </summary>
@@ -299,6 +336,47 @@ export function AppHome() {
                 {data.profile?.organizedProfile ? <ModelValue value={data.profile.organizedProfile} /> : <p className="text-sm text-muted">Save your profile to create this section.</p>}
               </div>
             </details>
+          </>
+        )}
+        {data && !showOnboarding && view === "analytics" && (
+          <>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Analytics</h1>
+            <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {[
+                ["Saved contacts", data.contacts.length],
+                ["Drafts saved", data.drafts.length],
+                ["Emails sent", 0],
+                ["Searches requested", data.searches.length],
+                ["People requested", peopleRequested],
+                ["Credits left", data.credits.balance],
+              ].map(([name, value]) => (
+                <div key={name} className="rounded-2xl border border-line bg-panel p-4">
+                  <p className="text-2xl font-semibold tabular-nums">{value}</p>
+                  <p className="mt-1 text-xs text-muted">{name}</p>
+                </div>
+              ))}
+            </section>
+            <p className="text-xs text-faint">
+              Email sending and people search are not connected yet, so nothing has been sent and {creditsSpent === 0 ? "no credits have been spent" : `${creditsSpent} ${creditsSpent === 1 ? "credit has" : "credits have"} been spent`}.
+            </p>
+            <section className="border-t border-line pt-8">
+              <h2 className={sectionTitle}>Recent searches</h2>
+              {data.searches.length === 0 ? (
+                <p className="mt-3 text-sm text-muted">No searches yet.</p>
+              ) : (
+                <ul className="mt-3 divide-y divide-line">
+                  {data.searches.slice(0, 10).map((item) => (
+                    <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 text-sm">
+                      <div className="min-w-0">
+                        <p className="font-medium">{item.mode === "automatic" ? "Find for Me" : "Custom Search"} · up to {item.quantity} people</p>
+                        {item.prompt && <p className="truncate text-muted">{item.prompt}</p>}
+                      </div>
+                      <p className="shrink-0 text-xs text-faint">{new Date(item.createdAt).toLocaleDateString()} · {item.creditsCharged} charged</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
           </>
         )}
       </main>
