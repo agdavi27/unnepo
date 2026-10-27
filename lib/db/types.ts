@@ -438,8 +438,8 @@ export type StoredProfileFact = {
   section: ProfileSectionName;
   label: string;
   text: string;
-  source: { kind: "onboarding_field" | "resume_file"; field?: string; resumeId?: string; excerpt?: string };
-  corroboration: { kind: "onboarding_field" | "resume_file"; field?: string; resumeId?: string; excerpt?: string } | null;
+  source: { kind: "onboarding_field" | "onboarding_model" | "resume_file"; field?: string; resumeId?: string; excerpt?: string };
+  corroboration: { kind: "onboarding_field" | "onboarding_model" | "resume_file"; field?: string; resumeId?: string; excerpt?: string } | null;
   verificationStatus: "user_entered" | "file_extracted";
   approvalStatus: "approved" | "pending_review";
   uncertain: boolean;
@@ -553,7 +553,7 @@ export type Database = {
   searchRequests: PeopleSearchRequest[];
   manualDrafts: ManualEmailDraft[];
   /** Server-only. Never return this from an API response. */
-  serverSecrets?: { apolloApiKey?: string };
+  serverSecrets?: { apolloApiKey?: string; anthropicApiKey?: string };
 };
 
 export function emptyDatabase(): Database {

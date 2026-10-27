@@ -71,6 +71,12 @@ export async function readApolloKey() {
   return withLock((db) => db.serverSecrets?.apolloApiKey?.trim() || "");
 }
 
+export async function readAnthropicKey() {
+  const fromEnv = process.env.ANTHROPIC_API_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  return withLock((db) => db.serverSecrets?.anthropicApiKey?.trim() || "");
+}
+
 export function persistenceMode(): "postgres" | "supabase" | "local-file" {
   if (!remoteActive()) return "local-file";
   return remoteKind() === "supabase" ? "supabase" : "postgres";

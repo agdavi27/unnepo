@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
+import { acceptModelFacts, factIsGrounded, mergeQuizFacts } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
 import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile } from "@/lib/services/workspace";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
@@ -70,14 +71,33 @@ describe("structured profile", () => {
     const outreach = profileIntelligence.approvedForOutreach(organized.facts, form.excludedTopics);
     expect(outreach.some((fact) => /gpa/i.test(fact.text))).toBe(false);
     expect(outreach.every((fact) => fact.verified)).toBe(true);
+    const invented = acceptModelFacts(form, [{ section: "employment", label: "Employer", text: "Worked at NASA", sourceField: "bio", uncertain: false }]);
+    expect(invented).toEqual([]);
+    expect(factIsGrounded("Built a campus store", form)).toBe(true);
+    const split = acceptModelFacts(form, [
+      { section: "career_goals", label: "Target company", text: "Patagonia", sourceField: "dreamCompanies" },
+      { section: "career_goals", label: "Target role", text: "Brand marketing", sourceField: "targetRoles" },
+    ]);
+    const base = profileIntelligence.organize({ profile: form }).facts;
+    const merged = mergeQuizFacts(base, split);
+    expect(merged.filter((fact) => fact.text === "Patagonia")).toHaveLength(1);
+    expect(merged.find((fact) => fact.text === "Patagonia")?.source.kind).toBe("onboarding_model");
+    expect(merged.some((fact) => fact.text === "Colby College" && fact.source.kind === "onboarding_field")).toBe(true);
+    const partialBase = profileIntelligence.organize({ profile: { ...form, targetRoles: "Brand marketing and eCommerce" } }).facts;
+    const partial = mergeQuizFacts(partialBase, acceptModelFacts(
+      { ...form, targetRoles: "Brand marketing and eCommerce" },
+      [{ section: "career_goals", label: "Target role", text: "Brand marketing", sourceField: "targetRoles" }],
+    ));
+    expect(partial.some((fact) => fact.text === "Brand marketing and eCommerce")).toBe(true);
   });
 
   it("saves a profile for the signed-in user and does not show it to someone else", async () => {
     const a = await verifiedStudent("a.profile@colby.edu", "A");
     const b = await verifiedStudent("b.profile@colby.edu", "B");
     const saved = await saveStructuredProfile(a, form, "A");
-    expect(saved.ready).toBe(true);
-    expect(saved.facts.some((fact) => fact.section === "projects" && fact.text === "Built a campus store")).toBe(true);
+    expect(saved.document.ready).toBe(true);
+    expect(saved.organization).toBe("rules");
+    expect(saved.document.facts.some((fact) => fact.section === "projects" && fact.text === "Built a campus store")).toBe(true);
     expect(await repo.getProfileDocument(b)).toBeNull();
     expect((await repo.getProfile(a))?.school).toBe("Colby College");
     await resetStructuredProfile(a);

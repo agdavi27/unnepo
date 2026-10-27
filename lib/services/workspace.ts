@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { id, nowIso, repo } from "@/lib/db/file-store";
+import { readAnthropicKey, id, nowIso, repo } from "@/lib/db/file-store";
 import type { ManualEmailDraft, PeopleSearchRequest, ProfileDocument } from "@/lib/db/types";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit } from "@/lib/credits/quote";
 import { integrations } from "@/lib/integrations/flags";
 import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligence";
+import { mergeQuizFacts, organizeQuizWithModel } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
 
 function asForm(value: unknown): FormProfile {
@@ -34,10 +35,12 @@ export async function saveStructuredProfile(userId: string, raw: unknown, name: 
   const form = asForm(raw);
   const [facts, resume] = await Promise.all([repo.getFacts(userId), repo.getLatestResume(userId)]);
   const organized = profileIntelligence.organize({ profile: form, resumeFacts: facts });
+  const modelFacts = await organizeQuizWithModel(userId, form, await readAnthropicKey());
+  const merged = modelFacts ? mergeQuizFacts(organized.facts, modelFacts) : organized.facts;
   const document: ProfileDocument = {
     userId,
     form,
-    facts: organized.facts,
+    facts: merged,
     inconsistencies: organized.inconsistencies,
     resumeId: resume?.id ?? null,
     ready: true,
@@ -72,7 +75,7 @@ export async function saveStructuredProfile(userId: string, raw: unknown, name: 
     updatedAt: nowIso(),
   });
   await repo.updateUser(userId, { onboardingStep: "done" });
-  return document;
+  return { document, organization: modelFacts && modelFacts.length ? "anthropic" : "rules" as const };
 }
 
 /** Clears the structured profile only. Contacts, credits, and resumes stay. */

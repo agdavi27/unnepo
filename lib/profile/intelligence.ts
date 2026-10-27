@@ -36,7 +36,7 @@ export type ProfileSection =
   | "excluded_topics";
 
 export type FactSource = {
-  kind: "onboarding_field" | "resume_file";
+  kind: "onboarding_field" | "onboarding_model" | "resume_file";
   field?: string;
   resumeId?: string;
   excerpt?: string;

@@ -114,11 +114,18 @@ export async function loadRemote(): Promise<{ db: Database; version: number | nu
 }
 
 async function keepStoredSecrets(db: Database) {
-  if (db.serverSecrets?.apolloApiKey) return;
+  const needsApollo = !db.serverSecrets?.apolloApiKey;
+  const needsAnthropic = !db.serverSecrets?.anthropicApiKey;
+  if (!needsApollo && !needsAnthropic) return;
   const loaded = await loadRemote();
-  const stored = loaded.db.serverSecrets?.apolloApiKey;
-  if (!stored) return;
-  db.serverSecrets = { ...loaded.db.serverSecrets, ...db.serverSecrets, apolloApiKey: stored };
+  const stored = loaded.db.serverSecrets;
+  if (!stored?.apolloApiKey && !stored?.anthropicApiKey) return;
+  db.serverSecrets = {
+    ...stored,
+    ...db.serverSecrets,
+    apolloApiKey: db.serverSecrets?.apolloApiKey || stored.apolloApiKey,
+    anthropicApiKey: db.serverSecrets?.anthropicApiKey || stored.anthropicApiKey,
+  };
 }
 
 export async function saveRemote(db: Database, version: number | null) {

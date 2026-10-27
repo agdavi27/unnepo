@@ -4,7 +4,10 @@
  */
 export const integrations = {
   apollo: false,
+  /** Email generation and other writing stay off. */
   anthropic: false,
+  /** Onboarding answers may be organized into profile facts. */
+  profileOrganization: true,
   stripeBilling: false,
   gmail: false,
   outlook: false,

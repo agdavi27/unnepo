@@ -1,6 +1,6 @@
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
-import { persistenceMode, readApolloKey, repo } from "@/lib/db/file-store";
+import { persistenceMode, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file-store";
 import { composerContext } from "@/lib/services/composer";
 import { outreachSummary, saveDraft } from "@/lib/services/outreach";
 import { readStoredResume, storeResume } from "@/lib/services/resume";
@@ -43,7 +43,7 @@ async function handle(request: Request, slug: string[]) {
       },
       configured: {
         apollo: Boolean(await readApolloKey()),
-        anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+        anthropic: Boolean(await readAnthropicKey()),
         stripe: Boolean(process.env.STRIPE_SECRET_KEY),
         gmail: ready.google,
         microsoft: ready.microsoft,
@@ -182,8 +182,8 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "app" && action === "profile" && request.method === "PUT") {
     const body = await request.json();
-    const document = await saveStructuredProfile(user.id, body.profile ?? body, user.name);
-    return json({ profile: document });
+    const saved = await saveStructuredProfile(user.id, body.profile ?? body, user.name);
+    return json({ profile: saved.document, organization: saved.organization });
   }
   if (root === "app" && action === "profile" && request.method === "DELETE") {
     await resetStructuredProfile(user.id);

@@ -118,7 +118,7 @@ export function AppHome() {
 
   async function saveProfile(profile: Profile) {
     setSaving(true);
-    setNotice("");
+    setNotice("Organizing your answers into profile facts…");
     try {
       const response = await fetch("/api/app/profile", {
         method: "PUT",
@@ -131,7 +131,7 @@ export function AppHome() {
         return;
       }
       setEditing(false);
-      setNotice("Profile saved.");
+      setNotice(payload.organization === "anthropic" ? "Profile saved. Your answers were organized into profile facts." : "Profile saved.");
       await load();
     } finally {
       setSaving(false);
