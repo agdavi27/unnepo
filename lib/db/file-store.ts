@@ -723,6 +723,15 @@ export const repo = {
       return rows;
     });
   },
+  /** Removes contacts from one student's list. The shared contact record and ledger stay. */
+  async deleteSaved(userId: string, contactIds: string[]) {
+    return withLock((db) => {
+      const remove = new Set(contactIds);
+      const before = db.saved.length;
+      db.saved = db.saved.filter((item) => !(item.userId === userId && remove.has(item.contactId)));
+      return before - db.saved.length;
+    });
+  },
   async listSavedDetailed(userId: string) {
     return withLock((db) =>
       db.saved

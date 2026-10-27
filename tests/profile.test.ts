@@ -3,7 +3,7 @@ import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
-import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail } from "@/lib/services/workspace";
+import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail, deleteWorkspaceContacts, workspaceState } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { integrations } from "@/lib/integrations/flags";
@@ -138,7 +138,8 @@ describe("structured profile", () => {
     const userId = await verifiedStudent("live.search@colby.edu", "Live Searcher");
     await saveStructuredProfile(userId, form, "Live Searcher");
     const bodies: Array<Record<string, unknown>> = [];
-    setContactFetcher(async (_input, init) => {
+    setContactFetcher(async (input, init) => {
+      if (String(input).includes("bulk_match")) return Response.json({ matches: [] });
       bodies.push(JSON.parse(String(init?.body ?? "{}")));
       const people = Array.from({ length: 30 }, (_, index) => ({
         id: `p${index}`,
@@ -176,32 +177,56 @@ describe("structured profile", () => {
     expect(calls).toBe(0);
   });
 
-  it("charges an email unlock only when Apollo returns a verified email, once", async () => {
+  it("includes verified emails with a search at no extra credit and retries lookups for free", async () => {
     process.env.APOLLO_API_KEY = "test-key";
-    process.env.DAILY_USER_SPEND_CENTS = "100000";
-    const userId = await verifiedStudent("unlock@colby.edu", "Unlocker");
-    await saveStructuredProfile(userId, form, "Unlocker");
+    const userId = await verifiedStudent("emails@colby.edu", "Emailer");
+    await saveStructuredProfile(userId, form, "Emailer");
     let status = "guessed";
-    setContactFetcher(async (input) => {
-      if (String(input).includes("people/match")) return Response.json({ person: { email: "jo@patagonia.com", email_status: status } });
-      return Response.json({ people: [{ id: "jo", first_name: "Jo", last_name: "Lee", title: "Brand Manager", organization: { name: "Patagonia" } }] });
+    const urls: string[] = [];
+    setContactFetcher(async (input, init) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("bulk_match")) {
+        const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
+        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@patagonia.com`, email_status: item.id === "jo" ? "verified" : status })) });
+      }
+      if (url.includes("people/match")) return Response.json({ person: { email: "al@patagonia.com", email_status: status } });
+      return Response.json({
+        people: [
+          { id: "jo", first_name: "Jo", last_name: "Lee", title: "Brand Manager", organization: { name: "Patagonia" } },
+          { id: "al", first_name: "Al", last_name: "Diaz", title: "Brand Manager", organization: { name: "Patagonia" } },
+        ],
+      });
     });
-    await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
-    const afterSearch = (await repo.getAccount(userId))!.balance;
+    const result = await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
+    expect(result.charged).toBe(1);
+    expect(urls.filter((url) => url.includes("bulk_match"))).toHaveLength(1);
+    const balance = (await repo.getAccount(userId))!.balance;
+    const state = await workspaceState(userId);
+    expect(state.contacts.find((contact) => contact.id === "apollo_jo")?.email).toBe("jo@patagonia.com");
+    expect(state.contacts.find((contact) => contact.id === "apollo_al")?.email).toBeUndefined();
 
-    const unverified = await unlockWorkspaceEmail(userId, { contactId: "apollo_jo" });
-    expect(unverified.ok).toBe(false);
-    expect(unverified.charged).toBe(0);
-    expect((await repo.getAccount(userId))!.balance).toBe(afterSearch);
-
+    const still = await unlockWorkspaceEmail(userId, { contactId: "apollo_al" });
+    expect(still.ok).toBe(false);
     status = "verified";
-    const unlocked = await unlockWorkspaceEmail(userId, { contactId: "apollo_jo" });
-    expect(unlocked.ok).toBe(true);
-    expect(unlocked.charged).toBe(1);
-    expect(unlocked.email).toBe("jo@patagonia.com");
-    const again = await unlockWorkspaceEmail(userId, { contactId: "apollo_jo" });
-    expect(again.charged).toBe(0);
-    expect((await repo.getAccount(userId))!.balance).toBe(afterSearch - 1);
+    const found = await unlockWorkspaceEmail(userId, { contactId: "apollo_al" });
+    expect(found.ok).toBe(true);
+    expect(found.email).toBe("al@patagonia.com");
+    expect((await repo.getAccount(userId))!.balance).toBe(balance);
+  });
+
+  it("deletes contacts from one student's list only", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    const a = await verifiedStudent("delete.a@colby.edu", "Deleter A");
+    const b = await verifiedStudent("delete.b@colby.edu", "Deleter B");
+    await saveStructuredProfile(a, form, "Deleter A");
+    await repo.saveFoundContacts(a, ["c1", "c2"]);
+    await repo.saveFoundContacts(b, ["c1"]);
+    const removed = await deleteWorkspaceContacts(a, { contactIds: ["c1"] });
+    expect(removed.removed).toBe(1);
+    expect((await repo.listSaved(a)).map((row) => row.contactId)).toEqual(["c2"]);
+    expect((await repo.listSaved(b)).map((row) => row.contactId)).toEqual(["c1"]);
+    await expect(deleteWorkspaceContacts(a, { contactIds: [] })).rejects.toThrow(/at least one/);
   });
 
   it("quotes credits and will not commit them while providers are off", () => {

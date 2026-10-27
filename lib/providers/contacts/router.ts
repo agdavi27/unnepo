@@ -326,6 +326,70 @@ async function apolloMatch(apiKey: string, contact: Contact) {
   } as const;
 }
 
+/** Apollo bulk match takes at most 10 people per request. */
+const APOLLO_BULK_SIZE = 10;
+
+/**
+ * Looks up work emails for people a search just returned. Stops early, without failing the
+ * search, when Apollo errors or the daily spend limit is reached.
+ */
+export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
+  const results = new Map<string, { email: string | null; emailStatus: Contact["emailStatus"] }>();
+  const apolloKey = await readApolloKey();
+  if (!apolloKey) return results;
+  const perPerson = estimateRequestCost("enrich").cents;
+  const people = contacts.filter((contact) => contact.provider === "apollo" && contact.externalId);
+  for (let start = 0; start < people.length; start += APOLLO_BULK_SIZE) {
+    const batch = people.slice(start, start + APOLLO_BULK_SIZE);
+    const costCents = perPerson * batch.length;
+    try {
+      await assertSpendAllowed(userId, costCents);
+    } catch {
+      break;
+    }
+    const started = Date.now();
+    try {
+      const response = await contactFetch("https://api.apollo.io/api/v1/people/bulk_match", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apolloKey },
+        body: JSON.stringify({
+          details: batch.map((contact) => ({
+            id: contact.externalId,
+            first_name: contact.firstName,
+            last_name: contact.lastName,
+            organization_name: contact.company,
+            domain: contact.companyDomain,
+          })),
+          reveal_personal_emails: false,
+        }),
+      });
+      if (!response.ok) throw new Error(`Apollo bulk match failed (${response.status})`);
+      const body = (await response.json()) as { matches?: Array<Record<string, unknown> | null> };
+      const matches = body.matches ?? [];
+      batch.forEach((contact, index) => {
+        const person = matches.find((item) => item && String(item.id ?? "") === contact.externalId) ?? matches[index] ?? null;
+        const email = person && typeof person.email === "string" ? person.email : null;
+        const verified = Boolean(email) && person?.email_status === "verified";
+        results.set(contact.id, { email: verified ? email : null, emailStatus: verified ? "verified" : email ? "unverified" : "unavailable" });
+      });
+      await recordUsage({ userId, provider: "apollo", operation: "enrich", success: true, latencyMs: Date.now() - started, costCents, estimated: true });
+    } catch (error) {
+      await recordUsage({
+        userId,
+        provider: "apollo",
+        operation: "enrich",
+        success: false,
+        latencyMs: Date.now() - started,
+        costCents: 0,
+        estimated: true,
+        error: error instanceof Error ? error.message : "bulk_enrich_failed",
+      });
+      break;
+    }
+  }
+  return results;
+}
+
 export function findSampleById(contactId: string) {
   return SAMPLE_CONTACTS.find((contact) => contact.id === contactId) ?? null;
 }

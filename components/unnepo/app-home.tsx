@@ -13,10 +13,12 @@ import {
   type Profile,
   type SearchRequest,
 } from "@/components/unnepo/UnnepoForms";
+import { PUBLIC_PLANS } from "@/lib/config";
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
-  credits: { balance: number };
+  user: { name: string; email: string };
+  credits: { balance: number; plan: string; includedAllowance: number };
   profile: { ready: boolean; form: Profile; organizedProfile: unknown | null } | null;
   studentFacts: StudentFact[];
   resume: { id: string; fileName: string; byteSize: number } | null;
@@ -26,12 +28,14 @@ type Workspace = {
   integrations: { apollo: boolean; anthropic: boolean };
 };
 
-type View = "contacts" | "find" | "analytics";
+type View = "contacts" | "find" | "analytics" | "settings";
 const VIEWS: { id: View; label: string }[] = [
   { id: "contacts", label: "My Contacts" },
   { id: "find", label: "Find New Contacts" },
   { id: "analytics", label: "Analytics" },
+  { id: "settings", label: "Settings" },
 ];
+const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
 function ModelValue({ value }: { value: unknown }) {
   if (value === null || value === undefined) return <span className="text-faint">null</span>;
@@ -81,6 +85,8 @@ export function AppHome() {
   const [searching, setSearching] = useState(false);
   const [emailContact, setEmailContact] = useState<Contact | null>(null);
   const [unlocking, setUnlocking] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/app/state");
@@ -194,8 +200,7 @@ export function AppHome() {
     }
   }
 
-  async function unlockEmail(contact: Contact) {
-    if (!window.confirm(`Unlock ${contact.name}'s verified work email for 1 credit? You're only charged if a verified email is found.`)) return;
+  async function findEmail(contact: Contact) {
     setUnlocking(contact.id);
     try {
       const response = await fetch("/api/app/unlock", {
@@ -204,11 +209,54 @@ export function AppHome() {
         body: JSON.stringify({ contactId: contact.id }),
       });
       const payload = await response.json();
-      setNotice(payload.message || payload.error || "Could not unlock that email.");
+      setNotice(payload.message || payload.error || "Could not look up that email.");
       await load();
     } finally {
       setUnlocking(null);
     }
+  }
+
+  async function deleteContacts(ids: string[]) {
+    if (!ids.length) return;
+    const label = ids.length === 1 ? "this contact" : `${ids.length} contacts`;
+    if (!window.confirm(`Delete ${label} from My Contacts? Credits already used are not refunded.`)) return;
+    setDeleting(true);
+    try {
+      const response = await fetch("/api/app/contacts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactIds: ids }),
+      });
+      const payload = await response.json();
+      setNotice(payload.message || payload.error || "Could not delete those contacts.");
+      if (response.ok) setSelected(new Set());
+      await load();
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  function toggleSelected(contactId: string) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(contactId)) next.delete(contactId);
+      else next.add(contactId);
+      return next;
+    });
+  }
+
+  async function requestUpgrade(planName: string) {
+    const response = await fetch("/api/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ plan: planName }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (payload.url) {
+      window.location.assign(payload.url);
+      return;
+    }
+    setNotice(payload.error || "Upgrades are not available right now.");
   }
 
   async function generateDraft(contact: Contact, input: Omit<EmailDraft, "subject" | "body">) {
@@ -241,10 +289,14 @@ export function AppHome() {
   const peopleFound = data?.searches.reduce((sum, item) => sum + (item.resultCount ?? 0), 0) ?? 0;
   const creditsSpent = data?.searches.reduce((sum, item) => sum + item.creditsCharged, 0) ?? 0;
 
+  const contacts = data?.contacts ?? [];
+  const allSelected = contacts.length > 0 && contacts.every((contact) => selected.has(contact.id));
+  const currentPlan = data?.credits.plan ?? "free";
+
   return (
     <div className="min-h-screen bg-bg text-ink [color-scheme:dark]">
       <header className="sticky top-0 z-20 border-b border-line bg-bg/80 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center justify-between gap-3 px-4 pt-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 pt-4 sm:px-6 lg:px-8">
           <span className="text-2xl font-semibold tracking-tight">unnepo.</span>
           <div className="flex items-center gap-4 text-sm">
             {data && <span className="rounded-full border border-line px-3 py-1 text-muted"><span className="text-ink">{data.credits.balance}</span> credits</span>}
@@ -252,14 +304,14 @@ export function AppHome() {
           </div>
         </div>
         {data && !showOnboarding ? (
-          <nav className="mx-auto flex max-w-2xl gap-5 px-4 pt-4 text-sm sm:gap-6" aria-label="Main">
+          <nav className="mx-auto flex max-w-6xl gap-5 overflow-x-auto px-4 pt-4 text-sm [scrollbar-width:none] sm:gap-7 sm:px-6 lg:px-8" aria-label="Main">
             {VIEWS.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => setView(item.id)}
                 aria-current={view === item.id ? "page" : undefined}
-                className={`-mb-px shrink-0 border-b-2 pb-3 ${view === item.id ? "border-white text-white" : "border-transparent text-muted hover:text-white"}`}
+                className={`shrink-0 border-b-2 pb-3 ${view === item.id ? "border-white text-white" : "border-transparent text-muted hover:text-white"}`}
               >
                 {item.label}
               </button>
@@ -269,7 +321,7 @@ export function AppHome() {
           <div className="pb-4" />
         )}
       </header>
-      <main className="mx-auto flex max-w-2xl flex-col gap-8 px-4 py-10">
+      <main className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8">
         {error && <p className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</p>}
         {!data && !error && <p className="text-sm text-muted">Loading your workspace…</p>}
         {notice && (
@@ -279,51 +331,79 @@ export function AppHome() {
           </div>
         )}
         {data && showOnboarding && (
-          <ProfileOnboarding
-            initialProfile={profile}
-            saving={saving}
-            onResumeUpload={uploadResume}
-            onSave={saveProfile}
-          />
+          <div className="mx-auto w-full max-w-3xl">
+            <ProfileOnboarding
+              initialProfile={profile}
+              saving={saving}
+              onResumeUpload={uploadResume}
+              onSave={saveProfile}
+            />
+          </div>
         )}
         {data && !showOnboarding && view === "contacts" && (
           <>
-            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">My Contacts</h1>
-            <section>
-              <h2 className={sectionTitle}>Saved contacts · {data.contacts.length}</h2>
-              {data.contacts.length === 0 ? (
-                <div className="mt-3 space-y-4">
-                  <p className="text-sm text-muted">No saved contacts yet. People you find will show up here.</p>
-                  <button type="button" onClick={() => setView("find")} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">Find new contacts</button>
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-bold tracking-tight md:text-4xl">My Contacts</h1>
+                <p className="mt-1 text-sm text-muted">{contacts.length} saved · {contacts.filter((contact) => contact.email).length} with a verified email</p>
+              </div>
+              {contacts.length > 0 && (
+                <div className="flex items-center gap-2">
+                  {selected.size > 0 && (
+                    <button type="button" disabled={deleting} onClick={() => void deleteContacts([...selected])} className="rounded-xl border border-red-900/70 px-3 py-1.5 text-sm text-red-300 hover:bg-red-950/40 disabled:opacity-50">
+                      {deleting ? "Deleting…" : `Delete ${selected.size} selected`}
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setView("find")} className="rounded-xl bg-white px-4 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">Find more</button>
                 </div>
-              ) : (
-                <ul className="mt-3 divide-y divide-line">
-                  {data.contacts.map((contact) => (
-                    <li key={contact.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-                      <div>
-                        <p className="font-medium">{contact.name}</p>
-                        <p className="text-sm text-muted">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
-                        {contact.email && <p className="mt-0.5 text-sm text-zinc-300">{contact.email}</p>}
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        {!contact.email && data.integrations.apollo && (
-                          <button type="button" disabled={unlocking === contact.id} onClick={() => void unlockEmail(contact)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">
-                            {unlocking === contact.id ? "Unlocking…" : "Unlock email · 1 cr"}
+              )}
+            </div>
+            {contacts.length === 0 ? (
+              <div className="rounded-2xl border border-line bg-panel p-8 text-center">
+                <p className="text-sm text-muted">No saved contacts yet. People you find will show up here.</p>
+                <button type="button" onClick={() => setView("find")} className="mt-4 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">Find new contacts</button>
+              </div>
+            ) : (
+              <section className="overflow-hidden rounded-2xl border border-line">
+                <div className="hidden grid-cols-[2rem_minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_12.5rem] items-center gap-4 border-b border-line bg-panel px-4 py-3 text-xs font-semibold uppercase tracking-[0.12em] text-faint md:grid">
+                  <input type="checkbox" aria-label="Select all contacts" checked={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(contacts.map((contact) => contact.id)))} />
+                  <span>Name</span>
+                  <span>Role</span>
+                  <span>Email</span>
+                  <span className="sr-only">Actions</span>
+                </div>
+                <ul className="divide-y divide-line">
+                  {contacts.map((contact) => (
+                    <li key={contact.id} className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-4 gap-y-2 px-4 py-3 md:grid-cols-[2rem_minmax(0,1.2fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_12.5rem]">
+                      <input type="checkbox" aria-label={`Select ${contact.name}`} checked={selected.has(contact.id)} onChange={() => toggleSelected(contact.id)} />
+                      <p className="truncate font-medium">{contact.name}</p>
+                      <p className="col-start-2 truncate text-sm text-muted md:col-start-auto">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
+                      <div className="col-start-2 min-w-0 text-sm md:col-start-auto">
+                        {contact.email ? (
+                          <a href={`mailto:${contact.email}`} className="truncate text-zinc-300 hover:text-white">{contact.email}</a>
+                        ) : data.integrations.apollo ? (
+                          <button type="button" disabled={unlocking === contact.id} onClick={() => void findEmail(contact)} className="text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-50">
+                            {unlocking === contact.id ? "Looking up…" : "No verified email · Try again"}
                           </button>
+                        ) : (
+                          <span className="text-faint">No email yet</span>
                         )}
-                        <button type="button" onClick={() => setEmailContact(contact)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
+                      </div>
+                      <div className="col-start-2 flex gap-2 md:col-start-auto md:justify-end">
+                        <button type="button" onClick={() => setEmailContact(contact)} className="whitespace-nowrap rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
+                        <button type="button" disabled={deleting} onClick={() => void deleteContacts([contact.id])} aria-label={`Delete ${contact.name}`} className="rounded-xl border border-line px-3 py-1.5 text-sm text-muted hover:border-red-900/70 hover:text-red-300 disabled:opacity-50">Delete</button>
                       </div>
                     </li>
                   ))}
                 </ul>
-              )}
-            </section>
+              </section>
+            )}
             {data.drafts.length > 0 && (
               <section className="border-t border-line pt-8">
                 <h2 className={sectionTitle}>Saved drafts · {data.drafts.length}</h2>
-                <ul className="mt-3 space-y-1 text-sm text-muted">
+                <ul className="mt-3 grid gap-2 text-sm text-muted sm:grid-cols-2 lg:grid-cols-3">
                   {data.drafts.map((draft) => (
-                    <li key={draft.id}>{draft.subject || "Untitled draft"} · not sent</li>
+                    <li key={draft.id} className="truncate rounded-xl border border-line bg-panel px-4 py-3">{draft.subject || "Untitled draft"} · not sent</li>
                   ))}
                 </ul>
               </section>
@@ -332,71 +412,72 @@ export function AppHome() {
         )}
         {data && !showOnboarding && view === "find" && (
           <>
-            <div className="space-y-5">
+            <div className="flex flex-wrap items-end justify-between gap-4">
               <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Who do you want to meet?</h1>
               <div className="inline-flex rounded-full border border-line bg-panel p-1">
                 <button type="button" onClick={() => setTab("find")} className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${tab === "find" ? "bg-white text-black" : "text-muted hover:text-white"}`}>Find for Me</button>
                 <button type="button" onClick={() => setTab("custom")} className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${tab === "custom" ? "bg-white text-black" : "text-muted hover:text-white"}`}>Custom Search</button>
               </div>
             </div>
-            {tab === "find" ? (
-              <FindForMe
-                profileReady
-                loading={searching}
-                onSearch={search}
-                onEditProfile={(action) => {
-                  if (action === "reset") void resetProfile();
-                  else setEditing(true);
-                }}
-              />
-            ) : (
-              <CustomSearch loading={searching} onSearch={search} />
-            )}
-            <section>
-              <h2 className={sectionTitle}>Results</h2>
-              {data.searches[0]?.status === "completed" ? (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm text-muted">
-                    Your last search found {data.searches[0].resultCount} {data.searches[0].resultCount === 1 ? "person" : "people"} and used {data.searches[0].creditsCharged} {data.searches[0].creditsCharged === 1 ? "credit" : "credits"}.
-                    {data.searches[0].prompt ? ` “${data.searches[0].prompt}”` : ""}
-                  </p>
-                  {data.searches[0].resultCount > 0 && (
-                    <button type="button" onClick={() => setView("contacts")} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">View in My Contacts</button>
-                  )}
-                </div>
-              ) : data.searches[0] ? (
-                <p className="mt-3 text-sm text-muted">
-                  Not connected yet. Your last request for up to {data.searches[0].quantity} people ({data.searches[0].creditsQuoted} {data.searches[0].creditsQuoted === 1 ? "credit" : "credits"}) was saved and did not charge anything.
-                  {data.searches[0].prompt ? ` “${data.searches[0].prompt}”` : ""}
-                </p>
-              ) : data.integrations.apollo ? (
-                <p className="mt-3 text-sm text-muted">Run a search to find people. You&apos;re only charged for people found, 1 credit per 25.</p>
+            <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_340px]">
+              {tab === "find" ? (
+                <FindForMe
+                  profileReady
+                  loading={searching}
+                  onSearch={search}
+                  onEditProfile={(action) => {
+                    if (action === "reset") void resetProfile();
+                    else setEditing(true);
+                  }}
+                />
               ) : (
-                <p className="mt-3 text-sm text-muted">People search is not connected yet. A search saves your request and does not return people or spend credits.</p>
+                <CustomSearch loading={searching} onSearch={search} />
               )}
-            </section>
-            <details className="group border-t border-line pt-8">
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-                <h2 className={sectionTitle}>Profile facts</h2>
-                <span className="text-xs text-muted group-open:hidden">Show</span>
-                <span className="hidden text-xs text-muted group-open:inline">Hide</span>
-              </summary>
-              {data.resume && <p className="mt-3 text-xs text-faint">Resume file: {data.resume.fileName}</p>}
-              <div className="mt-4 rounded-2xl border border-line bg-panel p-5">
-                {data.profile?.organizedProfile ? <ModelValue value={data.profile.organizedProfile} /> : <p className="text-sm text-muted">Save your profile to create this section.</p>}
-              </div>
-            </details>
+              <aside className="space-y-8">
+                <section className="rounded-2xl border border-line bg-panel p-5">
+                  <h2 className={sectionTitle}>Results</h2>
+                  {data.searches[0]?.status === "completed" ? (
+                    <div className="mt-3 space-y-3">
+                      <p className="text-sm text-muted">
+                        Your last search found {data.searches[0].resultCount} {data.searches[0].resultCount === 1 ? "person" : "people"} and used {data.searches[0].creditsCharged} {data.searches[0].creditsCharged === 1 ? "credit" : "credits"}.
+                        {data.searches[0].prompt ? ` “${data.searches[0].prompt}”` : ""}
+                      </p>
+                      {data.searches[0].resultCount > 0 && (
+                        <button type="button" onClick={() => setView("contacts")} className="w-full rounded-xl border border-line px-3 py-2 text-sm hover:bg-white/5">View in My Contacts</button>
+                      )}
+                    </div>
+                  ) : data.searches[0] ? (
+                    <p className="mt-3 text-sm text-muted">
+                      Not connected yet. Your last request for up to {data.searches[0].quantity} people ({data.searches[0].creditsQuoted} {data.searches[0].creditsQuoted === 1 ? "credit" : "credits"}) was saved and did not charge anything.
+                    </p>
+                  ) : (
+                    <p className="mt-3 text-sm text-muted">Run a search to find people. You&apos;re only charged for people found, 1 credit per 25. Verified work emails are included.</p>
+                  )}
+                </section>
+                <details className="group rounded-2xl border border-line bg-panel p-5">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                    <h2 className={sectionTitle}>Profile facts</h2>
+                    <span className="text-xs text-muted group-open:hidden">Show</span>
+                    <span className="hidden text-xs text-muted group-open:inline">Hide</span>
+                  </summary>
+                  {data.resume && <p className="mt-3 text-xs text-faint">Resume file: {data.resume.fileName}</p>}
+                  <div className="mt-4">
+                    {data.profile?.organizedProfile ? <ModelValue value={data.profile.organizedProfile} /> : <p className="text-sm text-muted">Save your profile to create this section.</p>}
+                  </div>
+                </details>
+              </aside>
+            </div>
           </>
         )}
         {data && !showOnboarding && view === "analytics" && (
           <>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Analytics</h1>
-            <section className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {[
-                ["Saved contacts", data.contacts.length],
+                ["Saved contacts", contacts.length],
+                ["Verified emails", contacts.filter((contact) => contact.email).length],
                 ["Drafts saved", data.drafts.length],
                 ["Emails sent", 0],
-                ["Searches requested", data.searches.length],
                 ["People found", peopleFound],
                 ["Credits left", data.credits.balance],
               ].map(([name, value]) => (
@@ -418,7 +499,7 @@ export function AppHome() {
                   {data.searches.slice(0, 10).map((item) => (
                     <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 text-sm">
                       <div className="min-w-0">
-                        <p className="font-medium">{item.mode === "automatic" ? "Find for Me" : "Custom Search"} · up to {item.quantity} people</p>
+                        <p className="font-medium">{item.mode === "automatic" ? "Find for Me" : "Custom Search"} · {item.status === "completed" ? `${item.resultCount} found` : `up to ${item.quantity} people`}</p>
                         {item.prompt && <p className="truncate text-muted">{item.prompt}</p>}
                       </div>
                       <p className="shrink-0 text-xs text-faint">{new Date(item.createdAt).toLocaleDateString()} · {item.creditsCharged} charged</p>
@@ -426,6 +507,65 @@ export function AppHome() {
                   ))}
                 </ul>
               )}
+            </section>
+          </>
+        )}
+        {data && !showOnboarding && view === "settings" && (
+          <>
+            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
+            <section className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <h2 className={sectionTitle}>Account</h2>
+                <p className="mt-3 font-medium">{data.user.name || "Student"}</p>
+                <p className="text-sm text-muted">{data.user.email}</p>
+                <button type="button" onClick={logout} className="mt-4 rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Log out</button>
+              </div>
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <h2 className={sectionTitle}>Profile</h2>
+                <p className="mt-3 text-sm text-muted">Your profile powers Find for Me and the facts used in your emails.</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" onClick={() => setEditing(true)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Edit profile</button>
+                  <button type="button" onClick={() => void resetProfile()} className="rounded-xl border border-line px-3 py-1.5 text-sm text-muted hover:bg-white/5">Start over</button>
+                </div>
+              </div>
+            </section>
+            <section className="space-y-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight">Plans</h2>
+                  <p className="mt-1 text-sm text-muted">
+                    You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {data.credits.balance} {data.credits.balance === 1 ? "credit" : "credits"} left.
+                  </p>
+                </div>
+                <p className="text-xs text-faint">1 credit = 25 people with verified emails</p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-3">
+                {PUBLIC_PLANS.map((plan) => {
+                  const current = plan.id === currentPlan;
+                  return (
+                    <div key={plan.id} className={`flex flex-col rounded-2xl border p-5 ${current ? "border-white bg-card" : "border-line bg-panel"}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-lg font-semibold">{plan.name}</h3>
+                        {current ? (
+                          <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-black">Current plan</span>
+                        ) : plan.popular ? (
+                          <span className="rounded-full border border-line px-2.5 py-0.5 text-xs text-muted">Popular</span>
+                        ) : null}
+                      </div>
+                      <p className="mt-3 text-3xl font-bold tabular-nums">{plan.priceLabel}<span className="text-sm font-normal text-muted">{plan.monthly ? " / month" : ""}</span></p>
+                      <p className="mt-1 text-sm text-muted">{plan.blurb}</p>
+                      <p className="mt-4 text-sm">{plan.monthly ? `${plan.credits} credits each month` : `${plan.credits} credits to start`}</p>
+                      <div className="mt-auto pt-5">
+                        {current ? (
+                          <p className="text-center text-sm text-muted">Your plan</p>
+                        ) : plan.monthly ? (
+                          <button type="button" onClick={() => void requestUpgrade(plan.id)} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">Upgrade to {plan.name}</button>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </section>
           </>
         )}

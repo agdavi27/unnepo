@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { readAnthropicKey, id, nowIso, repo } from "@/lib/db/file-store";
 import type { Contact, ManualEmailDraft, PeopleSearchRequest, ProfileDocument } from "@/lib/db/types";
 import { serverConfig } from "@/lib/config";
-import { PEOPLE_PER_CREDIT, VERIFIED_EMAIL_UNLOCK_CREDITS, creditsForPeople, prepareSearchDebit, prepareUnlockDebit } from "@/lib/credits/quote";
-import { enrichPerson, searchPeople } from "@/lib/providers/contacts/router";
+import { PEOPLE_PER_CREDIT, creditsForPeople, prepareSearchDebit, prepareUnlockDebit } from "@/lib/credits/quote";
+import { enrichPeopleBatch, enrichPerson, searchPeople } from "@/lib/providers/contacts/router";
 import { emptyFilters, filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
 import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligence";
@@ -244,6 +244,17 @@ async function runLivePeopleSearch(
     }
     charged = spend.charged;
   }
+  // Credits pay for the people. Their verified work emails come with them at no extra credit.
+  const emails = await enrichPeopleBatch(people, userId);
+  if (emails.size) {
+    await repo.upsertContacts(
+      people.map((person) => {
+        const found = emails.get(person.id);
+        return found ? { ...person, email: found.email, emailStatus: found.emailStatus, fetchedAt: nowIso() } : person;
+      }),
+    );
+  }
+  const withEmail = people.filter((person) => emails.get(person.id)?.email).length;
   await repo.saveFoundContacts(userId, people.map((person) => person.id));
   const request: PeopleSearchRequest = {
     id: requestId,
@@ -267,67 +278,37 @@ async function runLivePeopleSearch(
     charged,
     status: "completed" as const,
     message: people.length
-      ? `Found ${people.length} ${people.length === 1 ? "person" : "people"} and added them to My Contacts. ${charged} ${charged === 1 ? "credit was" : "credits were"} used.`
+      ? `Found ${people.length} ${people.length === 1 ? "person" : "people"} (${withEmail} with a verified work email) and added them to My Contacts. ${charged} ${charged === 1 ? "credit was" : "credits were"} used.`
       : "Apollo found no new people for that search. No credits were used.",
   };
 }
 
+/** Retries the email lookup for one saved contact. It never costs credits. */
 export async function unlockWorkspaceEmail(userId: string, raw: unknown) {
   const contactId = String((raw as { contactId?: unknown } | null)?.contactId ?? "").slice(0, 120);
   if (!integrations.apollo) {
-    return { ok: false, code: "not_connected", charged: 0, email: null, message: "Email unlock is not connected yet. No credits were used." };
+    return { ok: false, code: "not_connected", charged: 0, email: null, message: "Email lookup is not connected yet." };
   }
   const saved = await repo.getSavedByUserAndContact(userId, contactId);
   const contact = saved ? await repo.getContact(contactId) : null;
   if (!saved || !contact) throw new ServiceError("That contact is not in your saved list.", "not_found", 404);
-  if (saved.creditCharged && contact.email) {
-    return { ok: true, code: "already", charged: 0, email: contact.email, message: "Already unlocked. No credit was used." };
-  }
-  const account = await repo.getAccount(userId);
-  if ((account?.balance ?? 0) < VERIFIED_EMAIL_UNLOCK_CREDITS) {
-    return { ok: false, code: "insufficient_credits", charged: 0, email: null, message: "You need 1 credit to unlock a verified work email." };
+  if (contact.email && contact.emailStatus === "verified") {
+    return { ok: true, code: "already", charged: 0, email: contact.email, message: "This contact already has a verified email." };
   }
   const enriched = await enrichPerson(contact, userId);
   if (!enriched.ok || !enriched.email || enriched.emailStatus !== "verified") {
-    return {
-      ok: false,
-      code: "no_verified_email",
-      charged: 0,
-      email: null,
-      message: "Apollo did not return a verified work email for this person. No credit was used.",
-    };
+    return { ok: false, code: "no_verified_email", charged: 0, email: null, message: "Apollo still has no verified work email for this person. No credits were used." };
   }
-  const spend = await repo.spendCredits({
-    userId,
-    amount: VERIFIED_EMAIL_UNLOCK_CREDITS,
-    idempotencyKey: `unlock:${userId}:${contactId}`,
-    note: `Verified work email for ${contact.fullName}`,
-    entryType: "unlock_debit",
-  });
-  if (spend.insufficient) {
-    return { ok: false, code: "insufficient_credits", charged: 0, email: null, message: "You need 1 credit to unlock a verified work email." };
-  }
-  await repo.upsertContacts([
-    {
-      ...contact,
-      email: enriched.email,
-      emailStatus: enriched.emailStatus,
-      phone: enriched.phone ?? contact.phone,
-      phoneStatus: enriched.phoneStatus,
-      fetchedAt: nowIso(),
-      costCents: enriched.costCents,
-      costEstimated: enriched.estimated,
-    },
-  ]);
-  await repo.updateSaved(userId, saved.id, { creditCharged: true, unlockedAt: nowIso() });
-  await repo.insertAnalytics({ userId, name: "unlock", properties: { source: "apollo" } });
-  return {
-    ok: true,
-    code: spend.duplicate ? "already" : "unlocked",
-    charged: spend.charged,
-    email: enriched.email,
-    message: spend.duplicate ? "Already unlocked. No credit was used." : "Verified work email unlocked. 1 credit was used.",
-  };
+  await repo.upsertContacts([{ ...contact, email: enriched.email, emailStatus: "verified", fetchedAt: nowIso() }]);
+  return { ok: true, code: "found", charged: 0, email: enriched.email, message: "Found a verified work email. No credits were used." };
+}
+
+export async function deleteWorkspaceContacts(userId: string, raw: unknown) {
+  const list = (raw as { contactIds?: unknown } | null)?.contactIds;
+  const contactIds = (Array.isArray(list) ? list : []).map((item) => String(item).slice(0, 120)).filter(Boolean).slice(0, 500);
+  if (!contactIds.length) throw new ServiceError("Choose at least one contact to delete.", "contacts", 400);
+  const removed = await repo.deleteSaved(userId, contactIds);
+  return { removed, message: `Deleted ${removed} ${removed === 1 ? "contact" : "contacts"} from My Contacts.` };
 }
 
 const EMAIL_GOALS: Record<string, string> = {
@@ -500,7 +481,8 @@ export function emailUnlockQuote(userId: string, contactId: string) {
 }
 
 export async function workspaceState(userId: string) {
-  const [document, credits, resume, saved, searches, drafts] = await Promise.all([
+  const [user, document, credits, resume, saved, searches, drafts] = await Promise.all([
+    repo.getUserById(userId),
     repo.getProfileDocument(userId),
     repo.getAccount(userId),
     repo.getLatestResume(userId),
@@ -509,7 +491,7 @@ export async function workspaceState(userId: string) {
     repo.listManualDrafts(userId),
   ]);
   const studentFacts = document ? profileIntelligence.approvedForOutreach(document.facts, document.form.excludedTopics) : [];
-  const contacts = saved.flatMap(({ saved: row, contact }) => {
+  const contacts = saved.flatMap(({ contact }) => {
     if (!contact) return [];
     const verifiedFacts = [
       contact.title ? { id: `${contact.id}:title`, text: contact.title, verified: contact.dataSource === "provider" } : null,
@@ -522,12 +504,13 @@ export async function workspaceState(userId: string) {
       name: contact.fullName,
       title: contact.title,
       company: contact.company,
-      email: row.creditCharged && contact.email ? contact.email : undefined,
+      email: contact.email && contact.emailStatus === "verified" ? contact.email : undefined,
       facts: verifiedFacts,
     }];
   });
   return {
-    credits: { balance: credits?.balance ?? 0 },
+    user: { name: user?.name ?? "", email: user?.email ?? "" },
+    credits: { balance: credits?.balance ?? 0, plan: credits?.plan ?? "free", includedAllowance: credits?.includedAllowance ?? 0 },
     profile: document,
     studentFacts,
     resume: resume ? { id: resume.id, fileName: resume.fileName, byteSize: resume.byteSize } : null,
