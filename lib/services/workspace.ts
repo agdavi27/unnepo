@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { readAnthropicKey, id, nowIso, repo } from "@/lib/db/file-store";
-import type { ManualEmailDraft, PeopleSearchRequest, ProfileDocument } from "@/lib/db/types";
-import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit } from "@/lib/credits/quote";
+import type { Contact, ManualEmailDraft, PeopleSearchRequest, ProfileDocument } from "@/lib/db/types";
+import { serverConfig } from "@/lib/config";
+import { PEOPLE_PER_CREDIT, VERIFIED_EMAIL_UNLOCK_CREDITS, creditsForPeople, prepareSearchDebit, prepareUnlockDebit } from "@/lib/credits/quote";
+import { enrichPerson, searchPeople } from "@/lib/providers/contacts/router";
+import { emptyFilters, filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
 import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligence";
 import { organizeQuizWithModel } from "@/lib/profile/quiz-model";
@@ -85,9 +88,6 @@ export async function resetStructuredProfile(userId: string) {
 }
 
 export async function recordPeopleSearch(userId: string, raw: unknown) {
-  if (integrations.apollo) {
-    throw new ServiceError("Apollo is flagged on, but the live search adapter is not activated.", "disabled", 409);
-  }
   const body = (raw ?? {}) as { mode?: string; quantity?: number; prompt?: string; filters?: Record<string, unknown> };
   const quantity = Number(body.quantity);
   let creditsQuoted = 0;
@@ -99,6 +99,7 @@ export async function recordPeopleSearch(userId: string, raw: unknown) {
   const mode = body.mode === "custom" ? "custom" : "automatic";
   const filters = body.filters && typeof body.filters === "object" ? body.filters : {};
   const prompt = String(body.prompt ?? "").slice(0, 2000);
+  if (integrations.apollo) return runLivePeopleSearch(userId, { mode, quantity, creditsQuoted, prompt, filters });
   const idempotencyKey = `search:${userId}:${createHash("sha256").update(JSON.stringify({ mode, quantity, prompt, filters })).digest("hex").slice(0, 24)}`;
   const request: PeopleSearchRequest = {
     id: id(),
@@ -124,6 +125,344 @@ export async function recordPeopleSearch(userId: string, raw: unknown) {
     status: "not_connected" as const,
     message: "People search is not connected yet. No credits were used.",
   };
+}
+
+/** Apollo returns at most 100 people per page. */
+const APOLLO_PAGE_SIZE = 100;
+const APOLLO_SENIORITY: Record<string, string> = {
+  entry: "entry",
+  associate: "senior",
+  manager: "manager",
+  director: "director",
+  vp: "vp",
+  founder: "founder",
+};
+
+function splitList(value: unknown) {
+  return String(value ?? "")
+    .split(/[,;\n]/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function uniqueList(values: string[]) {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = value.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+async function profileSearchFilters(userId: string) {
+  const [document, goals] = await Promise.all([repo.getProfileDocument(userId), repo.getGoals(userId)]);
+  const expanded = goals
+    ? {
+        ...goals,
+        roles: goals.roles.flatMap(splitList),
+        companies: goals.companies.flatMap(splitList),
+        locations: goals.locations.flatMap(splitList),
+      }
+    : null;
+  return filtersFromProfile(expanded, document?.form.school || null, "").filters;
+}
+
+async function liveSearchFilters(userId: string, mode: "automatic" | "custom", prompt: string, raw: Record<string, unknown>) {
+  if (mode === "automatic") return profileSearchFilters(userId);
+  const text = prompt.trim();
+  // Suggested searches say "my college" or "my interests", so they start from the saved profile.
+  const filters = /\bmy\b/i.test(text) ? await profileSearchFilters(userId) : emptyFilters();
+  const parsed = text ? interpretPrompt(text).filters : emptyFilters();
+  const guessedTitle = /^find\b/i.test(text) ? [] : parsed.titles;
+  filters.titles = uniqueList([...splitList(raw.title), ...guessedTitle, ...filters.titles]).slice(0, 6);
+  filters.companies = uniqueList([...splitList(raw.company), ...parsed.companies, ...filters.companies]).slice(0, 6);
+  filters.locations = uniqueList([...splitList(raw.location), ...parsed.locations, ...filters.locations]).slice(0, 6);
+  filters.industries = uniqueList([...splitList(raw.industry), ...parsed.industries, ...filters.industries]).slice(0, 6);
+  filters.schools = uniqueList([...splitList(raw.school), ...filters.schools]).slice(0, 3);
+  const seniority = APOLLO_SENIORITY[String(raw.seniority ?? "")];
+  if (seniority) filters.seniorities = [seniority];
+  // A whole sentence is a poor keyword search, so it is only sent when nothing structured came out of it.
+  const structured = filters.titles.length + filters.companies.length + filters.locations.length + filters.schools.length;
+  filters.query = structured ? undefined : text.slice(0, 180) || undefined;
+  return filters;
+}
+
+async function runLivePeopleSearch(
+  userId: string,
+  input: { mode: "automatic" | "custom"; quantity: number; creditsQuoted: number; prompt: string; filters: Record<string, unknown> },
+) {
+  const filters = await liveSearchFilters(userId, input.mode, input.prompt, input.filters);
+  if (!filters.titles.length && !filters.companies.length && !filters.locations.length && !filters.schools.length && !filters.query) {
+    throw new ServiceError(
+      input.mode === "automatic"
+        ? "Add target roles, dream companies, or locations to your profile so Find for Me knows who to look for. No credits were used."
+        : "Describe who you're looking for or add a filter. No credits were used.",
+      "empty_search",
+      400,
+    );
+  }
+  const account = await repo.getAccount(userId);
+  const balance = account?.balance ?? 0;
+  if (balance < input.creditsQuoted) {
+    throw new ServiceError(
+      `Up to ${input.quantity} people needs ${input.creditsQuoted} ${input.creditsQuoted === 1 ? "credit" : "credits"}. You have ${balance}. No credits were used.`,
+      "insufficient_credits",
+      402,
+    );
+  }
+  const excludeSaved = input.filters.excludeSaved !== false;
+  const excluded = new Set(excludeSaved ? (await repo.listSaved(userId)).map((row) => row.contactId) : []);
+  const found: Contact[] = [];
+  const maxPages = Math.ceil(input.quantity / APOLLO_PAGE_SIZE) + 2;
+  for (let page = 1; page <= maxPages && found.length < input.quantity; page += 1) {
+    const result = await searchPeople(userId, filters, page, APOLLO_PAGE_SIZE);
+    if (result.source !== "apollo") {
+      throw new ServiceError("Live people search is not available right now. No credits were used.", "provider_missing", 503);
+    }
+    for (const person of result.people) {
+      if (!excluded.has(person.id) && !found.some((item) => item.id === person.id)) found.push(person);
+    }
+    if (result.people.length < APOLLO_PAGE_SIZE) break;
+  }
+  const people = found.slice(0, input.quantity);
+  // Partial results are charged per started block of 25, never more than the quote.
+  const creditsCharged = people.length ? Math.min(input.creditsQuoted, Math.ceil(people.length / PEOPLE_PER_CREDIT)) : 0;
+  const requestId = id();
+  const idempotencyKey = `search:${userId}:${requestId}`;
+  let charged = 0;
+  if (creditsCharged) {
+    const spend = await repo.spendCredits({
+      userId,
+      amount: creditsCharged,
+      idempotencyKey,
+      note: `${people.length} people found`,
+      entryType: "search_debit",
+    });
+    if (spend.insufficient) {
+      throw new ServiceError("Your credit balance changed during the search. No credits were used.", "insufficient_credits", 402);
+    }
+    charged = spend.charged;
+  }
+  await repo.saveFoundContacts(userId, people.map((person) => person.id));
+  const request: PeopleSearchRequest = {
+    id: requestId,
+    userId,
+    mode: input.mode,
+    quantity: input.quantity,
+    creditsQuoted: input.creditsQuoted,
+    prompt: input.prompt,
+    filters: input.filters,
+    status: "completed",
+    resultCount: people.length,
+    creditsCharged: charged,
+    idempotencyKey,
+    createdAt: nowIso(),
+  };
+  await repo.insertSearchRequest(request);
+  await repo.insertAnalytics({ userId, name: "search", properties: { source: "apollo", count: people.length, mode: input.mode } });
+  return {
+    request,
+    people: people.map((person) => ({ id: person.id, name: person.fullName, title: person.title, company: person.company })),
+    charged,
+    status: "completed" as const,
+    message: people.length
+      ? `Found ${people.length} ${people.length === 1 ? "person" : "people"} and added them to My Contacts. ${charged} ${charged === 1 ? "credit was" : "credits were"} used.`
+      : "Apollo found no new people for that search. No credits were used.",
+  };
+}
+
+export async function unlockWorkspaceEmail(userId: string, raw: unknown) {
+  const contactId = String((raw as { contactId?: unknown } | null)?.contactId ?? "").slice(0, 120);
+  if (!integrations.apollo) {
+    return { ok: false, code: "not_connected", charged: 0, email: null, message: "Email unlock is not connected yet. No credits were used." };
+  }
+  const saved = await repo.getSavedByUserAndContact(userId, contactId);
+  const contact = saved ? await repo.getContact(contactId) : null;
+  if (!saved || !contact) throw new ServiceError("That contact is not in your saved list.", "not_found", 404);
+  if (saved.creditCharged && contact.email) {
+    return { ok: true, code: "already", charged: 0, email: contact.email, message: "Already unlocked. No credit was used." };
+  }
+  const account = await repo.getAccount(userId);
+  if ((account?.balance ?? 0) < VERIFIED_EMAIL_UNLOCK_CREDITS) {
+    return { ok: false, code: "insufficient_credits", charged: 0, email: null, message: "You need 1 credit to unlock a verified work email." };
+  }
+  const enriched = await enrichPerson(contact, userId);
+  if (!enriched.ok || !enriched.email || enriched.emailStatus !== "verified") {
+    return {
+      ok: false,
+      code: "no_verified_email",
+      charged: 0,
+      email: null,
+      message: "Apollo did not return a verified work email for this person. No credit was used.",
+    };
+  }
+  const spend = await repo.spendCredits({
+    userId,
+    amount: VERIFIED_EMAIL_UNLOCK_CREDITS,
+    idempotencyKey: `unlock:${userId}:${contactId}`,
+    note: `Verified work email for ${contact.fullName}`,
+    entryType: "unlock_debit",
+  });
+  if (spend.insufficient) {
+    return { ok: false, code: "insufficient_credits", charged: 0, email: null, message: "You need 1 credit to unlock a verified work email." };
+  }
+  await repo.upsertContacts([
+    {
+      ...contact,
+      email: enriched.email,
+      emailStatus: enriched.emailStatus,
+      phone: enriched.phone ?? contact.phone,
+      phoneStatus: enriched.phoneStatus,
+      fetchedAt: nowIso(),
+      costCents: enriched.costCents,
+      costEstimated: enriched.estimated,
+    },
+  ]);
+  await repo.updateSaved(userId, saved.id, { creditCharged: true, unlockedAt: nowIso() });
+  await repo.insertAnalytics({ userId, name: "unlock", properties: { source: "apollo" } });
+  return {
+    ok: true,
+    code: spend.duplicate ? "already" : "unlocked",
+    charged: spend.charged,
+    email: enriched.email,
+    message: spend.duplicate ? "Already unlocked. No credit was used." : "Verified work email unlocked. 1 credit was used.",
+  };
+}
+
+const EMAIL_GOALS: Record<string, string> = {
+  chat: "ask for a quick 15-minute conversation",
+  advice: "ask for career advice",
+  referral: "ask whether they would be open to a referral or introduction",
+  opportunity: "ask about opportunities on their team",
+  mentor: "ask whether they would be open to mentorship",
+  other: "introduce yourself and start a conversation",
+};
+const EMAIL_TONES: Record<string, string> = {
+  friendly: "friendly and conversational",
+  professional: "professional and polished",
+  direct: "short and direct",
+  casual: "casual and personable",
+};
+const EMAIL_LENGTHS: Record<string, string> = {
+  "very-short": "under 60 words",
+  short: "under 100 words",
+  detailed: "under 160 words",
+};
+
+const EMAIL_SYSTEM_PROMPT =
+  "You write cold outreach emails from a college student to a professional. Use only the facts provided. Facts about the student describe the sender; facts about the recipient describe the person receiving the email. Never attribute the student's school, jobs, or interests to the recipient. Do not invent posts, mutual connections, employers, achievements, or shared experiences. Do not mention any topic the student asked to avoid. Write the body as plain text with a greeting, the message, and a sign-off with the student's name. Return only JSON with the keys subject and body.";
+
+function parseEmailJson(text: string) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return { subject: "", body: "" };
+  try {
+    const value = JSON.parse(match[0]) as { subject?: unknown; body?: unknown };
+    return { subject: String(value.subject ?? "").trim(), body: String(value.body ?? "").trim() };
+  } catch {
+    return { subject: "", body: "" };
+  }
+}
+
+export async function generateWorkspaceEmail(userId: string, raw: unknown) {
+  if (!integrations.anthropic) {
+    throw new ServiceError("AI email generation is not connected yet. Use Write it yourself, then save the draft.", "not_connected", 409);
+  }
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const contactId = String(body.contactId ?? "").slice(0, 120);
+  const ids = (value: unknown) => new Set((Array.isArray(value) ? value : []).map(String).slice(0, 40));
+  const studentIds = ids(body.studentFactIds);
+  const contactIds = ids(body.contactFactIds);
+  const goal = EMAIL_GOALS[String(body.goal)] ? String(body.goal) : "chat";
+  const tone = EMAIL_TONES[String(body.tone)] ? String(body.tone) : "friendly";
+  const length = EMAIL_LENGTHS[String(body.length)] ? String(body.length) : "short";
+  const notes = String(body.notes ?? "").slice(0, 1000);
+
+  const config = serverConfig();
+  const [hourly, daily] = await Promise.all([
+    repo.listGenerations(userId, new Date(Date.now() - 60 * 60 * 1000).toISOString()),
+    repo.listGenerations(userId, new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+  ]);
+  if (hourly.length >= config.aiHourlyLimit || daily.length >= config.aiDailyLimit) {
+    throw new ServiceError("AI email limit reached for now. You can still write the email yourself and save the draft.", "ai_limit", 429);
+  }
+
+  const state = await workspaceState(userId);
+  const contact = state.contacts.find((item) => item.id === contactId);
+  if (!contact) throw new ServiceError("That contact is not in your saved list.", "not_found", 404);
+  const studentFacts = state.studentFacts.filter((fact) => studentIds.has(fact.id));
+  const contactFacts = contact.facts.filter((fact) => fact.verified && contactIds.has(fact.id));
+  const user = await repo.getUserById(userId);
+  const excluded = state.profile?.form.excludedTopics.trim();
+  const apiKey = await readAnthropicKey();
+  if (!apiKey) throw new ServiceError("AI email generation is not configured. Use Write it yourself, then save the draft.", "not_configured", 503);
+
+  const prompt = [
+    `Student name: ${user?.name || "Student"}`,
+    `Recipient: ${contact.name}, ${contact.title}${contact.company ? ` at ${contact.company}` : ""}`,
+    `Goal: ${EMAIL_GOALS[goal]}`,
+    `Tone: ${EMAIL_TONES[tone]}`,
+    `Length: body ${EMAIL_LENGTHS[length]}`,
+    `Facts about the student:\n${studentFacts.map((fact) => `- ${fact.text}`).join("\n") || "- (none selected)"}`,
+    `Facts about the recipient:\n${contactFacts.map((fact) => `- ${fact.text}`).join("\n") || "- (none selected beyond name, title, and company)"}`,
+    excluded ? `Topics the student asked not to mention: ${excluded}` : "",
+    notes ? `Extra notes from the student: ${notes}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+  const started = Date.now();
+  let subject = "";
+  let text = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  try {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model,
+      max_tokens: 1000,
+      system: [{ type: "text", text: EMAIL_SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: prompt }],
+    });
+    if (response.stop_reason === "refusal") throw new Error("refusal");
+    const parsed = parseEmailJson(response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n"));
+    subject = parsed.subject;
+    text = parsed.body;
+    inputTokens = response.usage?.input_tokens ?? 0;
+    outputTokens = response.usage?.output_tokens ?? 0;
+    if (!text) throw new Error("empty_email");
+  } catch (error) {
+    await repo.insertUsage({
+      id: id(),
+      userId,
+      provider: "anthropic",
+      operation: "email",
+      success: false,
+      latencyMs: Date.now() - started,
+      costCents: 0,
+      estimated: true,
+      error: error instanceof Error ? error.message : "anthropic_failed",
+      createdAt: nowIso(),
+    });
+    throw new ServiceError("The AI could not write this email right now. Try again, or write it yourself and save the draft.", "provider_failed", 502);
+  }
+  const costCents = (inputTokens * config.fastInputCentsPerMillion + outputTokens * config.fastOutputCentsPerMillion) / 1_000_000;
+  await repo.insertUsage({
+    id: id(),
+    userId,
+    provider: "anthropic",
+    operation: "email",
+    success: true,
+    latencyMs: Date.now() - started,
+    costCents,
+    estimated: true,
+    error: null,
+    createdAt: nowIso(),
+  });
+  await repo.insertGeneration({ id: id(), userId, purpose: "email", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
+  return { subject: subject.slice(0, 200), body: text.slice(0, 8000) };
 }
 
 export async function saveManualEmailDraft(userId: string, raw: unknown) {

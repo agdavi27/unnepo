@@ -21,8 +21,9 @@ type Workspace = {
   studentFacts: StudentFact[];
   resume: { id: string; fileName: string; byteSize: number } | null;
   contacts: Contact[];
-  searches: { id: string; mode: string; quantity: number; creditsQuoted: number; status: string; creditsCharged: number; prompt: string; createdAt: string }[];
+  searches: { id: string; mode: string; quantity: number; creditsQuoted: number; status: string; resultCount: number; creditsCharged: number; prompt: string; createdAt: string }[];
   drafts: { id: string; contactId: string; subject: string; createdAt: string }[];
+  integrations: { apollo: boolean; anthropic: boolean };
 };
 
 type View = "contacts" | "find" | "analytics";
@@ -79,6 +80,7 @@ export function AppHome() {
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
   const [emailContact, setEmailContact] = useState<Contact | null>(null);
+  const [unlocking, setUnlocking] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/app/state");
@@ -192,6 +194,34 @@ export function AppHome() {
     }
   }
 
+  async function unlockEmail(contact: Contact) {
+    if (!window.confirm(`Unlock ${contact.name}'s verified work email for 1 credit? You're only charged if a verified email is found.`)) return;
+    setUnlocking(contact.id);
+    try {
+      const response = await fetch("/api/app/unlock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contactId: contact.id }),
+      });
+      const payload = await response.json();
+      setNotice(payload.message || payload.error || "Could not unlock that email.");
+      await load();
+    } finally {
+      setUnlocking(null);
+    }
+  }
+
+  async function generateDraft(contact: Contact, input: Omit<EmailDraft, "subject" | "body">) {
+    const response = await fetch("/api/app/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...input, contactId: contact.id }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not write that email.");
+    return { subject: String(payload.subject ?? ""), body: String(payload.body ?? "") };
+  }
+
   async function saveDraft(draft: EmailDraft, contact: Contact) {
     const response = await fetch("/api/app/draft", {
       method: "POST",
@@ -208,7 +238,7 @@ export function AppHome() {
   const showOnboarding = !data?.profile?.ready || editing;
 
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
-  const peopleRequested = data?.searches.reduce((sum, item) => sum + item.quantity, 0) ?? 0;
+  const peopleFound = data?.searches.reduce((sum, item) => sum + (item.resultCount ?? 0), 0) ?? 0;
   const creditsSpent = data?.searches.reduce((sum, item) => sum + item.creditsCharged, 0) ?? 0;
 
   return (
@@ -263,7 +293,7 @@ export function AppHome() {
               <h2 className={sectionTitle}>Saved contacts · {data.contacts.length}</h2>
               {data.contacts.length === 0 ? (
                 <div className="mt-3 space-y-4">
-                  <p className="text-sm text-muted">No saved contacts yet. People will show up here after a connected search.</p>
+                  <p className="text-sm text-muted">No saved contacts yet. People you find will show up here.</p>
                   <button type="button" onClick={() => setView("find")} className="rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">Find new contacts</button>
                 </div>
               ) : (
@@ -273,8 +303,16 @@ export function AppHome() {
                       <div>
                         <p className="font-medium">{contact.name}</p>
                         <p className="text-sm text-muted">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
+                        {contact.email && <p className="mt-0.5 text-sm text-zinc-300">{contact.email}</p>}
                       </div>
-                      <button type="button" onClick={() => setEmailContact(contact)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
+                      <div className="flex shrink-0 gap-2">
+                        {!contact.email && data.integrations.apollo && (
+                          <button type="button" disabled={unlocking === contact.id} onClick={() => void unlockEmail(contact)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">
+                            {unlocking === contact.id ? "Unlocking…" : "Unlock email · 1 cr"}
+                          </button>
+                        )}
+                        <button type="button" onClick={() => setEmailContact(contact)} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -316,11 +354,23 @@ export function AppHome() {
             )}
             <section>
               <h2 className={sectionTitle}>Results</h2>
-              {data.searches[0] ? (
+              {data.searches[0]?.status === "completed" ? (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm text-muted">
+                    Your last search found {data.searches[0].resultCount} {data.searches[0].resultCount === 1 ? "person" : "people"} and used {data.searches[0].creditsCharged} {data.searches[0].creditsCharged === 1 ? "credit" : "credits"}.
+                    {data.searches[0].prompt ? ` “${data.searches[0].prompt}”` : ""}
+                  </p>
+                  {data.searches[0].resultCount > 0 && (
+                    <button type="button" onClick={() => setView("contacts")} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">View in My Contacts</button>
+                  )}
+                </div>
+              ) : data.searches[0] ? (
                 <p className="mt-3 text-sm text-muted">
                   Not connected yet. Your last request for up to {data.searches[0].quantity} people ({data.searches[0].creditsQuoted} {data.searches[0].creditsQuoted === 1 ? "credit" : "credits"}) was saved and did not charge anything.
                   {data.searches[0].prompt ? ` “${data.searches[0].prompt}”` : ""}
                 </p>
+              ) : data.integrations.apollo ? (
+                <p className="mt-3 text-sm text-muted">Run a search to find people. You&apos;re only charged for people found, 1 credit per 25.</p>
               ) : (
                 <p className="mt-3 text-sm text-muted">People search is not connected yet. A search saves your request and does not return people or spend credits.</p>
               )}
@@ -347,7 +397,7 @@ export function AppHome() {
                 ["Drafts saved", data.drafts.length],
                 ["Emails sent", 0],
                 ["Searches requested", data.searches.length],
-                ["People requested", peopleRequested],
+                ["People found", peopleFound],
                 ["Credits left", data.credits.balance],
               ].map(([name, value]) => (
                 <div key={name} className="rounded-2xl border border-line bg-panel p-4">
@@ -357,7 +407,7 @@ export function AppHome() {
               ))}
             </section>
             <p className="text-xs text-faint">
-              Email sending and people search are not connected yet, so nothing has been sent and {creditsSpent === 0 ? "no credits have been spent" : `${creditsSpent} ${creditsSpent === 1 ? "credit has" : "credits have"} been spent`}.
+              Email sending is not connected yet, so nothing has been sent. Searches have used {creditsSpent} {creditsSpent === 1 ? "credit" : "credits"}.
             </p>
             <section className="border-t border-line pt-8">
               <h2 className={sectionTitle}>Recent searches</h2>
@@ -395,9 +445,7 @@ export function AppHome() {
           contact={emailContact}
           studentFacts={data?.studentFacts ?? []}
           onClose={() => setEmailContact(null)}
-          onGenerate={async () => {
-            throw new Error("AI email generation is not connected yet. Use Write it yourself, then save the draft.");
-          }}
+          onGenerate={(input) => generateDraft(emailContact, input)}
           onSaveDraft={saveDraft}
           onSend={async () => {
             throw new Error("Email sending is not connected yet. Nothing was sent.");

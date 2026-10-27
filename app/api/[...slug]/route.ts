@@ -16,7 +16,7 @@ import { serverConfig } from "@/lib/config";
 import { usingDefaultSecret } from "@/lib/security";
 import { filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
-import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
+import { generateWorkspaceEmail, recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, workspaceState } from "@/lib/services/workspace";
 
 const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests", "roles", "location", "employment", "timing", "contacts", "networking", "extra", "story"]);
 
@@ -191,6 +191,12 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "app" && action === "search" && request.method === "POST") {
     return json(await recordPeopleSearch(user.id, await request.json()));
+  }
+  if (root === "app" && action === "unlock" && request.method === "POST") {
+    return json(await unlockWorkspaceEmail(user.id, await request.json()));
+  }
+  if (root === "app" && action === "generate" && request.method === "POST") {
+    return json(await generateWorkspaceEmail(user.id, await request.json()));
   }
   if (root === "app" && action === "draft" && request.method === "POST") {
     return json({ draft: await saveManualEmailDraft(user.id, await request.json()) });

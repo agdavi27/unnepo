@@ -3,9 +3,10 @@
  * Credentials may exist in the environment. These flags decide whether code may call them.
  */
 export const integrations = {
-  apollo: false,
-  /** Email generation and other writing stay off. */
-  anthropic: false,
+  /** People search and verified email unlock on /home. */
+  apollo: true,
+  /** AI email drafts in the composer. Sending stays off with gmail and outlook. */
+  anthropic: true,
   /** Onboarding answers may be organized into profile facts. */
   profileOrganization: true,
   stripeBilling: false,

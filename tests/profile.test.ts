@@ -3,7 +3,8 @@ import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
-import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile } from "@/lib/services/workspace";
+import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail } from "@/lib/services/workspace";
+import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { integrations } from "@/lib/integrations/flags";
 import type { ResumeFact } from "@/lib/db/types";
@@ -111,19 +112,96 @@ describe("structured profile", () => {
     expect((await repo.getAccount(a))?.balance).toBe(3);
   });
 
-  it("records a search without charging and refuses a duplicate insert", async () => {
-    const userId = await verifiedStudent("search.quote@colby.edu", "Searcher");
-    const before = (await repo.getAccount(userId))?.balance;
+  it("records a search without charging and refuses a duplicate insert while Apollo is off", async () => {
+    const flags = integrations as { apollo: boolean };
+    flags.apollo = false;
+    try {
+      const userId = await verifiedStudent("search.quote@colby.edu", "Searcher");
+      const before = (await repo.getAccount(userId))?.balance;
+      const first = await recordPeopleSearch(userId, { mode: "automatic", quantity: 50 });
+      const second = await recordPeopleSearch(userId, { mode: "automatic", quantity: 50 });
+      expect(first.charged).toBe(0);
+      expect(first.people).toEqual([]);
+      expect(first.status).toBe("not_connected");
+      expect(first.request.creditsQuoted).toBe(2);
+      expect(second.request.id).toBe(first.request.id);
+      expect((await repo.getAccount(userId))?.balance).toBe(before);
+      expect(() => assertCreditCommitAllowed("search")).toThrow(/not deducted/);
+    } finally {
+      flags.apollo = true;
+    }
+  });
+
+  it("charges a live search only for people found and skips people already saved", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    process.env.SIGNUP_CREDITS = "25";
+    const userId = await verifiedStudent("live.search@colby.edu", "Live Searcher");
+    await saveStructuredProfile(userId, form, "Live Searcher");
+    const bodies: Array<Record<string, unknown>> = [];
+    setContactFetcher(async (_input, init) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      const people = Array.from({ length: 30 }, (_, index) => ({
+        id: `p${index}`,
+        first_name: "Person",
+        last_name: String(index),
+        title: "Brand Marketing Manager",
+        organization: { name: "Patagonia" },
+      }));
+      return Response.json({ people });
+    });
     const first = await recordPeopleSearch(userId, { mode: "automatic", quantity: 50 });
-    const second = await recordPeopleSearch(userId, { mode: "automatic", quantity: 50 });
-    expect(first.charged).toBe(0);
-    expect(first.people).toEqual([]);
-    expect(first.status).toBe("not_connected");
-    expect(first.request.creditsQuoted).toBe(2);
-    expect(second.request.id).toBe(first.request.id);
-    expect((await repo.getAccount(userId))?.balance).toBe(before);
-    expect(integrations.apollo).toBe(false);
-    expect(integrations.anthropic).toBe(false);
+    expect(first.status).toBe("completed");
+    expect(first.people).toHaveLength(30);
+    expect(first.charged).toBe(2);
+    expect(bodies[0].person_titles).toEqual(["Brand marketing"]);
+    expect((await repo.getAccount(userId))?.balance).toBe(23);
+    expect((await repo.listSaved(userId))).toHaveLength(30);
+
+    const second = await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
+    expect(second.people).toHaveLength(0);
+    expect(second.charged).toBe(0);
+    expect((await repo.getAccount(userId))?.balance).toBe(23);
+  });
+
+  it("refuses a live search the balance cannot cover without calling Apollo", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    const userId = await verifiedStudent("live.poor@colby.edu", "Short On Credits");
+    await saveStructuredProfile(userId, form, "Short On Credits");
+    let calls = 0;
+    setContactFetcher(async () => {
+      calls += 1;
+      return Response.json({ people: [] });
+    });
+    await expect(recordPeopleSearch(userId, { mode: "automatic", quantity: 250 })).rejects.toThrow(/needs 10 credits/);
+    expect(calls).toBe(0);
+  });
+
+  it("charges an email unlock only when Apollo returns a verified email, once", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    process.env.DAILY_USER_SPEND_CENTS = "100000";
+    const userId = await verifiedStudent("unlock@colby.edu", "Unlocker");
+    await saveStructuredProfile(userId, form, "Unlocker");
+    let status = "guessed";
+    setContactFetcher(async (input) => {
+      if (String(input).includes("people/match")) return Response.json({ person: { email: "jo@patagonia.com", email_status: status } });
+      return Response.json({ people: [{ id: "jo", first_name: "Jo", last_name: "Lee", title: "Brand Manager", organization: { name: "Patagonia" } }] });
+    });
+    await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
+    const afterSearch = (await repo.getAccount(userId))!.balance;
+
+    const unverified = await unlockWorkspaceEmail(userId, { contactId: "apollo_jo" });
+    expect(unverified.ok).toBe(false);
+    expect(unverified.charged).toBe(0);
+    expect((await repo.getAccount(userId))!.balance).toBe(afterSearch);
+
+    status = "verified";
+    const unlocked = await unlockWorkspaceEmail(userId, { contactId: "apollo_jo" });
+    expect(unlocked.ok).toBe(true);
+    expect(unlocked.charged).toBe(1);
+    expect(unlocked.email).toBe("jo@patagonia.com");
+    const again = await unlockWorkspaceEmail(userId, { contactId: "apollo_jo" });
+    expect(again.charged).toBe(0);
+    expect((await repo.getAccount(userId))!.balance).toBe(afterSearch - 1);
   });
 
   it("quotes credits and will not commit them while providers are off", () => {
@@ -136,8 +214,52 @@ describe("structured profile", () => {
     expect(search.idempotencyKey).toBe("search:user:req");
     expect(unlock.amount).toBe(1);
     expect(unlock.idempotencyKey).toBe("unlock:user:contact");
-    expect(() => assertCreditCommitAllowed("search")).toThrow(/not deducted/);
+    expect(() => assertCreditCommitAllowed("unlock")).toThrow(/not deducted/);
     expect(() => creditsForPeople(30)).toThrow(/25/);
+  });
+
+  it("refuses an AI draft without a key and does not count it", async () => {
+    const userId = await verifiedStudent("ai.draft@colby.edu", "Writer");
+    await saveStructuredProfile(userId, form, "Writer");
+    await repo.upsertContacts([{
+      id: "ai_person",
+      externalId: "ai_person",
+      provider: "apollo",
+      fullName: "Sam Rivera",
+      firstName: "Sam",
+      lastName: "Rivera",
+      title: "Brand Manager",
+      company: "Patagonia",
+      companyDomain: null,
+      location: "Boston, MA",
+      school: null,
+      profileUrl: null,
+      email: null,
+      emailStatus: "unknown",
+      phone: null,
+      phoneStatus: "unknown",
+      tags: [],
+      seniority: null,
+      department: null,
+      industry: null,
+      companySize: null,
+      interests: [],
+      previousRoles: [],
+      achievements: [],
+      publicPosts: [],
+      verifiedMutuals: [],
+      shareable: false,
+      licenseNote: "test",
+      dataSource: "provider",
+      fetchedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 86400000).toISOString(),
+      costCents: 0,
+      costEstimated: true,
+    }]);
+    await repo.saveFoundContacts(userId, ["ai_person"]);
+    await expect(generateWorkspaceEmail(userId, { contactId: "ai_person", goal: "chat" })).rejects.toThrow(/not configured/);
+    await expect(generateWorkspaceEmail(userId, { contactId: "nobody" })).rejects.toThrow();
+    expect(await repo.listGenerations(userId)).toHaveLength(0);
   });
 
   it("saves a manual draft and does not mark it sent", async () => {

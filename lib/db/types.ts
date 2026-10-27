@@ -486,7 +486,7 @@ export type PeopleSearchRequest = {
   creditsQuoted: number;
   prompt: string;
   filters: Record<string, unknown>;
-  status: "not_connected";
+  status: "not_connected" | "completed";
   resultCount: number;
   creditsCharged: number;
   idempotencyKey: string;
