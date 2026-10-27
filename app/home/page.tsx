@@ -1,10 +1,5 @@
-import { Shell } from "@/components/product/shell";
-import { HomeView } from "@/components/product/home-view";
+import { AppHome } from "@/components/unnepo/app-home";
 
 export default function Page() {
-  return (
-    <Shell>
-      <HomeView />
-    </Shell>
-  );
+  return <AppHome />;
 }

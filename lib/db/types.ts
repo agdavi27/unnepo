@@ -420,6 +420,93 @@ export type IdempotencyRecord = {
   createdAt: string;
 };
 
+export type ProfileSectionName =
+  | "personal_education"
+  | "employment"
+  | "skills"
+  | "projects"
+  | "interests"
+  | "career_goals"
+  | "industries_locations"
+  | "networking"
+  | "story"
+  | "email_preferences"
+  | "excluded_topics";
+
+export type StoredProfileFact = {
+  id: string;
+  section: ProfileSectionName;
+  label: string;
+  text: string;
+  source: { kind: "onboarding_field" | "resume_file"; field?: string; resumeId?: string; excerpt?: string };
+  corroboration: { kind: "onboarding_field" | "resume_file"; field?: string; resumeId?: string; excerpt?: string } | null;
+  verificationStatus: "user_entered" | "file_extracted";
+  approvalStatus: "approved" | "pending_review";
+  uncertain: boolean;
+  inconsistencyNote: string | null;
+};
+
+export type StoredFormProfile = {
+  school: string;
+  major: string;
+  graduationYear: string;
+  interests: string[];
+  otherInterests: string;
+  targetRoles: string;
+  dreamCompanies: string;
+  locations: string;
+  workPreference: string;
+  goals: string[];
+  contactTypes: string[];
+  seniority: string;
+  bio: string;
+  accomplishments: string;
+  excludedTopics: string;
+  emailTone: string;
+};
+
+/** Structured profile. One document per user. Not a single free-text blob. */
+export type ProfileDocument = {
+  userId: string;
+  form: StoredFormProfile;
+  facts: StoredProfileFact[];
+  inconsistencies: string[];
+  resumeId: string | null;
+  ready: boolean;
+  updatedAt: string;
+};
+
+export type PeopleSearchRequest = {
+  id: string;
+  userId: string;
+  mode: "automatic" | "custom";
+  quantity: number;
+  creditsQuoted: number;
+  prompt: string;
+  filters: Record<string, unknown>;
+  status: "not_connected";
+  resultCount: number;
+  creditsCharged: number;
+  idempotencyKey: string;
+  createdAt: string;
+};
+
+export type ManualEmailDraft = {
+  id: string;
+  userId: string;
+  contactId: string;
+  subject: string;
+  body: string;
+  studentFactIds: string[];
+  contactFactIds: string[];
+  goal: string;
+  tone: string;
+  length: string;
+  notes: string;
+  status: "saved";
+  createdAt: string;
+};
+
 export type OAuthState = {
   id: string;
   state: string;
@@ -462,6 +549,9 @@ export type Database = {
   webhooks: WebhookEvent[];
   idempotency: IdempotencyRecord[];
   oauthStates: OAuthState[];
+  profileDocuments: ProfileDocument[];
+  searchRequests: PeopleSearchRequest[];
+  manualDrafts: ManualEmailDraft[];
   /** Server-only. Never return this from an API response. */
   serverSecrets?: { apolloApiKey?: string };
 };
@@ -498,6 +588,9 @@ export function emptyDatabase(): Database {
     webhooks: [],
     idempotency: [],
     oauthStates: [],
+    profileDocuments: [],
+    searchRequests: [],
+    manualDrafts: [],
     serverSecrets: {},
   };
 }

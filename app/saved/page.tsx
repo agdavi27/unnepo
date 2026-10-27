@@ -1,10 +1,5 @@
-import { Shell } from "@/components/product/shell";
-import { SavedView } from "@/components/product/saved-view";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <Shell>
-      <SavedView />
-    </Shell>
-  );
+  redirect("/home");
 }

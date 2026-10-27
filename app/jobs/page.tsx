@@ -1,10 +1,5 @@
-import { Shell } from "@/components/product/shell";
-import { JobsView } from "@/components/product/jobs-view";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <Shell>
-      <JobsView />
-    </Shell>
-  );
+  redirect("/home");
 }

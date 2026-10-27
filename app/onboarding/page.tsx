@@ -1,10 +1,5 @@
-import { Shell } from "@/components/product/shell";
-import { OnboardingView } from "@/components/product/onboarding-view";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <Shell>
-      <OnboardingView />
-    </Shell>
-  );
+  redirect("/home");
 }

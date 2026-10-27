@@ -1,12 +1,10 @@
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { persistenceMode, readApolloKey, repo } from "@/lib/db/file-store";
-import { runSearch, unlockContact } from "@/lib/services/contacts";
-import { composerContext, generateEmail } from "@/lib/services/composer";
-import { outreachSummary, saveDraft, sendOutreach, syncReplies } from "@/lib/services/outreach";
+import { composerContext } from "@/lib/services/composer";
+import { outreachSummary, saveDraft } from "@/lib/services/outreach";
 import { readStoredResume, storeResume } from "@/lib/services/resume";
-import { listJobPostings } from "@/lib/services/jobs";
-import { confirmDemoPurchase, createStripeCheckout, applyVerifiedStripeEvent } from "@/lib/services/billing";
+import { applyVerifiedStripeEvent } from "@/lib/services/billing";
 import { applyReferralCode } from "@/lib/services/referrals";
 import { profitability } from "@/lib/services/admin";
 import { dashboard } from "@/lib/services/dashboard";
@@ -16,11 +14,11 @@ import { nowIso } from "@/lib/db/file-store";
 import type { OutreachStatus } from "@/lib/db/types";
 import { serverConfig } from "@/lib/config";
 import { usingDefaultSecret } from "@/lib/security";
-import { filtersFromProfile, interpretPrompt, searchChargeKey } from "@/lib/search/interpret";
-import { coverLetterPdf, generateCoverLetter, pdfForEditedLetter } from "@/lib/services/cover-letter";
+import { filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
+import { integrations } from "@/lib/integrations/flags";
+import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests", "roles", "location", "employment", "timing", "contacts", "networking", "extra", "story"]);
-const CHECKOUT_KINDS = new Set(["pro", "premium", "grind", "pack"]);
 
 async function handle(request: Request, slug: string[]) {
   const [root, action] = slug;
@@ -33,16 +31,24 @@ async function handle(request: Request, slug: string[]) {
       database: persistenceMode(),
       persistence: persistenceMode(),
       providers: {
-        apollo: Boolean(await readApolloKey()),
-        anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
-        stripe: Boolean(process.env.STRIPE_SECRET_KEY),
-        gmail: ready.google,
-        microsoft: ready.microsoft,
+        apollo: false,
+        anthropic: false,
+        stripe: false,
+        gmail: false,
+        microsoft: false,
         inngest: Boolean(process.env.INNGEST_EVENT_KEY),
         resend: Boolean(process.env.RESEND_API_KEY),
         posthog: Boolean(process.env.POSTHOG_KEY),
         sentry: Boolean(process.env.SENTRY_DSN),
       },
+      configured: {
+        apollo: Boolean(await readApolloKey()),
+        anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+        stripe: Boolean(process.env.STRIPE_SECRET_KEY),
+        gmail: ready.google,
+        microsoft: ready.microsoft,
+      },
+      enabled: integrations,
       sampleDirectory: serverConfig().sampleDirectory,
       defaultSecret: usingDefaultSecret(),
     });
@@ -111,6 +117,9 @@ async function handle(request: Request, slug: string[]) {
     return json({ ok: true });
   }
 
+  if (root === "oauth" && request.method === "GET" && (action === "gmail" || action === "outlook") && slug[2] !== "callback") {
+    return Response.redirect(new URL("/home", request.url));
+  }
   if (root === "oauth" && request.method === "GET" && action && slug[2] !== "callback") {
     const session = await readSession();
     if ((action === "gmail" || action === "outlook") && !session?.user) {
@@ -118,6 +127,9 @@ async function handle(request: Request, slug: string[]) {
     }
     const url = await beginOAuth(action as "google" | "microsoft" | "gmail" | "outlook", session?.user.id ?? null, publicOrigin(request));
     return Response.redirect(url);
+  }
+  if (root === "oauth" && slug[2] === "callback" && (action === "gmail" || action === "outlook") && request.method === "GET") {
+    return Response.redirect(new URL("/home", request.url));
   }
   if (root === "oauth" && slug[2] === "callback" && request.method === "GET") {
     const url = new URL(request.url);
@@ -163,6 +175,25 @@ async function handle(request: Request, slug: string[]) {
       followups: followups.filter((item) => item.status === "open").length,
       admin: await isAdminEmail(user),
     });
+  }
+
+  if (root === "app" && action === "state" && request.method === "GET") {
+    return json(await workspaceState(user.id));
+  }
+  if (root === "app" && action === "profile" && request.method === "PUT") {
+    const body = await request.json();
+    const document = await saveStructuredProfile(user.id, body.profile ?? body, user.name);
+    return json({ profile: document });
+  }
+  if (root === "app" && action === "profile" && request.method === "DELETE") {
+    await resetStructuredProfile(user.id);
+    return json({ ok: true });
+  }
+  if (root === "app" && action === "search" && request.method === "POST") {
+    return json(await recordPeopleSearch(user.id, await request.json()));
+  }
+  if (root === "app" && action === "draft" && request.method === "POST") {
+    return json({ draft: await saveManualEmailDraft(user.id, await request.json()) });
   }
 
   if (root === "dashboard" && request.method === "GET") return json(await dashboard(user.id));
@@ -237,58 +268,18 @@ async function handle(request: Request, slug: string[]) {
   }
 
   if (root === "contacts" && action === "search" && request.method === "POST") {
-    if (!rateLimit(`search:${user.id}`, 30, 60 * 1000)) throw new ServiceError("Search a little slower — limit is 30 a minute.", "rate", 429);
-    const body = await request.json();
-    const page = Number(body.page) || 1;
-    const pageSize = Math.min(20, Math.max(1, Number(body.pageSize) || 20));
-    if (page === 1) {
-      const account = await repo.getAccount(user.id);
-      if (!account || account.balance < 1) {
-        return json({ error: "You need 1 credit to see these people.", code: "insufficient_credits" }, 402);
-      }
-    }
-    const result = await runSearch(user.id, {
-      titles: body.titles ?? [],
-      industries: body.industries ?? [],
-      locations: body.locations ?? [],
-      schools: body.schools ?? [],
-      includeSimilarSchools: body.includeSimilarSchools !== false,
-      companies: body.companies ?? [],
-      seniorities: body.seniorities ?? [],
-      departments: body.departments ?? [],
-      companySizes: body.companySizes ?? [],
-      query: body.query,
-    }, page, pageSize);
-    if (page !== 1 || result.people.length === 0) {
-      const account = await repo.getAccount(user.id);
-      return json({ ...result, charged: 0, balance: account?.balance ?? 0 });
-    }
-    const spent = await repo.spendCredits({
-      userId: user.id,
-      amount: 1,
-      idempotencyKey: searchChargeKey(user.id, page, {
-        titles: body.titles ?? [],
-        industries: body.industries ?? [],
-        locations: body.locations ?? [],
-        schools: body.schools ?? [],
-        includeSimilarSchools: body.includeSimilarSchools !== false,
-        companies: body.companies ?? [],
-        seniorities: body.seniorities ?? [],
-        departments: body.departments ?? [],
-        companySizes: body.companySizes ?? [],
-        query: body.query,
-      }),
-      note: "Show up to 20 people",
-      entryType: "search_debit",
+    return json({
+      people: [],
+      total: 0,
+      source: "disabled",
+      notice: "People search is not connected yet. No credits were used.",
+      charged: 0,
+      status: "not_connected",
     });
-    if (spent.insufficient) return json({ error: "You need 1 credit to see these people.", code: "insufficient_credits" }, 402);
-    return json({ ...result, charged: spent.duplicate ? 0 : spent.charged, balance: spent.balance });
   }
 
   if (root === "contacts" && action === "unlock" && request.method === "POST") {
-    const body = await request.json();
-    const result = await unlockContact(user.id, body.contactId, body.idempotencyKey || `unlock:${user.id}:${body.contactId}`);
-    return json(result, result.ok ? 200 : result.code === "insufficient_credits" ? 402 : 422);
+    return json({ ok: false, code: "not_connected", message: "Email unlock is not connected yet. No credits were used." }, 409);
   }
 
   if (root === "saved" && action === "export" && request.method === "GET") {
@@ -325,16 +316,16 @@ async function handle(request: Request, slug: string[]) {
     });
   }
   if (root === "email" && action === "generate" && request.method === "POST") {
-    const body = await request.json();
-    return json(await generateEmail(user.id, body));
+    return json({ error: "AI email generation is not connected yet. Nothing was written for you." }, 409);
   }
   if (root === "email" && action === "send" && request.method === "POST") {
     const body = await request.json();
     if (body.action === "draft") return json({ draft: await saveDraft(user.id, body) });
-    const result = await sendOutreach(user.id, body);
-    return json(result);
+    return json({ error: "Email sending is not connected yet. Nothing was sent." }, 409);
   }
-  if (root === "email" && action === "sync" && request.method === "POST") return json(await syncReplies(user.id));
+  if (root === "email" && action === "sync" && request.method === "POST") {
+    return json({ error: "Mailbox sync is not connected yet." }, 409);
+  }
 
   if (root === "outreach" && request.method === "GET") {
     const [saved, messages, followups] = await Promise.all([repo.listSaved(user.id), repo.listMessages(user.id), repo.listFollowUps(user.id)]);
@@ -351,21 +342,8 @@ async function handle(request: Request, slug: string[]) {
     return json({ summary, followups: followups.filter((item) => item.status === "open"), messages, chart });
   }
 
-  if (root === "jobs" && action === "save" && request.method === "POST") {
-    const body = await request.json();
-    return json({ saved: await repo.saveJob(user.id, body.jobId) });
-  }
-  if (root === "jobs" && action === "save" && request.method === "DELETE") {
-    const body = await request.json();
-    await repo.unsaveJob(user.id, body.jobId);
-    return json({ ok: true });
-  }
-  if (root === "jobs" && request.method === "GET") {
-    const [goals, facts] = await Promise.all([repo.getGoals(user.id), repo.getFacts(user.id)]);
-    const page = Number(new URL(request.url).searchParams.get("page") || 1);
-    const result = await listJobPostings(goals, facts, page);
-    const saved = await repo.listSavedJobs(user.id);
-    return json({ ...result, savedJobs: saved, savedIds: saved.map((job) => job.id) });
+  if (root === "jobs") {
+    return json({ error: "Job listings are not part of Unnepo.", jobs: [], savedJobs: [] }, 410);
   }
 
   if (root === "billing" && action === "referral" && request.method === "POST") {
@@ -373,41 +351,13 @@ async function handle(request: Request, slug: string[]) {
     return json(await applyReferralCode(user.id, String(body.code || "")));
   }
   if (root === "billing" && action === "checkout" && request.method === "POST") {
-    const body = await request.json();
-    if (!CHECKOUT_KINDS.has(body.kind)) throw new ServiceError("Choose Pro or Premium.", "plan");
-    return json(await createStripeCheckout(user.id, body.kind));
+    return json({ error: "New checkouts are paused. Existing subscriptions are unchanged." }, 409);
   }
   if (root === "billing" && action === "demo" && request.method === "POST") {
-    const body = await request.json();
-    if (!CHECKOUT_KINDS.has(body.kind)) throw new ServiceError("Choose Pro or Premium.", "plan");
-    return json(await confirmDemoPurchase(user.id, body.kind));
+    return json({ error: "Demo credit purchases are paused. Existing balances are unchanged." }, 409);
   }
-  if (root === "cover-letter" && action === "pdf" && request.method === "POST") {
-    const body = await request.json();
-    const bytes = pdfForEditedLetter({
-      name: user.name,
-      email: user.email,
-      company: String(body.company || ""),
-      role: String(body.role || ""),
-      body: String(body.body || ""),
-    });
-    return new Response(bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": "attachment; filename=cover-letter.pdf" } });
-  }
-  if (root === "cover-letter" && request.method === "POST") {
-    const body = await request.json();
-    return json(await generateCoverLetter(user.id, {
-      jobId: body.jobId,
-      company: String(body.company || ""),
-      role: String(body.role || ""),
-      description: String(body.description || ""),
-      factIds: Array.isArray(body.factIds) ? body.factIds : [],
-      tone: String(body.tone || "professional"),
-    }));
-  }
-  if (root === "cover-letter" && request.method === "GET") {
-    const letterId = new URL(request.url).searchParams.get("id") || "";
-    const file = await coverLetterPdf(user.id, letterId);
-    return new Response(file.bytes, { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${file.filename}"` } });
+  if (root === "cover-letter") {
+    return json({ error: "Cover letters are not part of Unnepo." }, 410);
   }
   if (root === "billing" && action === "history" && request.method === "GET") return json({ payments: await repo.listPayments(user.id) });
 

@@ -1,10 +1,10 @@
 # Unnepo
 
-Unnepo is a career networking workspace for college students. A student verifies a school email, uploads a resume, searches for professionals, spends one credit to unlock a verified work email or business phone, writes a grounded outreach email, sends it from their own mailbox, and tracks the reply.
+Unnepo is a career networking workspace for college students. The public site is unchanged. After sign-in, the app is one page: Find for Me, Custom Search, profile onboarding, and a personal email composer.
 
-Showing a list of people costs 1 credit and returns up to 20. The same search is not charged again. An empty or failed search costs nothing. Unlocking a verified work email costs one more credit, and only after a real email comes back. Phone unlocking is not offered. AI email and cover letters are on Pro and Premium. Sending from a connected mailbox does not spend a contact credit.
+People search, AI writing, email sending, and new card charges are turned off. A search saves the request and shows “not connected yet.” It does not return people and does not spend credits. Students can save a profile, upload a resume, and save an email draft they write themselves.
 
-Production does not show sample people. Without `APOLLO_API_KEY` the search page says the live directory is unavailable.
+Profile answers are stored as separate facts (education, work, skills, projects, interests, goals, locations, networking, story, email tone, and topics to leave out). Each fact keeps its source, a verification status, and whether the student approved it. Resume files are stored. Heading lines from the file are marked for review. Anthropic is not called.
 
 ## Local development
 
@@ -17,11 +17,13 @@ Open [http://127.0.0.1:43123](http://127.0.0.1:43123).
 
 Copy `.env.example` to `.env.local` when you add provider keys. Without keys, the app runs in local mode:
 
-- Accounts, credits, resumes, and outreach live in `.data/db.json`.
-- Professional search uses a **labeled sample directory** on your laptop. Production never does. Emails stay hidden until a successful unlock.
-- Checkout is a demo screen. It does not charge a card, and demo credits are excluded from revenue.
-- “Demo outbox” records a message without claiming it was sent. Connect Gmail or Outlook before a message can be marked sent.
+- Accounts, profiles, resumes, search requests, and drafts live in `.data/db.json`.
+- People search does not call Apollo and does not show sample people. The screen says the search is not connected, and no credits are spent.
+- AI email generation and mailbox sending stay off. A draft you write can be saved.
+- New Stripe checkouts are paused. Existing billing records are left as they are.
 - School-email verification links are returned to the signup screen so you can finish onboarding without an email provider.
+
+The signed-in app reads and writes the structured profile through the existing Supabase `app_state` document in production. `supabase/migrations/0003_structured_profile.sql` adds matching tables and row level security. It does not drop current tables. Apply it in the Supabase SQL editor when you want those tables. The app works before that SQL is applied.
 
 ```bash
 npm test

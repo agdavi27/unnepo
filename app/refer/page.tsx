@@ -1,10 +1,5 @@
-import { Shell } from "@/components/product/shell";
-import { ReferView } from "@/components/product/refer-view";
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return (
-    <Shell>
-      <ReferView />
-    </Shell>
-  );
+  redirect("/home");
 }

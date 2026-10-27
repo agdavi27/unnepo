@@ -299,6 +299,45 @@ export const repo = {
   async getProfile(userId: string) {
     return withLock((db) => db.profiles.find((profile) => profile.userId === userId) ?? null);
   },
+  async upsertProfileDocument(document: Database["profileDocuments"][number]) {
+    return withLock((db) => {
+      db.profileDocuments ??= [];
+      const index = db.profileDocuments.findIndex((item) => item.userId === document.userId);
+      if (index === -1) db.profileDocuments.push(document);
+      else db.profileDocuments[index] = document;
+      return document;
+    });
+  },
+  async getProfileDocument(userId: string) {
+    return withLock((db) => (db.profileDocuments ?? []).find((item) => item.userId === userId) ?? null);
+  },
+  async deleteProfileDocument(userId: string) {
+    return withLock((db) => {
+      db.profileDocuments = (db.profileDocuments ?? []).filter((item) => item.userId !== userId);
+    });
+  },
+  async insertSearchRequest(request: Database["searchRequests"][number]) {
+    return withLock((db) => {
+      db.searchRequests ??= [];
+      const existing = db.searchRequests.find((item) => item.userId === request.userId && item.idempotencyKey === request.idempotencyKey);
+      if (existing) return existing;
+      db.searchRequests.push(request);
+      return request;
+    });
+  },
+  async listSearchRequests(userId: string) {
+    return withLock((db) => (db.searchRequests ?? []).filter((item) => item.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  },
+  async insertManualDraft(draft: Database["manualDrafts"][number]) {
+    return withLock((db) => {
+      db.manualDrafts ??= [];
+      db.manualDrafts.push(draft);
+      return draft;
+    });
+  },
+  async listManualDrafts(userId: string) {
+    return withLock((db) => (db.manualDrafts ?? []).filter((item) => item.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  },
   async upsertGoals(goals: Database["goals"][number]) {
     return withLock((db) => {
       const index = db.goals.findIndex((item) => item.userId === goals.userId);

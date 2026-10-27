@@ -6,14 +6,14 @@ import { ServiceError } from "@/lib/errors";
 import { extractResumeText, parseResumeText } from "@/lib/resume/parse";
 import { sha256Buffer } from "@/lib/security";
 
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_BYTES = 10 * 1024 * 1024;
 
 export async function storeResume(userId: string, fileName: string, mime: string, bytes: Uint8Array) {
   const lower = fileName.toLowerCase();
   if (!lower.endsWith(".pdf") && !lower.endsWith(".docx")) {
     throw new ServiceError("Upload a PDF or DOCX file.", "file_type");
   }
-  if (bytes.byteLength > MAX_BYTES) throw new ServiceError("Resumes need to be 5 MB or smaller.", "file_size");
+  if (bytes.byteLength > MAX_BYTES) throw new ServiceError("Resumes need to be 10 MB or smaller.", "file_size");
   const hash = sha256Buffer(bytes);
   const cached = await repo.getResumeByHash(userId, hash);
   if (cached) {
