@@ -51,6 +51,26 @@ async function recordUsage(input: {
   });
 }
 
+class ApolloError extends Error {
+  constructor(
+    readonly status: number,
+    readonly detail: string,
+  ) {
+    super(`Apollo search failed (${status})${detail ? `: ${detail}` : ""}`);
+  }
+}
+
+/** Turns an Apollo failure into a message the student can act on. */
+function apolloSearchMessage(error: unknown) {
+  const status = error instanceof ApolloError ? error.status : 0;
+  if (status === 401) return "Apollo rejected the API key (401). Check the key under Apollo Settings > Integrations > API.";
+  if (status === 403) return "Apollo refused the search (403). People search through the API needs a master API key and a plan that includes API access.";
+  if (status === 422) return `Apollo could not run this search (422)${error instanceof ApolloError && error.detail ? `: ${error.detail}` : "."}`;
+  if (status === 429) return "Apollo's rate limit was reached (429). Try again in a minute.";
+  if (status) return `Apollo search failed (${status}).`;
+  return "Apollo could not be reached.";
+}
+
 export async function spentTodayCents(userId?: string) {
   const start = new Date();
   start.setUTCHours(0, 0, 0, 0);
@@ -109,7 +129,7 @@ export async function searchPeople(userId: string, filters: SearchFilters, page:
         estimated: true,
         error: error instanceof Error ? error.message : "apollo_failed",
       });
-      throw new ServiceError("Professional search is temporarily unavailable. No sample profiles were substituted.", "provider_failed", 502);
+      throw new ServiceError(`${apolloSearchMessage(error)} No credits were used.`, "provider_failed", 502);
     }
   }
 
@@ -166,7 +186,7 @@ async function apolloSearch(apiKey: string, filters: SearchFilters, schools: str
       per_page: pageSize,
     }),
   });
-  if (!response.ok) throw new Error(`Apollo search failed (${response.status})`);
+  if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 300));
   const body = (await response.json()) as { people?: Array<Record<string, unknown>> };
   return (body.people ?? []).map((person) => mapApolloPerson(person, schools)).filter((person) => person !== null) as Contact[];
 }

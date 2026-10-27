@@ -7,7 +7,7 @@ import { enrichPeopleBatch, enrichPerson, searchPeople } from "@/lib/providers/c
 import { emptyFilters, filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
 import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligence";
-import { organizeQuizWithModel } from "@/lib/profile/quiz-model";
+import { highlightProfileWithModel, organizeQuizWithModel, quizSourceText } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
 
 function asForm(value: unknown): FormProfile {
@@ -38,7 +38,13 @@ export async function saveStructuredProfile(userId: string, raw: unknown, name: 
   const form = asForm(raw);
   const [facts, resume] = await Promise.all([repo.getFacts(userId), repo.getLatestResume(userId)]);
   const organized = profileIntelligence.organize({ profile: form, resumeFacts: facts });
-  const model = await organizeQuizWithModel(userId, form, await readAnthropicKey(), resume?.text ?? "");
+  const apiKey = await readAnthropicKey();
+  const model = await organizeQuizWithModel(userId, form, apiKey, resume?.text ?? "");
+  const highlights = await highlightProfileWithModel(
+    userId,
+    model?.profile ? JSON.stringify(model.profile) : quizSourceText(form, resume?.text ?? ""),
+    apiKey,
+  );
   const document: ProfileDocument = {
     userId,
     form,
@@ -46,6 +52,7 @@ export async function saveStructuredProfile(userId: string, raw: unknown, name: 
     inconsistencies: organized.inconsistencies,
     resumeId: resume?.id ?? null,
     organizedProfile: model?.profile ?? null,
+    highlights,
     ready: true,
     updatedAt: nowIso(),
   };
@@ -82,6 +89,21 @@ export async function saveStructuredProfile(userId: string, raw: unknown, name: 
 }
 
 /** Clears the structured profile only. Contacts, credits, and resumes stay. */
+/** Builds highlights for a profile saved before they existed, or rebuilds them on request. */
+export async function refreshProfileHighlights(userId: string) {
+  const document = await repo.getProfileDocument(userId);
+  if (!document?.ready) throw new ServiceError("Save your profile first.", "profile", 400);
+  const resume = await repo.getLatestResume(userId);
+  const highlights = await highlightProfileWithModel(
+    userId,
+    document.organizedProfile ? JSON.stringify(document.organizedProfile) : quizSourceText(document.form, resume?.text ?? ""),
+    await readAnthropicKey(),
+  );
+  if (!highlights) throw new ServiceError("Highlights could not be built right now. Try again in a moment.", "provider_failed", 502);
+  await repo.upsertProfileDocument({ ...document, highlights, updatedAt: nowIso() });
+  return { highlights };
+}
+
 export async function resetStructuredProfile(userId: string) {
   await repo.deleteProfileDocument(userId);
   await repo.updateUser(userId, { onboardingStep: "profile" });
@@ -353,6 +375,7 @@ export async function generateWorkspaceEmail(userId: string, raw: unknown) {
   const contactId = String(body.contactId ?? "").slice(0, 120);
   const ids = (value: unknown) => new Set((Array.isArray(value) ? value : []).map(String).slice(0, 40));
   const studentIds = ids(body.studentFactIds);
+  const detailIds = ids(body.detailFactIds);
   const contactIds = ids(body.contactFactIds);
   const goal = EMAIL_GOALS[String(body.goal)] ? String(body.goal) : "chat";
   const tone = EMAIL_TONES[String(body.tone)] ? String(body.tone) : "friendly";
@@ -371,7 +394,12 @@ export async function generateWorkspaceEmail(userId: string, raw: unknown) {
   const state = await workspaceState(userId);
   const contact = state.contacts.find((item) => item.id === contactId);
   if (!contact) throw new ServiceError("That contact is not in your saved list.", "not_found", 404);
-  const studentFacts = state.studentFacts.filter((fact) => studentIds.has(fact.id));
+  const studentFacts = [
+    ...state.highlights
+      .filter((item) => studentIds.has(item.id))
+      .map((item) => ({ text: detailIds.has(item.id) && item.experienceDetails ? `${item.detail} Details: ${item.experienceDetails}` : item.detail })),
+    ...state.studentFacts.filter((fact) => studentIds.has(fact.id)).map((fact) => ({ text: fact.text })),
+  ];
   const contactFacts = contact.facts.filter((fact) => fact.verified && contactIds.has(fact.id));
   const user = await repo.getUserById(userId);
   const excluded = state.profile?.form.excludedTopics.trim();
@@ -455,8 +483,12 @@ export async function saveManualEmailDraft(userId: string, raw: unknown) {
     throw new ServiceError("That contact is not in your saved list.", "not_found", 404);
   }
   const document = await repo.getProfileDocument(userId);
-  const allowed = new Set((document?.facts ?? []).filter((fact) => fact.approvalStatus === "approved").map((fact) => fact.id));
+  const allowed = new Set([
+    ...(document?.facts ?? []).filter((fact) => fact.approvalStatus === "approved").map((fact) => fact.id),
+    ...(document?.highlights ?? []).map((item) => item.id),
+  ]);
   const studentFactIds = (Array.isArray(body.studentFactIds) ? body.studentFactIds : []).map(String).filter((factId) => allowed.has(factId));
+  const detailFactIds = (Array.isArray(body.detailFactIds) ? body.detailFactIds : []).map(String).filter((factId) => studentFactIds.includes(factId));
   const draft: ManualEmailDraft = {
     id: id(),
     userId,
@@ -464,6 +496,7 @@ export async function saveManualEmailDraft(userId: string, raw: unknown) {
     subject: String(body.subject ?? "").slice(0, 200),
     body: String(body.body ?? "").slice(0, 8000),
     studentFactIds,
+    detailFactIds,
     contactFactIds: (Array.isArray(body.contactFactIds) ? body.contactFactIds : []).map(String).slice(0, 20),
     goal: String(body.goal ?? "").slice(0, 40),
     tone: String(body.tone ?? "").slice(0, 40),
@@ -513,6 +546,7 @@ export async function workspaceState(userId: string) {
     credits: { balance: credits?.balance ?? 0, plan: credits?.plan ?? "free", includedAllowance: credits?.includedAllowance ?? 0 },
     profile: document,
     studentFacts,
+    highlights: document?.highlights ?? [],
     resume: resume ? { id: resume.id, fileName: resume.fileName, byteSize: resume.byteSize } : null,
     contacts,
     searches: searches.slice(0, 10),

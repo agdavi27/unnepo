@@ -10,6 +10,7 @@ import {
   emptyProfile,
   type Contact,
   type EmailDraft,
+  type Highlight,
   type Profile,
   type SearchRequest,
 } from "@/components/unnepo/UnnepoForms";
@@ -21,6 +22,7 @@ type Workspace = {
   credits: { balance: number; plan: string; includedAllowance: number };
   profile: { ready: boolean; form: Profile; organizedProfile: unknown | null } | null;
   studentFacts: StudentFact[];
+  highlights: Highlight[];
   resume: { id: string; fileName: string; byteSize: number } | null;
   contacts: Contact[];
   searches: { id: string; mode: string; quantity: number; creditsQuoted: number; status: string; resultCount: number; creditsCharged: number; prompt: string; createdAt: string }[];
@@ -83,10 +85,13 @@ export function AppHome() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState("");
   const [emailContact, setEmailContact] = useState<Contact | null>(null);
   const [unlocking, setUnlocking] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  const [highlightsLoading, setHighlightsLoading] = useState(false);
+  const [highlightsError, setHighlightsError] = useState("");
 
   const load = useCallback(async () => {
     const response = await fetch("/api/app/state");
@@ -182,19 +187,23 @@ export function AppHome() {
   async function search(request: SearchRequest) {
     setSearching(true);
     setNotice("");
+    setSearchError("");
     try {
       const response = await fetch("/api/app/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request),
       });
-      const payload = await response.json();
+      const payload = await response.json().catch(() => ({ error: `The search request failed (${response.status}).` }));
       if (!response.ok) {
-        setNotice(payload.error || "Search could not be saved.");
+        setSearchError(payload.error || "The search did not run. No credits were used.");
+        await load();
         return;
       }
-      setNotice(payload.message || "People search is not connected yet. No credits were used.");
+      setNotice(payload.message || "Search finished.");
       await load();
+    } catch {
+      setSearchError("The search could not reach the server. No credits were used.");
     } finally {
       setSearching(false);
     }
@@ -259,6 +268,29 @@ export function AppHome() {
     setNotice(payload.error || "Upgrades are not available right now.");
   }
 
+  async function buildHighlights() {
+    setHighlightsLoading(true);
+    setHighlightsError("");
+    try {
+      const response = await fetch("/api/app/highlights", { method: "POST" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setHighlightsError(payload.error || "Highlights could not be built right now.");
+        return;
+      }
+      await load();
+    } catch {
+      setHighlightsError("Highlights could not be built right now.");
+    } finally {
+      setHighlightsLoading(false);
+    }
+  }
+
+  function openComposer(contact: Contact) {
+    setEmailContact(contact);
+    if (data?.profile?.ready && !data.highlights.length && !highlightsLoading) void buildHighlights();
+  }
+
   async function generateDraft(contact: Contact, input: Omit<EmailDraft, "subject" | "body">) {
     const response = await fetch("/api/app/generate", {
       method: "POST",
@@ -290,6 +322,7 @@ export function AppHome() {
   const creditsSpent = data?.searches.reduce((sum, item) => sum + item.creditsCharged, 0) ?? 0;
 
   const contacts = data?.contacts ?? [];
+  const lastSearch = data?.searches.find((item) => item.status === "completed");
   const allSelected = contacts.length > 0 && contacts.every((contact) => selected.has(contact.id));
   const currentPlan = data?.credits.plan ?? "free";
 
@@ -390,7 +423,7 @@ export function AppHome() {
                         )}
                       </div>
                       <div className="col-start-2 flex gap-2 md:col-start-auto md:justify-end">
-                        <button type="button" onClick={() => setEmailContact(contact)} className="whitespace-nowrap rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
+                        <button type="button" onClick={() => openComposer(contact)} className="whitespace-nowrap rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Write email</button>
                         <button type="button" disabled={deleting} onClick={() => void deleteContacts([contact.id])} aria-label={`Delete ${contact.name}`} className="rounded-xl border border-line px-3 py-1.5 text-sm text-muted hover:border-red-900/70 hover:text-red-300 disabled:opacity-50">Delete</button>
                       </div>
                     </li>
@@ -436,20 +469,20 @@ export function AppHome() {
               <aside className="space-y-8">
                 <section className="rounded-2xl border border-line bg-panel p-5">
                   <h2 className={sectionTitle}>Results</h2>
-                  {data.searches[0]?.status === "completed" ? (
+                  {searching ? (
+                    <p className="mt-3 text-sm text-muted">Searching Apollo and looking up verified emails…</p>
+                  ) : searchError ? (
+                    <p role="alert" className="mt-3 rounded-xl border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm text-red-300">{searchError}</p>
+                  ) : lastSearch ? (
                     <div className="mt-3 space-y-3">
                       <p className="text-sm text-muted">
-                        Your last search found {data.searches[0].resultCount} {data.searches[0].resultCount === 1 ? "person" : "people"} and used {data.searches[0].creditsCharged} {data.searches[0].creditsCharged === 1 ? "credit" : "credits"}.
-                        {data.searches[0].prompt ? ` “${data.searches[0].prompt}”` : ""}
+                        Your last search found {lastSearch.resultCount} {lastSearch.resultCount === 1 ? "person" : "people"} and used {lastSearch.creditsCharged} {lastSearch.creditsCharged === 1 ? "credit" : "credits"}.
+                        {lastSearch.prompt ? ` “${lastSearch.prompt}”` : ""}
                       </p>
-                      {data.searches[0].resultCount > 0 && (
+                      {lastSearch.resultCount > 0 && (
                         <button type="button" onClick={() => setView("contacts")} className="w-full rounded-xl border border-line px-3 py-2 text-sm hover:bg-white/5">View in My Contacts</button>
                       )}
                     </div>
-                  ) : data.searches[0] ? (
-                    <p className="mt-3 text-sm text-muted">
-                      Not connected yet. Your last request for up to {data.searches[0].quantity} people ({data.searches[0].creditsQuoted} {data.searches[0].creditsQuoted === 1 ? "credit" : "credits"}) was saved and did not charge anything.
-                    </p>
                   ) : (
                     <p className="mt-3 text-sm text-muted">Run a search to find people. You&apos;re only charged for people found, 1 credit per 25. Verified work emails are included.</p>
                   )}
@@ -584,6 +617,10 @@ export function AppHome() {
           open
           contact={emailContact}
           studentFacts={data?.studentFacts ?? []}
+          highlights={data?.highlights ?? []}
+          highlightsLoading={highlightsLoading}
+          highlightsError={highlightsError}
+          onRetryHighlights={() => void buildHighlights()}
           onClose={() => setEmailContact(null)}
           onGenerate={(input) => generateDraft(emailContact, input)}
           onSaveDraft={saveDraft}

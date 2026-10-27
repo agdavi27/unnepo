@@ -343,7 +343,7 @@ describe("isolation, spend limits, fallback, and retries", () => {
     setContactFetcher(async () => new Response("no", { status: 503 }));
     await expect(
       searchPeople("user", { titles: [], industries: [], locations: [], schools: [], includeSimilarSchools: false, companies: [], seniorities: [], departments: [], companySizes: [] }, 1, 5),
-    ).rejects.toThrow(/temporarily unavailable/);
+    ).rejects.toThrow(/Apollo search failed \(503\)\. No credits were used/);
   });
 
   it("does not invent an email when Apollo enrichment returns none", async () => {

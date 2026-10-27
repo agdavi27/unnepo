@@ -474,8 +474,19 @@ export type ProfileDocument = {
   resumeId: string | null;
   /** Anthropic's profile JSON, stored without renaming its fields. */
   organizedProfile: unknown | null;
+  /** Up to 20 things worth mentioning in outreach, picked by the model from the same profile. */
+  highlights?: ProfileHighlight[] | null;
   ready: boolean;
   updatedAt: string;
+};
+
+export type ProfileHighlight = {
+  id: string;
+  label: string;
+  detail: string;
+  category: "experience" | "education" | "project" | "achievement" | "leadership" | "skill" | "interest" | "goal";
+  /** Responsibilities and results for a job, offered as an optional add-on in the email composer. */
+  experienceDetails: string | null;
 };
 
 export type PeopleSearchRequest = {
@@ -500,6 +511,8 @@ export type ManualEmailDraft = {
   subject: string;
   body: string;
   studentFactIds: string[];
+  /** Experience highlights whose details the student chose to include. */
+  detailFactIds?: string[];
   contactFactIds: string[];
   goal: string;
   tone: string;

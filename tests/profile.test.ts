@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
-import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
+import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
-import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail, deleteWorkspaceContacts, workspaceState } from "@/lib/services/workspace";
+import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail, deleteWorkspaceContacts, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { integrations } from "@/lib/integrations/flags";
@@ -241,6 +241,26 @@ describe("structured profile", () => {
     expect(unlock.idempotencyKey).toBe("unlock:user:contact");
     expect(() => assertCreditCommitAllowed("unlock")).toThrow(/not deducted/);
     expect(() => creditsForPeople(30)).toThrow(/25/);
+  });
+
+  it("keeps at most 20 highlights, drops duplicates, and keeps job details only on experience", () => {
+    const items = Array.from({ length: 25 }, (_, index) => ({ label: `Item ${index}`, detail: `Detail ${index}`, category: "skill", experience_details: "should drop" }));
+    items.unshift({ label: "Marketing intern at Patagonia", detail: "Ran email tests.", category: "experience", experience_details: "Owned weekly email A/B tests." });
+    items.push({ label: "item 0", detail: "dup", category: "skill", experience_details: null as unknown as string });
+    const parsed = parseHighlights(`Here you go: ${JSON.stringify({ highlights: items })}`);
+    expect(parsed).toHaveLength(20);
+    expect(parsed[0]).toMatchObject({ label: "Marketing intern at Patagonia", category: "experience", experienceDetails: "Owned weekly email A/B tests." });
+    expect(parsed[1].experienceDetails).toBeNull();
+    expect(new Set(parsed.map((item) => item.id)).size).toBe(20);
+    expect(parseHighlights("not json")).toEqual([]);
+  });
+
+  it("saves a profile without highlights when no key is set and refuses to rebuild them", async () => {
+    const userId = await verifiedStudent("highlights@colby.edu", "Highlighter");
+    const saved = await saveStructuredProfile(userId, form, "Highlighter");
+    expect(saved.document.highlights).toBeNull();
+    expect((await workspaceState(userId)).highlights).toEqual([]);
+    await expect(refreshProfileHighlights(userId)).rejects.toThrow(/could not be built/);
   });
 
   it("refuses an AI draft without a key and does not count it", async () => {

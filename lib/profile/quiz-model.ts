@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { serverConfig } from "@/lib/config";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import { integrations } from "@/lib/integrations/flags";
+import type { ProfileHighlight } from "@/lib/db/types";
 import { type FormProfile, type ProfileSection, type StructuredFact } from "@/lib/profile/intelligence";
 
 const SECTIONS = new Set<ProfileSection>([
@@ -202,6 +203,85 @@ export async function organizeQuizWithModel(userId: string, profile: FormProfile
       userId,
       provider: "anthropic",
       operation: "profile_organize",
+      success: false,
+      latencyMs: Date.now() - started,
+      costCents: 0,
+      estimated: true,
+      error: error instanceof Error ? error.message : "anthropic_failed",
+      createdAt: nowIso(),
+    });
+    return null;
+  }
+}
+
+export const PROFILE_HIGHLIGHTS_PROMPT = "You pick what a college student could mention in a cold outreach email to a professional. From the student profile you are given, choose up to 20 of the most useful, specific items: jobs and internships, projects, achievements, leadership roles, notable skills, education, and distinctive interests or goals. Skip generic preferences such as graduation year on its own, work-location preference, preferred seniority of contacts, or email tone. Use only what the profile says; do not invent, embellish, or merge separate items. If the profile has fewer than 20 worthwhile items, return fewer. For each item return: label (a specific chip of at most 8 words, for example \"Marketing intern at Patagonia\"), detail (one sentence with the specifics, about the student), category (one of experience, education, project, achievement, leadership, skill, interest, goal), and experience_details (for category experience only: two or three sentences of responsibilities and results taken from the profile, or null when the profile has none; null for every other category). Return only JSON in the form {\"highlights\": [ ... ]}.";
+
+const HIGHLIGHT_CATEGORIES = new Set<ProfileHighlight["category"]>(["experience", "education", "project", "achievement", "leadership", "skill", "interest", "goal"]);
+
+export function parseHighlights(text: string): ProfileHighlight[] {
+  const parsed = parseModelProfile(text);
+  const list = parsed && typeof parsed === "object" && Array.isArray((parsed as { highlights?: unknown }).highlights)
+    ? ((parsed as { highlights: unknown[] }).highlights)
+    : [];
+  const out: ProfileHighlight[] = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const label = String(row.label ?? "").trim().slice(0, 80);
+    const detail = String(row.detail ?? "").trim().slice(0, 400);
+    if (!label || out.some((existing) => existing.label.toLowerCase() === label.toLowerCase())) continue;
+    const category = HIGHLIGHT_CATEGORIES.has(row.category as ProfileHighlight["category"]) ? (row.category as ProfileHighlight["category"]) : "achievement";
+    const details = typeof row.experience_details === "string" ? row.experience_details.trim().slice(0, 800) : "";
+    out.push({
+      id: `hl_${createHash("sha256").update(`${category}:${label}`).digest("hex").slice(0, 12)}`,
+      label,
+      detail: detail || label,
+      category,
+      experienceDetails: category === "experience" && details ? details : null,
+    });
+    if (out.length === 20) break;
+  }
+  return out;
+}
+
+/** Second pass over the same profile: picks highlights the student can select when writing an email. */
+export async function highlightProfileWithModel(userId: string, source: string, apiKey: string) {
+  if (!integrations.profileOrganization || !apiKey || !source.trim()) return null;
+  const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+  const started = Date.now();
+  try {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model,
+      max_tokens: 4000,
+      system: [{ type: "text", text: PROFILE_HIGHLIGHTS_PROMPT, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: source }],
+    });
+    const raw = response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n").trim();
+    const highlights = parseHighlights(raw);
+    const inputTokens = response.usage?.input_tokens ?? 0;
+    const outputTokens = response.usage?.output_tokens ?? 0;
+    const config = serverConfig();
+    await repo.insertUsage({
+      id: id(),
+      userId,
+      provider: "anthropic",
+      operation: "profile_highlights",
+      success: highlights.length > 0,
+      latencyMs: Date.now() - started,
+      costCents: (inputTokens * config.fastInputCentsPerMillion + outputTokens * config.fastOutputCentsPerMillion) / 1_000_000,
+      estimated: true,
+      error: highlights.length ? null : "no_highlights",
+      createdAt: nowIso(),
+    });
+    return highlights.length ? highlights : null;
+  } catch (error) {
+    await repo.insertUsage({
+      id: id(),
+      userId,
+      provider: "anthropic",
+      operation: "profile_highlights",
       success: false,
       latencyMs: Date.now() - started,
       costCents: 0,
