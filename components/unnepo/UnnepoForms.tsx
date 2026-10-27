@@ -3,7 +3,8 @@
 /* The supplied form copy uses apostrophes. Keep that text as written. */
 /* eslint-disable react/no-unescaped-entities */
 
-import React, { useMemo, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
+import { COLLEGE_SUGGESTIONS, COMPANY_SUGGESTIONS, INTEREST_SUGGESTIONS, LOCATION_SUGGESTIONS, MAJOR_SUGGESTIONS, ROLE_SUGGESTIONS, rankSuggestions } from "@/lib/suggestions";
 
 /** Drop-in UI components. Wire callbacks to your existing authenticated backend. */
 export type Profile = {
@@ -32,6 +33,68 @@ const Chips = ({ values, selected, onChange }: { values: string[]; selected: str
 const Quantity = ({ value, onChange }: { value: number; onChange: (n: number) => void }) => <div><div className="mb-3 flex items-center justify-between"><h3 className="text-sm font-semibold">How many people?</h3><span className="text-sm text-muted">{value / 25} {value === 25 ? "credit" : "credits"}</span></div><div className="grid grid-cols-5 gap-2">{quantities.map(n => <button type="button" key={n} onClick={() => onChange(n)} className={`rounded-lg border p-2 text-center transition ${value === n ? "border-white bg-white/10 ring-1 ring-white" : "border-line hover:bg-white/5"}`}><div className="text-sm font-semibold">{n}</div><div className="text-[10px] text-muted">{n / 25} cr</div></button>)}</div></div>;
 const Select = ({ value, onChange, options }: { value: string; onChange: (s: string) => void; options: [string, string][] }) => <select className={field} value={value} onChange={e => onChange(e.target.value)}>{options.map(([v, t]) => <option key={v} value={v}>{t}</option>)}</select>;
 const TextField = ({ title, value, onChange, placeholder, multiline = false }: { title: string; value: string; onChange: (s: string) => void; placeholder?: string; multiline?: boolean }) => <div><label className={label}>{title}</label>{multiline ? <textarea rows={3} className={field} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} /> : <input className={field} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} />}</div>;
+
+/** Text input with a typeahead list underneath. With multi, it completes the entry after the last comma. */
+function AutoField({ title, value, onChange, options, placeholder, multi = false }: { title: string; value: string; onChange: (s: string) => void; options: readonly string[]; placeholder?: string; multi?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const id = useId();
+  const parts = multi ? value.split(",") : [value];
+  const token = parts[parts.length - 1] ?? "";
+  const chosen = multi ? parts.slice(0, -1).map((part) => part.trim()).filter(Boolean) : [];
+  const matches = open ? rankSuggestions(options, token, chosen) : [];
+  const current = Math.min(active, Math.max(0, matches.length - 1));
+  const pick = (option: string) => {
+    onChange(multi ? `${[...chosen, option].join(", ")}, ` : option);
+    setActive(0);
+    setOpen(multi);
+  };
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!matches.length) return;
+    if (event.key === "ArrowDown") { event.preventDefault(); setActive((current + 1) % matches.length); }
+    else if (event.key === "ArrowUp") { event.preventDefault(); setActive((current - 1 + matches.length) % matches.length); }
+    else if (event.key === "Enter" || event.key === "Tab") { event.preventDefault(); pick(matches[current]); }
+    else if (event.key === "Escape") { event.preventDefault(); setOpen(false); }
+  };
+  return (
+    <div className="relative">
+      <label htmlFor={`${id}-input`} className={label}>{title}</label>
+      <input
+        id={`${id}-input`}
+        role="combobox"
+        aria-autocomplete="list"
+        aria-expanded={matches.length > 0}
+        aria-controls={`${id}-list`}
+        aria-activedescendant={matches.length ? `${id}-option-${current}` : undefined}
+        autoComplete="off"
+        className={field}
+        value={value}
+        placeholder={placeholder}
+        onChange={(event) => { onChange(event.target.value); setOpen(true); setActive(0); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => { setOpen(false); if (multi) onChange(value.replace(/,\s*$/, "")); }}
+        onKeyDown={onKeyDown}
+      />
+      {matches.length > 0 && (
+        <ul id={`${id}-list`} role="listbox" className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-line bg-card p-1 shadow-2xl">
+          {matches.map((option, index) => (
+            <li
+              key={option}
+              id={`${id}-option-${index}`}
+              role="option"
+              aria-selected={index === current}
+              onMouseDown={(event) => { event.preventDefault(); pick(option); }}
+              onMouseEnter={() => setActive(index)}
+              className={`cursor-pointer rounded-lg px-3 py-2 text-sm ${index === current ? "bg-white/10 text-white" : "text-zinc-300"}`}
+            >
+              {option}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function FindForMe({ profileReady, onSearch, onEditProfile, loading = false }: { profileReady: boolean; onSearch: (request: SearchRequest) => void | Promise<void>; onEditProfile: (action: "resume" | "profile" | "reset") => void; loading?: boolean }) {
   const [quantity, setQuantity] = useState(25);
@@ -73,9 +136,9 @@ export function ProfileOnboarding({ initialProfile = emptyProfile, onSave, onRes
   const acceptResume = (f?: File) => { if(!f)return; const named=/\.(pdf|docx)$/i.test(f.name); const typed=f.type==="application/pdf"||f.type.includes("wordprocessingml"); if(!named&&!typed){alert("Upload a PDF or DOCX file.");return;} if(f.size>10*1024*1024){alert("Resume must be under 10 MB");return;} setFile(f.name); void onResumeUpload?.(f); };
   const steps=["Resume","Interests","Career goals","Connections","Your story","Review"];
   return <section className={`${card} space-y-5`}><div className="flex items-center justify-between"><div><h2 className="text-2xl font-semibold tracking-tight">Let's get to know you.</h2><p className="text-sm text-muted">Your profile powers personalized search and outreach.</p></div><span className="text-xs text-muted">{step+1} of 6</span></div><div className="grid grid-cols-6 gap-1">{steps.map((s,i)=><div key={s}><div className={`h-1.5 rounded-full ${i<=step?"bg-white":"bg-line"}`}/><div className="mt-1 text-center text-[9px] text-muted">{s}</div></div>)}</div>
-  {step===0 && <div className="space-y-4"><h3 className="text-lg font-semibold">First, the basics.</h3><p className="text-sm text-muted">Upload your resume and we'll extract education, experience, skills, and projects. Review everything before saving.</p><label onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);acceptResume(e.dataTransfer.files?.[0]);}} className={`flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed p-6 text-center ${drag?"border-white bg-card":"border-line"}`}><span className="text-2xl">⇧</span><strong className="text-sm">Upload your resume</strong><span className="text-xs text-muted">PDF or DOCX · Max 10 MB · Drop a file here</span><input type="file" className="max-w-full text-xs" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e=>acceptResume(e.target.files?.[0])}/>{file && <span className="text-xs text-emerald-400">✓ {file}</span>}</label><TextField title="College / University" value={p.school} onChange={v=>set("school",v)} placeholder="e.g. Colby College"/><div className="grid grid-cols-2 gap-3"><TextField title="Major / Field of Study" value={p.major} onChange={v=>set("major",v)} placeholder="e.g. Economics"/><div><label className={label}>Graduation year</label><Select value={p.graduationYear} onChange={v=>set("graduationYear",v)} options={Array.from({length:10},(_,i)=>String(2025+i)).map(v=>[v,v])}/></div></div></div>}
-  {step===1 && <div className="space-y-4"><h3 className="text-lg font-semibold">What are you into?</h3><p className="text-sm text-muted">Choose anything that interests you, even if it isn't related to your major.</p><Chips values={interestOptions} selected={p.interests} onChange={v=>set("interests",v)}/><TextField title="Anything else?" value={p.otherInterests} onChange={v=>set("otherInterests",v)} placeholder="Guitar building, running, photography…"/></div>}
-  {step===2 && <div className="space-y-4"><h3 className="text-lg font-semibold">Where do you want to go?</h3><TextField title="Roles that interest you" multiline value={p.targetRoles} onChange={v=>set("targetRoles",v)} placeholder="eCommerce, brand marketing, software engineering…"/><TextField title="Dream companies or brands" multiline value={p.dreamCompanies} onChange={v=>set("dreamCompanies",v)} placeholder="Patagonia, Fender, Spotify…"/><TextField title="Where would you like to work?" value={p.locations} onChange={v=>set("locations",v)} placeholder="Boston, New York, anywhere in the US…"/><div><label className={label}>Work location preference</label><Select value={p.workPreference} onChange={v=>set("workPreference",v)} options={[["either","Open to anything"],["remote","Remote preferred"],["hybrid","Hybrid preferred"],["onsite","In-person preferred"]]}/></div></div>}
+  {step===0 && <div className="space-y-4"><h3 className="text-lg font-semibold">First, the basics.</h3><p className="text-sm text-muted">Upload your resume and we'll extract education, experience, skills, and projects. Review everything before saving.</p><label onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);acceptResume(e.dataTransfer.files?.[0]);}} className={`flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed p-6 text-center ${drag?"border-white bg-card":"border-line"}`}><span className="text-2xl">⇧</span><strong className="text-sm">Upload your resume</strong><span className="text-xs text-muted">PDF or DOCX · Max 10 MB · Drop a file here</span><input type="file" className="max-w-full text-xs" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e=>acceptResume(e.target.files?.[0])}/>{file && <span className="text-xs text-emerald-400">✓ {file}</span>}</label><AutoField title="College / University" value={p.school} onChange={v=>set("school",v)} options={COLLEGE_SUGGESTIONS} placeholder="e.g. Colby College"/><div className="grid grid-cols-2 gap-3"><AutoField title="Major / Field of Study" value={p.major} onChange={v=>set("major",v)} options={MAJOR_SUGGESTIONS} placeholder="e.g. Economics"/><div><label className={label}>Graduation year</label><Select value={p.graduationYear} onChange={v=>set("graduationYear",v)} options={Array.from({length:10},(_,i)=>String(2025+i)).map(v=>[v,v])}/></div></div></div>}
+  {step===1 && <div className="space-y-4"><h3 className="text-lg font-semibold">What are you into?</h3><p className="text-sm text-muted">Choose anything that interests you, even if it isn't related to your major.</p><Chips values={interestOptions} selected={p.interests} onChange={v=>set("interests",v)}/><AutoField multi title="Anything else?" value={p.otherInterests} onChange={v=>set("otherInterests",v)} options={INTEREST_SUGGESTIONS} placeholder="Guitar building, running, photography…"/></div>}
+  {step===2 && <div className="space-y-4"><h3 className="text-lg font-semibold">Where do you want to go?</h3><AutoField multi title="Roles that interest you" value={p.targetRoles} onChange={v=>set("targetRoles",v)} options={ROLE_SUGGESTIONS} placeholder="eCommerce, brand marketing, software engineering…"/><AutoField multi title="Dream companies or brands" value={p.dreamCompanies} onChange={v=>set("dreamCompanies",v)} options={COMPANY_SUGGESTIONS} placeholder="Patagonia, Fender, Spotify…"/><AutoField multi title="Where would you like to work?" value={p.locations} onChange={v=>set("locations",v)} options={LOCATION_SUGGESTIONS} placeholder="Boston, New York, anywhere in the US…"/><div><label className={label}>Work location preference</label><Select value={p.workPreference} onChange={v=>set("workPreference",v)} options={[["either","Open to anything"],["remote","Remote preferred"],["hybrid","Hybrid preferred"],["onsite","In-person preferred"]]}/></div></div>}
   {step===3 && <div className="space-y-4"><h3 className="text-lg font-semibold">What are you hoping to get out of this?</h3><p className="text-sm text-muted">Pick as many as you like.</p><label className={label}>My networking goals</label><Chips values={goalOptions} selected={p.goals} onChange={v=>set("goals",v)}/><label className={label}>Who would you like to connect with?</label><Chips values={contactOptions} selected={p.contactTypes} onChange={v=>set("contactTypes",v)}/><div><label className={label}>Preferred experience level</label><Select value={p.seniority} onChange={v=>set("seniority",v)} options={[["balanced","A mix of experience levels"],["early","Early-career professionals"],["manager","Managers and directors"],["executive","Founders and executives"]]}/></div></div>}
   {step===4 && <div className="space-y-4"><h3 className="text-lg font-semibold">What should people know about you?</h3><p className="text-sm text-muted">These details help write personal emails without inventing anything.</p><TextField title="Tell us a little about yourself" multiline value={p.bio} onChange={v=>set("bio",v)} placeholder="What do you care about? What makes you interesting?"/><TextField title="Experiences or accomplishments you're proud of" multiline value={p.accomplishments} onChange={v=>set("accomplishments",v)} placeholder="Projects, jobs, athletics, volunteering…"/><TextField title="Anything you don't want mentioned in outreach?" multiline value={p.excludedTopics} onChange={v=>set("excludedTopics",v)} placeholder="Optional topics to avoid"/><div><label className={label}>How should your emails sound?</label><Select value={p.emailTone} onChange={v=>set("emailTone",v)} options={[["friendly","Friendly and conversational"],["professional","Professional and polished"],["direct","Short and direct"],["casual","Casual and personable"]]}/></div></div>}
   {step===5 && <div className="space-y-4"><h3 className="text-lg font-semibold">Your profile is ready to review.</h3><p className="text-sm text-muted">Check your details before saving. Use Back to make changes.</p><div className="space-y-3 rounded-xl bg-card p-4 text-sm"><p><strong>Education:</strong> {p.school||"Not provided"} · {p.major||"No major"} · {p.graduationYear}</p><p><strong>Interests:</strong> {[...p.interests,p.otherInterests].filter(Boolean).join(", ")||"Not provided"}</p><p><strong>Target roles:</strong> {p.targetRoles||"Not specified"}</p><p><strong>Dream companies:</strong> {p.dreamCompanies||"Not specified"}</p><p><strong>Locations:</strong> {p.locations||"Anywhere"}</p><p><strong>Goals:</strong> {p.goals.join(", ")||"Not specified"}</p><p><strong>Preferred contacts:</strong> {p.contactTypes.join(", ")||"Not specified"}</p><p><strong>Your story:</strong> {p.bio||"Not provided"}</p><p><strong>Accomplishments:</strong> {p.accomplishments||"Not provided"}</p><p><strong>Do not mention:</strong> {p.excludedTopics||"None"}</p><p><strong>Email style:</strong> {p.emailTone}</p></div></div>}

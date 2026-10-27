@@ -5,6 +5,7 @@ import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, pars
 import { profileIntelligence } from "@/lib/profile/intelligence";
 import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail, deleteWorkspaceContacts, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
+import { COLLEGE_SUGGESTIONS, rankSuggestions } from "@/lib/suggestions";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { integrations } from "@/lib/integrations/flags";
 import type { ResumeFact } from "@/lib/db/types";
@@ -241,6 +242,14 @@ describe("structured profile", () => {
     expect(unlock.idempotencyKey).toBe("unlock:user:contact");
     expect(() => assertCreditCommitAllowed("unlock")).toThrow(/not deducted/);
     expect(() => creditsForPeople(30)).toThrow(/25/);
+  });
+
+  it("ranks typeahead suggestions by prefix and skips ones already chosen", () => {
+    expect(rankSuggestions(COLLEGE_SUGGESTIONS, "col")[0]).toBe("Colby College");
+    expect(rankSuggestions(COLLEGE_SUGGESTIONS, "berk")).toContain("University of California, Berkeley");
+    expect(rankSuggestions(["Patagonia", "Spotify", "Pinterest"], "p", ["Patagonia"])).toEqual(["Pinterest", "Spotify"]);
+    expect(rankSuggestions(["Patagonia"], "  ")).toEqual([]);
+    expect(rankSuggestions(COLLEGE_SUGGESTIONS, "u", [], 8)).toHaveLength(8);
   });
 
   it("keeps at most 20 highlights, drops duplicates, and keeps job details only on experience", () => {
