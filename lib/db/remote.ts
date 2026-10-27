@@ -113,7 +113,16 @@ export async function loadRemote(): Promise<{ db: Database; version: number | nu
   return { db: asDatabase(data.data), version: Number(data.version) };
 }
 
+async function keepStoredSecrets(db: Database) {
+  if (db.serverSecrets?.apolloApiKey) return;
+  const loaded = await loadRemote();
+  const stored = loaded.db.serverSecrets?.apolloApiKey;
+  if (!stored) return;
+  db.serverSecrets = { ...loaded.db.serverSecrets, ...db.serverSecrets, apolloApiKey: stored };
+}
+
 export async function saveRemote(db: Database, version: number | null) {
+  await keepStoredSecrets(db);
   if (remoteKind() === "postgres") {
     await ensurePostgres();
     const sql = sqlClient();

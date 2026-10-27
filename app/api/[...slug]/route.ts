@@ -1,6 +1,6 @@
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
-import { persistenceMode, repo } from "@/lib/db/file-store";
+import { persistenceMode, readApolloKey, repo } from "@/lib/db/file-store";
 import { runSearch, unlockContact } from "@/lib/services/contacts";
 import { composerContext, generateEmail } from "@/lib/services/composer";
 import { outreachSummary, saveDraft, sendOutreach, syncReplies } from "@/lib/services/outreach";
@@ -33,7 +33,7 @@ async function handle(request: Request, slug: string[]) {
       database: persistenceMode(),
       persistence: persistenceMode(),
       providers: {
-        apollo: Boolean(process.env.APOLLO_API_KEY),
+        apollo: Boolean(await readApolloKey()),
         anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
         stripe: Boolean(process.env.STRIPE_SECRET_KEY),
         gmail: ready.google,

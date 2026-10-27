@@ -65,6 +65,12 @@ function remoteActive() {
   return remoteKind() !== null;
 }
 
+export async function readApolloKey() {
+  const fromEnv = process.env.APOLLO_API_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  return withLock((db) => db.serverSecrets?.apolloApiKey?.trim() || "");
+}
+
 export function persistenceMode(): "postgres" | "supabase" | "local-file" {
   if (!remoteActive()) return "local-file";
   return remoteKind() === "supabase" ? "supabase" : "postgres";

@@ -1,5 +1,5 @@
 import { serverConfig } from "@/lib/config";
-import { repo, id, nowIso } from "@/lib/db/file-store";
+import { repo, id, nowIso, readApolloKey } from "@/lib/db/file-store";
 import type { Contact } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
 import { expandSchools } from "@/lib/schools";
@@ -80,7 +80,7 @@ export function estimateRequestCost(operation: "search" | "enrich") {
 
 export async function searchPeople(userId: string, filters: SearchFilters, page: number, pageSize: number): Promise<PeopleSearchResult> {
   const schools = expandSchools(filters.schools, filters.includeSimilarSchools);
-  const apolloKey = process.env.APOLLO_API_KEY;
+  const apolloKey = await readApolloKey();
   if (apolloKey) {
     const estimate = estimateRequestCost("search");
     await assertSpendAllowed(userId, estimate.cents);
@@ -240,7 +240,7 @@ export async function enrichPerson(contact: Contact, userId: string): Promise<En
     };
   }
 
-  const apolloKey = process.env.APOLLO_API_KEY;
+  const apolloKey = await readApolloKey();
   let email = contact.email;
   let phone = contact.phone;
   let emailStatus = contact.emailStatus;

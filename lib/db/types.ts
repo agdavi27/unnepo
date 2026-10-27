@@ -462,6 +462,8 @@ export type Database = {
   webhooks: WebhookEvent[];
   idempotency: IdempotencyRecord[];
   oauthStates: OAuthState[];
+  /** Server-only. Never return this from an API response. */
+  serverSecrets?: { apolloApiKey?: string };
 };
 
 export function emptyDatabase(): Database {
@@ -496,5 +498,6 @@ export function emptyDatabase(): Database {
     webhooks: [],
     idempotency: [],
     oauthStates: [],
+    serverSecrets: {},
   };
 }
