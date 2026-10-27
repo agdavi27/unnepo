@@ -62,15 +62,7 @@ export function HomeView() {
           {data.user?.onboardingStep && data.user.onboardingStep !== "done" && data.user.onboardingStep !== "mailbox" ? (
             <Link href="/onboarding" className="block rounded-2xl border border-gold/40 bg-gold/10 px-4 py-3 text-sm text-cream">Finish setup so search and jobs can use your resume and preferences.</Link>
           ) : null}
-          <section className="grid gap-3 sm:grid-cols-3">
-            {(data.milestones ?? [10, 20, 50].map((goal) => ({ goal, current: Math.min(goal, data.summary.confirmedSends) }))).map((item) => (
-              <article key={item.goal} className="rounded-2xl border border-line bg-card p-4">
-                <p className="text-sm text-muted">First {item.goal} emails</p>
-                <p className="mt-1 text-2xl font-semibold">{item.current} / {item.goal}</p>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800"><div className="h-full bg-white" style={{ width: `${Math.min(100, (item.current / item.goal) * 100)}%` }} /></div>
-              </article>
-            ))}
-          </section>
+          <EmailMilestone sends={data.summary.confirmedSends} />
           <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <Stat value={String(data.metrics?.contacts ?? data.summary.unlocked)} label="Contacts Found" hint={`+${data.deltas.contactsToday} today`} />
             <Stat value={String(data.metrics?.sends ?? data.summary.confirmedSends)} label="Emails Sent" hint={data.summary.demoOutbox ? `${data.summary.demoOutbox} in demo outbox` : `+${data.deltas.sendsToday} today`} />
@@ -158,6 +150,18 @@ export function HomeView() {
         </aside>
       </div>
     </div>
+  );
+}
+
+function EmailMilestone({ sends }: { sends: number }) {
+  const goal = sends < 10 ? 10 : sends < 20 ? 20 : 50;
+  const current = Math.min(sends, goal);
+  return (
+    <article className="rounded-2xl border border-line bg-card p-4">
+      <p className="text-sm text-muted">First {goal} emails</p>
+      <p className="mt-1 text-2xl font-semibold">{current} / {goal}</p>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-zinc-800"><div className="h-full bg-white" style={{ width: `${Math.min(100, (current / goal) * 100)}%` }} /></div>
+    </article>
   );
 }
 
