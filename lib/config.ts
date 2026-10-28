@@ -102,5 +102,5 @@ export const ENTERPRISE_PLAN = {
   blurb: "Buy for your school",
   priceLabel: "Custom",
   features: ["Unnepo for students across your school", "Credits sized to your number of students", "Pricing set with you"],
-  contactEmail: process.env.NEXT_PUBLIC_SALES_EMAIL ?? "",
+  contactEmail: process.env.NEXT_PUBLIC_SALES_EMAIL || "contactus@unnepo.io",
 };
