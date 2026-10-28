@@ -389,7 +389,7 @@ export function AppHome() {
     const response = await fetch("/api/app/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contactId: contact.id, subject: draft.subject, body: draft.body }),
+      body: JSON.stringify({ contactId: contact.id, subject: draft.subject, body: draft.body, attachResume: Boolean(draft.attachResume) }),
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Could not send that email. Nothing was marked as sent.");
@@ -882,6 +882,7 @@ export function AppHome() {
           onGenerate={(input) => generateDraft(emailContact, input)}
           onSaveDraft={saveDraft}
           connectedAccount={data?.mailboxes[0]?.email}
+          resumeFileName={data?.resume?.fileName ?? null}
           onSend={sendEmail}
         />
       )}

@@ -4,6 +4,7 @@ import { classifyReply, statusForReply } from "@/lib/email/classify";
 import { ServiceError } from "@/lib/errors";
 import { decryptSecret } from "@/lib/security";
 import { mailboxAccessToken } from "@/lib/services/oauth";
+import { readStoredResume } from "@/lib/services/resume";
 
 /** One header line only, encoded so non-ASCII subjects survive. */
 function encodeSubject(subject: string) {
@@ -11,8 +12,13 @@ function encodeSubject(subject: string) {
   return /^[\x20-\x7e]*$/.test(line) ? line : `=?UTF-8?B?${Buffer.from(line, "utf8").toString("base64")}?=`;
 }
 
+export type MailAttachment = { fileName: string; mime: string; bytes: Uint8Array };
+
+/** Outlook's sendMail takes attachments inline only up to about 3 MB. */
+const OUTLOOK_ATTACHMENT_LIMIT = 3 * 1024 * 1024;
+
 export type MailSender = {
-  send: (input: { accessToken: string; to: string; subject: string; body: string; threadId?: string | null }) => Promise<{ id: string; threadId: string }>;
+  send: (input: { accessToken: string; to: string; subject: string; body: string; threadId?: string | null; attachment?: MailAttachment | null }) => Promise<{ id: string; threadId: string }>;
   replies: (input: { accessToken: string; threadId: string }) => Promise<Array<{ id: string; from: string; body: string }>>;
 };
 
@@ -48,6 +54,7 @@ export async function sendOutreach(userId: string, input: {
   delivery: "provider" | "demo_outbox";
   followUpDays?: number | null;
   authorizeAutoFollowUp?: boolean;
+  attachResume?: boolean;
 }) {
   const saved = await repo.getSavedById(userId, input.savedContactId);
   if (!saved) throw new ServiceError("Saved contact not found.", "not_found", 404);
@@ -84,6 +91,10 @@ export async function sendOutreach(userId: string, input: {
   if (!mailbox?.accessTokenEncrypted) {
     throw new ServiceError("Connect Gmail or Outlook before sending. Nothing was marked as sent.", "mailbox_required", 409);
   }
+  const attachment = input.attachResume ? await latestResumeAttachment(userId) : null;
+  if (attachment && mailbox.provider === "outlook" && attachment.bytes.byteLength > OUTLOOK_ATTACHMENT_LIMIT) {
+    throw new ServiceError("Outlook can only attach files up to 3 MB. Upload a smaller resume or send without it.", "attachment_size", 400);
+  }
   const sender = senderOverride ?? (mailbox.provider === "outlook" ? outlookSender : gmailSender);
   let providerResult: { id: string; threadId: string };
   try {
@@ -92,6 +103,7 @@ export async function sendOutreach(userId: string, input: {
       to: contact.email,
       subject: input.subject,
       body: input.body,
+      attachment,
     });
   } catch (error) {
     await repo.insertMessage({
@@ -135,8 +147,43 @@ export async function sendOutreach(userId: string, input: {
   });
   await repo.updateSaved(userId, saved.id, { status: "contacted" });
   await maybeScheduleFollowUp(userId, saved.id, input.followUpDays, Boolean(input.authorizeAutoFollowUp));
-  await repo.insertAudit({ userId, action: "email_sent", metadata: { provider: mailbox.provider, messageId: providerResult.id } });
+  await repo.insertAudit({ userId, action: "email_sent", metadata: { provider: mailbox.provider, messageId: providerResult.id, resumeAttached: Boolean(attachment) } });
   return { message: inserted.message, created: inserted.created, creditsCharged: 0 };
+}
+
+async function latestResumeAttachment(userId: string): Promise<MailAttachment> {
+  const resume = await repo.getLatestResume(userId);
+  if (!resume) throw new ServiceError("Upload your resume in Settings before attaching it. Nothing was sent.", "no_resume", 400);
+  const bytes = await readStoredResume(resume.storagePath);
+  if (!bytes?.byteLength) throw new ServiceError("Your resume file couldn't be found. Upload it again in Settings. Nothing was sent.", "no_resume", 400);
+  const mime = resume.mime || (resume.fileName.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  return { fileName: resume.fileName, mime, bytes };
+}
+
+/** Plain-text email, or multipart/mixed when a file is attached. */
+export function buildMimeMessage(input: { to: string; subject: string; body: string; attachment?: MailAttachment | null }) {
+  const headers = `To: ${input.to.replace(/[\r\n]/g, "")}\r\nSubject: ${encodeSubject(input.subject)}\r\nMIME-Version: 1.0\r\n`;
+  if (!input.attachment) return `${headers}Content-Type: text/plain; charset=utf-8\r\n\r\n${input.body}`;
+  const boundary = `unnepo_${crypto.randomUUID().replace(/-/g, "")}`;
+  const name = input.attachment.fileName.replace(/["\r\n\\]/g, "_");
+  const encodedName = /^[\x20-\x7e]*$/.test(name) ? name : `=?UTF-8?B?${Buffer.from(name, "utf8").toString("base64")}?=`;
+  const file = Buffer.from(input.attachment.bytes).toString("base64").replace(/.{76}/g, "$&\r\n");
+  return [
+    `${headers}Content-Type: multipart/mixed; boundary="${boundary}"`,
+    "",
+    `--${boundary}`,
+    "Content-Type: text/plain; charset=utf-8",
+    "",
+    input.body,
+    `--${boundary}`,
+    `Content-Type: ${input.attachment.mime.replace(/[\r\n;]/g, "")}; name="${encodedName}"`,
+    `Content-Disposition: attachment; filename="${encodedName}"`,
+    "Content-Transfer-Encoding: base64",
+    "",
+    file,
+    `--${boundary}--`,
+    "",
+  ].join("\r\n");
 }
 
 async function maybeScheduleFollowUp(userId: string, savedContactId: string, days: number | null | undefined, _autoSend: boolean) {
@@ -204,9 +251,8 @@ export async function syncReplies(userId: string) {
 }
 
 const gmailSender: MailSender = {
-  async send({ accessToken, to, subject, body }) {
-    const raw = Buffer.from(`To: ${to.replace(/[\r\n]/g, "")}\r\nSubject: ${encodeSubject(subject)}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`)
-      .toString("base64url");
+  async send({ accessToken, to, subject, body, attachment }) {
+    const raw = Buffer.from(buildMimeMessage({ to, subject, body, attachment })).toString("base64url");
     const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
@@ -233,11 +279,14 @@ const gmailSender: MailSender = {
 };
 
 const outlookSender: MailSender = {
-  async send({ accessToken, to, subject, body }) {
+  async send({ accessToken, to, subject, body, attachment }) {
+    const attachments = attachment
+      ? [{ "@odata.type": "#microsoft.graph.fileAttachment", name: attachment.fileName, contentType: attachment.mime, contentBytes: Buffer.from(attachment.bytes).toString("base64") }]
+      : undefined;
     const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ message: { subject: subject.replace(/[\r\n]+/g, " "), body: { contentType: "Text", content: body }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: true }),
+      body: JSON.stringify({ message: { subject: subject.replace(/[\r\n]+/g, " "), body: { contentType: "Text", content: body }, toRecipients: [{ emailAddress: { address: to } }], attachments }, saveToSentItems: true }),
     });
     if (!response.ok) throw new Error(`Outlook did not accept the message (${response.status}).`);
     return { id: `outlook_${crypto.randomUUID()}`, threadId: `outlook_thread_${to}` };

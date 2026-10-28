@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { repo } from "@/lib/db/file-store";
+import { dataDir, repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
 import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, generateWorkspaceEmail, deleteWorkspaceContacts, disconnectWorkspaceMailbox, generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, sendWorkspaceEmail, updateWorkspaceContact, workspaceState } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { PUBLIC_PLANS, creditMath, serverConfig } from "@/lib/config";
-import { setMailSenderForTests } from "@/lib/services/outreach";
+import { buildMimeMessage, setMailSenderForTests } from "@/lib/services/outreach";
+import { saveResumeBytes } from "@/lib/services/resume";
 import { scoreJob, setJobFetcherForTests } from "@/lib/jobs/recommend";
 import { mailboxAccessToken } from "@/lib/services/oauth";
 import { encryptSecret, decryptSecret } from "@/lib/security";
@@ -413,6 +414,41 @@ describe("structured profile", () => {
     expect(JSON.stringify(state)).not.toContain("token");
     expect((await disconnectWorkspaceMailbox(userId, { provider: "gmail" })).removed).toBe(1);
     expect((await workspaceState(userId)).mailboxes).toEqual([]);
+  });
+
+  it("attaches the stored resume when asked and refuses when there is none", async () => {
+    const userId = await verifiedStudent("attach@colby.edu", "Attacher");
+    await saveStructuredProfile(userId, form, "Attacher");
+    await repo.upsertContacts([{
+      id: "attach_person", externalId: "attach_person", provider: "apollo", fullName: "Sam Lee", firstName: "Sam", lastName: "Lee",
+      title: "Recruiter", company: "REI", companyDomain: null, location: "", school: null, profileUrl: null, email: "sam.lee@rei.com", emailStatus: "verified",
+      phone: null, phoneStatus: "unknown", tags: [], seniority: null, department: null, industry: null, companySize: null, interests: [],
+      previousRoles: [], achievements: [], publicPosts: [], verifiedMutuals: [], shareable: false, licenseNote: "test", dataSource: "provider",
+      fetchedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString(), costCents: 0, costEstimated: true,
+    }]);
+    await repo.saveFoundContacts(userId, ["attach_person"]);
+    await repo.upsertMailbox({ id: "m3", userId, provider: "gmail", email: "attach@gmail.com", accessTokenEncrypted: "token", refreshTokenEncrypted: null, expiresAt: null, connectedAt: new Date().toISOString() });
+    const attachments: Array<string | null> = [];
+    setMailSenderForTests({ send: async (input) => { attachments.push(input.attachment?.fileName ?? null); return { id: `msg_${attachments.length}`, threadId: "t1" }; }, replies: async () => [] });
+    await expect(sendWorkspaceEmail(userId, { contactId: "attach_person", subject: "Hi", body: "Hello", attachResume: true })).rejects.toThrow(/Upload your resume/);
+    expect(attachments).toEqual([]);
+    const bytes = new Uint8Array([37, 80, 68, 70, 45, 49]);
+    const storagePath = await saveResumeBytes(dataDir(), `${userId}/r1-resume.pdf`, bytes, "application/pdf");
+    await repo.insertResume({ id: "r1", userId, fileName: "Attacher Resume.pdf", mime: "application/pdf", byteSize: bytes.byteLength, sha256: "x", storagePath, text: "", createdAt: new Date().toISOString() });
+    const result = await sendWorkspaceEmail(userId, { contactId: "attach_person", subject: "Hi", body: "Hello", attachResume: true });
+    expect(result.message).toMatch(/resume attached/);
+    expect(attachments).toEqual(["Attacher Resume.pdf"]);
+  });
+
+  it("builds a multipart message with the resume as a base64 attachment", () => {
+    const plain = buildMimeMessage({ to: "a@b.com", subject: "Hi", body: "Hello" });
+    expect(plain).toContain("Content-Type: text/plain");
+    const mixed = buildMimeMessage({ to: "a@b.com", subject: "Hi", body: "Hello", attachment: { fileName: "Resume.pdf", mime: "application/pdf", bytes: new Uint8Array([37, 80, 68, 70]) } });
+    const boundary = mixed.match(/boundary="([^"]+)"/)![1];
+    expect(mixed).toContain(`--${boundary}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nHello`);
+    expect(mixed).toContain('Content-Disposition: attachment; filename="Resume.pdf"');
+    expect(mixed).toContain("JVBERg==");
+    expect(mixed.trimEnd().endsWith(`--${boundary}--`)).toBe(true);
   });
 
   it("refreshes an expired mailbox token and keeps the new one", async () => {

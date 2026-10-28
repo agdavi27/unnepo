@@ -570,16 +570,17 @@ export async function sendWorkspaceEmail(userId: string, raw: unknown) {
   if (!integrations.gmail && !integrations.outlook) {
     throw new ServiceError("Email sending is not connected yet. Nothing was sent.", "not_connected", 409);
   }
-  const body = (raw ?? {}) as { contactId?: unknown; subject?: unknown; body?: unknown };
+  const body = (raw ?? {}) as { contactId?: unknown; subject?: unknown; body?: unknown; attachResume?: unknown };
+  const attachResume = body.attachResume === true;
   const contactId = String(body.contactId ?? "").slice(0, 120);
   const subject = String(body.subject ?? "").trim().slice(0, 200);
   const text = String(body.body ?? "").trim().slice(0, 8000);
   if (!subject || !text) throw new ServiceError("Add a subject and a message before sending.", "draft", 400);
   const saved = await repo.getSavedByUserAndContact(userId, contactId);
   if (!saved) throw new ServiceError("That contact is not in your saved list.", "not_found", 404);
-  const idempotencyKey = `send:${userId}:${createHash("sha256").update(JSON.stringify([contactId, subject, text])).digest("hex").slice(0, 24)}`;
-  const result = await sendOutreach(userId, { savedContactId: saved.id, subject, body: text, idempotencyKey, delivery: "provider" });
-  return { sent: true, duplicate: !result.created, message: result.created ? "Email sent from your mailbox." : "That email was already sent." };
+  const idempotencyKey = `send:${userId}:${createHash("sha256").update(JSON.stringify([contactId, subject, text, attachResume])).digest("hex").slice(0, 24)}`;
+  const result = await sendOutreach(userId, { savedContactId: saved.id, subject, body: text, idempotencyKey, delivery: "provider", attachResume });
+  return { sent: true, duplicate: !result.created, message: result.created ? `Email sent from your mailbox${attachResume ? " with your resume attached" : ""}.` : "That email was already sent." };
 }
 
 export async function disconnectWorkspaceMailbox(userId: string, raw: unknown) {
