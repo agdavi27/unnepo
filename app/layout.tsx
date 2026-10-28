@@ -7,8 +7,8 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const caveat = Caveat({ variable: "--font-caveat", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Unnepo — They knew someone. Now you do too.",
-  description: "Find relevant professionals, write personalized outreach emails, and make your own opportunities. Built for students.",
+  title: "Unnepo — Less applying. More getting hired.",
+  description: "Paste a job link, apply in minutes, and reach the people behind the role. Built for students.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

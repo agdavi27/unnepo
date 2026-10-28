@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { oauthReady } from "@/lib/services/oauth";
+import { Logo } from "@/components/brand/logo";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ provider?: string }> }) {
   const params = await searchParams;
@@ -17,7 +18,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ p
   return (
     <div className="min-h-screen bg-bg px-4 py-10 text-ink">
       <div className="mx-auto max-w-2xl">
-        <Link href="/" className="text-2xl font-semibold">unnepo.</Link>
+        <Logo href="/" className="text-2xl font-semibold" />
         <p className="mt-8 text-xs font-semibold uppercase tracking-[0.18em] text-faint">{provider === "google" ? "Google" : "Microsoft"}</p>
         <h1 className="mt-2 text-4xl font-semibold tracking-tight">Mailbox sending needs an app you create.</h1>
         <p className="mt-4 text-muted">

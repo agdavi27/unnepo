@@ -16,8 +16,10 @@ import {
 } from "@/components/unnepo/UnnepoForms";
 import { Dashboard } from "@/components/unnepo/dashboard";
 import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
-import { ENTERPRISE_PLAN, PEOPLE_PER_CREDIT, PUBLIC_PLANS, creditMath } from "@/lib/config";
+import { APPLICATIONS_PER_CREDIT, ENTERPRISE_PLAN, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { splitProfileList } from "@/lib/profile/lists";
+import { Logo } from "@/components/brand/logo";
+import { ApplyArea } from "@/components/unnepo/apply";
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
@@ -36,13 +38,11 @@ type Workspace = {
   emailsSent: number;
 };
 
-type View = "home" | "contacts" | "find" | "jobs" | "settings";
+// V1 shows two pages. Home, My Contacts, Find, and Recommended Jobs stay in the code but are hidden from the menu.
+type View = "apply" | "applied" | "home" | "contacts" | "find" | "jobs" | "settings";
 const VIEWS: { id: View; label: string }[] = [
-  { id: "home", label: "Home" },
-  { id: "contacts", label: "My Contacts" },
-  { id: "find", label: "Find New Contacts" },
-  { id: "jobs", label: "Recommended Jobs" },
-  { id: "settings", label: "Settings" },
+  { id: "apply", label: "Apply to Job" },
+  { id: "applied", label: "Jobs Applied To" },
 ];
 const PROFILE_SECTIONS: { step: number; label: string; summary: (profile: Profile) => string }[] = [
   { step: 0, label: "School and majors", summary: (profile) => [profile.school, splitProfileList(profile.major).join(", ")].filter(Boolean).join(" · ") },
@@ -144,7 +144,7 @@ export function AppHome() {
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>("apply");
   const [tab, setTab] = useState<"find" | "custom">("find");
   const [editing, setEditing] = useState(false);
   const [editStep, setEditStep] = useState(0);
@@ -540,9 +540,10 @@ export function AppHome() {
     <div className="min-h-screen bg-bg text-ink [color-scheme:dark]">
       <header className="sticky top-0 z-20 border-b border-line bg-bg/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 pt-4 sm:px-6 lg:px-8">
-          <span className="text-2xl font-semibold tracking-tight">unnepo.</span>
-          <div className="flex items-center gap-4 text-sm">
-            {data && <span className="rounded-full border border-line px-3 py-1 text-muted"><span className="text-ink">{data.credits.balance}</span> credits</span>}
+          <Logo />
+          <div className="flex items-center gap-3 whitespace-nowrap text-sm sm:gap-4">
+            {data && <span className="rounded-full border border-line px-2.5 py-1 text-muted sm:px-3"><span className="text-ink">{data.credits.balance}</span> credits</span>}
+            {data && !showOnboarding && <button type="button" onClick={() => setView("settings")} aria-current={view === "settings" ? "page" : undefined} className={view === "settings" ? "text-white" : "text-muted hover:text-white"}>Settings</button>}
             <button type="button" onClick={logout} className="text-muted hover:text-white">Log out</button>
           </div>
         </div>
@@ -591,6 +592,9 @@ export function AppHome() {
               onSave={saveProfile}
             />
           </div>
+        )}
+        {data && !showOnboarding && (view === "apply" || view === "applied") && (
+          <ApplyArea view={view} onNavigate={setView} onCreditsChanged={() => void load()} />
         )}
         {data && !showOnboarding && view === "contacts" && (
           <>
@@ -805,7 +809,7 @@ export function AppHome() {
                     You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {data.credits.balance} {data.credits.balance === 1 ? "credit" : "credits"} left.
                   </p>
                 </div>
-                <p className="text-xs text-faint">1 credit = {PEOPLE_PER_CREDIT} contacts, each with a verified work email</p>
+                <p className="text-xs text-faint">1 credit = {APPLICATIONS_PER_CREDIT} applications, each with up to 5 contacts</p>
               </div>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {PUBLIC_PLANS.map((plan) => {

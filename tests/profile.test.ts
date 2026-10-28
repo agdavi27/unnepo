@@ -375,10 +375,10 @@ describe("structured profile", () => {
     expect(await repo.countUnsavedContacts()).toBe(0);
   });
 
-  it("offers 5, 25, and 60 credit plans with the contact math shown", () => {
+  it("offers 5, 25, and 60 credit plans with the application math shown", () => {
     expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.credits])).toEqual([["free", "$0", 5], ["pro", "$30", 25], ["premium", "$60", 60]]);
-    expect(creditMath(5)).toBe("5 credits = 125 contacts");
-    expect(creditMath(60)).toBe("60 credits = 1,500 contacts");
+    expect(creditMath(5)).toBe("5 credits = 75 applications");
+    expect(creditMath(60)).toBe("60 credits = 900 applications");
     const saved = process.env.SIGNUP_CREDITS;
     delete process.env.SIGNUP_CREDITS;
     expect(serverConfig().signupCredits).toBe(5);

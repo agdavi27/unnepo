@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ENTERPRISE_PLAN } from "@/lib/config";
+import { Logo } from "@/components/brand/logo";
 
 export const metadata: Metadata = {
   title: "Privacy Policy · Unnepo",
@@ -146,7 +147,7 @@ export default function PrivacyPage() {
   return (
     <div className="min-h-screen bg-bg text-ink">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
-        <Link href="/" className="text-2xl font-semibold tracking-tight">unnepo.</Link>
+        <Logo href="/" />
         <Link href="/signup" className="rounded-full bg-white px-4 py-2 text-sm font-semibold text-black">Get started</Link>
       </header>
 

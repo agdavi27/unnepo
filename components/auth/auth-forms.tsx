@@ -8,6 +8,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Check } from "lucide-react";
 import { isSchoolEmail } from "@/lib/schools";
+import { Logo } from "@/components/brand/logo";
 
 const signupSchema = z.object({
   name: z.string().min(1, "Add your name"),
@@ -254,7 +255,7 @@ function AuthShell({ title, subtitle, children }: { title: string; subtitle: str
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg px-4">
       <div className="w-full max-w-md rounded-3xl border border-line bg-card p-6">
-        <Link href="/" className="text-2xl font-semibold">unnepo.</Link>
+        <Logo href="/" className="text-2xl font-semibold" />
         <h1 className="mt-6 text-3xl font-semibold">{title}</h1>
         <p className="mt-2 text-sm text-muted">{subtitle}</p>
         <div className="mt-6">{children}</div>

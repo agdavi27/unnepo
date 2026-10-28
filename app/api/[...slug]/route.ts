@@ -18,6 +18,11 @@ import { filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
 import { deleteWorkspaceContacts, disconnectWorkspaceMailbox, generateWorkspaceCoverLetter, listRecommendedJobs, sendWorkspaceEmail, generateWorkspaceEmail, recordPeopleSearch, refreshProfileHighlights, updateWorkspaceContact, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, workspaceState } from "@/lib/services/workspace";
 
+import { applyState, approveAndSubmit, checkSubmission, createApplication, deleteApplication, markApplied, retryContacts, saveApplicationProfile, startAutofill, updateAnswers, updateOutreach } from "@/lib/apply/service";
+
+/** Autofill keeps a browser connection open while it fills or submits a form. */
+export const maxDuration = 300;
+
 const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests", "roles", "location", "employment", "timing", "contacts", "networking", "extra", "story"]);
 
 async function handle(request: Request, slug: string[]) {
@@ -174,6 +179,24 @@ async function handle(request: Request, slug: string[]) {
       followups: followups.filter((item) => item.status === "open").length,
       admin: await isAdminEmail(user),
     });
+  }
+
+  if (root === "apply") {
+    const method = request.method;
+    if (!action && method === "GET") return json(await applyState(user.id));
+    if (action === "applications" && method === "POST") {
+      if (!rateLimit(`apply:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of jobs in an hour. Try again a bit later.", "rate_limited", 429);
+      return json(await createApplication(user.id, await request.json()));
+    }
+    if (action === "applications" && method === "DELETE") return json(await deleteApplication(user.id, await request.json()));
+    if (action === "answers" && method === "PATCH") return json(await updateAnswers(user.id, await request.json()));
+    if (action === "profile" && method === "PUT") return json(await saveApplicationProfile(user.id, await request.json()));
+    if (action === "autofill" && method === "POST") return json(await startAutofill(user.id, await request.json()));
+    if (action === "submit" && method === "POST") return json(await approveAndSubmit(user.id, await request.json()));
+    if (action === "check" && method === "POST") return json(await checkSubmission(user.id, await request.json()));
+    if (action === "applied" && method === "POST") return json(await markApplied(user.id, await request.json()));
+    if (action === "retry-contacts" && method === "POST") return json(await retryContacts(user.id, await request.json()));
+    if (action === "contact" && method === "PATCH") return json(await updateOutreach(user.id, await request.json()));
   }
 
   if (root === "app" && action === "state" && request.method === "GET") {

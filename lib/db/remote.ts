@@ -171,6 +171,11 @@ export async function saveRemote(db: Database, version: number | null) {
   if (!data?.length) throw new VersionConflict();
 }
 
+/** The Supabase client for the V1 application tables. Callers check persistenceMode() first. */
+export function supabaseTables() {
+  return supabaseClient();
+}
+
 const RESUME_BUCKET = "resumes";
 let resumeBucketReady = false;
 

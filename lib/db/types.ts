@@ -1,3 +1,4 @@
+import type { ApplicationContact, ApplicationProfile, JobApplication } from "@/lib/apply/types";
 export type OutreachStatus =
   | "not_contacted"
   | "contacted"
@@ -141,6 +142,7 @@ export type LedgerEntryType =
   | "purchase_grant"
   | "unlock_debit"
   | "search_debit"
+  | "application_debit"
   | "refund_clawback"
   | "demo_grant"
   | "adjustment";
@@ -578,6 +580,10 @@ export type Database = {
   serverSecrets?: { apolloApiKey?: string; anthropicApiKey?: string };
   /** Company name (lowercase) to the domains Apollo knows it by, so each name is looked up once. */
   companyDomains?: Record<string, string[]>;
+  /** V1 applications. Production keeps these in their own Supabase tables; local runs and tests keep them here. */
+  jobApplications?: JobApplication[];
+  applicationContacts?: ApplicationContact[];
+  applicationProfiles?: Array<{ userId: string; data: ApplicationProfile; updatedAt: string }>;
 };
 
 export function emptyDatabase(): Database {

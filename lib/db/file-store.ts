@@ -583,7 +583,7 @@ export const repo = {
       return { released: true };
     });
   },
-  async spendCredits(input: { userId: string; amount: number; idempotencyKey: string; note: string; entryType: "search_debit" | "unlock_debit" }) {
+  async spendCredits(input: { userId: string; amount: number; idempotencyKey: string; note: string; entryType: "search_debit" | "unlock_debit" | "application_debit" }) {
     return withLock((db) => {
       const account = ensureAccount(db, input.userId);
       const prior = db.ledger.find((entry) => entry.idempotencyKey === input.idempotencyKey || entry.idempotencyKey.startsWith(`${input.idempotencyKey}:`));

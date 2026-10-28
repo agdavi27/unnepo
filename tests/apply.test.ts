@@ -1,0 +1,285 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { repo } from "@/lib/db/file-store";
+import { login, signUp, verifyEmail } from "@/lib/services/auth";
+import { saveStructuredProfile } from "@/lib/services/workspace";
+import { setContactFetcher } from "@/lib/providers/contacts/http";
+import { assertPublicUrl, setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
+import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
+import { acceptAiAnswer, classifyQuestion, missingAnswers, planAnswers } from "@/lib/apply/questions";
+import { applications, applicationContacts } from "@/lib/apply/store";
+import { coreTitle } from "@/lib/apply/contacts";
+import { applyState, checkSubmission, createApplication, markApplied, runContactDiscovery, setDeferForTests, startAutofill, updateAnswers } from "@/lib/apply/service";
+import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
+import { useTempDb } from "./helpers";
+
+const model = vi.hoisted(() => ({ replies: [] as string[], calls: [] as string[] }));
+
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: class {
+    messages = {
+      create: async (input: { messages: Array<{ content: string }> }) => {
+        model.calls.push(input.messages[0].content);
+        const text = model.replies.shift() ?? "{}";
+        return { content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 10 } };
+      },
+    };
+  },
+}));
+
+const form = {
+  school: "Colby College", major: "Economics; Computer Science", graduationYear: "2027", interests: ["Technology"], otherInterests: "",
+  targetRoles: "Product analyst", dreamCompanies: "Acme", locations: "Boston", workPreference: "hybrid", goals: [], contactTypes: [],
+  seniority: "manager", bio: "I build data tools.", accomplishments: "Led the Colby Data Club and built a dashboard used by 40 students.", excludedTopics: "", emailTone: "friendly",
+};
+
+async function student(email = "pat.doe@colby.edu") {
+  const signed = await signUp({ email, password: "password123", name: "Pat Doe" });
+  await verifyEmail(signed.verifyToken!);
+  const userId = (await login(email, "password123")).user.id;
+  await saveStructuredProfile(userId, form, "Pat Doe");
+  return userId;
+}
+
+function q(key: string, label: string, kind: ApplicationQuestion["kind"] = "text", options: string[] = [], required = true): ApplicationQuestion {
+  return { key, label, kind, required, options, sensitive: classifyQuestion(label).sensitive, answer: null, source: null, evidence: null };
+}
+
+const profile: ApplicationProfile = { firstName: "Pat", lastName: "Doe", email: "pat@colby.edu", phone: "207-555-0100", linkedin: "", website: "", github: "", city: "Waterville, ME", saved: {} };
+const context = { profile, school: "Colby College", majors: ["Economics"], graduationYear: "2027", resumeFileName: "Pat Doe Resume.pdf" };
+
+const GREENHOUSE_JOB = {
+  title: "Product Analyst Intern",
+  absolute_url: "https://job-boards.greenhouse.io/acme/jobs/123",
+  location: { name: "Boston, MA" },
+  departments: [{ name: "Product" }],
+  content: "&lt;p&gt;Join us.&lt;/p&gt;&lt;p&gt;&lt;strong&gt;Qualifications&lt;/strong&gt;&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Comfort with SQL&lt;/li&gt;&lt;li&gt;Clear writing&lt;/li&gt;&lt;/ul&gt;&lt;p&gt;Your recruiter: Jordan Smith (jordan.smith@acme.com)&lt;/p&gt;",
+  questions: [
+    { label: "First Name", required: true, fields: [{ name: "first_name", type: "input_text" }] },
+    { label: "Last Name", required: true, fields: [{ name: "last_name", type: "input_text" }] },
+    { label: "Email", required: true, fields: [{ name: "email", type: "input_text" }] },
+    { label: "Resume/CV", required: true, fields: [{ name: "resume", type: "input_file" }, { name: "resume_text", type: "textarea" }] },
+    { label: "Why are you interested in Acme?", required: true, fields: [{ name: "question_1", type: "textarea" }] },
+    { label: "Will you require visa sponsorship?", required: true, fields: [{ name: "question_2", type: "multi_value_single_select", values: [{ label: "Yes", value: 1 }, { label: "No", value: 0 }] }] },
+    { label: "How did you hear about us?", required: false, fields: [{ name: "question_3", type: "input_text" }] },
+  ],
+};
+
+function greenhouseFetcher(url: string) {
+  if (url.endsWith("/boards/acme")) return Promise.resolve(Response.json({ name: "Acme Corp" }));
+  if (url.includes("/boards/acme/jobs/123")) return Promise.resolve(Response.json(GREENHOUSE_JOB));
+  return Promise.resolve(new Response("not found", { status: 404 }));
+}
+
+beforeEach(() => {
+  useTempDb();
+  model.replies = [];
+  model.calls = [];
+  setJobPageFetcherForTests(greenhouseFetcher);
+  setDeferForTests(() => undefined);
+  delete process.env.BROWSERBASE_API_KEY;
+  delete process.env.BROWSERBASE_PROJECT_ID;
+});
+
+afterEach(() => {
+  setJobPageFetcherForTests(null);
+  setDeferForTests(null);
+});
+
+describe("reading job links", () => {
+  it("recognizes job boards, blocks sites that forbid automation, and keys duplicates", () => {
+    expect(parseJobUrl("https://job-boards.greenhouse.io/acme/jobs/123?gh_src=x")).toMatchObject({ ats: "greenhouse", board: "acme", jobId: "123" });
+    expect(parseJobUrl("https://boards.greenhouse.io/embed/job_app?for=acme&token=123")).toMatchObject({ ats: "greenhouse", board: "acme", jobId: "123" });
+    expect(parseJobUrl("https://jobs.lever.co/acme/abc-123/apply")).toMatchObject({ ats: "lever", board: "acme", jobId: "abc-123" });
+    expect(parseJobUrl("https://jobs.ashbyhq.com/acme/xyz")).toMatchObject({ ats: "ashby", board: "acme", jobId: "xyz" });
+    expect(() => parseJobUrl("https://www.linkedin.com/jobs/view/1")).toThrow(/LinkedIn doesn't allow/);
+    expect(() => parseJobUrl("https://www.indeed.com/viewjob?jk=1")).toThrow(/Indeed/);
+    expect(jobKeyFor(parseJobUrl("https://acme.com/careers/role?utm_source=x&gh_jid=55"))).toBe("gh_jid:acme.com:55");
+    expect(jobKeyFor(parseJobUrl("https://acme.com/careers/role/?utm_source=x#top"))).toBe("url:acme.com/careers/role");
+  });
+
+  it("refuses links to private addresses", async () => {
+    await expect(assertPublicUrl("http://localhost:3000/x")).rejects.toThrow(/private/);
+    await expect(assertPublicUrl("http://127.0.0.1/x")).rejects.toThrow(/private/);
+    await expect(assertPublicUrl("http://169.254.169.254/latest")).rejects.toThrow(/private/);
+    await expect(assertPublicUrl("file:///etc/passwd")).rejects.toThrow(/https/);
+  });
+
+  it("reads a Greenhouse job with its questions, requirements, and the recruiter it names", async () => {
+    const job = await extractJob("https://job-boards.greenhouse.io/acme/jobs/123");
+    expect(job).toMatchObject({ ats: "greenhouse", title: "Product Analyst Intern", company: "Acme Corp", department: "Product", location: "Boston, MA" });
+    expect(job.requirements).toEqual(["Comfort with SQL", "Clear writing"]);
+    expect(job.postedRecruiter).toEqual({ name: "Jordan Smith", title: "Recruiter", email: "jordan.smith@acme.com" });
+    // The paste-your-resume box is dropped in favor of the file upload.
+    expect(job.questions.map((item) => item.key)).not.toContain("resume_text");
+    expect(job.questions.find((item) => item.key === "question_2")?.sensitive).toBe(true);
+  });
+
+  it("only names a recruiter when the posting does", () => {
+    expect(findPostedRecruiter("We are hiring. Apply today.")).toBeNull();
+    expect(findPostedRecruiter("Questions? Contact Maria Lopez, our recruiter, at careers@acme.com")).toEqual({ name: "Maria Lopez", title: "Recruiter", email: null });
+    expect(extractRequirements("About\n• Fun team\nWhat you'll bring\n• Python\n• SQL\nBenefits\n• Snacks")).toEqual(["Python", "SQL"]);
+  });
+});
+
+describe("answers", () => {
+  it("fills known fields, leaves sensitive ones for the student, and uses saved answers", () => {
+    const questions = [
+      q("first_name", "First Name"), q("email", "Email"), q("resume", "Resume/CV", "file"),
+      q("grad", "Graduation Year", "select", ["2026", "2027"]),
+      q("visa", "Will you now or in the future require sponsorship?", "select", ["Yes", "No"]),
+      q("gender", "Gender", "select", ["Male", "Female", "Decline"] , false),
+      q("hear", "How did you hear about us?"),
+    ];
+    const planned = planAnswers(questions, context);
+    const by = Object.fromEntries(planned.map((item) => [item.key, item]));
+    expect(by.first_name).toMatchObject({ answer: "Pat", source: "profile" });
+    expect(by.resume).toMatchObject({ answer: "Pat Doe Resume.pdf", source: "resume_file" });
+    expect(by.grad.answer).toBe("2027");
+    expect(by.visa).toMatchObject({ answer: null, sensitive: true });
+    expect(by.gender).toMatchObject({ answer: null, sensitive: true });
+    expect(missingAnswers(planned).map((item) => item.key)).toEqual(["visa", "hear"]);
+
+    const withSaved = planAnswers(questions, { ...context, profile: { ...profile, saved: { "will you now or in the future require sponsorship": { label: "x", answer: "No", updatedAt: "" } } } });
+    expect(withSaved.find((item) => item.key === "visa")).toMatchObject({ answer: "No", source: "saved" });
+  });
+
+  it("keeps an AI answer only with evidence quoted from the student's own text", () => {
+    const sources = "Led the Colby Data Club and built a dashboard used by 40 students.";
+    const essay = q("why", "Why this role?", "textarea");
+    expect(acceptAiAnswer(essay, "I led the Colby Data Club.", "Led the Colby Data Club", sources)).toBe("I led the Colby Data Club.");
+    expect(acceptAiAnswer(essay, "I interned at Google.", "interned at Google", sources)).toBeNull();
+    expect(acceptAiAnswer(q("visa", "Do you require visa sponsorship?", "select", ["Yes", "No"]), "No", "Colby Data Club", sources)).toBeNull();
+    expect(acceptAiAnswer(q("club", "Club member?", "select", ["Yes", "No"]), "Maybe", "Colby Data Club", sources)).toBeNull();
+  });
+});
+
+describe("applications", () => {
+  it("adds a job once, drafts grounded answers, and saves the student's answers for next time", async () => {
+    const userId = await student();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    model.replies.push(JSON.stringify({ answers: [
+      { key: "question_1", answer: "I led the Colby Data Club and want to build tools like Acme's.", evidence: "Led the Colby Data Club" },
+      { key: "question_3", answer: "LinkedIn", evidence: "saw it on LinkedIn" },
+    ] }));
+    const first = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
+    expect(first.duplicate).toBe(false);
+    const by = Object.fromEntries(first.application.questions.map((item) => [item.key, item]));
+    expect(by.question_1).toMatchObject({ source: "ai", evidence: "Led the Colby Data Club" });
+    expect(by.question_3.answer).toBeNull();
+    expect(by.question_2.answer).toBeNull();
+    expect(model.calls[0]).not.toContain("visa sponsorship");
+    // No resume uploaded in this test, so the required resume stays missing rather than faked.
+    expect(first.application.missing).toEqual(["resume", "question_2"]);
+
+    const again = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123?utm=1" });
+    expect(again).toMatchObject({ duplicate: true });
+    expect((await applications.list(userId)).length).toBe(1);
+
+    await expect(updateAnswers(userId, { applicationId: first.application.id, answers: { question_2: "Maybe" } })).rejects.toThrow(/Pick one/);
+    const updated = await updateAnswers(userId, { applicationId: first.application.id, answers: { question_2: "No" }, save: ["question_2"] });
+    expect(updated.application.missing).toEqual(["resume"]);
+    const state = await applyState(userId);
+    expect(state.profile.saved["will you require visa sponsorship"]).toMatchObject({ answer: "No" });
+  });
+
+  it("needs a finished profile before reading jobs", async () => {
+    const signed = await signUp({ email: "new.student@colby.edu", password: "password123", name: "New Student" });
+    await verifyEmail(signed.verifyToken!);
+    const userId = (await login("new.student@colby.edu", "password123")).user.id;
+    await expect(createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" })).rejects.toThrow(/Finish your profile/);
+  });
+
+  it("says autofill isn't connected instead of pretending, and changes nothing", async () => {
+    const userId = await student();
+    model.replies.push("{}");
+    const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
+    await updateAnswers(userId, { applicationId: application.id, answers: { question_1: "Because.", question_2: "No" } });
+    await expect(startAutofill(userId, { applicationId: application.id })).rejects.toThrow(/Autofill isn't connected/);
+    expect((await applications.get(userId, application.id))?.status).toBe("extracted");
+    await expect(checkSubmission(userId, { applicationId: application.id })).rejects.toThrow(/Nothing to check/);
+  });
+
+  it("charges 1 credit per 15 applications and stops when credits run out", async () => {
+    const userId = await student();
+    await repo.setAccountForTests(userId, { balance: 1, allowanceBalance: 1, purchasedBalance: 0 });
+    const ids: string[] = [];
+    for (let index = 0; index < 16; index += 1) {
+      const { app } = await applications.insert({
+        userId, jobKey: `url:acme.com/job/${index}`, jobUrl: `https://acme.com/job/${index}`, ats: "other", title: `Role ${index}`, company: "Acme", companyDomain: null, department: null, location: null,
+        description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "extracted", statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
+        confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
+      });
+      ids.push(app.id);
+    }
+    for (const applicationId of ids.slice(0, 15)) await markApplied(userId, { applicationId });
+    expect((await repo.getAccount(userId))?.balance).toBe(0);
+    await expect(markApplied(userId, { applicationId: ids[15] })).rejects.toThrow(/out of credits/);
+    expect((await applications.get(userId, ids[15]))?.status).toBe("extracted");
+    // Marking the same job again never charges twice.
+    await markApplied(userId, { applicationId: ids[0] });
+    expect((await repo.listLedger(userId)).filter((entry) => entry.entryType === "application_debit").length).toBe(1);
+  });
+});
+
+describe("people after applying", () => {
+  it("ranks the named recruiter first, keeps only verified emails, and writes an email for each person", async () => {
+    process.env.APOLLO_API_KEY = "apollo";
+    process.env.HUNTER_API_KEY = "hunter";
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    process.env.DAILY_USER_SPEND_CENTS = "5000";
+    process.env.DAILY_GLOBAL_SPEND_CENTS = "50000";
+    const userId = await student();
+    model.replies.push("{}");
+    const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
+    await runContactDiscovery(userId, application.id);
+    expect((await applications.get(userId, application.id))?.contactsStatus).toBe("idle");
+
+    const person = (id: string, first: string, last: string, title: string) => ({ id, first_name: first, last_name: last, title, organization: { name: "Acme Corp", primary_domain: "acme.com" }, linkedin_url: `https://linkedin.com/in/${id}` });
+    const seen: string[] = [];
+    setContactFetcher(async (input, init) => {
+      const url = String(input);
+      seen.push(url.replace(/api_key=[^&]+/, "api_key=…"));
+      if (url.includes("mixed_companies/search")) return Response.json({ organizations: [{ primary_domain: "acme.com" }] });
+      if (url.includes("people/match")) return Response.json({ person: { title: "Senior Recruiter", email: "jordan.smith@acme.com", email_status: "verified" } });
+      if (url.includes("mixed_people/api_search")) {
+        const titles = JSON.parse(String(init?.body)).person_titles as string[];
+        if (titles.includes("recruiter")) return Response.json({ people: [person("r1", "Avery", "Kim", "University Recruiter"), person("r2", "Sam", "Lee", "Talent Acquisition Partner"), person("r3", "Extra", "Person", "Recruiter")] });
+        if (titles.some((title) => /manager|head|director/.test(title))) return Response.json({ people: [person("m1", "Taylor", "Brooks", "Head of Product")] });
+        return Response.json({ people: [person("t1", "Riley", "Chen", "Product Analyst")] });
+      }
+      if (url.includes("bulk_match")) {
+        const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
+        // Apollo verifies everyone except Taylor.
+        return Response.json({ matches: details.map((item) => ({ id: item.id, email: item.id === "m1" ? "taylor@acme.com" : `${item.id}@acme.com`, email_status: item.id === "m1" ? "guessed" : "verified" })) });
+      }
+      if (url.includes("email-finder")) return Response.json({ data: { email: "taylor.brooks@acme.com", verification: { status: "valid" } } });
+      return new Response("unexpected", { status: 500 });
+    });
+    model.replies.push(JSON.stringify({ emails: [1, 2, 3, 4, 5].map((index) => ({ index, subject: `Subject ${index}`, body: `Hi ${index}, I applied to the Product Analyst Intern role.` })) }));
+
+    await markApplied(userId, { applicationId: application.id });
+    await runContactDiscovery(userId, application.id);
+
+    const app = await applications.get(userId, application.id);
+    expect(app).toMatchObject({ status: "applied_manual", contactsStatus: "done", companyDomain: "acme.com" });
+    const contacts = await applicationContacts.list(userId, [application.id]);
+    expect(contacts.map((item) => [item.rank, item.role, item.name])).toEqual([
+      [1, "job_poster", "Jordan Smith"],
+      [2, "recruiter", "Avery Kim"],
+      [3, "recruiter", "Sam Lee"],
+      [4, "hiring_manager", "Taylor Brooks"],
+      [5, "team_member", "Riley Chen"],
+    ]);
+    expect(contacts[0]).toMatchObject({ email: "jordan.smith@acme.com", emailSource: "apollo", title: "Senior Recruiter" });
+    // Apollo's guess is dropped; Hunter's verified address is used instead.
+    expect(contacts[3]).toMatchObject({ email: "taylor.brooks@acme.com", emailSource: "hunter" });
+    expect(contacts.every((item) => item.emailBody?.includes("Product Analyst Intern"))).toBe(true);
+    expect(model.calls.at(-1)).toContain("Jordan Smith");
+    expect(seen.some((url) => url.includes("api_key=hunter"))).toBe(false);
+  });
+
+  it("shortens job titles for team searches", () => {
+    expect(coreTitle("Account Executive - Commercial, Spotify Technology")).toBe("Account Executive");
+    expect(coreTitle("Senior Software Engineer II (Payments)")).toBe("Software Engineer");
+  });
+});

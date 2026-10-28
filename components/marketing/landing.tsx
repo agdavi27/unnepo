@@ -3,10 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowRight, Check, Mail, MessageSquare, Phone, Target } from "lucide-react";
-import { ENTERPRISE_PLAN, PEOPLE_PER_CREDIT, PUBLIC_PLANS, creditMath, peopleFromCredits } from "@/lib/config";
+import { ArrowRight, Check, Mail, MessageSquare, Send, Target } from "lucide-react";
+import { APPLICATIONS_PER_CREDIT, ENTERPRISE_PLAN, PUBLIC_PLANS, applicationsFromCredits, creditMath } from "@/lib/config";
 import { isSchoolEmail } from "@/lib/schools";
 import { SchoolLogos } from "@/components/marketing/school-logos";
+import { Logo } from "@/components/brand/logo";
 
 const HEADSHOTS = [
   { src: "/students/student-1.jpg", alt: "Student in a suit" },
@@ -38,7 +39,7 @@ export function Landing() {
   return (
     <div className="min-h-screen bg-bg text-ink">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
-        <Link href="/" className="text-2xl font-semibold tracking-tight">unnepo.</Link>
+        <Logo href="/" />
         <nav className="hidden items-center gap-8 text-sm text-muted md:flex">
           <a href="#how" className="hover:text-white">How it works</a>
           <a href="#pricing" className="hover:text-white">Pricing</a>
@@ -53,12 +54,12 @@ export function Landing() {
           BUILT BY STUDENTS FOR STUDENTS
         </div>
         <h1 className="text-5xl font-bold uppercase leading-[0.95] tracking-tight md:text-7xl">
-          They knew someone.
+          Less applying.
           <br />
-          <span className="text-[#3D8BFF]">Now you do too.</span>
+          <span className="text-[#3D8BFF]">More getting hired.</span>
         </h1>
         <p className="mx-auto mt-6 max-w-2xl text-base text-muted md:text-lg">
-          Find relevant professionals, write personalized outreach emails, and make your own opportunities — no connections required.
+          Paste a job link and Unnepo fills out the application from your profile. After you apply, it finds the people behind the role and writes the email for you.
         </p>
         <form onSubmit={start} className="mx-auto mt-8 flex max-w-xl flex-col gap-3 sm:flex-row">
           <label className="flex flex-1 items-center gap-2 rounded-xl border border-line bg-card px-3">
@@ -71,14 +72,14 @@ export function Landing() {
           </button>
         </form>
         {params.get("error") ? <p className="mt-3 text-sm text-red-300">{params.get("error")}</p> : null}
-        <p className="mt-3 text-sm text-faint">Start with {PUBLIC_PLANS[0].credits} free credits ({peopleFromCredits(PUBLIC_PLANS[0].credits)} contacts). No subscription. Built for students.</p>
+        <p className="mt-3 text-sm text-faint">Start with {PUBLIC_PLANS[0].credits} free credits ({applicationsFromCredits(PUBLIC_PLANS[0].credits)} applications). No subscription. Built for students.</p>
         <div className="mt-6 flex items-center justify-center gap-3 text-sm text-muted">
           <div className="flex -space-x-2">
             {HEADSHOTS.map((photo) => (
               <img key={photo.src} src={photo.src} alt={photo.alt} className="h-11 w-11 rounded-full border-2 border-black object-cover object-top" />
             ))}
           </div>
-          2500+ students are finding opportunities with Unnepo.
+          2500+ students are applying faster with Unnepo.
         </div>
       </section>
 
@@ -86,16 +87,16 @@ export function Landing() {
 
       <section id="how" className="mx-auto max-w-6xl px-5 py-20">
         <p className="text-center text-xs font-semibold tracking-[0.22em] text-faint">HOW IT WORKS</p>
-        <h2 className="mx-auto mt-3 max-w-3xl text-center text-4xl font-semibold tracking-tight md:text-5xl">Find the right people. Get their emails and phone numbers.</h2>
+        <h2 className="mx-auto mt-3 max-w-3xl text-center text-4xl font-semibold tracking-tight md:text-5xl">Paste the job. We handle the busywork.</h2>
         <p className="mx-auto mt-4 max-w-3xl text-center text-muted">
-          Search by job title, industry, location, school (or similar school), and company to find relevant professionals, get their contact information, and reach out — all in one place.
+          Stop retyping your resume into every form. Unnepo fills the application, waits for your approval, then lines up the right people to email about the role.
         </p>
         <div className="mt-10 grid gap-4 md:grid-cols-4">
           {[
-            ["01", "Set your search", "Filter by job title, industry, location, school (or similar schools), and company (optional)."],
-            ["02", "Get a list of relevant people", "We find professionals that match your criteria — with verified work emails and phone numbers when a provider has them."],
-            ["03", "View contact details", "Spend one credit to reveal a verified email or business phone. Failed lookups are free."],
-            ["04", "Reach out and track", "Use AI to write a personalized email, send it from your own inbox, and track replies."],
+            ["01", "Paste a job link", "Drop in any posting. We pull out the role, company, team, and requirements."],
+            ["02", "Apply in minutes", "Unnepo fills the form from your profile and resume. You fill any gaps and approve before anything is submitted."],
+            ["03", "Find the right people", "After you apply, we find up to five people tied to the role: recruiters, the hiring manager, and the team."],
+            ["04", "Send and track", "Copy a personalized email for each person and track every application in one list."],
           ].map(([n, title, copy]) => (
             <article key={n} className="rounded-2xl border border-line bg-card p-5">
               <p className="text-sm font-semibold text-faint">{n}</p>
@@ -109,9 +110,9 @@ export function Landing() {
 
       <section id="pricing" className="mx-auto max-w-6xl px-5 pb-24">
         <p className="text-center text-xs font-semibold tracking-[0.22em] text-faint">PRICING</p>
-        <h2 className="mt-3 text-center text-4xl font-semibold tracking-tight md:text-5xl">Find opportunities. On your terms.</h2>
+        <h2 className="mt-3 text-center text-4xl font-semibold tracking-tight md:text-5xl">Apply more. Stress less.</h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-muted">
-          1 credit = {PEOPLE_PER_CREDIT} contacts, each with a verified work email. Every plan includes AI email drafts.
+          1 credit = {APPLICATIONS_PER_CREDIT} applications. Every application includes up to five contacts and a personalized email for each.
         </p>
         <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {PUBLIC_PLANS.map((plan) => (
@@ -139,7 +140,7 @@ export function Landing() {
             <h3 className="mt-4 text-2xl font-semibold">{ENTERPRISE_PLAN.name}</h3>
             <p className="mt-2 text-4xl font-semibold">{ENTERPRISE_PLAN.priceLabel}</p>
             <p className="mt-2 text-lg font-semibold text-[#3D8BFF]">Contact us for pricing</p>
-            <p className="mt-1 text-sm text-faint">1 credit = {PEOPLE_PER_CREDIT} contacts</p>
+            <p className="mt-1 text-sm text-faint">1 credit = {APPLICATIONS_PER_CREDIT} applications</p>
             <ul className="mt-6 space-y-2 text-sm text-muted">
               {ENTERPRISE_PLAN.features.map((feature) => <li key={feature}>✓ {feature}</li>)}
             </ul>
@@ -152,37 +153,36 @@ export function Landing() {
           </article>
         </div>
       </section>
-      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit = {PEOPLE_PER_CREDIT} contacts, each with a verified work email. · <Link href="/privacy" className="underline-offset-4 hover:text-white hover:underline">Privacy Policy</Link></footer>
+      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit = {APPLICATIONS_PER_CREDIT} applications. · <Link href="/privacy" className="underline-offset-4 hover:text-white hover:underline">Privacy Policy</Link></footer>
     </div>
   );
 }
 
 function Calculator() {
-  const [target, setTarget] = useState(5);
-  const [response, setResponse] = useState(22);
-  const [close, setClose] = useState(6);
+  const [target, setTarget] = useState(2);
+  const [response, setResponse] = useState(8);
+  const [close, setClose] = useState(20);
   const numbers = useMemo(() => {
-    const emails = Math.max(1, Math.round(target / ((response / 100) * (close / 100) * 0.1)));
-    const responses = Math.round(emails * (response / 100));
-    const interviews = Math.round(responses * 0.3);
-    return { emails, responses, interviews, opportunities: target };
+    const applications = Math.max(1, Math.round(target / ((response / 100) * (close / 100))));
+    const interviews = Math.round(applications * (response / 100));
+    return { applications, contacts: applications * 5, interviews, offers: target };
   }, [target, response, close]);
 
   return (
     <div className="mt-8 grid gap-4 rounded-3xl border border-line bg-card p-5 md:grid-cols-[1.1fr_0.9fr]">
       <div>
         <p className="text-xs font-semibold tracking-[0.16em] text-faint">SEE YOUR RESULTS</p>
-        <h3 className="mt-2 text-3xl font-semibold tracking-tight">How many emails do you need to send?</h3>
-        <p className="mt-2 text-sm text-muted">Adjust the numbers based on your goals to see how many emails it will take to get there.</p>
-        <Slider label="Target opportunities" value={target} min={1} max={20} onChange={setTarget} display={String(target)} />
-        <Slider label="Expected response rate" value={response} min={5} max={60} onChange={setResponse} display={`${response}%`} />
-        <Slider label="Expected close rate" value={close} min={1} max={30} onChange={setClose} display={`${close}%`} accent />
+        <h3 className="mt-2 text-3xl font-semibold tracking-tight">How many applications do you need?</h3>
+        <p className="mt-2 text-sm text-muted">Adjust the numbers to your goals to see how many applications it will take, and how many people you can reach along the way.</p>
+        <Slider label="Target offers" value={target} min={1} max={10} onChange={setTarget} display={String(target)} />
+        <Slider label="Expected interview rate" value={response} min={2} max={40} onChange={setResponse} display={`${response}%`} />
+        <Slider label="Expected offer rate after interviews" value={close} min={5} max={60} onChange={setClose} display={`${close}%`} accent />
       </div>
       <div className="grid grid-cols-2 gap-3">
-        <Metric icon={<Mail className="h-4 w-4" />} value={numbers.emails.toLocaleString()} label="Emails to send" />
-        <Metric icon={<MessageSquare className="h-4 w-4" />} value={numbers.responses.toLocaleString()} label="Expected responses" />
-        <Metric icon={<Phone className="h-4 w-4" />} value={numbers.interviews.toLocaleString()} label="Expected interviews" />
-        <Metric icon={<Target className="h-4 w-4" />} value={String(numbers.opportunities)} label="Expected opportunities" />
+        <Metric icon={<Send className="h-4 w-4" />} value={numbers.applications.toLocaleString()} label="Applications to send" />
+        <Metric icon={<Mail className="h-4 w-4" />} value={numbers.contacts.toLocaleString()} label="People you can email" />
+        <Metric icon={<MessageSquare className="h-4 w-4" />} value={numbers.interviews.toLocaleString()} label="Expected interviews" />
+        <Metric icon={<Target className="h-4 w-4" />} value={String(numbers.offers)} label="Expected offers" />
       </div>
     </div>
   );

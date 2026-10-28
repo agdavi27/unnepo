@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { PUBLIC_PLANS, peopleFromCredits } from "@/lib/config";
+import { PUBLIC_PLANS, applicationsFromCredits } from "@/lib/config";
+import { Logo } from "@/components/brand/logo";
 
 export default function ForStudentsPage() {
   return (
     <div className="min-h-screen bg-bg text-ink">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-5 py-5">
-        <Link href="/" className="text-2xl font-semibold tracking-tight">unnepo.</Link>
+        <Logo href="/" />
         <nav className="hidden items-center gap-8 text-sm text-muted md:flex">
           <Link href="/#how" className="hover:text-white">How it works</Link>
           <Link href="/#pricing" className="hover:text-white">Pricing</Link>
@@ -44,7 +45,7 @@ export default function ForStudentsPage() {
         </p>
 
         <Link href="/signup" className="mt-8 inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black">
-          Start with {PUBLIC_PLANS[0].credits} free credits ({peopleFromCredits(PUBLIC_PLANS[0].credits)} contacts)
+          Start with {PUBLIC_PLANS[0].credits} free credits ({applicationsFromCredits(PUBLIC_PLANS[0].credits)} applications)
         </Link>
       </main>
     </div>

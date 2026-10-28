@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Bell, Briefcase, Gift, Home, Link2, LogOut, Menu, Search, Send, Settings, Bookmark, X } from "lucide-react";
 import { Avatar } from "@/components/product/bits";
+import { Logo } from "@/components/brand/logo";
 
 type Me = {
   user: { id: string; name: string; email: string; referralCode: string; onboardingStep: string };
@@ -61,7 +62,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-bg text-ink md:grid md:grid-cols-[240px_1fr]">
       <aside className={`${open ? "fixed inset-0 z-40 flex" : "hidden"} flex-col border-r border-line bg-panel md:sticky md:top-0 md:flex md:h-screen`}>
         <div className="flex items-center justify-between px-4 py-4">
-          <Link href="/home" className="text-2xl font-semibold tracking-tight">unnepo.</Link>
+          <Logo href="/home" />
           <button className="md:hidden" onClick={() => setOpen(false)} aria-label="Close menu"><X className="h-5 w-5" /></button>
         </div>
         <nav className="flex-1 space-y-1 px-3">
@@ -104,7 +105,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <div className="min-w-0">
         <div className="flex items-center justify-between px-4 py-3 md:hidden">
           <button onClick={() => setOpen(true)} aria-label="Open menu"><Menu className="h-5 w-5" /></button>
-          <span className="font-semibold">unnepo.</span>
+          <Logo className="font-semibold" />
           <Bell className="h-4 w-4 text-muted" />
         </div>
         {children}

@@ -46,9 +46,16 @@ export function peopleFromCredits(credits: number) {
   return credits * PEOPLE_PER_CREDIT;
 }
 
-/** "5 credits = 125 contacts" */
+/** V1: one credit covers this many job applications, each with up to five contacts and their emails. */
+export const APPLICATIONS_PER_CREDIT = 15;
+
+export function applicationsFromCredits(credits: number) {
+  return credits * APPLICATIONS_PER_CREDIT;
+}
+
+/** "5 credits = 75 applications" */
 export function creditMath(credits: number) {
-  return `${credits} credits = ${peopleFromCredits(credits).toLocaleString("en-US")} contacts`;
+  return `${credits} credits = ${applicationsFromCredits(credits).toLocaleString("en-US")} applications`;
 }
 
 export const PUBLIC_PLANS = [
@@ -63,8 +70,8 @@ export const PUBLIC_PLANS = [
     monthly: false,
     credits: 5,
     people: peopleFromCredits(5),
-    peopleLabel: `${peopleFromCredits(5)} contacts to start`,
-    features: ["Verified work emails included", "AI email drafts", "Send from Gmail or Outlook"],
+    peopleLabel: `${applicationsFromCredits(5)} applications to start`,
+    features: ["Autofill applications from your profile", "Up to 5 contacts per application", "Copy-ready outreach emails"],
   },
   {
     id: "pro" as const,
@@ -77,8 +84,8 @@ export const PUBLIC_PLANS = [
     monthly: true,
     credits: 25,
     people: peopleFromCredits(25),
-    peopleLabel: `${peopleFromCredits(25).toLocaleString("en-US")} contacts each month`,
-    features: ["Verified work emails included", "AI email drafts", "Everything in Free"],
+    peopleLabel: `${applicationsFromCredits(25).toLocaleString("en-US")} applications each month`,
+    features: ["Contacts and emails included", "Track every application", "Everything in Free"],
   },
   {
     id: "premium" as const,
@@ -91,8 +98,8 @@ export const PUBLIC_PLANS = [
     monthly: true,
     credits: 60,
     people: peopleFromCredits(60),
-    peopleLabel: `${peopleFromCredits(60).toLocaleString("en-US")} contacts each month`,
-    features: ["Verified work emails included", "AI email drafts", "Everything in Pro"],
+    peopleLabel: `${applicationsFromCredits(60).toLocaleString("en-US")} applications each month`,
+    features: ["Contacts and emails included", "Track every application", "Everything in Pro"],
   },
 ];
 
