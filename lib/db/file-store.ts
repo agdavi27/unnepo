@@ -661,12 +661,17 @@ export const repo = {
         if (index === -1) db.contacts.push(contact);
         else {
           const previous = db.contacts[index];
-          db.contacts[index] = {
-            ...contact,
-            id: previous.id,
-            email: contact.email ?? previous.email,
-            phone: contact.phone ?? previous.phone,
-          };
+          // A bare search result must not erase what an email lookup already filled in.
+          const filled = Object.fromEntries(
+            Object.entries(contact).filter(([, value]) => value !== null && value !== undefined && value !== "" && !(Array.isArray(value) && !value.length)),
+          ) as Partial<typeof contact>;
+          const merged = { ...previous, ...filled, id: previous.id };
+          if (!contact.email && previous.email) merged.emailStatus = previous.emailStatus;
+          if (contact.lastName.includes("*") && previous.lastName && !previous.lastName.includes("*")) {
+            merged.lastName = previous.lastName;
+            merged.fullName = previous.fullName;
+          }
+          db.contacts[index] = merged;
         }
       }
       return contacts.length;

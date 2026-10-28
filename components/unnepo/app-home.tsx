@@ -146,7 +146,6 @@ export function AppHome() {
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState("");
   const [emailContact, setEmailContact] = useState<Contact | null>(null);
-  const [unlocking, setUnlocking] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
   const [foundFilter, setFoundFilter] = useState<FoundFilter>("any");
@@ -268,22 +267,6 @@ export function AppHome() {
       setSearchError("The search could not reach the server. No credits were used.");
     } finally {
       setSearching(false);
-    }
-  }
-
-  async function findEmail(contact: Contact) {
-    setUnlocking(contact.id);
-    try {
-      const response = await fetch("/api/app/unlock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contactId: contact.id }),
-      });
-      const payload = await response.json();
-      setNotice(payload.message || payload.error || "Could not look up that email.");
-      await load();
-    } finally {
-      setUnlocking(null);
     }
   }
 
@@ -463,15 +446,7 @@ export function AppHome() {
               {contact.location && <p className="truncate text-xs text-faint">{contact.location}</p>}
             </div>
             <div className="col-start-2 min-w-0 text-sm lg:col-start-auto">
-              {contact.email ? (
-                <a href={`mailto:${contact.email}`} className="block truncate text-zinc-300 hover:text-white">{contact.email}</a>
-              ) : data?.integrations.apollo ? (
-                <button type="button" disabled={unlocking === contact.id} onClick={() => void findEmail(contact)} className="text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-50">
-                  {unlocking === contact.id ? "Looking up…" : "No verified email · Try again"}
-                </button>
-              ) : (
-                <span className="text-faint">No email yet</span>
-              )}
+              <a href={`mailto:${contact.email}`} className="block truncate text-zinc-300 hover:text-white">{contact.email}</a>
             </div>
             <select
               aria-label={`Status for ${contact.name}`}
@@ -549,7 +524,7 @@ export function AppHome() {
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <h1 className="text-3xl font-bold tracking-tight md:text-4xl">My Contacts</h1>
-                <p className="mt-1 text-sm text-muted">{contacts.length} saved · {contacts.filter((contact) => contact.email).length} with a verified email · {contacts.filter((contact) => (contact.status ?? "not_contacted") !== "not_contacted").length} contacted</p>
+                <p className="mt-1 text-sm text-muted">{contacts.length} saved, each with a verified work email · {contacts.filter((contact) => (contact.status ?? "not_contacted") !== "not_contacted").length} contacted</p>
               </div>
               {contacts.length > 0 && (
                 <div className="flex items-center gap-2">
@@ -687,7 +662,7 @@ export function AppHome() {
             <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               {[
                 ["Saved contacts", contacts.length],
-                ["Verified emails", contacts.filter((contact) => contact.email).length],
+                ["Contacted", contacts.filter((contact) => (contact.status ?? "not_contacted") !== "not_contacted").length],
                 ["Drafts saved", data.drafts.length],
                 ["Emails sent", 0],
                 ["People found", peopleFound],

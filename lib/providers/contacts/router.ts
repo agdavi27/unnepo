@@ -193,6 +193,27 @@ async function apolloSearch(apiKey: string, filters: SearchFilters, schools: str
   return (body.people ?? []).map((person) => mapApolloPerson(person)).filter((person) => person !== null) as Contact[];
 }
 
+const ORGANIZATION_WORDS = /\b(inc|llc|ltd|corp|corporation|company|startups?|ventures|capital|labs?|studios?|agency|group|team|official|hq|careers|jobs|recruiting|hiring|foundation|association|university|college|club|network|solutions|consulting|partners|marketing|media|news|support|admin|info|store|shop)\b/i;
+const GENERIC_INBOXES = new Set(["info", "hello", "hi", "contact", "contactus", "team", "support", "help", "admin", "office", "sales", "marketing", "press", "media", "pr", "hr", "jobs", "careers", "recruiting", "talent", "hiring", "founders", "partners", "partnerships", "billing", "accounts", "events", "general", "inquiries", "enquiries", "mail", "webmaster", "noreply", "no-reply", "donotreply"]);
+
+/** True when an Apollo record reads like one person, not a company page or shared account. */
+export function looksLikePerson(first: string, last: string, company: string) {
+  const name = `${first} ${last}`.trim();
+  if (!/^[\p{L}][\p{L}'.-]*$/u.test(first) || first.length < 2) return false;
+  if (!last) return false;
+  if (ORGANIZATION_WORDS.test(name)) return false;
+  const lowerName = name.toLowerCase();
+  const lowerCompany = company.trim().toLowerCase();
+  if (lowerCompany && (lowerName === lowerCompany || lowerCompany.startsWith(lowerName) || first.toLowerCase() === lowerCompany)) return false;
+  return true;
+}
+
+/** A person's own work inbox, not a shared one like info@ or careers@. */
+export function isPersonalWorkEmail(email: string) {
+  const local = email.split("@")[0]?.toLowerCase().replace(/[^a-z0-9-]/g, "") ?? "";
+  return Boolean(local) && !GENERIC_INBOXES.has(local) && !local.startsWith("noreply");
+}
+
 function mapApolloPerson(raw: Record<string, unknown>): Contact | null {
   const first = String(raw.first_name ?? "").trim();
   const last = String(raw.last_name || raw.last_name_obfuscated || "").trim();
@@ -200,6 +221,8 @@ function mapApolloPerson(raw: Record<string, unknown>): Contact | null {
   const externalId = String(raw.id ?? "");
   if (!fullName || !externalId) return null;
   const organization = (raw.organization ?? {}) as Record<string, unknown>;
+  if (raw.has_email === false) return null;
+  if (!looksLikePerson(first, last, String(organization.name ?? raw.organization_name ?? ""))) return null;
   // People search returns no education, so a school is never assumed for the contact.
   const school = null;
   return {
@@ -423,7 +446,7 @@ export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
       batch.forEach((contact, index) => {
         const person = matches.find((item) => item && String(item.id ?? "") === contact.externalId) ?? matches[index] ?? null;
         const email = person && typeof person.email === "string" ? person.email : null;
-        const verified = Boolean(email) && person?.email_status === "verified";
+        const verified = Boolean(email) && person?.email_status === "verified" && isPersonalWorkEmail(email ?? "");
         const patch = person ? personPatch(person, contact) : {};
         results.set(contact.id, { email: verified ? email : null, emailStatus: verified ? "verified" : email ? "unverified" : "unavailable", patch });
       });
@@ -508,7 +531,8 @@ export async function searchPeopleQuery(userId: string, query: ApolloPeopleQuery
     const response = await contactFetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apolloKey },
-      body: JSON.stringify({ ...query, ...(query.person_titles?.length ? { include_similar_titles: true } : {}), page, per_page: perPage }),
+      // Only people Apollo already holds a verified email for.
+      body: JSON.stringify({ ...query, contact_email_status: ["verified"], ...(query.person_titles?.length ? { include_similar_titles: true } : {}), page, per_page: perPage }),
     });
     if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 300));
     const body = (await response.json()) as { people?: Array<Record<string, unknown>>; total_entries?: number };

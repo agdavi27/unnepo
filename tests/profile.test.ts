@@ -3,8 +3,9 @@ import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
-import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, generateWorkspaceEmail, deleteWorkspaceContacts, refreshProfileHighlights, updateWorkspaceContact, workspaceState } from "@/lib/services/workspace";
+import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, generateWorkspaceEmail, deleteWorkspaceContacts, refreshProfileHighlights, updateWorkspaceContact, workspaceState } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
+import { isPersonalWorkEmail, looksLikePerson } from "@/lib/providers/contacts/router";
 import { COLLEGE_SUGGESTIONS, brandsForInterests, rankSuggestions } from "@/lib/suggestions";
 import { formatLocation, joinProfileList, parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
@@ -15,6 +16,12 @@ import { useTempDb } from "./helpers";
 beforeEach(() => {
   useTempDb();
 });
+
+/** Apollo bulk match reply that gives every person a verified work email of their own. */
+function verifiedMatches(init?: RequestInit) {
+  const details = JSON.parse(String(init?.body ?? "{}")).details as Array<{ id: string }>;
+  return Response.json({ matches: details.map((item) => ({ id: item.id, last_name: "Lee", email: `${item.id}.lee@example.com`, email_status: "verified" })) });
+}
 
 async function verifiedStudent(email: string, name: string) {
   const signed = await signUp({ email, password: "password123", name });
@@ -136,12 +143,13 @@ describe("structured profile", () => {
 
   it("charges a live search only for people found and skips people already saved", async () => {
     process.env.APOLLO_API_KEY = "test-key";
+    process.env.DAILY_USER_SPEND_CENTS = "100000";
     process.env.SIGNUP_CREDITS = "25";
     const userId = await verifiedStudent("live.search@colby.edu", "Live Searcher");
     await saveStructuredProfile(userId, form, "Live Searcher");
     const bodies: Array<Record<string, unknown>> = [];
     setContactFetcher(async (input, init) => {
-      if (String(input).includes("bulk_match")) return Response.json({ matches: [] });
+      if (String(input).includes("bulk_match")) return verifiedMatches(init);
       bodies.push(JSON.parse(String(init?.body ?? "{}")));
       const people = Array.from({ length: 30 }, (_, index) => ({
         id: `p${index}`,
@@ -176,7 +184,7 @@ describe("structured profile", () => {
     await saveStructuredProfile(userId, form, "Ladder");
     const bodies: Array<Record<string, unknown>> = [];
     setContactFetcher(async (input, init) => {
-      if (String(input).includes("bulk_match")) return Response.json({ matches: [] });
+      if (String(input).includes("bulk_match")) return verifiedMatches(init);
       const body = JSON.parse(String(init?.body ?? "{}"));
       bodies.push(body);
       // Only the step without a company filter finds anyone.
@@ -211,15 +219,16 @@ describe("structured profile", () => {
 
   it("falls back to broader searches instead of returning nobody", async () => {
     process.env.APOLLO_API_KEY = "test-key";
+    process.env.DAILY_USER_SPEND_CENTS = "100000";
     const userId = await verifiedStudent("fallback@colby.edu", "Fallback");
     await saveStructuredProfile(userId, form, "Fallback");
     const bodies: Array<Record<string, unknown>> = [];
     setContactFetcher(async (input, init) => {
-      if (String(input).includes("bulk_match")) return Response.json({ matches: [] });
+      if (String(input).includes("bulk_match")) return verifiedMatches(init);
       const body = JSON.parse(String(init?.body ?? "{}"));
       bodies.push(body);
       // Only the broadest step finds anyone.
-      const keys = Object.keys(body).filter((key) => !["page", "per_page", "include_similar_titles"].includes(key));
+      const keys = Object.keys(body).filter((key) => !["page", "per_page", "include_similar_titles", "contact_email_status"].includes(key));
       if (keys.length === 1 && keys[0] === "person_seniorities") {
         return Response.json({ people: [{ id: `b${bodies.length}`, first_name: "Alex", last_name_obfuscated: "K***", title: "Manager", organization: { name: "Acme" } }] });
       }
@@ -243,7 +252,7 @@ describe("structured profile", () => {
       if (String(input).includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
         return Response.json({ matches: details.map((item) => ({
-          id: item.id, last_name: "Rivera", city: "Boston", state: "Massachusetts", email: null,
+          id: item.id, last_name: "Rivera", city: "Boston", state: "Massachusetts", email: "sam.rivera@patagonia.com", email_status: "verified",
           photo_url: "https://example.com/p.jpg", linkedin_url: "https://linkedin.com/in/sam", twitter_url: "https://x.com/sam", github_url: "javascript:alert(1)",
         })) });
       }
@@ -292,42 +301,50 @@ describe("structured profile", () => {
     expect(calls).toBe(0);
   });
 
-  it("includes verified emails with a search at no extra credit and retries lookups for free", async () => {
+  it("keeps only real people with a verified personal work email", async () => {
     process.env.APOLLO_API_KEY = "test-key";
     const userId = await verifiedStudent("emails@colby.edu", "Emailer");
     await saveStructuredProfile(userId, form, "Emailer");
-    let status = "guessed";
-    const urls: string[] = [];
+    const replies: Record<string, Record<string, unknown>> = {
+      jo: { last_name: "Lee", email: "jo.lee@patagonia.com", email_status: "verified" },
+      al: { last_name: "Diaz", email: "al.diaz@patagonia.com", email_status: "guessed" },
+      kim: { last_name: "Park", email: "info@patagonia.com", email_status: "verified" },
+    };
+    const matched: string[] = [];
     setContactFetcher(async (input, init) => {
       const url = String(input);
-      urls.push(url);
       if (url.includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
-        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@patagonia.com`, email_status: item.id === "jo" ? "verified" : status })) });
+        matched.push(...details.map((item) => item.id));
+        return Response.json({ matches: details.map((item) => ({ id: item.id, ...replies[item.id] })) });
       }
-      if (url.includes("people/match")) return Response.json({ person: { email: "al@patagonia.com", email_status: status } });
       return Response.json({
         people: [
-          { id: "jo", first_name: "Jo", last_name: "Lee", title: "Brand Manager", organization: { name: "Patagonia" } },
-          { id: "al", first_name: "Al", last_name: "Diaz", title: "Brand Manager", organization: { name: "Patagonia" } },
+          { id: "jo", first_name: "Jo", last_name_obfuscated: "L***", title: "Brand Manager", organization: { name: "Patagonia" } },
+          { id: "al", first_name: "Al", last_name_obfuscated: "D***", title: "Brand Manager", organization: { name: "Patagonia" } },
+          { id: "kim", first_name: "Kim", last_name_obfuscated: "P***", title: "Brand Manager", organization: { name: "Patagonia" } },
+          { id: "org", first_name: "Field", last_name_obfuscated: "Startup", title: "Company", organization: { name: "Field Startup" } },
+          { id: "noemail", first_name: "Ty", last_name_obfuscated: "B***", has_email: false, organization: { name: "Patagonia" } },
         ],
       });
     });
     const result = await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
+    expect(result.people.map((person) => person.id)).toEqual(["apollo_jo"]);
     expect(result.charged).toBe(1);
-    expect(urls.filter((url) => url.includes("bulk_match"))).toHaveLength(1);
-    const balance = (await repo.getAccount(userId))!.balance;
+    expect(matched).not.toContain("org");
+    expect(matched).not.toContain("noemail");
     const state = await workspaceState(userId);
-    expect(state.contacts.find((contact) => contact.id === "apollo_jo")?.email).toBe("jo@patagonia.com");
-    expect(state.contacts.find((contact) => contact.id === "apollo_al")?.email).toBeUndefined();
+    expect(state.contacts.map((contact) => contact.email)).toEqual(["jo.lee@patagonia.com"]);
+  });
 
-    const still = await unlockWorkspaceEmail(userId, { contactId: "apollo_al" });
-    expect(still.ok).toBe(false);
-    status = "verified";
-    const found = await unlockWorkspaceEmail(userId, { contactId: "apollo_al" });
-    expect(found.ok).toBe(true);
-    expect(found.email).toBe("al@patagonia.com");
-    expect((await repo.getAccount(userId))!.balance).toBe(balance);
+  it("recognizes company pages and shared inboxes", () => {
+    expect(looksLikePerson("Field", "Startup", "Field Startup")).toBe(false);
+    expect(looksLikePerson("Patagonia", "Careers", "Patagonia")).toBe(false);
+    expect(looksLikePerson("Jordan", "Lee", "REI")).toBe(true);
+    expect(looksLikePerson("Jordan", "", "REI")).toBe(false);
+    expect(isPersonalWorkEmail("jordan.lee@rei.com")).toBe(true);
+    expect(isPersonalWorkEmail("careers@rei.com")).toBe(false);
+    expect(isPersonalWorkEmail("no-reply@rei.com")).toBe(false);
   });
 
   it("lets a student mark a saved contact as contacted and reports when it was found", async () => {
@@ -336,7 +353,7 @@ describe("structured profile", () => {
     await saveStructuredProfile(userId, form, "Statuser");
     await repo.upsertContacts([{
       id: "status_person", externalId: "status_person", provider: "apollo", fullName: "Pat Doe", firstName: "Pat", lastName: "Doe",
-      title: "Recruiter", company: "REI", companyDomain: null, location: "", school: null, profileUrl: null, email: null, emailStatus: "unknown",
+      title: "Recruiter", company: "REI", companyDomain: null, location: "", school: null, profileUrl: null, email: "pat.doe@rei.com", emailStatus: "verified",
       phone: null, phoneStatus: "unknown", tags: [], seniority: null, department: null, industry: null, companySize: null, interests: [],
       previousRoles: [], achievements: [], publicPosts: [], verifiedMutuals: [], shareable: false, licenseNote: "test", dataSource: "provider",
       fetchedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString(), costCents: 0, costEstimated: true,
@@ -452,8 +469,8 @@ describe("structured profile", () => {
       location: "Boston, MA",
       school: null,
       profileUrl: null,
-      email: null,
-      emailStatus: "unknown",
+      email: "sam.rivera@patagonia.com",
+      emailStatus: "verified",
       phone: null,
       phoneStatus: "unknown",
       tags: [],

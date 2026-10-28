@@ -3,7 +3,7 @@ import { readAnthropicKey, id, nowIso, repo } from "@/lib/db/file-store";
 import type { Contact, ManualEmailDraft, PeopleSearchRequest, ProfileDocument, SavedContact } from "@/lib/db/types";
 import { serverConfig } from "@/lib/config";
 import { PEOPLE_PER_CREDIT, creditsForPeople, prepareSearchDebit, prepareUnlockDebit } from "@/lib/credits/quote";
-import { enrichPeopleBatch, enrichPerson, resolveCompanyDomains, searchPeopleQuery } from "@/lib/providers/contacts/router";
+import { enrichPeopleBatch, enrichPerson, isPersonalWorkEmail, looksLikePerson, resolveCompanyDomains, searchPeopleQuery } from "@/lib/providers/contacts/router";
 import {
   EMPLOYEE_RANGES,
   HIRING_MANAGER_SENIORITIES,
@@ -411,26 +411,56 @@ async function runLivePeopleSearch(
   }
   const excludeSaved = input.filters.excludeSaved !== false;
   const excluded = new Set(excludeSaved ? (await repo.listSaved(userId)).map((row) => row.contactId) : []);
-  const found: Contact[] = [];
+  const people: Contact[] = [];
+  const seen = new Set<string>();
   const matched: string[] = [];
   let firstMatchedStep = -1;
-  const maxPages = Math.ceil(input.quantity / APOLLO_PAGE_SIZE) + 1;
-  for (const step of plan.steps) {
-    if (found.length >= input.quantity) break;
-    const before = found.length;
-    for (let page = 1; page <= maxPages && found.length < input.quantity; page += 1) {
-      const result = await searchPeopleQuery(userId, step.query, page, APOLLO_PAGE_SIZE);
-      for (const person of result.people) {
-        if (!excluded.has(person.id) && !found.some((item) => item.id === person.id)) found.push(person);
+  // Email lookups cost Apollo credits, so at most twice the requested number are checked.
+  let lookupBudget = input.quantity * 2;
+  const maxPages = Math.ceil((input.quantity * 2) / APOLLO_PAGE_SIZE) + 1;
+
+  /** Looks up emails for candidates and keeps only people with a verified personal work email. */
+  const keepVerified = async (candidates: Contact[]) => {
+    let added = 0;
+    while (candidates.length && people.length < input.quantity && lookupBudget > 0) {
+      const chunk = candidates.splice(0, Math.min(lookupBudget, Math.max(10, input.quantity - people.length)));
+      lookupBudget -= chunk.length;
+      const emails = await enrichPeopleBatch(chunk, userId);
+      if (!emails.size) {
+        lookupBudget = 0;
+        break;
       }
+      const updated = chunk.map((person) => {
+        const result = emails.get(person.id);
+        return result ? { ...person, ...result.patch, email: result.email, emailStatus: result.emailStatus, fetchedAt: nowIso() } : person;
+      });
+      await repo.upsertContacts(updated);
+      for (const person of updated) {
+        if (people.length >= input.quantity) break;
+        if (person.email && person.emailStatus === "verified" && looksLikePerson(person.firstName, person.lastName, person.company)) {
+          people.push(person);
+          added += 1;
+        }
+      }
+    }
+    return added;
+  };
+
+  for (const step of plan.steps) {
+    if (people.length >= input.quantity || lookupBudget <= 0) break;
+    let added = 0;
+    for (let page = 1; page <= maxPages && people.length < input.quantity && lookupBudget > 0; page += 1) {
+      const result = await searchPeopleQuery(userId, step.query, page, APOLLO_PAGE_SIZE);
+      const candidates = result.people.filter((person) => !excluded.has(person.id) && !seen.has(person.id));
+      candidates.forEach((person) => seen.add(person.id));
+      added += await keepVerified(candidates);
       if (result.people.length < APOLLO_PAGE_SIZE) break;
     }
-    if (found.length > before) {
+    if (added > 0) {
       if (firstMatchedStep < 0) firstMatchedStep = plan.steps.indexOf(step);
       if (!matched.includes(step.label)) matched.push(step.label);
     }
   }
-  const people = found.slice(0, input.quantity);
   // Partial results are charged per started block of 25, never more than the quote.
   const creditsCharged = people.length ? Math.min(input.creditsQuoted, Math.ceil(people.length / PEOPLE_PER_CREDIT)) : 0;
   const requestId = id();
@@ -449,17 +479,6 @@ async function runLivePeopleSearch(
     }
     charged = spend.charged;
   }
-  // Credits pay for the people. Their verified work emails come with them at no extra credit.
-  const emails = await enrichPeopleBatch(people, userId);
-  if (emails.size) {
-    await repo.upsertContacts(
-      people.map((person) => {
-        const found = emails.get(person.id);
-        return found ? { ...person, ...found.patch, email: found.email, emailStatus: found.emailStatus, fetchedAt: nowIso() } : person;
-      }),
-    );
-  }
-  const withEmail = people.filter((person) => emails.get(person.id)?.email).length;
   await repo.saveFoundContacts(userId, people.map((person) => person.id));
   const request: PeopleSearchRequest = {
     id: requestId,
@@ -485,8 +504,8 @@ async function runLivePeopleSearch(
     status: "completed" as const,
     message: [
       people.length
-        ? `Found ${people.length} ${people.length === 1 ? "person" : "people"} (${withEmail} with a verified work email) and added them to My Contacts. ${charged} ${charged === 1 ? "credit was" : "credits were"} used.`
-        : "Apollo found no new people for that search, even after loosening the filters. No credits were used.",
+        ? `Found ${people.length} ${people.length === 1 ? "person" : "people"} with a verified work email and added them to My Contacts. ${charged} ${charged === 1 ? "credit was" : "credits were"} used.`
+        : "Apollo found no new people with a verified work email for that search, even after loosening the filters. No credits were used.",
       matched.length ? `Matched: ${matched.join("; then ")}.` : "",
       people.length && firstMatchedStep > 0 ? "Exact matches were limited, so some people match only part of your search." : "",
       ...plan.notes,
@@ -730,7 +749,9 @@ export async function workspaceState(userId: string) {
   ]);
   const studentFacts = document ? profileIntelligence.approvedForOutreach(document.facts, document.form.excludedTopics) : [];
   const contacts = saved.flatMap(({ saved: row, contact }) => {
-    if (!contact) return [];
+    // My Contacts only lists people with a verified work email of their own.
+    if (!contact?.email || contact.emailStatus !== "verified" || !isPersonalWorkEmail(contact.email)) return [];
+    if (!looksLikePerson(contact.firstName, contact.lastName, contact.company)) return [];
     const verifiedFacts = [
       contact.title ? { id: `${contact.id}:title`, text: contact.title, verified: contact.dataSource === "provider" } : null,
       contact.company ? { id: `${contact.id}:company`, text: `Works at ${contact.company}`, verified: contact.dataSource === "provider" } : null,
