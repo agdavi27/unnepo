@@ -4,7 +4,7 @@ import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { splitProfileList } from "@/lib/profile/lists";
 import { readStoredResume } from "@/lib/services/resume";
-import { browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
+import { AutofillStopped, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
 import { decryptSecret, encryptSecret } from "@/lib/security";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
 import { extractJob } from "@/lib/apply/extract";
@@ -36,6 +36,10 @@ async function student(userId: string) {
     website: stored?.website ?? "",
     github: stored?.github ?? fromResume.github,
     city: stored?.city ?? "",
+    addressLine1: stored?.addressLine1 ?? "",
+    state: stored?.state ?? "",
+    postalCode: stored?.postalCode ?? "",
+    country: stored?.country ?? "",
     saved: stored?.saved ?? {},
     jobSitePasswordEncrypted: stored?.jobSitePasswordEncrypted ?? null,
     accountConsentAt: stored?.accountConsentAt ?? null,
@@ -255,14 +259,31 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
     const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], info.context);
     return planned.answer && planned.source && planned.source !== "resume_file" ? planned.answer : null;
   };
-  const report = await withSessionPage(sessionId, (page) =>
-    runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor }),
-  );
+  const shouldStop = async () => (await applications.get(userId, app.id))?.status !== "filling";
+  // Show the live view while filling, so the student can watch and stop it.
+  const live = await liveViewUrl(sessionId);
+  await applications.update(userId, app.id, { browserSessionId: sessionId, fillReport: { ...(app.fillReport ?? { filled: [], failed: [] }), liveViewUrl: live, screenshotAt: nowIso() } });
+  let report: FlowResult;
+  try {
+    report = await withSessionPage(sessionId, (page) =>
+      runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, shouldStop }),
+    );
+  } catch (error) {
+    // Stopped by the student: stopAutofill already saved where things stand.
+    if (!(error instanceof AutofillStopped) && !(await shouldStop().catch(() => false))) throw error;
+    const current = (await applications.get(userId, app.id))!;
+    // Stopped before the browser was recorded: close it so it doesn't keep running.
+    if (current.status === "extracted") {
+      await releaseBrowserSession(sessionId);
+      return { application: summary((await applications.update(userId, app.id, { browserSessionId: null, fillReport: null }))!) };
+    }
+    return { application: summary(current) };
+  }
   if (report.account === "created") {
     const jobAccounts = [...(info.profile.jobAccounts ?? []).filter((item) => item.host !== report.host), { host: report.host, email: info.profile.email, createdAt: nowIso() }];
     await applicationProfiles.put(userId, { ...info.profile, jobAccounts });
   }
-  const live = await liveViewUrl(sessionId);
+  if (await shouldStop()) return { application: summary((await applications.get(userId, app.id))!) };
   const updated = await applications.update(userId, app.id, {
     status: "review",
     browserSessionId: sessionId,
@@ -337,6 +358,21 @@ export async function continueAutofill(userId: string, raw: unknown) {
     await applications.update(userId, app.id, { status: "review", statusMessage: message });
     throw error instanceof ServiceError ? error : new ServiceError(message, "browser_failed", 502);
   }
+}
+
+/** Stops a running autofill. The browser stays open so the student can finish in the live view or continue later. */
+export async function stopAutofill(userId: string, raw: unknown) {
+  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
+  if (app.status !== "filling") return { application: summary(app) };
+  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  const updated = await applications.transition(userId, app.id, ["filling"], {
+    status: app.browserSessionId ? "review" : "extracted",
+    fillReport: app.browserSessionId ? { ...report, stoppedAt: "needs_input", pending: [] } : app.fillReport,
+    statusMessage: app.browserSessionId
+      ? "You stopped autofill. Nothing was submitted. Finish in the live view, or press Continue autofill to pick up where it stopped."
+      : "You stopped autofill before the browser opened. Nothing was submitted.",
+  });
+  return { application: summary(updated ?? (await requireApp(userId, app.id))) };
 }
 
 function startContacts(userId: string, applicationId: string) {

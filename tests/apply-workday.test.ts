@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Browser } from "playwright-core";
-import { runApplicationFlow } from "@/lib/apply/browser";
+import { AutofillStopped, runApplicationFlow } from "@/lib/apply/browser";
 import { bestOption } from "@/lib/apply/options";
 
 /**
@@ -155,6 +155,10 @@ describe.skipIf(!hasChrome)("Workday-style application (local Chrome)", () => {
       answerFor: (label: string) => saved[label.toLowerCase()] ?? null,
     };
 
+    // Stop is honored before anything is typed.
+    await expect(runApplicationFlow(page, { ...options, navigate: true, shouldStop: async () => true })).rejects.toBeInstanceOf(AutofillStopped);
+
+    const started = Date.now();
     const first = await runApplicationFlow(page, { ...options, navigate: true });
     expect(first).toMatchObject({ stoppedAt: "needs_input", account: "created" });
     const state1 = await page.evaluate(() => (window as unknown as { state: { accounts: Record<string, string>; values: Record<string, string>; headerClicked: boolean } }).state);
@@ -178,6 +182,7 @@ describe.skipIf(!hasChrome)("Workday-style application (local Chrome)", () => {
     expect(state2.view).toBe("review");
     expect(state2.values).toMatchObject({ phoneDeviceType: "Mobile", prev: "false", resume: "Pat Doe Resume.pdf", agreement: "yes", source: "Job Board" });
     expect(state2.uploads).toBe(1);
+    console.log(`Workday copy filled to Review in ${((Date.now() - started) / 1000).toFixed(1)}s`);
     expect(state2.values.gender).toBeUndefined();
     await page.close();
   }, 240_000);

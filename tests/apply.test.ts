@@ -161,6 +161,16 @@ describe("answers", () => {
     expect(withSaved.find((item) => item.key === "visa")).toMatchObject({ answer: "No", source: "saved" });
   });
 
+  it("answers the phone type as mobile and never types the number into it", () => {
+    const planned = planAnswers([
+      q("type", "Phone Device Type", "select", ["Landline", "Mobile"]),
+      q("type2", "Phone Type", "select", ["Home", "Cell", "Work"]),
+      q("ext", "Phone Extension", "text", [], false),
+      q("phone", "Phone Number"),
+    ], context);
+    expect(planned.map((item) => item.answer)).toEqual(["Mobile", "Cell", null, "207-555-0100"]);
+  });
+
   it("keeps an AI answer only with evidence quoted from the student's own text", () => {
     const sources = "Led the Colby Data Club and built a dashboard used by 40 students.";
     const essay = q("why", "Why this role?", "textarea");

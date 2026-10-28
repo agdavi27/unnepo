@@ -118,6 +118,7 @@ export function ApplyArea({ view, onNavigate, onCreditsChanged }: { view: "apply
       error={error}
       onPick={setCurrentId}
       onChanged={(app) => { replace(app); setCurrentId(app.id); void load(); onCreditsChanged(); }}
+      onPatch={replace}
       onProfile={(profile) => setData({ ...data, profile })}
       onDone={() => onNavigate("applied")}
     />
@@ -126,9 +127,9 @@ export function ApplyArea({ view, onNavigate, onCreditsChanged }: { view: "apply
   );
 }
 
-function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone }: {
+function ApplyPage({ data, current, error, onPick, onChanged, onPatch, onProfile, onDone }: {
   data: ApplyData; current: App | null; error: string;
-  onPick: (id: string | null) => void; onChanged: (app: App) => void; onProfile: (profile: PublicProfile) => void; onDone: () => void;
+  onPick: (id: string | null) => void; onChanged: (app: App) => void; onPatch: (app: App) => void; onProfile: (profile: PublicProfile) => void; onDone: () => void;
 }) {
   const [url, setUrl] = useState("");
   const [reading, setReading] = useState(false);
@@ -192,16 +193,17 @@ function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone 
           </ul>
         </section>
       )}
-      {current && <ApplicationCard key={current.id} app={current} data={data} onChanged={onChanged} onClose={() => onPick(null)} onDone={onDone} />}
+      {current && <ApplicationCard key={current.id} app={current} data={data} onChanged={onChanged} onPatch={onPatch} onClose={() => onPick(null)} onDone={onDone} />}
       <ProfileDetails profile={data.profile} resume={data.resume} onSaved={onProfile} />
     </div>
   );
 }
 
-function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; data: ApplyData; onChanged: (app: App) => void; onClose: () => void; onDone: () => void }) {
+function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { app: App; data: ApplyData; onChanged: (app: App) => void; onPatch: (app: App) => void; onClose: () => void; onDone: () => void }) {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [save, setSave] = useState<Set<string>>(new Set());
   const [working, setWorking] = useState("");
+  const [stopping, setStopping] = useState(false);
   const [problem, setProblem] = useState("");
   const [message, setMessage] = useState("");
   const [showReqs, setShowReqs] = useState(false);
@@ -213,6 +215,8 @@ function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; 
     setWorking(name);
     setProblem("");
     setMessage("");
+    // Show filling right away so the page polls for the live view and the Stop button appears.
+    if (name === "fill" || name === "continue") onPatch({ ...app, status: "filling", statusMessage: "Filling the form…" });
     try {
       const result = await call<{ application?: App; message?: string }>(path, method, body);
       if (result.application) onChanged(result.application);
@@ -223,6 +227,18 @@ function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; 
       return false;
     } finally {
       setWorking("");
+    }
+  }
+
+  async function stop() {
+    setStopping(true);
+    try {
+      const result = await call<{ application?: App }>("/stop", "POST", { applicationId: app.id });
+      if (result.application) onChanged(result.application);
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't stop autofill.");
+    } finally {
+      setStopping(false);
     }
   }
 
@@ -271,14 +287,14 @@ function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; 
         </div>
       )}
 
-      {(app.status === "review" || app.status === "unconfirmed") && app.fillReport && (
+      {(app.status === "review" || app.status === "unconfirmed" || app.status === "filling") && app.fillReport && (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold">{app.fillReport.stoppedAt && app.fillReport.stoppedAt !== "review" ? "Your turn in the live view" : "Check the filled form"}</h3>
+          <h3 className="text-sm font-semibold">{app.status === "filling" ? "Filling the form. Watch it here." : app.fillReport.stoppedAt && app.fillReport.stoppedAt !== "review" ? "Your turn in the live view" : "Check the filled form"}</h3>
           {app.fillReport.account === "created" && <p className="text-xs text-muted">Unnepo created your account on {app.fillReport.host} with {data.profile.email} and your job-site password.</p>}
           {live ? (
             <iframe title="Live application browser" src={live} className="h-[560px] w-full rounded-xl border border-line bg-black" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write" />
           ) : <p className="text-sm text-muted">The live view isn&apos;t available for this session.</p>}
-          {app.fillReport.failed.length > 0 && (
+          {app.status !== "filling" && app.fillReport.failed.length > 0 && (
             <div className="rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-sm">
               <p className="font-medium text-amber-200">Finish these in the live view</p>
               <ul className="mt-1 list-disc pl-5 text-amber-100/80">{app.fillReport.failed.map((item) => <li key={item.label}>{item.label}: {item.reason}</li>)}</ul>
@@ -312,14 +328,19 @@ function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; 
       {message && <p className="text-sm text-muted">{message}</p>}
 
       <div className="flex flex-wrap gap-2 border-t border-line pt-4">
+        {app.status === "filling" && (
+          <button type="button" className={`${btn} border border-red-900/70 bg-red-950/40 text-red-200 hover:bg-red-950/70`} disabled={stopping} onClick={() => void stop()}>
+            {stopping ? "Stopping…" : "Stop autofill"}
+          </button>
+        )}
         {(app.status === "extracted" || app.status === "failed") && (
           <button type="button" className={primary} disabled={!data.ready.autofill || dirty || missing.length > 0 || Boolean(working)} title={!data.ready.autofill ? "Autofill isn't connected yet" : missing.length ? "Answer the required questions first" : dirty ? "Save your answers first" : undefined} onClick={() => void run("fill", "/autofill")}>
-            {working === "fill" ? "Filling the form… (up to a minute)" : "Autofill application"}
+            {working === "fill" ? "Filling the form…" : "Autofill application"}
           </button>
         )}
         {app.status === "review" && app.fillReport?.stoppedAt && app.fillReport.stoppedAt !== "review" && (
           <button type="button" className={primary} disabled={Boolean(working)} onClick={() => void run("continue", "/continue")}>
-            {working === "continue" ? "Continuing… (up to a minute)" : "Continue autofill"}
+            {working === "continue" ? "Continuing…" : "Continue autofill"}
           </button>
         )}
         {app.status === "review" && (!app.fillReport?.stoppedAt || app.fillReport.stoppedAt === "review") && (

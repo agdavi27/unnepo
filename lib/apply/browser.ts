@@ -73,7 +73,7 @@ export async function withSessionPage<T>(sessionId: string, run: (page: Page) =>
     const page = context.pages()[0] ?? (await context.newPage());
     return await run(page);
   } catch (error) {
-    if (error instanceof ServiceError) throw error;
+    if (error instanceof ServiceError || error instanceof AutofillStopped) throw error;
     throw new ServiceError("Lost the connection to the autofill browser. Try again. Nothing was submitted.", "browser_failed", 502);
   } finally {
     // Closing a CDP connection disconnects without ending a keepAlive session.
@@ -105,24 +105,37 @@ const YES = /^(yes|true|y|1|i agree|agree)$/i;
 
 /** Clicks through Workday-style invisible click layers when a normal click is blocked. */
 async function clickSmart(page: Page, target: Locator) {
+  const label = (await target.getAttribute("aria-label", { timeout: 2_000 }).catch(() => null)) || (await target.innerText({ timeout: 2_000 }).catch(() => "")).trim();
+  const overlay = label ? page.locator(`[data-automation-id='click_filter'][aria-label="${cssAttr(label)}"]`) : null;
+  if (overlay && (await overlay.count()) > 0) {
+    await overlay.first().click({ timeout: 5_000 });
+    return;
+  }
   try {
-    await target.click({ timeout: 3_000 });
+    await target.click({ timeout: 2_000 });
   } catch {
-    const label = (await target.getAttribute("aria-label").catch(() => null)) || (await target.innerText().catch(() => "")).trim();
-    const overlay = label ? page.locator(`[data-automation-id='click_filter'][aria-label="${cssAttr(label)}"]`) : null;
-    if (overlay && (await overlay.count()) > 0) await overlay.first().click({ timeout: 5_000 });
-    else await target.click({ force: true, timeout: 5_000 });
+    await target.click({ force: true, timeout: 5_000 });
   }
 }
 
-/** Options of a custom dropdown (a button that opens a listbox), read by opening and closing it. */
-async function listboxOptions(page: Page, field: Locator) {
+/**
+ * Opens a custom dropdown (a button that opens a listbox) once: reads its options, asks for an answer,
+ * and picks it while the list is open. Closes the list when there's no answer.
+ */
+async function decideListbox(page: Page, field: Locator, decide: (options: string[]) => string | null) {
   await clickSmart(page, field);
   const list = page.locator("[role='listbox']:visible [role='option']");
   await list.first().waitFor({ timeout: 4_000 }).catch(() => undefined);
-  const options = (await list.allInnerTexts().catch(() => [])).map((text) => text.replace(/\s+/g, " ").trim()).filter(Boolean);
-  await page.keyboard.press("Escape").catch(() => undefined);
-  return options;
+  const texts = (await list.allInnerTexts().catch(() => [])).map((text) => text.replace(/\s+/g, " ").trim());
+  const options = texts.filter(Boolean);
+  const answer = decide(options);
+  const choice = answer ? bestOption(answer, texts) : null;
+  if (!choice) {
+    await page.keyboard.press("Escape").catch(() => undefined);
+    return { options, answer, picked: false };
+  }
+  await list.nth(texts.indexOf(choice)).click();
+  return { options, answer, picked: true };
 }
 
 async function pickListbox(page: Page, field: Locator, answer: string) {
@@ -143,13 +156,14 @@ async function pickPrompt(page: Page, field: Locator, answer: string) {
   await field.click();
   await field.fill(answer);
   await field.press("Enter");
-  await page.waitForTimeout(1200);
   const options = page.locator("[data-automation-id='promptOption']:visible, [role='option']:visible");
+  await options.first().waitFor({ timeout: 3_000 }).catch(() => undefined);
+  await page.waitForTimeout(250);
   const texts = (await options.allInnerTexts().catch(() => [])).map((text) => text.replace(/\s+/g, " ").trim());
   const choice = bestOption(answer, texts) ?? (texts.length === 1 ? texts[0] : null);
   if (!choice) throw new Error("option not found");
   await options.nth(texts.indexOf(choice)).click();
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(200);
 }
 
 async function setValue(page: Page, field: Locator, question: ApplicationQuestion, answer: string, resume: ResumeFile | null) {
@@ -191,7 +205,7 @@ async function setValue(page: Page, field: Locator, question: ApplicationQuestio
     // Searchable dropdowns: type the option, then pick the highlighted match.
     await field.click();
     await field.fill(answer);
-    await page.waitForTimeout(400);
+    await page.getByRole("option").first().waitFor({ timeout: 1_500 }).catch(() => undefined);
     const exact = page.getByRole("option", { name: answer, exact: true });
     if ((await exact.count()) > 0) await exact.first().click();
     else await field.press("Enter");
@@ -236,11 +250,20 @@ export type FlowOptions = {
   credentials: Credentials | null;
   /** The student agreed to let Unnepo create job-site accounts and accept their candidate terms. */
   allowSignup: boolean;
+  /** True once the student pressed Stop. Checked between fields and pages. */
+  shouldStop?: () => Promise<boolean>;
   /** Answers for fields the job board didn't publish ahead of time, matched by label. Null leaves the field for the student. */
   answerFor: (label: string, kind: ApplicationQuestion["kind"], options: string[]) => string | null;
 };
 
 export type FlowResult = Omit<FillReport, "liveViewUrl" | "screenshotAt"> & { stoppedAt: NonNullable<FillReport["stoppedAt"]>; host: string };
+
+/** Thrown when the student stops autofill. */
+export class AutofillStopped extends Error {
+  constructor() {
+    super("stopped");
+  }
+}
 
 const MAX_PAGES = 10;
 
@@ -269,9 +292,15 @@ export function passwordAllowedOn(pageUrl: string, applicationUrl: string) {
 
 async function settle(page: Page) {
   await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
-  await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
-  // Workday draws each step after the page loads.
-  await page.waitForTimeout(/myworkday(jobs|site)\.com/.test(page.url()) ? 2_500 : 500);
+  // Job sites keep connections open, so "network idle" often never comes; don't wait long for it.
+  await page.waitForLoadState("networkidle", { timeout: 2_500 }).catch(() => undefined);
+  if (/myworkday(jobs|site)\.com/.test(page.url())) {
+    // Workday draws each step after the page loads: wait for its fields or buttons, not a fixed time.
+    await page.locator("[data-automation-id^='formField'], [data-automation-id='bottom-navigation-next-button'], [data-automation-id='applyManually'], [data-automation-id='adventureButton'], input[type='password']").first().waitFor({ timeout: 6_000 }).catch(() => undefined);
+    await page.waitForTimeout(400);
+  } else {
+    await page.waitForTimeout(250);
+  }
 }
 
 async function visible(locator: Locator) {
@@ -464,6 +493,13 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
   const startHost = new URL(options.url).hostname;
   // No single step may hang the run: a missing field fails fast and goes to the student instead.
   page.setDefaultTimeout(10_000);
+  // Checking for Stop reads the database, so it's done at most once a second.
+  let lastCheck = 0;
+  const checkStop = async () => {
+    if (!options.shouldStop || Date.now() - lastCheck < 1_000) return;
+    lastCheck = Date.now();
+    if (await options.shouldStop()) throw new AutofillStopped();
+  };
   if (options.navigate) {
     await page.goto(options.url, { waitUntil: "domcontentloaded", timeout: 45_000 });
     await settle(page);
@@ -497,6 +533,8 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
   });
 
   for (let pageIndex = 1; pageIndex <= MAX_PAGES; pageIndex += 1) {
+    lastCheck = 0;
+    await checkStop();
     await openForm(page, Boolean(options.resume));
     if (VERIFY_TEXT.test(await bodyText(page)) && !(await authKind(page))) return done("email_verification", pageIndex);
 
@@ -562,6 +600,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     for (const question of options.questions) {
       const answer = question.answer?.trim();
       if (!answer || filled.has(question.label)) continue;
+      await checkStop();
       if (question.kind === "file" && resumeUploaded) continue;
       const field = await locate(page, question);
       // File inputs are usually hidden behind a styled button, so only other fields must be visible.
@@ -580,11 +619,26 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     // Sites like Workday redraw the form after each choice, so the page is scanned again after every field.
     const handled = new Set<string>();
     for (let guard = 0; guard < 60; guard += 1) {
+      await checkStop();
       const field = (await scanFields(page)).find((item) => !handled.has(item.label));
       if (!field) break;
       handled.add(field.label);
-      let fieldOptions = field.options;
-      if (field.listbox) fieldOptions = await listboxOptions(page, page.locator(field.selector).first()).catch(() => []);
+      if (field.listbox) {
+        const result = await decideListbox(page, page.locator(field.selector).first(), (choices) => options.answerFor(field.label, "select", choices)).catch(() => null);
+        if (result?.picked) {
+          filled.add(field.label);
+          failed.delete(field.label);
+          ask.delete(field.label);
+        } else if (result?.answer) {
+          failed.set(field.label, "Couldn't pick this option. Choose it in the live view.");
+          if (field.required) ask.set(field.label, { kind: "select", options: result.options });
+        } else if (field.required) {
+          ask.set(field.label, { kind: "select", options: result?.options ?? [] });
+          failed.set(field.label, result ? "Required. Answer it below or in the live view." : "Couldn't open this dropdown. Choose it in the live view.");
+        }
+        continue;
+      }
+      const fieldOptions = field.options;
       let answer: string | null = null;
       if (field.kind === "file") {
         // One resume upload per run, on a page that asks for a resume or CV.
@@ -601,8 +655,9 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
         continue;
       }
       try {
-        // Find the field again by its label: the marker from the scan may be gone after a redraw.
-        const fresh = (await scanFields(page)).find((item) => item.label === field.label);
+        // The marker from the scan may be gone after a redraw; then find the field again by its label.
+        const marked = (await page.locator(field.selector).count()) > 0;
+        const fresh = marked ? null : (await scanFields(page)).find((item) => item.label === field.label);
         const locator = page.locator(fresh?.selector ?? field.selector).first();
         const question: ApplicationQuestion = { key: field.selector, label: field.label, kind: field.kind, required: false, options: fieldOptions, sensitive: false, answer, source: null, evidence: null };
         await setValue(page, locator, question, answer, options.resume);
@@ -650,7 +705,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     const deadline = Date.now() + 12_000;
     let after = before;
     while (Date.now() < deadline && after === before) {
-      await page.waitForTimeout(700);
+      await page.waitForTimeout(300);
       after = page.url() + (await bodyText(page));
     }
     await settle(page);
