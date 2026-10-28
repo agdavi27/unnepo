@@ -144,6 +144,8 @@ export function AppHome() {
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [resumeBusy, setResumeBusy] = useState(false);
+  const [resumeVersion, setResumeVersion] = useState(0);
   const [view, setView] = useState<View>("apply");
   const [tab, setTab] = useState<"find" | "custom">("find");
   const [editing, setEditing] = useState(false);
@@ -237,6 +239,26 @@ export function AppHome() {
     }
     setNotice(`Stored ${payload.resume.fileName}. The file is saved. AI parsing is not connected. Heading lines are kept for you to review when you save.`);
     await load();
+  }
+
+  /** The header's resume button: the newest upload becomes the resume autofill uses. */
+  async function replaceResume(file: File) {
+    setResumeBusy(true);
+    try {
+      const body = new FormData();
+      body.set("file", file);
+      const response = await fetch("/api/resume", { method: "POST", body });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        setNotice(payload.error || "Couldn't save that resume. Try a PDF or DOCX under 10 MB.");
+        return;
+      }
+      setNotice(`${hadResume ? "Replaced your resume with" : "Attached"} ${payload.resume.fileName}. Autofill, answers, and cover letters use it from now on.`);
+      await load();
+      setResumeVersion((value) => value + 1);
+    } finally {
+      setResumeBusy(false);
+    }
   }
 
   async function saveProfile(profile: Profile) {
@@ -535,6 +557,23 @@ export function AppHome() {
     </section>
   );
   const currentPlan = data?.credits.plan ?? "free";
+  const hadResume = Boolean(data?.resume);
+  /** Attach or replace the resume from anywhere in the app. Shown in the top row on wider screens, beside the tabs on phones. */
+  const resumeButton = (placement: string) => data && !showOnboarding && (
+    <label title={data.resume ? `Your resume: ${data.resume.fileName}. Choose a file to replace it.` : "Attach your resume"} className={`${placement} max-w-[14rem] shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 sm:px-3 ${data.resume ? "border-line text-muted hover:text-white" : "border-white/60 text-white hover:bg-white/10"} ${resumeBusy ? "pointer-events-none opacity-60" : ""}`}>
+      <span aria-hidden>⇧</span>
+      {resumeBusy ? "Uploading…" : data.resume ? (
+        <><span className="hidden truncate text-ink md:inline">{data.resume.fileName}</span><span className="md:hidden">Resume</span><span className="hidden text-faint sm:inline">· Replace</span></>
+      ) : "Attach resume"}
+      <input
+        type="file"
+        className="sr-only"
+        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        disabled={resumeBusy}
+        onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void replaceResume(file); }}
+      />
+    </label>
+  );
 
   return (
     <div className="min-h-screen bg-bg text-ink [color-scheme:dark]">
@@ -542,6 +581,7 @@ export function AppHome() {
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 pt-4 sm:px-6 lg:px-8">
           <Logo />
           <div className="flex items-center gap-3 whitespace-nowrap text-sm sm:gap-4">
+            {resumeButton("hidden sm:flex")}
             {data && <span className="rounded-full border border-line px-2.5 py-1 text-muted sm:px-3"><span className="text-ink">{data.credits.balance}</span> credits</span>}
             {data && !showOnboarding && <button type="button" onClick={() => setView("settings")} aria-current={view === "settings" ? "page" : undefined} className={view === "settings" ? "text-white" : "text-muted hover:text-white"}>Settings</button>}
             <button type="button" onClick={logout} className="text-muted hover:text-white">Log out</button>
@@ -560,6 +600,7 @@ export function AppHome() {
                 {item.label}
               </button>
             ))}
+            <div className="ml-auto pb-2">{resumeButton("flex sm:hidden")}</div>
           </nav>
         ) : (
           <div className="pb-4" />
@@ -594,7 +635,7 @@ export function AppHome() {
           </div>
         )}
         {data && !showOnboarding && (view === "apply" || view === "applied") && (
-          <ApplyArea view={view} onNavigate={setView} onCreditsChanged={() => void load()} />
+          <ApplyArea view={view} onNavigate={setView} onCreditsChanged={() => void load()} refreshKey={resumeVersion} />
         )}
         {data && !showOnboarding && view === "contacts" && (
           <>

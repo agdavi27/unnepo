@@ -65,7 +65,7 @@ function StatusChip({ status }: { status: JobApplication["status"] }) {
 }
 
 /** The two V1 pages share one data load: Apply to Job and Jobs Applied To. */
-export function ApplyArea({ view, onNavigate, onCreditsChanged }: { view: "apply" | "applied"; onNavigate: (view: "apply" | "applied") => void; onCreditsChanged: () => void }) {
+export function ApplyArea({ view, onNavigate, onCreditsChanged, refreshKey = 0 }: { view: "apply" | "applied"; onNavigate: (view: "apply" | "applied") => void; onCreditsChanged: () => void; refreshKey?: number }) {
   const [data, setData] = useState<ApplyData | null>(null);
   const [error, setError] = useState("");
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -82,7 +82,7 @@ export function ApplyArea({ view, onNavigate, onCreditsChanged }: { view: "apply
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- first load of server data
     void load();
-  }, [load]);
+  }, [load, refreshKey]);
 
   const busy = useMemo(() => (data?.applications ?? []).some((app) => app.status === "filling" || app.status === "submitting" || app.contactsStatus === "finding" || app.contactsStatus === "writing"), [data]);
   useEffect(() => {
