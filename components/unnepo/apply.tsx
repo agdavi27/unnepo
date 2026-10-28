@@ -171,6 +171,11 @@ function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone 
       {!data.ready.autofill && (
         <p className="rounded-xl border border-line bg-card px-4 py-3 text-sm text-muted">Autofill isn&apos;t connected yet. You can still read jobs, prepare answers, apply on the company&apos;s site, and press <span className="text-ink">I applied</span> to find people and get emails.</p>
       )}
+      {(!data.profile.lastName.trim() || !data.profile.phone.trim()) && (
+        <p className="rounded-xl border border-amber-900/60 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
+          Add your {[!data.profile.lastName.trim() && "legal last name", !data.profile.phone.trim() && "phone number"].filter(Boolean).join(" and ")} under <span className="font-medium">Your application details</span> below. Almost every application requires {!data.profile.lastName.trim() && !data.profile.phone.trim() ? "them" : "it"}, and Unnepo won&apos;t guess.
+        </p>
+      )}
       {inProgress.length > 0 && !current && (
         <section className={card}>
           <h2 className="text-sm font-semibold">In progress</h2>

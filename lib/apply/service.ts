@@ -232,7 +232,14 @@ async function resumeFile(userId: string): Promise<ResumeFile | null> {
 
 const STOP_MESSAGE: Record<FlowResult["stoppedAt"], (report: FlowResult, email: string) => string> = {
   review: (r) => `Filled ${r.filled.length} fields${r.pages && r.pages > 1 ? ` across ${r.pages} pages` : ""}.${r.failed.length ? ` ${r.failed.length} still need you in the live view.` : ""} Check the form in the live view, then approve.`,
-  needs_input: (r) => `Filled ${r.filled.length} fields, then stopped on a page that needs you. Finish it in the live view, then press Continue autofill.`,
+  needs_input: (r) => {
+    const names = r.failed.map((item) => item.label);
+    const list = names.length ? ` It needs: ${names.slice(0, 4).join("; ")}${names.length > 4 ? ` and ${names.length - 4} more` : ""}.` : "";
+    const profileHint = names.some((label) => classifyQuestion(label).field && ["firstName", "lastName", "fullName", "phone", "email", "city", "linkedin"].includes(classifyQuestion(label).field!))
+      ? " Add missing contact details under Your application details so Unnepo fills them next time."
+      : "";
+    return `Filled ${r.filled.length} fields, then stopped on a page that needs you.${list} Finish it in the live view, then press Continue autofill.${profileHint}`;
+  },
   email_verification: (r, email) => `${r.account === "created" ? `Created your account on ${r.host}. ` : ""}${r.host} sent a verification email to ${email}. Click the link in that email, then press Continue autofill.`,
   needs_account: (r) => `${r.host} needs an account. Set your job-site password and allow account creation under Your application details, then press Continue autofill.`,
   signin_failed: (r) => `Couldn't sign in on ${r.host} with your email and job-site password. Sign in (or reset the password) in the live view, then press Continue autofill.`,

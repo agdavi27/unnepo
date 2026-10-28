@@ -43,6 +43,7 @@ describe("where the job-site password may be typed", () => {
 function jobSite() {
   const accounts = new Map<string, { password: string; verified: boolean }>();
   const signups: Array<Record<string, string>> = [];
+  const paycom: Array<Record<string, string>> = [];
   const page = (body: string) => `<!doctype html><html><body>${body}</body></html>`;
   const handler = async (request: import("node:http").IncomingMessage, response: import("node:http").ServerResponse) => {
     const url = new URL(request.url ?? "/", "http://x");
@@ -73,6 +74,22 @@ function jobSite() {
       accounts.set(form.get("email")!, { password: form.get("password")!, verified: false });
       return send("<h1>Almost there</h1><p>We've sent you an email. Verify your email to continue.</p>");
     }
+    if (url.pathname === "/paycom") {
+      return send(`<h1>Marketing Manager</h1><div role="dialog"><h2>Getting You Started</h2><form action="/paycom-next">
+        <label for="f">Legal First Name *</label><input id="f" name="first" required>
+        <label for="l">Legal Last Name *</label><input id="l" name="last" required>
+        <label for="e">Email Address *</label><input id="e" name="email" required>
+        <label for="ce">Confirm Email *</label><input id="ce" name="confirm" required>
+        <label for="ph">Primary Phone Number *</label><input id="ph" name="phone" required>
+        <div><p>Do you consent to receiving text communications related to your job application via SMS, which may include auto dialed messages?</p>
+        <div><label><input type="radio" name="sms" value="yes" required> Yes</label><label><input type="radio" name="sms" value="no"> No</label></div></div>
+        <button type="submit">Continue To Application</button></form>
+        <p>Already have an account? <a href="/login">Sign In</a></p></div>`);
+    }
+    if (url.pathname === "/paycom-next") {
+      paycom.push(Object.fromEntries(url.searchParams));
+      return go("/step1");
+    }
     if (url.pathname === "/step1") {
       return send(`<h2>My Information</h2><form action="/step2"><label for="fn">First Name *</label><input id="fn" required><label for="ln">Last Name *</label><input id="ln" required><label for="ph">Phone Number *</label><input id="ph" required><label for="g">Gender</label><select id="g"><option>Select</option><option>Female</option><option>Male</option></select><button type="submit">Save and Continue</button></form>`);
     }
@@ -81,7 +98,7 @@ function jobSite() {
     response.writeHead(404);
     response.end();
   };
-  return { accounts, signups, handler };
+  return { accounts, signups, paycom, handler };
 }
 
 describe.skipIf(!hasChrome)("multi-page applications with job-site accounts (local Chrome)", () => {
@@ -132,6 +149,25 @@ describe.skipIf(!hasChrome)("multi-page applications with job-site accounts (loc
     expect(second.filled).toEqual(expect.arrayContaining(["First Name", "Last Name", "Phone Number", "Upload Resume"]));
     expect(second.filled).not.toContain("Gender");
     expect(new URL(page.url()).pathname).toBe("/review");
+    await page.close();
+  }, 120_000);
+
+  it("gets through a Paycom-style start box: fills contact details, declines SMS, and names what's missing", async () => {
+    const page = await browser.newPage();
+    const known: Record<string, string> = { "legal first name": "Drew", "email address": "drew@colby.edu", "confirm email": "drew@colby.edu", "primary phone number": "484-555-0100", "first name": "Drew", "phone number": "484-555-0100" };
+    const base_options = { url: `${base}/paycom`, navigate: true, questions: [], resume: null, credentials: null, allowSignup: false };
+    // No last name on file: stop and say so, rather than guessing.
+    const stuck = await runApplicationFlow(page, { ...base_options, answerFor: (label) => known[label.toLowerCase()] ?? null });
+    expect(stuck.stoppedAt).toBe("needs_input");
+    expect(stuck.failed.map((item) => item.label)).toContain("Legal Last Name");
+    expect(site.paycom).toHaveLength(0);
+
+    known["legal last name"] = "Davis";
+    known["last name"] = "Davis";
+    const through = await runApplicationFlow(page, { ...base_options, answerFor: (label) => known[label.toLowerCase()] ?? null });
+    expect(site.paycom[0]).toMatchObject({ first: "Drew", last: "Davis", email: "drew@colby.edu", confirm: "drew@colby.edu", sms: "no" });
+    expect(new URL(page.url()).pathname).not.toBe("/paycom");
+    expect(through.stoppedAt).not.toBe("needs_account");
     await page.close();
   }, 120_000);
 

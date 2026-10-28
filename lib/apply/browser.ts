@@ -146,7 +146,7 @@ async function emptyRequiredLabels(page: Page) {
     const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input[required], textarea[required], select[required], [aria-required='true']"));
     for (const field of fields) {
       const type = (field.getAttribute("type") || "").toLowerCase();
-      if (type === "hidden" || type === "submit") continue;
+      if (type === "hidden" || type === "submit" || type === "radio") continue;
       const style = window.getComputedStyle(field);
       if (style.display === "none" || style.visibility === "hidden") continue;
       const empty = type === "checkbox" || type === "radio"
@@ -282,6 +282,60 @@ async function openForm(page: Page) {
       await settle(page);
     }
   }
+}
+
+/** Buttons that move to the next step without submitting. */
+const NEXT_BUTTON = /^(next|continue|save and continue|save & continue|save and next|continue to (the )?application|continue application|start (my |your )?application|begin application|proceed|next step|continue to next step)$/i;
+
+/** Text-message and marketing opt-ins. Unnepo always answers no; the student can change it in the live view. */
+const OPT_IN_QUESTION = /\b(sms|text (message|messages|messaging|communications?)|receiv(e|ing) (text|sms)|auto-?dialed|marketing|newsletter|job alerts?|talent community)\b/i;
+
+type RadioGroup = { name: string; question: string; options: Array<{ label: string; value: string }>; required: boolean; selector: (value: string) => string };
+
+/** Unanswered radio-button questions, with the question text found around them. */
+async function scanRadioGroups(page: Page): Promise<RadioGroup[]> {
+  const groups = await page.evaluate(() => {
+    const byName = new Map<string, HTMLInputElement[]>();
+    for (const radio of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='radio']"))) {
+      const name = radio.getAttribute("name");
+      if (!name) continue;
+      byName.set(name, [...(byName.get(name) ?? []), radio]);
+    }
+    const out: Array<{ name: string; question: string; options: Array<{ label: string; value: string }>; required: boolean }> = [];
+    for (const [name, radios] of byName) {
+      if (radios.some((radio) => radio.checked)) continue;
+      const labelOf = (radio: HTMLInputElement) => ((radio.id && document.querySelector(`label[for="${CSS.escape(radio.id)}"]`)?.textContent) || radio.closest("label")?.textContent || radio.getAttribute("aria-label") || radio.value || "").replace(/\s+/g, " ").trim();
+      const options = radios.map((radio) => ({ label: labelOf(radio), value: radio.value }));
+      // The question is the nearest text around the group that is more than its own option labels.
+      let node: HTMLElement | null = radios[0].parentElement;
+      let question = "";
+      const optionText = options.map((option) => option.label).join(" ");
+      while (node && node !== document.body && !question) {
+        const contains = radios.every((radio) => node!.contains(radio));
+        if (contains) {
+          const legend = node.querySelector("legend")?.textContent?.trim();
+          const text = (legend || node.innerText || "").replace(/\s+/g, " ").trim();
+          if (text.replace(optionText, "").trim().length > 12) question = text.replace(optionText, "").trim();
+          else if (node.previousElementSibling) {
+            const before = (node.previousElementSibling as HTMLElement).innerText?.replace(/\s+/g, " ").trim() ?? "";
+            if (before.length > 12) question = before;
+          }
+        }
+        node = node.parentElement;
+      }
+      const required = radios.some((radio) => radio.required) || Boolean(radios[0].closest("[aria-required='true'], [role='radiogroup'][aria-required='true']"));
+      if (question) out.push({ name, question: question.slice(0, 600), options, required });
+    }
+    return out;
+  });
+  return groups.map((group) => ({ ...group, selector: (value: string) => `input[type="radio"][name="${cssAttr(group.name)}"][value="${cssAttr(value)}"]` }));
+}
+
+function radioAnswer(group: RadioGroup, answerFor: FlowOptions["answerFor"]) {
+  const labels = group.options.map((option) => option.label);
+  if (OPT_IN_QUESTION.test(group.question)) return group.options.find((option) => /^no\b/i.test(option.label)) ?? null;
+  const answer = answerFor(group.question, "select", labels);
+  return answer ? group.options.find((option) => option.label.toLowerCase() === answer.toLowerCase()) ?? null : null;
 }
 
 type ScannedField = { selector: string; label: string; kind: ApplicationQuestion["kind"]; options: string[] };
@@ -435,14 +489,29 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
       }
     }
 
+    for (const group of await scanRadioGroups(page)) {
+      const answer = radioAnswer(group, options.answerFor);
+      if (!answer) {
+        if (group.required) failed.set(group.question.slice(0, 120), "Required. Only you can answer this one. Choose it in the live view.");
+        continue;
+      }
+      try {
+        await page.locator(group.selector(answer.value)).first().check({ force: true });
+        filled.add(group.question.slice(0, 120));
+      } catch {
+        failed.set(group.question.slice(0, 120), "Couldn't pick an answer. Choose it in the live view.");
+      }
+    }
+
     const empty = await emptyRequiredLabels(page);
-    const next = await visible(button(page, /^(next|continue|save and continue|save & continue|save and next)$/i));
+    const next = await visible(button(page, NEXT_BUTTON));
     const submit = await visible(page.getByRole("button", { name: /^(submit( application)?|send application|complete application|submit my application)$/i }).or(page.locator("input[type='submit'][value*='Submit' i]")));
     if (submit && !next) {
       for (const label of empty) if (!failed.has(label)) failed.set(label, "Required. Fill it in the live view.");
       return done("review", pageIndex);
     }
-    if (empty.length || !next) {
+    const unansweredRadios = [...failed.keys()].some((label) => failed.get(label)?.startsWith("Required. Only you"));
+    if (empty.length || unansweredRadios || !next) {
       for (const label of empty) if (!failed.has(label)) failed.set(label, "Required. Fill it in the live view.");
       return done("needs_input", pageIndex);
     }
