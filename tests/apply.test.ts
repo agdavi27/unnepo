@@ -6,9 +6,9 @@ import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { assertPublicUrl, setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { acceptAiAnswer, classifyQuestion, missingAnswers, planAnswers } from "@/lib/apply/questions";
-import { applications, applicationContacts } from "@/lib/apply/store";
+import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
 import { coreTitle } from "@/lib/apply/contacts";
-import { applyState, checkSubmission, createApplication, markApplied, runContactDiscovery, setDeferForTests, startAutofill, updateAnswers } from "@/lib/apply/service";
+import { applyState, saveApplicationProfile, checkSubmission, createApplication, markApplied, runContactDiscovery, setDeferForTests, startAutofill, updateAnswers } from "@/lib/apply/service";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
 
@@ -218,6 +218,28 @@ describe("applications", () => {
     // Marking the same job again never charges twice.
     await markApplied(userId, { applicationId: ids[0] });
     expect((await repo.listLedger(userId)).filter((entry) => entry.entryType === "application_debit").length).toBe(1);
+  });
+});
+
+describe("job-site password", () => {
+  it("is stored encrypted, never returned, and needs a strong value", async () => {
+    const userId = await student();
+    await expect(saveApplicationProfile(userId, { jobSitePassword: "short" })).rejects.toThrow(/at least 10 characters/);
+    const saved = await saveApplicationProfile(userId, { jobSitePassword: "Str0ng!Passw0rd", accountConsent: true });
+    expect(saved.profile).toMatchObject({ hasJobSitePassword: true });
+    expect(saved.profile.accountConsentAt).toBeTruthy();
+    const state = await applyState(userId);
+    const text = JSON.stringify(state);
+    expect(text).not.toContain("Str0ng!Passw0rd");
+    expect(text).not.toContain("jobSitePasswordEncrypted");
+    expect(state.profile.hasJobSitePassword).toBe(true);
+    const stored = await applicationProfiles.get(userId);
+    expect(stored?.jobSitePasswordEncrypted).toBeTruthy();
+    expect(stored?.jobSitePasswordEncrypted).not.toContain("Str0ng");
+    // Saving other details keeps the password; turning consent off clears it.
+    await saveApplicationProfile(userId, { phone: "207-555-0100", accountConsent: false });
+    expect((await applicationProfiles.get(userId))?.jobSitePasswordEncrypted).toBe(stored?.jobSitePasswordEncrypted);
+    expect((await applyState(userId)).profile.accountConsentAt).toBeNull();
   });
 });
 

@@ -47,11 +47,19 @@ export type JobDetails = {
   questions: ApplicationQuestion[];
 };
 
+/** Where autofill stopped. Only "review" means the form is ready for the student to approve. */
+export type FillStop = "review" | "needs_input" | "email_verification" | "needs_account" | "signin_failed";
+
 export type FillReport = {
   filled: string[];
   failed: Array<{ label: string; reason: string }>;
   liveViewUrl: string | null;
   screenshotAt: string | null;
+  stoppedAt?: FillStop;
+  pages?: number;
+  /** "created" when Unnepo made a job-site account on this run, "signed_in" when it used an existing one. */
+  account?: "created" | "signed_in" | null;
+  host?: string;
 };
 
 export type Confirmation = { url: string; text: string; detectedAt: string };
@@ -121,4 +129,10 @@ export type ApplicationProfile = {
   city: string;
   /** Answers the student saved from earlier forms, keyed by a normalized question label. */
   saved: Record<string, { label: string; answer: string; updatedAt: string }>;
+  /** The student's one job-site password, encrypted. Never sent to the browser page. */
+  jobSitePasswordEncrypted?: string | null;
+  /** When the student allowed Unnepo to create job-site accounts and accept their candidate terms. */
+  accountConsentAt?: string | null;
+  /** Job sites where Unnepo created an account for the student. */
+  jobAccounts?: Array<{ host: string; email: string; createdAt: string }>;
 };

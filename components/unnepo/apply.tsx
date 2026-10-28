@@ -11,9 +11,10 @@ const card = "rounded-2xl border border-line bg-panel p-5 sm:p-6";
 const labelClass = "mb-1.5 block text-xs font-medium text-muted";
 
 type App = JobApplication & { missing: string[]; contacts?: ApplicationContact[] };
+type PublicProfile = Omit<ApplicationProfile, "jobSitePasswordEncrypted"> & { hasJobSitePassword: boolean };
 type ApplyData = {
   applications: App[];
-  profile: ApplicationProfile;
+  profile: PublicProfile;
   resume: { fileName: string; stored: boolean } | null;
   ready: { autofill: boolean; hunter: boolean; profile: boolean };
   applicationsPerCredit: number;
@@ -127,7 +128,7 @@ export function ApplyArea({ view, onNavigate, onCreditsChanged }: { view: "apply
 
 function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone }: {
   data: ApplyData; current: App | null; error: string;
-  onPick: (id: string | null) => void; onChanged: (app: App) => void; onProfile: (profile: ApplicationProfile) => void; onDone: () => void;
+  onPick: (id: string | null) => void; onChanged: (app: App) => void; onProfile: (profile: PublicProfile) => void; onDone: () => void;
 }) {
   const [url, setUrl] = useState("");
   const [reading, setReading] = useState(false);
@@ -267,7 +268,8 @@ function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; 
 
       {(app.status === "review" || app.status === "unconfirmed") && app.fillReport && (
         <div className="space-y-3">
-          <h3 className="text-sm font-semibold">Check the filled form</h3>
+          <h3 className="text-sm font-semibold">{app.fillReport.stoppedAt && app.fillReport.stoppedAt !== "review" ? "Your turn in the live view" : "Check the filled form"}</h3>
+          {app.fillReport.account === "created" && <p className="text-xs text-muted">Unnepo created your account on {app.fillReport.host} with {data.profile.email} and your job-site password.</p>}
           {live ? (
             <iframe title="Live application browser" src={live} className="h-[560px] w-full rounded-xl border border-line bg-black" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write" />
           ) : <p className="text-sm text-muted">The live view isn&apos;t available for this session.</p>}
@@ -290,7 +292,12 @@ function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; 
             {working === "fill" ? "Filling the form… (up to a minute)" : "Autofill application"}
           </button>
         )}
-        {app.status === "review" && (
+        {app.status === "review" && app.fillReport?.stoppedAt && app.fillReport.stoppedAt !== "review" && (
+          <button type="button" className={primary} disabled={Boolean(working)} onClick={() => void run("continue", "/continue")}>
+            {working === "continue" ? "Continuing… (up to a minute)" : "Continue autofill"}
+          </button>
+        )}
+        {app.status === "review" && (!app.fillReport?.stoppedAt || app.fillReport.stoppedAt === "review") && (
           <button type="button" className={primary} disabled={Boolean(working)} onClick={() => { if (window.confirm(`Submit your application for ${app.title} at ${app.company}? Check the form in the live view first.`)) void run("submit", "/submit"); }}>
             {working === "submit" ? "Submitting…" : "Approve & submit"}
           </button>
@@ -339,16 +346,19 @@ function QuestionField({ question, value, disabled, saveChecked, onChange, onSav
   );
 }
 
-function ProfileDetails({ profile, resume, onSaved }: { profile: ApplicationProfile; resume: ApplyData["resume"]; onSaved: (profile: ApplicationProfile) => void }) {
+function ProfileDetails({ profile, resume, onSaved }: { profile: PublicProfile; resume: ApplyData["resume"]; onSaved: (profile: PublicProfile) => void }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(profile);
   const [state, setState] = useState("");
-  const fields: Array<[keyof ApplicationProfile, string]> = [["firstName", "First name"], ["lastName", "Last name"], ["email", "Email for applications"], ["phone", "Phone"], ["linkedin", "LinkedIn URL"], ["website", "Website or portfolio"], ["github", "GitHub URL"], ["city", "City"]];
+  const [password, setPassword] = useState("");
+  const [consent, setConsent] = useState(Boolean(profile.accountConsentAt));
+  const fields: Array<[keyof PublicProfile, string]> = [["firstName", "First name"], ["lastName", "Last name"], ["email", "Email for applications"], ["phone", "Phone"], ["linkedin", "LinkedIn URL"], ["website", "Website or portfolio"], ["github", "GitHub URL"], ["city", "City"]];
   async function save() {
     setState("Saving…");
     try {
-      const result = await call<{ profile: ApplicationProfile }>("/profile", "PUT", draft);
+      const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { ...draft, jobSitePassword: password || undefined, accountConsent: consent });
       onSaved(result.profile);
+      setPassword("");
       setState("Saved. New jobs will use these details.");
     } catch (reason) {
       setState(reason instanceof Error ? reason.message : "Couldn't save.");
@@ -374,6 +384,27 @@ function ProfileDetails({ profile, resume, onSaved }: { profile: ApplicationProf
             ))}
           </div>
           <p className="text-xs text-faint">Phone, LinkedIn, and GitHub are pulled from your resume when it lists them. Unnepo never makes up details.</p>
+          <div className="space-y-3 rounded-xl border border-line p-4">
+            <div>
+              <p className="text-sm font-semibold">Job-site accounts</p>
+              <p className="mt-1 text-xs text-muted">Many companies (Workday, iCIMS, Taleo) need an account before you can apply. Unnepo signs in, or creates the account, with <span className="text-ink">{draft.email || "your email"}</span> and the password below.</p>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="job-site-password">{profile.hasJobSitePassword ? "Change job-site password" : "Job-site password"}</label>
+              <input id="job-site-password" type="password" autoComplete="new-password" className={field} value={password} onChange={(event) => setPassword(event.target.value)} placeholder={profile.hasJobSitePassword ? "•••••••••• (set — type to change)" : "At least 10 characters"} />
+              <p className="mt-1 text-[11px] text-faint">Use a password you don&apos;t use anywhere else. It&apos;s stored encrypted and only typed on the job site you&apos;re applying to. Keep a copy: you&apos;ll need it to sign in to those sites yourself.</p>
+            </div>
+            <label className="flex items-start gap-2.5 text-sm">
+              <input type="checkbox" className="mt-1" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
+              <span>Let Unnepo create job-site accounts for me with this email and password, and accept those sites&apos; candidate terms and privacy policies on my behalf. It never opts me into marketing.</span>
+            </label>
+            {(profile.jobAccounts ?? []).length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-muted">Accounts Unnepo created</p>
+                <ul className="mt-1 space-y-0.5 text-xs text-faint">{(profile.jobAccounts ?? []).map((item) => <li key={item.host}>{item.host} · {item.email} · {when(item.createdAt)}</li>)}</ul>
+              </div>
+            )}
+          </div>
           <div className="flex items-center gap-3"><button type="button" className={primary} onClick={() => void save()}>Save details</button>{state && <span className="text-xs text-muted">{state}</span>}</div>
         </div>
       )}

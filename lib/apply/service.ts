@@ -4,7 +4,8 @@ import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { splitProfileList } from "@/lib/profile/lists";
 import { readStoredResume } from "@/lib/services/resume";
-import { browserReady, createBrowserSession, detectConfirmation, fillApplicationForm, liveViewUrl, releaseBrowserSession, submitAndConfirm, withSessionPage, type ResumeFile } from "@/lib/apply/browser";
+import { browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
+import { decryptSecret, encryptSecret } from "@/lib/security";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
 import { extractJob } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
@@ -36,6 +37,9 @@ async function student(userId: string) {
     github: stored?.github ?? fromResume.github,
     city: stored?.city ?? "",
     saved: stored?.saved ?? {},
+    jobSitePasswordEncrypted: stored?.jobSitePasswordEncrypted ?? null,
+    accountConsentAt: stored?.accountConsentAt ?? null,
+    jobAccounts: stored?.jobAccounts ?? [],
   };
   const form = document?.form;
   const context: AnswerContext = {
@@ -103,7 +107,7 @@ export async function applyState(userId: string) {
   const contacts = await applicationContacts.list(userId, apps.map((app) => app.id));
   return {
     applications: apps.map((app) => ({ ...summary(app), contacts: contacts.filter((contact) => contact.applicationId === app.id) })),
-    profile: info.profile,
+    profile: publicProfile(info.profile),
     resume: info.resume ? { fileName: info.resume.fileName, stored: Boolean(info.resume.storagePath) } : null,
     ready: { autofill: browserReady(), hunter: hunterReady(), profile: Boolean(info.document?.ready) },
     applicationsPerCredit: APPLICATIONS_PER_CREDIT,
@@ -181,14 +185,29 @@ export async function updateAnswers(userId: string, raw: unknown) {
 
 const PROFILE_FIELDS = ["firstName", "lastName", "email", "phone", "linkedin", "website", "github", "city"] as const;
 
+/** The profile as the page sees it: the encrypted password is replaced by whether one is set. */
+function publicProfile(profile: ApplicationProfile) {
+  const { jobSitePasswordEncrypted, ...rest } = profile;
+  return { ...rest, hasJobSitePassword: Boolean(jobSitePasswordEncrypted) };
+}
+
 export async function saveApplicationProfile(userId: string, raw: unknown) {
   const body = (raw ?? {}) as Record<string, unknown>;
   const info = await student(userId);
   const next: ApplicationProfile = { ...info.profile };
   for (const field of PROFILE_FIELDS) if (typeof body[field] === "string") next[field] = String(body[field]).trim().slice(0, 300);
   if (next.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) throw new ServiceError("Enter a valid email address.", "email", 400);
+  if (typeof body.jobSitePassword === "string" && body.jobSitePassword) {
+    const password = body.jobSitePassword;
+    // Job sites commonly want 8+ characters with upper, lower, a number, and a symbol.
+    if (password.length < 10 || password.length > 128 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+      throw new ServiceError("Use at least 10 characters with an uppercase letter, a lowercase letter, a number, and a symbol. Most job sites require that.", "password", 400);
+    }
+    next.jobSitePasswordEncrypted = encryptSecret(password);
+  }
+  if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? info.profile.accountConsentAt || nowIso() : null;
   await applicationProfiles.put(userId, next);
-  return { profile: next };
+  return { profile: publicProfile(next) };
 }
 
 /** 1 credit covers APPLICATIONS_PER_CREDIT applications: charged on the 1st, 16th, 31st… */
@@ -211,7 +230,42 @@ async function resumeFile(userId: string): Promise<ResumeFile | null> {
   return { name: resume.fileName, mimeType: resume.mime || "application/pdf", buffer: Buffer.from(bytes) };
 }
 
-/** Opens the application in a browser and fills it. Stops before submitting. */
+const STOP_MESSAGE: Record<FlowResult["stoppedAt"], (report: FlowResult, email: string) => string> = {
+  review: (r) => `Filled ${r.filled.length} fields${r.pages && r.pages > 1 ? ` across ${r.pages} pages` : ""}.${r.failed.length ? ` ${r.failed.length} still need you in the live view.` : ""} Check the form in the live view, then approve.`,
+  needs_input: (r) => `Filled ${r.filled.length} fields, then stopped on a page that needs you. Finish it in the live view, then press Continue autofill.`,
+  email_verification: (r, email) => `${r.account === "created" ? `Created your account on ${r.host}. ` : ""}${r.host} sent a verification email to ${email}. Click the link in that email, then press Continue autofill.`,
+  needs_account: (r) => `${r.host} needs an account. Set your job-site password and allow account creation under Your application details, then press Continue autofill.`,
+  signin_failed: (r) => `Couldn't sign in on ${r.host} with your email and job-site password. Sign in (or reset the password) in the live view, then press Continue autofill.`,
+};
+
+/** Runs the page-by-page fill in a session and records where it stopped. Never submits. */
+async function runFlow(userId: string, app: JobApplication, sessionId: string, navigate: boolean) {
+  const info = await student(userId);
+  const resume = await resumeFile(userId);
+  const password = info.profile.jobSitePasswordEncrypted ? decryptSecret(info.profile.jobSitePasswordEncrypted) : "";
+  const credentials = password && info.profile.email ? { email: info.profile.email, password } : null;
+  const answerFor = (label: string, kind: ApplicationQuestion["kind"], options: string[]) => {
+    const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], info.context);
+    return planned.answer && planned.source && planned.source !== "resume_file" ? planned.answer : null;
+  };
+  const report = await withSessionPage(sessionId, (page) =>
+    runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor }),
+  );
+  if (report.account === "created") {
+    const jobAccounts = [...(info.profile.jobAccounts ?? []).filter((item) => item.host !== report.host), { host: report.host, email: info.profile.email, createdAt: nowIso() }];
+    await applicationProfiles.put(userId, { ...info.profile, jobAccounts });
+  }
+  const live = await liveViewUrl(sessionId);
+  const updated = await applications.update(userId, app.id, {
+    status: "review",
+    browserSessionId: sessionId,
+    fillReport: { ...report, liveViewUrl: live, screenshotAt: nowIso() },
+    statusMessage: STOP_MESSAGE[report.stoppedAt](report, info.profile.email),
+  });
+  return { application: summary(updated!) };
+}
+
+/** Opens the application in a browser and fills it page by page. Stops before submitting. */
 export async function startAutofill(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
   if (!app.applicationUrl) throw new ServiceError("This posting has no application form link.", "no_form", 409);
@@ -230,20 +284,26 @@ export async function startAutofill(userId: string, raw: unknown) {
   let sessionId: string | null = null;
   try {
     sessionId = await createBrowserSession();
-    const resume = await resumeFile(userId);
-    const report = await withSessionPage(sessionId, (page) => fillApplicationForm(page, app.applicationUrl!, app.questions, resume));
-    const live = await liveViewUrl(sessionId);
-    const updated = await applications.update(userId, app.id, {
-      status: "review",
-      browserSessionId: sessionId,
-      fillReport: { ...report, liveViewUrl: live, screenshotAt: nowIso() },
-      statusMessage: report.failed.length ? `Filled ${report.filled.length} fields. ${report.failed.length} need you in the live view.` : `Filled ${report.filled.length} fields. Check the form in the live view, then approve.`,
-    });
-    return { application: summary(updated!) };
+    return await runFlow(userId, app, sessionId, true);
   } catch (error) {
     if (sessionId) await releaseBrowserSession(sessionId);
     const message = error instanceof ServiceError ? error.message : "The form couldn't be filled. Nothing was submitted.";
     await applications.update(userId, app.id, { status: "failed", browserSessionId: null, statusMessage: message });
+    throw error instanceof ServiceError ? error : new ServiceError(message, "browser_failed", 502);
+  }
+}
+
+/** Picks up in the same browser after the student verified an email or finished a page themselves. */
+export async function continueAutofill(userId: string, raw: unknown) {
+  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
+  if (!app.browserSessionId) throw new ServiceError("The browser for this application has closed. Press Autofill application to start again.", "state", 409);
+  const claimed = await applications.transition(userId, app.id, ["review"], { status: "filling", statusMessage: "Continuing…" });
+  if (!claimed) throw new ServiceError("This application isn't waiting on you right now.", "state", 409);
+  try {
+    return await runFlow(userId, app, app.browserSessionId, false);
+  } catch (error) {
+    const message = error instanceof ServiceError ? error.message : "Couldn't continue in the browser. Nothing was submitted.";
+    await applications.update(userId, app.id, { status: "review", statusMessage: message });
     throw error instanceof ServiceError ? error : new ServiceError(message, "browser_failed", 502);
   }
 }
@@ -258,6 +318,9 @@ function startContacts(userId: string, applicationId: string) {
 export async function approveAndSubmit(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
   if (!app.browserSessionId) throw new ServiceError("Run autofill first.", "state", 409);
+  if (app.fillReport?.stoppedAt && app.fillReport.stoppedAt !== "review") {
+    throw new ServiceError("Autofill hasn't reached the final page yet. Finish the step it stopped on, then press Continue autofill.", "state", 409);
+  }
   const claimed = await applications.transition(userId, app.id, ["review"], { status: "submitting", statusMessage: "Submitting…" });
   if (!claimed) throw new ServiceError("This application isn't waiting for approval.", "state", 409);
   try {

@@ -27,6 +27,8 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
         <li><strong>Account details:</strong> your name, school email address, and a password (stored only as a secure hash).</li>
         <li><strong>Profile:</strong> your school, majors, graduation year, roles, companies, locations, interests, and anything else you enter during onboarding or in Settings.</li>
         <li><strong>Resume:</strong> the file you upload and the text we read from it, used to build your profile, write emails and cover letters, and attach to emails when you choose.</li>
+        <li><strong>Job applications:</strong> the job links you paste, the answers you give or approve, and the status of each application.</li>
+        <li><strong>Job-site accounts:</strong> if you turn it on, the password you choose for job sites (stored encrypted) and a list of the sites where Unnepo created an account for you with your email. Unnepo types that password only on the job site you&apos;re applying to.</li>
         <li><strong>Emails and cover letters:</strong> drafts you write or generate, and the subject and body of emails you send through Unnepo.</li>
       </ul>
     ),
@@ -83,6 +85,8 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
         <p>We share only what each service needs to do its job:</p>
         <ul>
           <li><strong>Vercel</strong> hosts the website.</li>
+          <li><strong>Browserbase</strong> runs the browser that fills out applications. It sees the pages Unnepo fills, including the answers and account details entered on them.</li>
+          <li><strong>Hunter</strong> receives the names and company domains of people you&apos;re trying to reach, to find and verify their work emails.</li>
           <li><strong>Supabase</strong> stores the database and resume files.</li>
           <li><strong>Apollo.io</strong> receives search filters built from your profile (such as roles, companies, industries, and locations) to find people and verify their emails.</li>
           <li><strong>Anthropic</strong> receives your profile, resume text, and the details you select so its AI can write drafts, highlights, and cover letters. Anthropic does not use this data to train its models.</li>

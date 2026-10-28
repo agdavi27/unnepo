@@ -161,40 +161,308 @@ async function emptyRequiredLabels(page: Page) {
   });
 }
 
-/** Fills every answered question. Never clicks submit. */
-export async function fillApplicationForm(page: Page, applicationUrl: string, questions: ApplicationQuestion[], resume: ResumeFile | null): Promise<Omit<FillReport, "liveViewUrl" | "screenshotAt">> {
-  await page.goto(applicationUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => undefined);
-  // Lever and some boards show the job first and the form behind an "Apply" button.
-  if ((await page.locator("form input, form textarea").count()) === 0) {
-    const apply = page.getByRole("link", { name: /^apply( for this job| now)?$/i }).or(page.getByRole("button", { name: /^apply( for this job| now)?$/i }));
-    if ((await apply.count()) > 0) {
-      await apply.first().click();
-      await page.waitForLoadState("domcontentloaded").catch(() => undefined);
-      await page.waitForTimeout(1000);
+export type Credentials = { email: string; password: string };
+
+export type FlowOptions = {
+  url: string;
+  /** false continues on the page the browser is already on (after the student verified an email or finished a step). */
+  navigate: boolean;
+  questions: ApplicationQuestion[];
+  resume: ResumeFile | null;
+  credentials: Credentials | null;
+  /** The student agreed to let Unnepo create job-site accounts and accept their candidate terms. */
+  allowSignup: boolean;
+  /** Answers for fields the job board didn't publish ahead of time, matched by label. Null leaves the field for the student. */
+  answerFor: (label: string, kind: ApplicationQuestion["kind"], options: string[]) => string | null;
+};
+
+export type FlowResult = Omit<FillReport, "liveViewUrl" | "screenshotAt"> & { stoppedAt: NonNullable<FillReport["stoppedAt"]>; host: string };
+
+const MAX_PAGES = 10;
+
+/** Job systems that host a company's applications on their own domain. */
+const ATS_DOMAINS = ["myworkdayjobs.com", "myworkdaysite.com", "workday.com", "icims.com", "taleo.net", "successfactors.com", "successfactors.eu", "sapsf.com", "oraclecloud.com", "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "jobvite.com", "brassring.com", "ultipro.com", "ukg.com", "paylocity.com", "adp.com", "bamboohr.com", "workable.com", "recruitee.com", "breezy.hr", "jazzhr.com", "applytojob.com"];
+
+function baseDomain(host: string) {
+  return host.toLowerCase().split(".").slice(-2).join(".");
+}
+
+/** The password is only ever typed on the company's own site or the job system it uses. */
+export function passwordAllowedOn(pageUrl: string, applicationUrl: string) {
+  let page: URL;
+  let start: URL;
+  try {
+    page = new URL(pageUrl);
+    start = new URL(applicationUrl);
+  } catch {
+    return false;
+  }
+  if (page.protocol !== "https:" && !(page.hostname === "127.0.0.1" || page.hostname === "localhost")) return false;
+  const host = page.hostname.toLowerCase();
+  if (baseDomain(host) === baseDomain(start.hostname)) return true;
+  return ATS_DOMAINS.some((domain) => host === domain || host.endsWith(`.${domain}`));
+}
+
+async function settle(page: Page) {
+  await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
+  await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
+  await page.waitForTimeout(500);
+}
+
+async function visible(locator: Locator) {
+  const count = await locator.count().catch(() => 0);
+  for (let index = 0; index < count; index += 1) {
+    if (await locator.nth(index).isVisible().catch(() => false)) return locator.nth(index);
+  }
+  return null;
+}
+
+function button(page: Page, name: RegExp) {
+  return page.getByRole("button", { name }).or(page.getByRole("link", { name })).or(page.locator("input[type='submit']").filter({ hasText: name }));
+}
+
+async function bodyText(page: Page) {
+  return (await page.locator("body").innerText({ timeout: 5_000 }).catch(() => "")).replace(/\s+/g, " ");
+}
+
+const VERIFY_TEXT = /((verify|confirm|activate) your (email|account)|check your (email|inbox)|we(?:'|’)?ve sent (you )?an? (email|verification|link)|verification (email|link) (has been|was) sent)/i;
+const SIGNIN_ERROR = /(invalid|incorrect|wrong) (email|password|username|credentials)|(account|user) (not found|does not exist|doesn(?:'|’)t exist)|no account (found|exists)|sign[- ]in failed/i;
+const SAFE_CONSENT = /(agree|terms|privacy|consent|acknowledge|accept)/i;
+const NOT_CONSENT = /(marketing|newsletter|offers|promotion|sms|text messages?|job alerts?|talent community)/i;
+
+/** "signup" when the page asks to create an account, "signin" when it asks to log in, null otherwise. */
+async function authKind(page: Page): Promise<"signup" | "signin" | null> {
+  const passwords = page.locator("input[type='password']");
+  let shown = 0;
+  for (let index = 0; index < (await passwords.count()); index += 1) if (await passwords.nth(index).isVisible().catch(() => false)) shown += 1;
+  if (!shown) return null;
+  const create = await visible(page.getByRole("button", { name: /^(create (an )?account|sign up|register|create)$/i }));
+  if (shown >= 2 || create) return "signup";
+  return "signin";
+}
+
+async function emailField(page: Page) {
+  return (
+    (await visible(page.locator("input[type='email']"))) ??
+    (await visible(page.getByLabel(/e-?mail/i))) ??
+    (await visible(page.locator("input[name*='email' i], input[id*='email' i], input[autocomplete='username']")))
+  );
+}
+
+async function fillPasswords(page: Page, password: string) {
+  const passwords = page.locator("input[type='password']");
+  for (let index = 0; index < (await passwords.count()); index += 1) {
+    const field = passwords.nth(index);
+    if (await field.isVisible().catch(() => false)) await field.fill(password);
+  }
+}
+
+/** Ticks only terms and privacy boxes on a sign-up form, never marketing or job-alert opt-ins. */
+async function acceptSignupTerms(page: Page) {
+  const boxes = page.locator("input[type='checkbox']");
+  for (let index = 0; index < (await boxes.count()); index += 1) {
+    const box = boxes.nth(index);
+    if (!(await box.isVisible().catch(() => false)) || (await box.isChecked().catch(() => true))) continue;
+    const label = await box.evaluate((el) => {
+      const id = el.getAttribute("id");
+      return ((id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || el.closest("label")?.textContent || el.getAttribute("aria-label") || "").replace(/\s+/g, " ");
+    });
+    if (SAFE_CONSENT.test(label) && !NOT_CONSENT.test(label)) await box.check().catch(() => undefined);
+  }
+}
+
+/** Opens the form from a job page: Apply, Apply now, or Workday's Apply Manually. */
+async function openForm(page: Page) {
+  for (const name of [/^apply( for this job| now)?$/i, /^apply manually$/i]) {
+    const formFields = await page.locator("input:visible:not([type='search']):not([type='hidden']):not([type='checkbox']), textarea:visible, select:visible").count();
+    if (formFields >= 2 || (await authKind(page))) return;
+    const entry = await visible(button(page, name));
+    if (entry) {
+      await entry.click().catch(() => undefined);
+      await settle(page);
     }
   }
-  const filled: string[] = [];
-  const failed: Array<{ label: string; reason: string }> = [];
-  for (const question of questions) {
-    const answer = question.answer?.trim();
-    if (!answer) continue;
-    const field = await locate(page, question);
-    if (!field) {
-      failed.push({ label: question.label, reason: "Couldn't find this field on the form." });
+}
+
+type ScannedField = { selector: string; label: string; kind: ApplicationQuestion["kind"]; options: string[] };
+
+/** Visible empty fields on the page, with their labels, for questions the job board didn't publish. */
+async function scanFields(page: Page): Promise<ScannedField[]> {
+  return page.evaluate(() => {
+    const out: Array<{ selector: string; label: string; kind: "text" | "textarea" | "select" | "file"; options: string[] }> = [];
+    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select"));
+    fields.forEach((field, index) => {
+      const type = (field.getAttribute("type") || "text").toLowerCase();
+      if (["hidden", "submit", "button", "password", "checkbox", "radio", "search", "image", "reset"].includes(type)) return;
+      const rect = field.getBoundingClientRect();
+      const style = window.getComputedStyle(field);
+      if ((!rect.width && !rect.height && type !== "file") || style.visibility === "hidden" || style.display === "none") return;
+      if (type === "file" ? (field as HTMLInputElement).files?.length : String(field.value || "").trim()) return;
+      const id = field.getAttribute("id");
+      const label = ((id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || field.closest("label")?.textContent || field.getAttribute("aria-label") || field.getAttribute("placeholder") || "").replace(/\s+/g, " ").replace(/\*$/, "").trim();
+      if (!label) return;
+      field.setAttribute("data-unnepo-field", String(index));
+      const kind = field.tagName === "SELECT" ? "select" : field.tagName === "TEXTAREA" ? "textarea" : type === "file" ? "file" : "text";
+      const options = field.tagName === "SELECT" ? Array.from((field as HTMLSelectElement).options).map((option) => option.text.trim()).filter((text) => text && !/^(select|choose|--)/i.test(text)) : [];
+      out.push({ selector: `[data-unnepo-field="${index}"]`, label: label.slice(0, 200), kind, options });
+    });
+    return out;
+  });
+}
+
+/**
+ * Fills the application page by page: signs in or creates the student's account when a page asks for
+ * one, fills what it knows, clicks Next, and stops at the final page before Submit. Never clicks Submit.
+ */
+export async function runApplicationFlow(page: Page, options: FlowOptions): Promise<FlowResult> {
+  const startHost = new URL(options.url).hostname;
+  if (options.navigate) {
+    await page.goto(options.url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await settle(page);
+  } else if (VERIFY_TEXT.test(await bodyText(page))) {
+    // The student clicked the verification link in their inbox; open the application again and sign in.
+    await page.goto(options.url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    await settle(page);
+  }
+  const filled = new Set<string>();
+  const failed = new Map<string, string>();
+  let account: FlowResult["account"] = null;
+  let triedSignin = false;
+  const host = () => {
+    try {
+      return new URL(page.url()).hostname;
+    } catch {
+      return startHost;
+    }
+  };
+  const done = (stoppedAt: FlowResult["stoppedAt"], pages: number): FlowResult => ({
+    filled: [...filled],
+    failed: [...failed].map(([label, reason]) => ({ label, reason })),
+    stoppedAt,
+    pages,
+    account,
+    host: host(),
+  });
+
+  for (let pageIndex = 1; pageIndex <= MAX_PAGES; pageIndex += 1) {
+    await openForm(page);
+    if (VERIFY_TEXT.test(await bodyText(page)) && !(await authKind(page))) return done("email_verification", pageIndex);
+
+    const auth = await authKind(page);
+    if (auth) {
+      if (!options.credentials) return done("needs_account", pageIndex);
+      if (!passwordAllowedOn(page.url(), options.url)) {
+        failed.set("Account sign-in", `This page (${host()}) isn't the job site, so Unnepo didn't enter your password. Sign in in the live view.`);
+        return done("needs_input", pageIndex);
+      }
+      if (auth === "signin" && !triedSignin) {
+        triedSignin = true;
+        const email = await emailField(page);
+        if (email) await email.fill(options.credentials.email);
+        await fillPasswords(page, options.credentials.password);
+        const submit = await visible(button(page, /^(sign in|log ?in|continue|next|submit)$/i));
+        if (!submit) return done("signin_failed", pageIndex);
+        await submit.click();
+        await settle(page);
+        if (!(await authKind(page))) {
+          account = "signed_in";
+          continue;
+        }
+        if (!SIGNIN_ERROR.test(await bodyText(page))) return done("signin_failed", pageIndex);
+        // No account yet: switch to the create-account form.
+        const create = await visible(button(page, /^(create (an )?account|sign up|register|new user\??)$/i));
+        if (!create || !options.allowSignup) return done(options.allowSignup ? "signin_failed" : "needs_account", pageIndex);
+        await create.click();
+        await settle(page);
+        continue;
+      }
+      if (auth === "signin") return done("signin_failed", pageIndex);
+      if (!options.allowSignup) return done("needs_account", pageIndex);
+      const email = await emailField(page);
+      if (!email) return done("needs_input", pageIndex);
+      await email.fill(options.credentials.email);
+      await fillPasswords(page, options.credentials.password);
+      await acceptSignupTerms(page);
+      const create = await visible(button(page, /^(create (an )?account|sign up|register|create|continue|submit)$/i));
+      if (!create) return done("needs_input", pageIndex);
+      await create.click();
+      await settle(page);
+      if (await authKind(page)) {
+        const text = await bodyText(page);
+        if (/already (exists|registered|in use)/i.test(text) && !triedSignin) {
+          // An account exists already; go back to sign in with the same password.
+          const signin = await visible(button(page, /^(sign in|log ?in)$/i));
+          if (signin) {
+            await signin.click();
+            await settle(page);
+            continue;
+          }
+        }
+        failed.set("Create account", "The site didn't accept the new account. Finish it in the live view.");
+        return done("needs_input", pageIndex);
+      }
+      account = "created";
+      if (VERIFY_TEXT.test(await bodyText(page))) return done("email_verification", pageIndex);
       continue;
     }
-    try {
-      await setValue(page, field, question, answer, resume);
-      filled.push(question.label);
-    } catch (error) {
-      failed.push({ label: question.label, reason: error instanceof Error && /no resume/.test(error.message) ? "Upload a resume in Settings first." : "Couldn't fill this field. Fill it in the live view." });
+
+    // Questions the job board published ahead of time.
+    for (const question of options.questions) {
+      const answer = question.answer?.trim();
+      if (!answer || filled.has(question.label)) continue;
+      const field = await locate(page, question);
+      // File inputs are usually hidden behind a styled button, so only other fields must be visible.
+      if (!field || (question.kind !== "file" && !(await field.isVisible().catch(() => false)))) continue;
+      try {
+        await setValue(page, field, question, answer, options.resume);
+        filled.add(question.label);
+        failed.delete(question.label);
+      } catch (error) {
+        failed.set(question.label, error instanceof Error && /no resume/.test(error.message) ? "Upload a resume in Settings first." : "Couldn't fill this field. Fill it in the live view.");
+      }
+    }
+    // Everything else on the page, matched by label to what Unnepo knows for sure.
+    for (const field of await scanFields(page)) {
+      const answer = field.kind === "file" ? (/resume|cv/i.test(field.label) && options.resume ? options.resume.name : null) : options.answerFor(field.label, field.kind, field.options);
+      if (!answer) continue;
+      try {
+        const locator = page.locator(field.selector).first();
+        const question: ApplicationQuestion = { key: field.selector, label: field.label, kind: field.kind, required: false, options: field.options, sensitive: false, answer, source: null, evidence: null };
+        await setValue(page, locator, question, answer, options.resume);
+        filled.add(field.label);
+      } catch {
+        failed.set(field.label, "Couldn't fill this field. Fill it in the live view.");
+      }
+    }
+
+    const empty = await emptyRequiredLabels(page);
+    const next = await visible(button(page, /^(next|continue|save and continue|save & continue|save and next)$/i));
+    const submit = await visible(page.getByRole("button", { name: /^(submit( application)?|send application|complete application|submit my application)$/i }).or(page.locator("input[type='submit'][value*='Submit' i]")));
+    if (submit && !next) {
+      for (const label of empty) if (!failed.has(label)) failed.set(label, "Required. Fill it in the live view.");
+      return done("review", pageIndex);
+    }
+    if (empty.length || !next) {
+      for (const label of empty) if (!failed.has(label)) failed.set(label, "Required. Fill it in the live view.");
+      return done("needs_input", pageIndex);
+    }
+    const before = page.url() + (await bodyText(page)).slice(0, 400);
+    await next.click();
+    await settle(page);
+    if (page.url() + (await bodyText(page)).slice(0, 400) === before) return done("needs_input", pageIndex);
+  }
+  return done("needs_input", MAX_PAGES);
+}
+
+/** Single-page fill, kept for callers that don't need accounts or multiple pages. */
+export async function fillApplicationForm(page: Page, applicationUrl: string, questions: ApplicationQuestion[], resume: ResumeFile | null) {
+  const result = await runApplicationFlow(page, { url: applicationUrl, navigate: true, questions, resume, credentials: null, allowSignup: false, answerFor: () => null });
+  for (const question of questions) {
+    if (question.answer?.trim() && !result.filled.includes(question.label) && !result.failed.some((item) => item.label === question.label)) {
+      result.failed.push({ label: question.label, reason: "Couldn't find this field on the form." });
     }
   }
-  for (const label of await emptyRequiredLabels(page)) {
-    if (!failed.some((item) => item.label === label) && !filled.includes(label)) failed.push({ label, reason: "Required. Fill it in the live view." });
-  }
-  return { filled, failed };
+  return result;
 }
 
 const CONFIRM_TEXT = /(thank(s| you) for (applying|your application|your interest|submitting)|application (has been |was )?(successfully )?(submitted|received|sent)|we(?:'|’)?ve received your application|successfully (submitted|applied)|your application is (in|complete))/i;
