@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PUBLIC_PLANS, peopleFromCredits } from "@/lib/config";
 
 export default function ForStudentsPage() {
   return (
@@ -43,7 +44,7 @@ export default function ForStudentsPage() {
         </p>
 
         <Link href="/signup" className="mt-8 inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black">
-          Get 3 free credits (30 people)
+          Start with {PUBLIC_PLANS[0].credits} free credits ({peopleFromCredits(PUBLIC_PLANS[0].credits)} contacts)
         </Link>
       </main>
     </div>

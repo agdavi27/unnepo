@@ -3,6 +3,13 @@ import type { EmailMessage, OutreachStatus } from "@/lib/db/types";
 import { classifyReply, statusForReply } from "@/lib/email/classify";
 import { ServiceError } from "@/lib/errors";
 import { decryptSecret } from "@/lib/security";
+import { mailboxAccessToken } from "@/lib/services/oauth";
+
+/** One header line only, encoded so non-ASCII subjects survive. */
+function encodeSubject(subject: string) {
+  const line = subject.replace(/[\r\n]+/g, " ").trim();
+  return /^[\x20-\x7e]*$/.test(line) ? line : `=?UTF-8?B?${Buffer.from(line, "utf8").toString("base64")}?=`;
+}
 
 export type MailSender = {
   send: (input: { accessToken: string; to: string; subject: string; body: string; threadId?: string | null }) => Promise<{ id: string; threadId: string }>;
@@ -81,7 +88,7 @@ export async function sendOutreach(userId: string, input: {
   let providerResult: { id: string; threadId: string };
   try {
     providerResult = await sender.send({
-      accessToken: senderOverride ? mailbox.accessTokenEncrypted : decryptSecret(mailbox.accessTokenEncrypted),
+      accessToken: senderOverride ? mailbox.accessTokenEncrypted : await mailboxAccessToken(mailbox),
       to: contact.email,
       subject: input.subject,
       body: input.body,
@@ -198,7 +205,7 @@ export async function syncReplies(userId: string) {
 
 const gmailSender: MailSender = {
   async send({ accessToken, to, subject, body }) {
-    const raw = Buffer.from(`To: ${to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`)
+    const raw = Buffer.from(`To: ${to.replace(/[\r\n]/g, "")}\r\nSubject: ${encodeSubject(subject)}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`)
       .toString("base64url");
     const response = await fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
       method: "POST",
@@ -230,7 +237,7 @@ const outlookSender: MailSender = {
     const response = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ message: { subject, body: { contentType: "Text", content: body }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: true }),
+      body: JSON.stringify({ message: { subject: subject.replace(/[\r\n]+/g, " "), body: { contentType: "Text", content: body }, toRecipients: [{ emailAddress: { address: to } }] }, saveToSentItems: true }),
     });
     if (!response.ok) throw new Error(`Outlook did not accept the message (${response.status}).`);
     return { id: `outlook_${crypto.randomUUID()}`, threadId: `outlook_thread_${to}` };

@@ -16,7 +16,7 @@ import { serverConfig } from "@/lib/config";
 import { usingDefaultSecret } from "@/lib/security";
 import { filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
-import { deleteWorkspaceContacts, generateWorkspaceEmail, recordPeopleSearch, refreshProfileHighlights, updateWorkspaceContact, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, workspaceState } from "@/lib/services/workspace";
+import { deleteWorkspaceContacts, disconnectWorkspaceMailbox, generateWorkspaceCoverLetter, listRecommendedJobs, sendWorkspaceEmail, generateWorkspaceEmail, recordPeopleSearch, refreshProfileHighlights, updateWorkspaceContact, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, workspaceState } from "@/lib/services/workspace";
 
 const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests", "roles", "location", "employment", "timing", "contacts", "networking", "extra", "story"]);
 
@@ -117,19 +117,16 @@ async function handle(request: Request, slug: string[]) {
     return json({ ok: true });
   }
 
-  if (root === "oauth" && request.method === "GET" && (action === "gmail" || action === "outlook") && slug[2] !== "callback") {
+  if (root === "oauth" && request.method === "GET" && (action === "gmail" || action === "outlook") && !integrations[action]) {
     return Response.redirect(new URL("/home", request.url));
   }
   if (root === "oauth" && request.method === "GET" && action && slug[2] !== "callback") {
     const session = await readSession();
     if ((action === "gmail" || action === "outlook") && !session?.user) {
-      return Response.redirect(new URL("/login?next=/settings", request.url));
+      return Response.redirect(new URL("/login?next=/home", request.url));
     }
     const url = await beginOAuth(action as "google" | "microsoft" | "gmail" | "outlook", session?.user.id ?? null, publicOrigin(request));
     return Response.redirect(url);
-  }
-  if (root === "oauth" && slug[2] === "callback" && (action === "gmail" || action === "outlook") && request.method === "GET") {
-    return Response.redirect(new URL("/home", request.url));
   }
   if (root === "oauth" && slug[2] === "callback" && request.method === "GET") {
     const url = new URL(request.url);
@@ -142,7 +139,9 @@ async function handle(request: Request, slug: string[]) {
       const dest = ONBOARDING_INCOMPLETE.has(step) ? "/onboarding" : "/home";
       return Response.redirect(new URL(dest, request.url));
     }
-    return Response.redirect(new URL("/settings?tab=integrations", request.url));
+    const connected = new URL("/home", request.url);
+    connected.searchParams.set("mailbox", action === "outlook" ? "outlook" : "gmail");
+    return Response.redirect(connected);
   }
 
   if (root === "billing" && action === "webhook" && request.method === "POST") {
@@ -194,6 +193,18 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "app" && action === "unlock" && request.method === "POST") {
     return json(await unlockWorkspaceEmail(user.id, await request.json()));
+  }
+  if (root === "app" && action === "jobs" && request.method === "GET") {
+    return json(await listRecommendedJobs(user.id, { refresh: new URL(request.url).searchParams.get("refresh") === "1" }));
+  }
+  if (root === "app" && action === "cover-letter" && request.method === "POST") {
+    return json(await generateWorkspaceCoverLetter(user.id, await request.json()));
+  }
+  if (root === "app" && action === "send" && request.method === "POST") {
+    return json(await sendWorkspaceEmail(user.id, await request.json()));
+  }
+  if (root === "app" && action === "mailbox" && request.method === "DELETE") {
+    return json(await disconnectWorkspaceMailbox(user.id, await request.json()));
   }
   if (root === "app" && action === "highlights" && request.method === "POST") {
     return json(await refreshProfileHighlights(user.id));
@@ -404,14 +415,14 @@ function oauthReturnUrl(request: Request, message: string) {
   const current = new URL(request.url);
   const provider = current.pathname.split("/").filter(Boolean)[2] || "";
   const mailbox = provider === "gmail" || provider === "outlook";
-  let path = mailbox ? "/settings" : "/signup";
+  let path = mailbox ? "/home" : "/signup";
   const referer = request.headers.get("referer");
   if (referer) {
     try {
       const from = new URL(referer);
       const local = new Set(["localhost", "127.0.0.1"]);
       const sameSite = from.origin === current.origin || (local.has(from.hostname) && local.has(current.hostname) && from.port === current.port);
-      if (sameSite && (from.pathname === "/login" || from.pathname === "/signup" || from.pathname === "/" || from.pathname === "/settings")) {
+      if (!mailbox && sameSite && (from.pathname === "/login" || from.pathname === "/signup" || from.pathname === "/")) {
         path = from.pathname;
       }
     } catch {
@@ -419,8 +430,7 @@ function oauthReturnUrl(request: Request, message: string) {
     }
   }
   const back = new URL(path, publicOrigin(request));
-  if (path === "/settings") back.searchParams.set("tab", "integrations");
-  back.searchParams.set("error", message);
+  back.searchParams.set(mailbox ? "mailbox_error" : "error", message);
   return back;
 }
 

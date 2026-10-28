@@ -14,7 +14,9 @@ import {
   type Profile,
   type SearchRequest,
 } from "@/components/unnepo/UnnepoForms";
-import { PUBLIC_PLANS } from "@/lib/config";
+import { Dashboard } from "@/components/unnepo/dashboard";
+import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
+import { ENTERPRISE_PLAN, PEOPLE_PER_CREDIT, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { splitProfileList } from "@/lib/profile/lists";
 
 type StudentFact = { id: string; text: string; verified: boolean };
@@ -28,14 +30,18 @@ type Workspace = {
   contacts: Contact[];
   searches: { id: string; mode: string; quantity: number; creditsQuoted: number; status: string; resultCount: number; creditsCharged: number; prompt: string; createdAt: string; contactIds?: string[] }[];
   drafts: { id: string; contactId: string; subject: string; createdAt: string }[];
-  integrations: { apollo: boolean; anthropic: boolean };
+  integrations: { apollo: boolean; anthropic: boolean; gmail: boolean; outlook: boolean };
+  mailboxes: { provider: "gmail" | "outlook"; email: string; connectedAt: string }[];
+  mailboxSetup: { gmail: boolean; outlook: boolean };
+  emailsSent: number;
 };
 
-type View = "contacts" | "find" | "analytics" | "settings";
+type View = "home" | "contacts" | "find" | "jobs" | "settings";
 const VIEWS: { id: View; label: string }[] = [
+  { id: "home", label: "Home" },
   { id: "contacts", label: "My Contacts" },
   { id: "find", label: "Find New Contacts" },
-  { id: "analytics", label: "Analytics" },
+  { id: "jobs", label: "Recommended Jobs" },
   { id: "settings", label: "Settings" },
 ];
 const PROFILE_SECTIONS: { step: number; label: string; summary: (profile: Profile) => string }[] = [
@@ -138,7 +144,7 @@ export function AppHome() {
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
-  const [view, setView] = useState<View>("find");
+  const [view, setView] = useState<View>("home");
   const [tab, setTab] = useState<"find" | "custom">("find");
   const [editing, setEditing] = useState(false);
   const [editStep, setEditStep] = useState(0);
@@ -152,6 +158,7 @@ export function AppHome() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [foundSince, setFoundSince] = useState(0);
   const [highlightsLoading, setHighlightsLoading] = useState(false);
+  const [letter, setLetter] = useState<{ job: Job | null; jobs: Job[] } | null>(null);
   const [highlightsError, setHighlightsError] = useState("");
 
   /** Loads the workspace, giving up after 30 seconds so the page never waits forever. */
@@ -186,6 +193,19 @@ export function AppHome() {
       setError(reason instanceof Error ? reason.message : "Could not load your workspace.");
     }
   }, [fetchState]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("mailbox");
+    const failed = params.get("mailbox_error");
+    if (!connected && !failed) return;
+    const message = failed ? `Couldn't connect your mailbox: ${failed}` : `${connected === "outlook" ? "Outlook" : "Gmail"} connected. You can now send emails from the email popup.`;
+    window.history.replaceState(null, "", window.location.pathname);
+    queueMicrotask(() => {
+      setNotice(message);
+      setView("settings");
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -365,6 +385,47 @@ export function AppHome() {
     window.scrollTo({ top: 0 });
   }
 
+  async function sendEmail(draft: EmailDraft, contact: Contact) {
+    const response = await fetch("/api/app/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contactId: contact.id, subject: draft.subject, body: draft.body }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Could not send that email. Nothing was marked as sent.");
+    setEmailContact(null);
+    setNotice(`${payload.message || "Email sent."} ${contact.name} is now marked Contacted.`);
+    await load();
+  }
+
+  async function disconnectMailbox(provider: "gmail" | "outlook") {
+    if (!window.confirm(`Disconnect ${provider === "gmail" ? "Gmail" : "Outlook"}? You can reconnect it any time.`)) return;
+    const response = await fetch("/api/app/mailbox", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    setNotice(payload.message || payload.error || "Could not disconnect that mailbox.");
+    await load();
+  }
+
+  function openCoverLetter(job: Job | null, jobs: Job[]) {
+    setLetter({ job, jobs });
+    if (data?.profile?.ready && !data.highlights.length && !highlightsLoading) void buildHighlights();
+  }
+
+  async function writeCoverLetter(input: { job: { title: string; company: string; description: string }; studentFactIds: string[]; detailFactIds: string[]; tone: string; length: string; notes: string }) {
+    const response = await fetch("/api/app/cover-letter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "Could not write that letter.");
+    return String(payload.body ?? "");
+  }
+
   async function generateDraft(contact: Contact, input: Omit<EmailDraft, "subject" | "body">) {
     const response = await fetch("/api/app/generate", {
       method: "POST",
@@ -392,8 +453,6 @@ export function AppHome() {
   const showOnboarding = !data?.profile?.ready || editing;
 
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
-  const peopleFound = data?.searches.reduce((sum, item) => sum + (item.resultCount ?? 0), 0) ?? 0;
-  const creditsSpent = data?.searches.reduce((sum, item) => sum + item.creditsCharged, 0) ?? 0;
 
   const contacts = data?.contacts ?? [];
   const lastSearch = data?.searches.find((item) => item.status === "completed");
@@ -670,47 +729,20 @@ export function AppHome() {
             )}
           </>
         )}
-        {data && !showOnboarding && view === "analytics" && (
-          <>
-            <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Analytics</h1>
-            <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              {[
-                ["Saved contacts", contacts.length],
-                ["Contacted", contacts.filter((contact) => (contact.status ?? "not_contacted") !== "not_contacted").length],
-                ["Drafts saved", data.drafts.length],
-                ["Emails sent", 0],
-                ["People found", peopleFound],
-                ["Credits left", data.credits.balance],
-              ].map(([name, value]) => (
-                <div key={name} className="rounded-2xl border border-line bg-panel p-4">
-                  <p className="text-2xl font-semibold tabular-nums">{value}</p>
-                  <p className="mt-1 text-xs text-muted">{name}</p>
-                </div>
-              ))}
-            </section>
-            <p className="text-xs text-faint">
-              Email sending is not connected yet, so nothing has been sent. Searches have used {creditsSpent} {creditsSpent === 1 ? "credit" : "credits"}.
-            </p>
-            <section className="border-t border-line pt-8">
-              <h2 className={sectionTitle}>Recent searches</h2>
-              {data.searches.length === 0 ? (
-                <p className="mt-3 text-sm text-muted">No searches yet.</p>
-              ) : (
-                <ul className="mt-3 divide-y divide-line">
-                  {data.searches.slice(0, 10).map((item) => (
-                    <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-3 text-sm">
-                      <div className="min-w-0">
-                        <p className="font-medium">{item.mode === "automatic" ? "Find for Me" : "Custom Search"} · {item.status === "completed" ? `${item.resultCount} found` : `up to ${item.quantity} people`}</p>
-                        {item.prompt && <p className="truncate text-muted">{item.prompt}</p>}
-                      </div>
-                      <p className="shrink-0 text-xs text-faint">{new Date(item.createdAt).toLocaleDateString()} · {item.creditsCharged} charged</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </section>
-          </>
+        {data && !showOnboarding && view === "home" && (
+          <Dashboard
+            firstName={data.user.name.split(/\s+/)[0] ?? ""}
+            contacts={contacts}
+            searches={data.searches}
+            drafts={data.drafts.length}
+            emailsSent={data.emailsSent}
+            credits={data.credits.balance}
+            plan={currentPlan}
+            onFind={() => setView("find")}
+            onContacts={() => setView("contacts")}
+          />
         )}
+        {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
         {data && !showOnboarding && view === "settings" && (
           <>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
@@ -740,6 +772,31 @@ export function AppHome() {
                 </ul>
               </div>
             </section>
+            <section className="rounded-2xl border border-line bg-panel p-5">
+              <h2 className={sectionTitle}>Connected email</h2>
+              <p className="mt-3 text-sm text-muted">Send emails from your own inbox. Unnepo can only send, never read your mail, and nothing goes out until you click Send and confirm.</p>
+              <ul className="mt-3 divide-y divide-line">
+                {(["gmail", "outlook"] as const).map((provider) => {
+                  const mailbox = data.mailboxes.find((item) => item.provider === provider);
+                  const name = provider === "gmail" ? "Gmail" : "Outlook";
+                  return (
+                    <li key={provider} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{name}</p>
+                        <p className="truncate text-xs text-muted">
+                          {mailbox ? `Connected as ${mailbox.email}` : data.mailboxSetup[provider] ? "Not connected" : `Not available yet. ${provider === "gmail" ? "Google" : "Microsoft"} sign-in hasn't been set up for Unnepo.`}
+                        </p>
+                      </div>
+                      {mailbox ? (
+                        <button type="button" onClick={() => void disconnectMailbox(provider)} className="rounded-xl border border-line px-3 py-1.5 text-sm text-muted hover:bg-white/5">Disconnect</button>
+                      ) : data.mailboxSetup[provider] ? (
+                        <a href={`/api/oauth/${provider}`} className="rounded-xl bg-white px-3 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">Connect {name}</a>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
             <section className="space-y-4">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
@@ -748,9 +805,9 @@ export function AppHome() {
                     You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {data.credits.balance} {data.credits.balance === 1 ? "credit" : "credits"} left.
                   </p>
                 </div>
-                <p className="text-xs text-faint">1 credit = 25 people with verified emails</p>
+                <p className="text-xs text-faint">1 credit = {PEOPLE_PER_CREDIT} contacts, each with a verified work email</p>
               </div>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {PUBLIC_PLANS.map((plan) => {
                   const current = plan.id === currentPlan;
                   return (
@@ -765,7 +822,7 @@ export function AppHome() {
                       </div>
                       <p className="mt-3 text-3xl font-bold tabular-nums">{plan.priceLabel}<span className="text-sm font-normal text-muted">{plan.monthly ? " / month" : ""}</span></p>
                       <p className="mt-1 text-sm text-muted">{plan.blurb}</p>
-                      <p className="mt-4 text-sm">{plan.monthly ? `${plan.credits} credits each month` : `${plan.credits} credits to start`}</p>
+                      <p className="mt-4 text-sm font-medium">{creditMath(plan.credits)}{plan.monthly ? " each month" : " to start"}</p>
                       <div className="mt-auto pt-5">
                         {current ? (
                           <p className="text-center text-sm text-muted">Your plan</p>
@@ -776,6 +833,17 @@ export function AppHome() {
                     </div>
                   );
                 })}
+                <div className="flex flex-col rounded-2xl border border-line bg-panel p-5">
+                  <h3 className="text-lg font-semibold">{ENTERPRISE_PLAN.name}</h3>
+                  <p className="mt-3 text-3xl font-bold">{ENTERPRISE_PLAN.priceLabel}</p>
+                  <p className="mt-1 text-sm text-muted">{ENTERPRISE_PLAN.blurb}</p>
+                  <p className="mt-4 text-sm font-medium">Contact us for pricing</p>
+                  <div className="mt-auto pt-5">
+                    {ENTERPRISE_PLAN.contactEmail ? (
+                      <a href={`mailto:${ENTERPRISE_PLAN.contactEmail}?subject=${encodeURIComponent("Unnepo for our school")}`} className="block w-full rounded-xl border border-line px-4 py-2 text-center text-sm font-semibold hover:bg-white/5">Contact us</a>
+                    ) : null}
+                  </div>
+                </div>
               </div>
             </section>
           </>
@@ -788,6 +856,17 @@ export function AppHome() {
             <p className="mt-4 text-lg font-semibold">Creating user profile</p>
           </div>
         </div>
+      )}
+      {letter && (
+        <CoverLetterModal
+          key={letter.job?.id ?? "new"}
+          jobs={letter.jobs}
+          initialJob={letter.job}
+          highlights={data?.highlights ?? []}
+          highlightsLoading={highlightsLoading}
+          onClose={() => setLetter(null)}
+          onGenerate={writeCoverLetter}
+        />
       )}
       {emailContact && (
         <PersonalizedEmailModal
@@ -802,9 +881,8 @@ export function AppHome() {
           onClose={() => setEmailContact(null)}
           onGenerate={(input) => generateDraft(emailContact, input)}
           onSaveDraft={saveDraft}
-          onSend={async () => {
-            throw new Error("Email sending is not connected yet. Nothing was sent.");
-          }}
+          connectedAccount={data?.mailboxes[0]?.email}
+          onSend={sendEmail}
         />
       )}
     </div>

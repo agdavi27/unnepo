@@ -14,12 +14,15 @@ import {
   ladder,
   type LadderStep,
 } from "@/lib/search/apollo-query";
-import { COMPANY_SUGGESTIONS, LOCATION_SUGGESTIONS, ROLE_SUGGESTIONS } from "@/lib/suggestions";
+import { COMPANY_SUGGESTIONS, LOCATION_SUGGESTIONS, ROLE_SUGGESTIONS, brandsForInterests } from "@/lib/suggestions";
+import { SOURCE_LABEL, recommendJobs } from "@/lib/jobs/recommend";
 import { integrations } from "@/lib/integrations/flags";
 import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligence";
 import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
 import { highlightProfileWithModel, organizeQuizWithModel, quizSourceText } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
+import { oauthReady } from "@/lib/services/oauth";
+import { sendOutreach } from "@/lib/services/outreach";
 
 function asForm(value: unknown): FormProfile {
   const body = (value ?? {}) as Partial<FormProfile>;
@@ -562,6 +565,138 @@ export async function deleteWorkspaceContacts(userId: string, raw: unknown) {
   return { removed, message: `Deleted ${removed} ${removed === 1 ? "contact" : "contacts"} from My Contacts.` };
 }
 
+/** Sends a reviewed email from the student's own Gmail or Outlook and marks the contact as contacted. */
+export async function sendWorkspaceEmail(userId: string, raw: unknown) {
+  if (!integrations.gmail && !integrations.outlook) {
+    throw new ServiceError("Email sending is not connected yet. Nothing was sent.", "not_connected", 409);
+  }
+  const body = (raw ?? {}) as { contactId?: unknown; subject?: unknown; body?: unknown };
+  const contactId = String(body.contactId ?? "").slice(0, 120);
+  const subject = String(body.subject ?? "").trim().slice(0, 200);
+  const text = String(body.body ?? "").trim().slice(0, 8000);
+  if (!subject || !text) throw new ServiceError("Add a subject and a message before sending.", "draft", 400);
+  const saved = await repo.getSavedByUserAndContact(userId, contactId);
+  if (!saved) throw new ServiceError("That contact is not in your saved list.", "not_found", 404);
+  const idempotencyKey = `send:${userId}:${createHash("sha256").update(JSON.stringify([contactId, subject, text])).digest("hex").slice(0, 24)}`;
+  const result = await sendOutreach(userId, { savedContactId: saved.id, subject, body: text, idempotencyKey, delivery: "provider" });
+  return { sent: true, duplicate: !result.created, message: result.created ? "Email sent from your mailbox." : "That email was already sent." };
+}
+
+export async function disconnectWorkspaceMailbox(userId: string, raw: unknown) {
+  const provider = String((raw as { provider?: unknown } | null)?.provider ?? "");
+  if (provider !== "gmail" && provider !== "outlook") throw new ServiceError("Choose Gmail or Outlook.", "provider", 400);
+  const removed = await repo.deleteMailbox(userId, provider);
+  return { removed, message: removed ? `${provider === "gmail" ? "Gmail" : "Outlook"} disconnected.` : "That mailbox wasn't connected." };
+}
+
+/** Jobs from public job feeds, ranked against the student's roles, companies, cities, and interests. */
+export async function listRecommendedJobs(userId: string, { refresh = false } = {}) {
+  const document = await repo.getProfileDocument(userId);
+  if (!document?.ready) throw new ServiceError("Save your profile first so jobs can match your interests.", "profile", 400);
+  const me = await profileInputs(userId);
+  const interests = document.form.interests;
+  const suggestedCompanies = brandsForInterests(interests, me.companies, 8);
+  const companies = uniqueList([...me.companies, ...suggestedCompanies]).slice(0, 12);
+  const prefs = { roles: me.roles, companies: me.companies, suggestedCompanies, locations: me.locations, interests, remoteOk: document.form.workPreference !== "onsite" };
+  const key = `${userId}:${createHash("sha256").update(JSON.stringify(prefs)).digest("hex").slice(0, 16)}`;
+  const result = await recommendJobs(key, prefs, { refresh });
+  return {
+    jobs: result.jobs.map((job) => ({ ...job, sourceLabel: SOURCE_LABEL[job.source] })),
+    cachedAt: result.cachedAt,
+    searchedCompanies: companies,
+  };
+}
+
+const LETTER_TONES: Record<string, string> = {
+  professional: "professional and polished",
+  friendly: "warm and personable",
+  confident: "confident and direct",
+  enthusiastic: "enthusiastic but grounded",
+};
+const LETTER_LENGTHS: Record<string, string> = { short: "about 200 words", standard: "about 300 words", detailed: "about 400 words" };
+
+const COVER_LETTER_PROMPT =
+  "You write cover letters for college students applying to jobs and internships. Use only facts from the student's highlights and resume; never invent jobs, schools, skills, numbers, or achievements. Connect two or three of the student's real experiences to specific requirements in the job description. Do not copy sentences from the job description. Do not mention anything the student asked to avoid. Write plain text: a greeting, three or four short paragraphs, and a sign-off with the student's name. No placeholders in brackets. Return only JSON with the key body.";
+
+/** Writes a cover letter for one job from the student's selected highlights and resume text. */
+export async function generateWorkspaceCoverLetter(userId: string, raw: unknown) {
+  if (!integrations.anthropic) throw new ServiceError("AI writing is not connected yet. You can still write the letter yourself.", "not_connected", 409);
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const job = (body.job ?? {}) as Record<string, unknown>;
+  const title = String(job.title ?? "").trim().slice(0, 200);
+  const company = String(job.company ?? "").trim().slice(0, 200);
+  const description = String(job.description ?? "").trim().slice(0, 6000);
+  if (!title || !company) throw new ServiceError("Add the job title and company.", "job", 400);
+  const ids = (value: unknown) => new Set((Array.isArray(value) ? value : []).map(String).slice(0, 40));
+  const chosen = ids(body.studentFactIds);
+  const withDetails = ids(body.detailFactIds);
+  const tone = LETTER_TONES[String(body.tone)] ? String(body.tone) : "professional";
+  const length = LETTER_LENGTHS[String(body.length)] ? String(body.length) : "standard";
+  const notes = String(body.notes ?? "").slice(0, 1000);
+
+  const config = serverConfig();
+  const [hourly, daily] = await Promise.all([
+    repo.listGenerations(userId, new Date(Date.now() - 60 * 60 * 1000).toISOString()),
+    repo.listGenerations(userId, new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()),
+  ]);
+  if (hourly.length >= config.aiHourlyLimit || daily.length >= config.aiDailyLimit) {
+    throw new ServiceError("AI writing limit reached for now. Try again later.", "ai_limit", 429);
+  }
+  const [document, resume, user] = await Promise.all([repo.getProfileDocument(userId), repo.getLatestResume(userId), repo.getUserById(userId)]);
+  const highlights = (document?.highlights ?? []).filter((item) => chosen.has(item.id));
+  const resumeText = (resume?.text ?? "").trim().slice(0, 5000);
+  if (!highlights.length && !resumeText && !document?.organizedProfile) {
+    throw new ServiceError("Upload a resume or pick a few highlights so the letter has real experience to draw on.", "profile", 400);
+  }
+  const apiKey = await readAnthropicKey();
+  if (!apiKey) throw new ServiceError("AI writing is not configured.", "not_configured", 503);
+
+  const prompt = [
+    `Student name: ${user?.name || "Student"}`,
+    `Job: ${title} at ${company}`,
+    `Tone: ${LETTER_TONES[tone]}`,
+    `Length: ${LETTER_LENGTHS[length]}`,
+    `Job description:\n${description || "(not provided)"}`,
+    `Highlights the student wants to feature:\n${highlights.map((item) => `- ${item.detail}${withDetails.has(item.id) && item.experienceDetails ? ` Details: ${item.experienceDetails}` : ""}`).join("\n") || "- (none picked; choose from the resume)"}`,
+    resumeText ? `Resume:\n${resumeText}` : document?.organizedProfile ? `Profile:\n${JSON.stringify(document.organizedProfile).slice(0, 5000)}` : "",
+    document?.form.excludedTopics.trim() ? `Topics not to mention: ${document.form.excludedTopics.trim()}` : "",
+    notes ? `Extra notes from the student: ${notes}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+  const started = Date.now();
+  let letter = "";
+  let inputTokens = 0;
+  let outputTokens = 0;
+  try {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const client = new Anthropic({ apiKey });
+    const response = await client.messages.create({
+      model,
+      max_tokens: 2000,
+      system: [{ type: "text", text: COVER_LETTER_PROMPT, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: prompt }],
+    });
+    if (response.stop_reason === "refusal") throw new Error("refusal");
+    letter = parseEmailJson(response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n")).body;
+    inputTokens = response.usage?.input_tokens ?? 0;
+    outputTokens = response.usage?.output_tokens ?? 0;
+    if (!letter) throw new Error("empty_letter");
+  } catch (error) {
+    await repo.insertUsage({
+      id: id(), userId, provider: "anthropic", operation: "cover_letter", success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true,
+      error: error instanceof Error ? error.message : "anthropic_failed", createdAt: nowIso(),
+    });
+    throw new ServiceError("The AI could not write this letter right now. Try again in a moment.", "provider_failed", 502);
+  }
+  const costCents = (inputTokens * config.fastInputCentsPerMillion + outputTokens * config.fastOutputCentsPerMillion) / 1_000_000;
+  await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
+  await repo.insertGeneration({ id: id(), userId, purpose: "cover_letter", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
+  return { body: letter.slice(0, 8000) };
+}
+
 const EMAIL_GOALS: Record<string, string> = {
   chat: "ask for a quick 15-minute conversation",
   advice: "ask for career advice",
@@ -745,7 +880,7 @@ export function emailUnlockQuote(userId: string, contactId: string) {
 export async function workspaceState(userId: string) {
   // Earlier searches stored every Apollo result; clear those once so the shared record stays small.
   if ((await repo.countUnsavedContacts()) > 200) await repo.pruneUnsavedContacts();
-  const [user, document, credits, resume, saved, searches, drafts] = await Promise.all([
+  const [user, document, credits, resume, saved, searches, drafts, mailboxes, messages] = await Promise.all([
     repo.getUserById(userId),
     repo.getProfileDocument(userId),
     repo.getAccount(userId),
@@ -753,6 +888,8 @@ export async function workspaceState(userId: string) {
     repo.listSavedDetailed(userId),
     repo.listSearchRequests(userId),
     repo.listManualDrafts(userId),
+    repo.listMailboxes(userId),
+    repo.listMessages(userId),
   ]);
   const studentFacts = document ? profileIntelligence.approvedForOutreach(document.facts, document.form.excludedTopics) : [];
   const contacts = saved.flatMap(({ saved: row, contact }) => {
@@ -790,6 +927,11 @@ export async function workspaceState(userId: string) {
     profile: document,
     studentFacts,
     highlights: document?.highlights ?? [],
+    mailboxes: mailboxes
+      .filter((item) => item.provider === "gmail" || item.provider === "outlook")
+      .map((item) => ({ provider: item.provider, email: item.email, connectedAt: item.connectedAt })),
+    mailboxSetup: { gmail: integrations.gmail && oauthReady().google, outlook: integrations.outlook && oauthReady().microsoft },
+    emailsSent: messages.filter((message) => message.direction === "outbound" && message.deliveryConfirmed).length,
     resume: resume ? { id: resume.id, fileName: resume.fileName, byteSize: resume.byteSize } : null,
     contacts,
     searches: searches.slice(0, 10),

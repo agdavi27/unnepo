@@ -802,6 +802,13 @@ export const repo = {
         .map((item) => ({ ...item, accessTokenEncrypted: null, refreshTokenEncrypted: null, connected: true })),
     );
   },
+  async deleteMailbox(userId: string, provider: Database["mailboxes"][number]["provider"]) {
+    return withLock((db) => {
+      const before = db.mailboxes.length;
+      db.mailboxes = db.mailboxes.filter((item) => !(item.userId === userId && item.provider === provider));
+      return before - db.mailboxes.length;
+    });
+  },
   async getMailboxSecrets(userId: string, provider: Database["mailboxes"][number]["provider"]) {
     return withLock((db) => db.mailboxes.find((item) => item.userId === userId && item.provider === provider) ?? null);
   },

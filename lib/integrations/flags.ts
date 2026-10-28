@@ -10,8 +10,9 @@ export const integrations = {
   /** Onboarding answers may be organized into profile facts. */
   profileOrganization: true,
   stripeBilling: false,
-  gmail: false,
-  outlook: false,
+  /** Students connect their own mailbox; nothing sends without their click and confirmation. */
+  gmail: true,
+  outlook: true,
 } as const;
 
 export type IntegrationName = keyof typeof integrations;

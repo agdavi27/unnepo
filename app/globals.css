@@ -67,7 +67,16 @@ button, input, select, textarea { font: inherit; }
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+.bubble-float {
+  animation: bubble-float 12s ease-in-out infinite;
+}
+@keyframes bubble-float {
+  0%, 100% { transform: translate(0, 0); }
+  33% { transform: translate(6px, -10px); }
+  66% { transform: translate(-5px, 6px); }
+}
 @media (prefers-reduced-motion: reduce) {
+  .bubble-float { animation: none; }
   .school-track,
   .school-track-reverse { animation: none; }
   .loader { animation: none; border-top-color: #f6e7a8; }

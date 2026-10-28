@@ -1,10 +1,15 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
-import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, generateWorkspaceEmail, deleteWorkspaceContacts, refreshProfileHighlights, updateWorkspaceContact, workspaceState } from "@/lib/services/workspace";
+import { recordPeopleSearch, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, generateWorkspaceEmail, deleteWorkspaceContacts, disconnectWorkspaceMailbox, generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, sendWorkspaceEmail, updateWorkspaceContact, workspaceState } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
+import { PUBLIC_PLANS, creditMath, serverConfig } from "@/lib/config";
+import { setMailSenderForTests } from "@/lib/services/outreach";
+import { scoreJob, setJobFetcherForTests } from "@/lib/jobs/recommend";
+import { mailboxAccessToken } from "@/lib/services/oauth";
+import { encryptSecret, decryptSecret } from "@/lib/security";
 import { isPersonalWorkEmail, looksLikePerson } from "@/lib/providers/contacts/router";
 import { COLLEGE_SUGGESTIONS, brandsForInterests, rankSuggestions } from "@/lib/suggestions";
 import { formatLocation, joinProfileList, parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
@@ -15,6 +20,11 @@ import { useTempDb } from "./helpers";
 
 beforeEach(() => {
   useTempDb();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  setJobFetcherForTests(null);
 });
 
 /** Apollo bulk match reply that gives every person a verified work email of their own. */
@@ -362,6 +372,113 @@ describe("structured profile", () => {
     expect(await repo.getContact("apollo_c1")).toBeNull();
     expect(await repo.getContact("old_0")).toBeNull();
     expect(await repo.countUnsavedContacts()).toBe(0);
+  });
+
+  it("offers 5, 25, and 60 credit plans with the contact math shown", () => {
+    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.credits])).toEqual([["free", "$0", 5], ["pro", "$30", 25], ["premium", "$60", 60]]);
+    expect(creditMath(5)).toBe("5 credits = 125 contacts");
+    expect(creditMath(60)).toBe("60 credits = 1,500 contacts");
+    const saved = process.env.SIGNUP_CREDITS;
+    delete process.env.SIGNUP_CREDITS;
+    expect(serverConfig().signupCredits).toBe(5);
+    expect(serverConfig().proMonthlyCredits).toBe(25);
+    expect(serverConfig().premiumMonthlyCredits).toBe(60);
+    process.env.SIGNUP_CREDITS = saved;
+  });
+
+  it("sends from a connected mailbox once, marks the contact, and can disconnect", async () => {
+    const userId = await verifiedStudent("sender@colby.edu", "Sender");
+    await saveStructuredProfile(userId, form, "Sender");
+    await repo.upsertContacts([{
+      id: "send_person", externalId: "send_person", provider: "apollo", fullName: "Pat Doe", firstName: "Pat", lastName: "Doe",
+      title: "Recruiter", company: "REI", companyDomain: null, location: "", school: null, profileUrl: null, email: "pat.doe@rei.com", emailStatus: "verified",
+      phone: null, phoneStatus: "unknown", tags: [], seniority: null, department: null, industry: null, companySize: null, interests: [],
+      previousRoles: [], achievements: [], publicPosts: [], verifiedMutuals: [], shareable: false, licenseNote: "test", dataSource: "provider",
+      fetchedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString(), costCents: 0, costEstimated: true,
+    }]);
+    await repo.saveFoundContacts(userId, ["send_person"]);
+    await expect(sendWorkspaceEmail(userId, { contactId: "send_person", subject: "Hi", body: "Hello" })).rejects.toThrow(/Connect Gmail or Outlook/);
+    await repo.upsertMailbox({ id: "m1", userId, provider: "gmail", email: "sender@gmail.com", accessTokenEncrypted: "token", refreshTokenEncrypted: null, expiresAt: null, connectedAt: new Date().toISOString() });
+    const sent: Array<{ to: string; subject: string }> = [];
+    setMailSenderForTests({ send: async (input) => { sent.push({ to: input.to, subject: input.subject }); return { id: `msg_${sent.length}`, threadId: "t1" }; }, replies: async () => [] });
+    const first = await sendWorkspaceEmail(userId, { contactId: "send_person", subject: "Hi", body: "Hello" });
+    const again = await sendWorkspaceEmail(userId, { contactId: "send_person", subject: "Hi", body: "Hello" });
+    expect(first.sent).toBe(true);
+    expect(again.duplicate).toBe(true);
+    expect(sent).toEqual([{ to: "pat.doe@rei.com", subject: "Hi" }]);
+    const state = await workspaceState(userId);
+    expect(state.emailsSent).toBe(1);
+    expect(state.contacts[0].status).toBe("contacted");
+    expect(state.mailboxes).toEqual([expect.objectContaining({ provider: "gmail", email: "sender@gmail.com" })]);
+    expect(JSON.stringify(state)).not.toContain("token");
+    expect((await disconnectWorkspaceMailbox(userId, { provider: "gmail" })).removed).toBe(1);
+    expect((await workspaceState(userId)).mailboxes).toEqual([]);
+  });
+
+  it("refreshes an expired mailbox token and keeps the new one", async () => {
+    process.env.GOOGLE_CLIENT_ID = "client";
+    process.env.GOOGLE_CLIENT_SECRET = "secret";
+    const userId = await verifiedStudent("refresh@colby.edu", "Refresher");
+    const mailbox = { id: "m2", userId, provider: "gmail" as const, email: "r@gmail.com", accessTokenEncrypted: encryptSecret("old"), refreshTokenEncrypted: encryptSecret("refresh"), expiresAt: new Date(Date.now() - 1000).toISOString(), connectedAt: new Date().toISOString() };
+    await repo.upsertMailbox(mailbox);
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      calls.push(`${url} ${String(init?.body)}`);
+      return Response.json({ access_token: "fresh", expires_in: 3600 });
+    });
+    expect(await mailboxAccessToken(mailbox)).toBe("fresh");
+    expect(calls[0]).toMatch(/oauth2\.googleapis\.com\/token .*grant_type=refresh_token/);
+    const stored = await repo.getMailboxSecrets(userId, "gmail");
+    expect(decryptSecret(stored!.accessTokenEncrypted!)).toBe("fresh");
+    expect(decryptSecret(stored!.refreshTokenEncrypted!)).toBe("refresh");
+    delete process.env.GOOGLE_CLIENT_ID;
+    delete process.env.GOOGLE_CLIENT_SECRET;
+  });
+
+  it("scores jobs for students and drops senior or stale postings", () => {
+    const prefs = { roles: ["Brand marketing"], companies: ["Patagonia"], locations: ["Boston"], interests: ["Marketing"], remoteOk: true };
+    const base = { id: "j", company: "Patagonia", location: "Boston, MA", postedKind: "posted" as const, url: "https://example.com/j", source: "greenhouse" as const, description: "Help our marketing team." };
+    const now = Date.parse("2026-10-27T12:00:00Z");
+    const intern = scoreJob({ ...base, title: "Brand Marketing Intern", postedAt: "2026-10-25T00:00:00Z" }, prefs, now);
+    expect(intern?.reasons).toEqual(expect.arrayContaining(["Matches your role: Brand marketing", "At Patagonia, one of your dream companies", "In Boston", "Internship"]));
+    expect(scoreJob({ ...base, title: "Senior Brand Marketing Manager", postedAt: "2026-10-25T00:00:00Z" }, prefs, now)).toBeNull();
+    expect(scoreJob({ ...base, title: "Brand Marketing Intern", postedAt: "2026-06-01T00:00:00Z" }, prefs, now)).toBeNull();
+    expect(scoreJob({ ...base, company: "Acme", location: "Denver", description: "", title: "Accountant", postedAt: "2026-10-25T00:00:00Z" }, prefs, now)).toBeNull();
+  });
+
+  it("recommends jobs from dream company boards with posted dates", async () => {
+    const userId = await verifiedStudent("jobs@colby.edu", "Jobseeker");
+    await expect(listRecommendedJobs(userId)).rejects.toThrow(/Save your profile/);
+    await saveStructuredProfile(userId, form, "Jobseeker");
+    const urls: string[] = [];
+    setJobFetcherForTests(async (url) => {
+      urls.push(url);
+      if (url.includes("boards-api.greenhouse.io/v1/boards/patagonia/")) {
+        return Response.json({ jobs: [
+          { id: 1, title: "Brand Marketing Intern", location: { name: "Boston, MA" }, first_published: new Date(Date.now() - 2 * 86400000).toISOString(), absolute_url: "https://boards.greenhouse.io/patagonia/jobs/1", content: "&lt;p&gt;Support campaigns&lt;/p&gt;" },
+          { id: 2, title: "Director of Brand", location: { name: "Boston, MA" }, first_published: new Date().toISOString(), absolute_url: "https://boards.greenhouse.io/patagonia/jobs/2", content: "" },
+        ] });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const result = await listRecommendedJobs(userId);
+    expect(urls.some((url) => url.includes("greenhouse.io/v1/boards/patagonia/"))).toBe(true);
+    expect(urls.some((url) => url.includes("linkedin.com"))).toBe(false);
+    expect(result.jobs.map((job) => job.title)).toEqual(["Brand Marketing Intern"]);
+    expect(result.jobs[0]).toMatchObject({ company: "Patagonia", postedKind: "posted", sourceLabel: "Company careers page" });
+    expect(result.jobs[0].postedAt).toBeTruthy();
+    expect(result.searchedCompanies[0]).toBe("Patagonia");
+  });
+
+  it("refuses a cover letter without a job or without a key", async () => {
+    const userId = await verifiedStudent("letter@colby.edu", "Letterer");
+    await saveStructuredProfile(userId, { ...form, accomplishments: "Ran a campus store" }, "Letterer");
+    await expect(generateWorkspaceCoverLetter(userId, { job: { title: "", company: "REI" } })).rejects.toThrow(/job title and company/);
+    await expect(generateWorkspaceCoverLetter(userId, { job: { title: "Intern", company: "REI", description: "Retail" } })).rejects.toThrow(/Upload a resume or pick a few highlights/);
+    const document = await repo.getProfileDocument(userId);
+    await repo.upsertProfileDocument({ ...document!, highlights: [{ id: "hl_store", label: "Campus store founder", detail: "Ran a campus store.", category: "leadership", experienceDetails: null }] });
+    await expect(generateWorkspaceCoverLetter(userId, { job: { title: "Intern", company: "REI", description: "Retail" }, studentFactIds: ["hl_store"] })).rejects.toThrow(/not configured/);
+    expect(await repo.listGenerations(userId)).toHaveLength(0);
   });
 
   it("recognizes company pages and shared inboxes", () => {

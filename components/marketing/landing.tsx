@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowRight, Check, Mail, MessageSquare, Phone, Target } from "lucide-react";
-import { PUBLIC_PLANS } from "@/lib/config";
+import { ENTERPRISE_PLAN, PEOPLE_PER_CREDIT, PUBLIC_PLANS, creditMath, peopleFromCredits } from "@/lib/config";
 import { isSchoolEmail } from "@/lib/schools";
 import { SchoolLogos } from "@/components/marketing/school-logos";
 
@@ -71,7 +71,7 @@ export function Landing() {
           </button>
         </form>
         {params.get("error") ? <p className="mt-3 text-sm text-red-300">{params.get("error")}</p> : null}
-        <p className="mt-3 text-sm text-faint">Get 3 free credits (30 people). No subscription. Built for students.</p>
+        <p className="mt-3 text-sm text-faint">Start with {PUBLIC_PLANS[0].credits} free credits ({peopleFromCredits(PUBLIC_PLANS[0].credits)} contacts). No subscription. Built for students.</p>
         <div className="mt-6 flex items-center justify-center gap-3 text-sm text-muted">
           <div className="flex -space-x-2">
             {HEADSHOTS.map((photo) => (
@@ -111,9 +111,9 @@ export function Landing() {
         <p className="text-center text-xs font-semibold tracking-[0.22em] text-faint">PRICING</p>
         <h2 className="mt-3 text-center text-4xl font-semibold tracking-tight md:text-5xl">Find opportunities. On your terms.</h2>
         <p className="mx-auto mt-4 max-w-2xl text-center text-muted">
-          Free includes search, unlocks, and sending from your own inbox. Pro and Premium add AI email and cover letters.
+          1 credit = {PEOPLE_PER_CREDIT} contacts, each with a verified work email. Every plan includes AI email drafts.
         </p>
-        <div className="mt-10 grid gap-4 lg:grid-cols-3">
+        <div className="mt-10 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           {PUBLIC_PLANS.map((plan) => (
             <article key={plan.id} className={`rounded-2xl border bg-card p-6 ${plan.popular ? "border-gold" : "border-line"}`}>
               <div className="flex items-center justify-between text-sm">
@@ -123,7 +123,7 @@ export function Landing() {
               <h3 className="mt-4 text-2xl font-semibold">{plan.name}</h3>
               <p className="mt-2 text-4xl font-semibold">{plan.priceLabel}{plan.monthly ? <span className="text-lg text-muted"> / month</span> : null}</p>
               <p className="mt-2 text-lg font-semibold text-[#3D8BFF]">{plan.peopleLabel}</p>
-              <p className="mt-1 text-sm text-faint">{plan.cadence} · {plan.credits} credits</p>
+              <p className="mt-1 text-sm text-faint">{plan.cadence} · {creditMath(plan.credits)}</p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
                 {plan.features.map((feature) => <li key={feature}>✓ {feature}</li>)}
               </ul>
@@ -132,9 +132,27 @@ export function Landing() {
               </Link>
             </article>
           ))}
+          <article className="flex flex-col rounded-2xl border border-line bg-card p-6">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted">{ENTERPRISE_PLAN.blurb}</span>
+            </div>
+            <h3 className="mt-4 text-2xl font-semibold">{ENTERPRISE_PLAN.name}</h3>
+            <p className="mt-2 text-4xl font-semibold">{ENTERPRISE_PLAN.priceLabel}</p>
+            <p className="mt-2 text-lg font-semibold text-[#3D8BFF]">Contact us for pricing</p>
+            <p className="mt-1 text-sm text-faint">1 credit = {PEOPLE_PER_CREDIT} contacts</p>
+            <ul className="mt-6 space-y-2 text-sm text-muted">
+              {ENTERPRISE_PLAN.features.map((feature) => <li key={feature}>✓ {feature}</li>)}
+            </ul>
+            <a
+              href={ENTERPRISE_PLAN.contactEmail ? `mailto:${ENTERPRISE_PLAN.contactEmail}?subject=${encodeURIComponent("Unnepo for our school")}` : "#pricing"}
+              className="mt-auto flex h-11 items-center justify-center rounded-xl border border-line text-sm font-semibold text-ink hover:bg-white/5"
+            >
+              Contact us →
+            </a>
+          </article>
         </div>
       </section>
-      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit shows up to 20 people, or unlocks one verified work email.</footer>
+      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit = {PEOPLE_PER_CREDIT} contacts, each with a verified work email.</footer>
     </div>
   );
 }

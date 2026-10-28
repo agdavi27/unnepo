@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
-import { encryptSecret, randomToken } from "@/lib/security";
+import type { Mailbox } from "@/lib/db/types";
+import { decryptSecret, encryptSecret, randomToken } from "@/lib/security";
 import { loginWithOAuth } from "@/lib/services/auth";
 
 type Provider = "google" | "microsoft" | "gmail" | "outlook";
@@ -89,6 +90,39 @@ export async function finishOAuth(provider: Provider, code: string, state: strin
   return { mailbox: profile.email };
 }
 
+/** A usable access token for a connected mailbox, refreshed with the stored refresh token when it is about to expire. */
+export async function mailboxAccessToken(mailbox: Mailbox) {
+  if (!mailbox.accessTokenEncrypted) throw new ServiceError("Reconnect your mailbox in Settings.", "mailbox_required", 409);
+  const expiresAt = mailbox.expiresAt ? new Date(mailbox.expiresAt).getTime() : 0;
+  if (expiresAt && expiresAt - Date.now() > 2 * 60 * 1000) return decryptSecret(mailbox.accessTokenEncrypted);
+  if (!mailbox.refreshTokenEncrypted) {
+    if (!expiresAt) return decryptSecret(mailbox.accessTokenEncrypted);
+    throw new ServiceError("Your mailbox connection expired. Reconnect it in Settings.", "mailbox_expired", 409);
+  }
+  const client = clientFor(mailbox.provider === "outlook" ? "outlook" : "gmail");
+  const response = await fetch(client.token, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: client.id,
+      client_secret: client.secret,
+      refresh_token: decryptSecret(mailbox.refreshTokenEncrypted),
+      grant_type: "refresh_token",
+      ...(mailbox.provider === "outlook" ? { scope: client.scope } : {}),
+    }),
+  });
+  if (!response.ok) throw new ServiceError("Your mailbox connection expired. Reconnect it in Settings.", "mailbox_expired", 409);
+  const tokens = (await response.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
+  if (!tokens.access_token) throw new ServiceError("Your mailbox connection expired. Reconnect it in Settings.", "mailbox_expired", 409);
+  await repo.upsertMailbox({
+    ...mailbox,
+    accessTokenEncrypted: encryptSecret(tokens.access_token),
+    refreshTokenEncrypted: tokens.refresh_token ? encryptSecret(tokens.refresh_token) : mailbox.refreshTokenEncrypted,
+    expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null,
+  });
+  return tokens.access_token;
+}
+
 function envValue(name: string) {
   if (process.env[name]) return process.env[name] || "";
   if (process.env.NODE_ENV === "production") return "";
@@ -111,7 +145,8 @@ function clientFor(provider: Provider) {
       token: "https://oauth2.googleapis.com/token",
       scope:
         provider === "gmail"
-          ? "openid email profile https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly"
+          ? // Send only. Reading mail is a restricted scope that needs a Google security assessment.
+            "openid email profile https://www.googleapis.com/auth/gmail.send"
           : "openid email profile",
     };
   }
@@ -120,7 +155,7 @@ function clientFor(provider: Provider) {
     secret: envValue("MICROSOFT_CLIENT_SECRET"),
     authorize: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
     token: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-    scope: provider === "outlook" ? "offline_access openid email profile User.Read Mail.Send Mail.Read" : "openid email profile User.Read",
+    scope: provider === "outlook" ? "offline_access openid email profile User.Read Mail.Send" : "openid email profile User.Read",
   };
 }
 
