@@ -152,7 +152,7 @@ export function Landing() {
           </article>
         </div>
       </section>
-      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit = {PEOPLE_PER_CREDIT} contacts, each with a verified work email.</footer>
+      <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">Unnepo · Built for students · One credit = {PEOPLE_PER_CREDIT} contacts, each with a verified work email. · <Link href="/privacy" className="underline-offset-4 hover:text-white hover:underline">Privacy Policy</Link></footer>
     </div>
   );
 }

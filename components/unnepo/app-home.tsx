@@ -774,7 +774,7 @@ export function AppHome() {
             </section>
             <section className="rounded-2xl border border-line bg-panel p-5">
               <h2 className={sectionTitle}>Connected email</h2>
-              <p className="mt-3 text-sm text-muted">Send emails from your own inbox. Unnepo can only send, never read your mail, and nothing goes out until you click Send and confirm.</p>
+              <p className="mt-3 text-sm text-muted">Send emails from your own inbox. Unnepo can only send, never read your mail, and nothing goes out until you click Send and confirm. <a href="/privacy" target="_blank" rel="noreferrer" className="underline underline-offset-4 hover:text-white">Privacy Policy</a></p>
               <ul className="mt-3 divide-y divide-line">
                 {(["gmail", "outlook"] as const).map((provider) => {
                   const mailbox = data.mailboxes.find((item) => item.provider === provider);
