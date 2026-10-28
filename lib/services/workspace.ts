@@ -418,6 +418,8 @@ async function runLivePeopleSearch(
   // Email lookups cost Apollo credits, so at most twice the requested number are checked.
   let lookupBudget = input.quantity * 2;
   const maxPages = Math.ceil((input.quantity * 2) / APOLLO_PAGE_SIZE) + 1;
+  // Bounds how long one search can run.
+  let searchCalls = 15;
 
   /** Looks up emails for candidates and keeps only people with a verified personal work email. */
   const keepVerified = async (candidates: Contact[]) => {
@@ -434,7 +436,6 @@ async function runLivePeopleSearch(
         const result = emails.get(person.id);
         return result ? { ...person, ...result.patch, email: result.email, emailStatus: result.emailStatus, fetchedAt: nowIso() } : person;
       });
-      await repo.upsertContacts(updated);
       for (const person of updated) {
         if (people.length >= input.quantity) break;
         if (person.email && person.emailStatus === "verified" && looksLikePerson(person.firstName, person.lastName, person.company)) {
@@ -447,9 +448,10 @@ async function runLivePeopleSearch(
   };
 
   for (const step of plan.steps) {
-    if (people.length >= input.quantity || lookupBudget <= 0) break;
+    if (people.length >= input.quantity || lookupBudget <= 0 || searchCalls <= 0) break;
     let added = 0;
-    for (let page = 1; page <= maxPages && people.length < input.quantity && lookupBudget > 0; page += 1) {
+    for (let page = 1; page <= maxPages && people.length < input.quantity && lookupBudget > 0 && searchCalls > 0; page += 1) {
+      searchCalls -= 1;
       const result = await searchPeopleQuery(userId, step.query, page, APOLLO_PAGE_SIZE);
       const candidates = result.people.filter((person) => !excluded.has(person.id) && !seen.has(person.id));
       candidates.forEach((person) => seen.add(person.id));
@@ -479,7 +481,10 @@ async function runLivePeopleSearch(
     }
     charged = spend.charged;
   }
+  // One write for everyone kept, then clear out cached contacts nobody saved.
+  await repo.upsertContacts(people);
   await repo.saveFoundContacts(userId, people.map((person) => person.id));
+  await repo.pruneUnsavedContacts();
   const request: PeopleSearchRequest = {
     id: requestId,
     userId,
@@ -738,6 +743,8 @@ export function emailUnlockQuote(userId: string, contactId: string) {
 }
 
 export async function workspaceState(userId: string) {
+  // Earlier searches stored every Apollo result; clear those once so the shared record stays small.
+  if ((await repo.countUnsavedContacts()) > 200) await repo.pruneUnsavedContacts();
   const [user, document, credits, resume, saved, searches, drafts] = await Promise.all([
     repo.getUserById(userId),
     repo.getProfileDocument(userId),

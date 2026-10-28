@@ -154,33 +154,42 @@ export function AppHome() {
   const [highlightsLoading, setHighlightsLoading] = useState(false);
   const [highlightsError, setHighlightsError] = useState("");
 
-  const load = useCallback(async () => {
-    const response = await fetch("/api/app/state");
-    if (response.status === 401) {
-      router.push("/login");
-      return;
+  /** Loads the workspace, giving up after 30 seconds so the page never waits forever. */
+  const fetchState = useCallback(async (): Promise<Workspace | null> => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch("/api/app/state", { signal: controller.signal });
+      if (response.status === 401) {
+        router.push("/login");
+        return null;
+      }
+      const body = await response.json().catch(() => ({ error: `The server returned an error (${response.status}).` }));
+      if (!response.ok) throw new Error(body.error || "Could not load your workspace.");
+      return body as Workspace;
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === "AbortError") throw new Error("Your workspace is taking too long to load.");
+      throw reason instanceof Error ? reason : new Error("Could not load your workspace.");
+    } finally {
+      clearTimeout(timer);
     }
-    const body = await response.json();
-    if (!response.ok) {
-      setError(body.error || "Could not load your workspace.");
-      return;
-    }
-    setData(body);
-    setError("");
   }, [router]);
+
+  const load = useCallback(async () => {
+    try {
+      const body = await fetchState();
+      if (body) {
+        setData(body);
+        setError("");
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not load your workspace.");
+    }
+  }, [fetchState]);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/app/state")
-      .then(async (response) => {
-        if (response.status === 401) {
-          router.push("/login");
-          return null;
-        }
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error || "Could not load your workspace.");
-        return body as Workspace;
-      })
+    fetchState()
       .then((body) => {
         if (!cancelled && body) setData(body);
       })
@@ -190,7 +199,7 @@ export function AppHome() {
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [fetchState]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -497,7 +506,12 @@ export function AppHome() {
         )}
       </header>
       <main className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8">
-        {error && <p className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</p>}
+        {error && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+            <p>{error}</p>
+            <button type="button" onClick={() => { setError(""); void load(); }} className="rounded-lg border border-red-900/70 px-3 py-1 text-red-200 hover:bg-red-950/60">Try again</button>
+          </div>
+        )}
         {!data && !error && <p className="text-sm text-muted">Loading your workspace…</p>}
         {notice && (
           <div className="flex items-start justify-between gap-3 rounded-xl border border-line bg-card px-4 py-3 text-sm text-zinc-300">

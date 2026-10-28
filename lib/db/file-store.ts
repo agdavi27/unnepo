@@ -728,6 +728,25 @@ export const repo = {
       return rows;
     });
   },
+  /** Drops cached contacts nobody has saved, drafted to, or is unlocking. Returns how many were removed. */
+  async pruneUnsavedContacts() {
+    return withLock((db) => {
+      const keep = new Set<string>([
+        ...db.saved.map((item) => item.contactId),
+        ...(db.manualDrafts ?? []).map((item) => item.contactId),
+        ...db.reservations.filter((item) => item.status === "reserved").map((item) => item.contactId),
+      ]);
+      const before = db.contacts.length;
+      db.contacts = db.contacts.filter((contact) => keep.has(contact.id));
+      return before - db.contacts.length;
+    });
+  },
+  async countUnsavedContacts() {
+    return withLock((db) => {
+      const saved = new Set(db.saved.map((item) => item.contactId));
+      return db.contacts.filter((contact) => !saved.has(contact.id)).length;
+    });
+  },
   async getCompanyDomains(names: string[]) {
     return withLock((db) => {
       const out: Record<string, string[]> = {};

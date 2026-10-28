@@ -536,9 +536,9 @@ export async function searchPeopleQuery(userId: string, query: ApolloPeopleQuery
     });
     if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 300));
     const body = (await response.json()) as { people?: Array<Record<string, unknown>>; total_entries?: number };
+    // Search results are candidates only. Nothing is stored until a search keeps someone,
+    // and the free call writes no usage row, so a long search doesn't rewrite the data record.
     const people = (body.people ?? []).map((person) => mapApolloPerson(person)).filter((person) => person !== null) as Contact[];
-    await recordUsage({ userId, provider: "apollo", operation: "search", success: true, latencyMs: Date.now() - started, costCents: 0, estimated: true });
-    await repo.upsertContacts(people);
     return { people, total: Number(body.total_entries ?? people.length) };
   } catch (error) {
     await recordUsage({

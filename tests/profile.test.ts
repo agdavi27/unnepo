@@ -337,6 +337,33 @@ describe("structured profile", () => {
     expect(state.contacts.map((contact) => contact.email)).toEqual(["jo.lee@patagonia.com"]);
   });
 
+  it("stores only the people a search keeps and clears old cached results", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    process.env.DAILY_USER_SPEND_CENTS = "100000";
+    const userId = await verifiedStudent("lean@colby.edu", "Lean");
+    await saveStructuredProfile(userId, form, "Lean");
+    await repo.upsertContacts(Array.from({ length: 250 }, (_, index) => ({
+      id: `old_${index}`, externalId: `old_${index}`, provider: "apollo" as const, fullName: "Old Result", firstName: "Old", lastName: "Result",
+      title: "", company: "", companyDomain: null, location: "", school: null, profileUrl: null, email: null, emailStatus: "unknown" as const,
+      phone: null, phoneStatus: "unknown" as const, tags: [], seniority: null, department: null, industry: null, companySize: null, interests: [],
+      previousRoles: [], achievements: [], publicPosts: [], verifiedMutuals: [], shareable: false, licenseNote: "test", dataSource: "provider" as const,
+      fetchedAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString(), costCents: 0, costEstimated: true,
+    })));
+    setContactFetcher(async (input, init) => {
+      if (String(input).includes("bulk_match")) {
+        const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
+        // Only the first candidate has a verified email.
+        return Response.json({ matches: details.map((item) => (item.id === "c0" ? { id: item.id, last_name: "Lee", email: "c0.lee@example.com", email_status: "verified" } : { id: item.id, email: null })) });
+      }
+      return Response.json({ people: Array.from({ length: 40 }, (_, index) => ({ id: `c${index}`, first_name: "Casey", last_name_obfuscated: "L***", title: "Manager", organization: { name: "REI" } })) });
+    });
+    const result = await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
+    expect(result.people.map((person) => person.id)).toEqual(["apollo_c0"]);
+    expect(await repo.getContact("apollo_c1")).toBeNull();
+    expect(await repo.getContact("old_0")).toBeNull();
+    expect(await repo.countUnsavedContacts()).toBe(0);
+  });
+
   it("recognizes company pages and shared inboxes", () => {
     expect(looksLikePerson("Field", "Startup", "Field Startup")).toBe(false);
     expect(looksLikePerson("Patagonia", "Careers", "Patagonia")).toBe(false);
