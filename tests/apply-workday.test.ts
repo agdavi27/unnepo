@@ -153,7 +153,13 @@ describe.skipIf(!hasChrome)("Workday-style application (local Chrome)", () => {
       credentials: { email: "pat@colby.edu", password: "Str0ng!Passw0rd" },
       allowSignup: true,
       answerFor: (label: string) => saved[label.toLowerCase()] ?? null,
+      // Stands in for the resume-based AI: it can answer the past-employer question, never the phone type.
+      aiAnswers: async (items: Array<{ label: string; options: string[] }>) => {
+        aiCalls.push(items.map((item) => item.label));
+        return Object.fromEntries(items.filter((item) => item.label === "Have you previously worked for Acme?").map((item) => [item.label, "No"]));
+      },
     };
+    const aiCalls: string[][] = [];
 
     // Stop is honored before anything is typed.
     await expect(runApplicationFlow(page, { ...options, navigate: true, shouldStop: async () => true })).rejects.toBeInstanceOf(AutofillStopped);
@@ -167,14 +173,14 @@ describe.skipIf(!hasChrome)("Workday-style application (local Chrome)", () => {
     expect(state1.values).toMatchObject({ source: "Job Board", country: "United States of America", state: "Maine", legalFirstName: "Pat", phoneNumber: "2075550100" });
     expect(await page.inputValue("#beecatcher")).toBe("");
     // The two questions it can't know come back to the student, with Workday's own options.
-    expect(first.pending).toEqual(expect.arrayContaining([
-      { label: "Phone Device Type", kind: "select", options: ["Landline", "Mobile"] },
-      expect.objectContaining({ label: "Have you previously worked for Acme?", options: ["Yes", "No"] }),
-    ]));
+    expect(first.pending).toEqual(expect.arrayContaining([{ label: "Phone Device Type", kind: "select", options: ["Landline", "Mobile"] }]));
+    // The question the resume answers is filled and listed for the student to check.
+    expect(first.pending?.map((item) => item.label)).not.toContain("Have you previously worked for Acme?");
+    expect(first.fromResume).toContain("Have you previously worked for Acme?");
+    expect(aiCalls.flat()).toContain("Phone Device Type");
 
     // The student answers in Unnepo; the answers are saved and autofill continues in the same browser.
     saved["phone device type"] = "Mobile";
-    saved["have you previously worked for acme?"] = "No";
     saved["yes, i have read and consent to the terms and conditions"] = "Yes";
     const second = await runApplicationFlow(page, { ...options, navigate: false });
     const state2 = await page.evaluate(() => (window as unknown as { state: { view: string; values: Record<string, string>; uploads: number } }).state);

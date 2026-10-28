@@ -235,7 +235,7 @@ async function resumeFile(userId: string): Promise<ResumeFile | null> {
 }
 
 const STOP_MESSAGE: Record<FlowResult["stoppedAt"], (report: FlowResult, email: string) => string> = {
-  review: (r) => `Filled ${r.filled.length} fields${r.pages && r.pages > 1 ? ` across ${r.pages} pages` : ""}.${r.failed.length ? ` ${r.failed.length} still need you in the live view.` : ""} Check the form in the live view, then approve.`,
+  review: (r) => `Filled ${r.filled.length} fields${r.pages && r.pages > 1 ? ` across ${r.pages} pages` : ""}${r.fromResume?.length ? `, ${r.fromResume.length} written from your resume` : ""}.${r.failed.length ? ` ${r.failed.length} still need you in the live view.` : ""} Check the form in the live view, then approve.`,
   needs_input: (r) => {
     const names = r.failed.map((item) => item.label);
     const list = names.length ? ` It needs: ${names.slice(0, 4).join("; ")}${names.length > 4 ? ` and ${names.length - 4} more` : ""}.` : "";
@@ -259,6 +259,13 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
     const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], info.context);
     return planned.answer && planned.source && planned.source !== "resume_file" ? planned.answer : null;
   };
+  // New questions on the live form are answered from the resume and profile, with the same evidence rule as before.
+  const sources = [info.profileText, info.resumeText].join("\n\n");
+  const resumeAnswers = async (items: Array<{ label: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => {
+    const asked = items.map((item, index) => ({ key: `q${index}`, label: item.label, kind: item.kind, required: false, options: item.options, sensitive: classifyQuestion(item.label).sensitive, answer: null, source: null, evidence: null }));
+    const answered = await aiAnswers(userId, asked, sources);
+    return Object.fromEntries(answered.filter((question) => question.source === "ai" && question.answer).map((question) => [question.label, question.answer!]));
+  };
   const shouldStop = async () => (await applications.get(userId, app.id))?.status !== "filling";
   // Show the live view while filling, so the student can watch and stop it.
   const live = await liveViewUrl(sessionId);
@@ -266,7 +273,7 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
   let report: FlowResult;
   try {
     report = await withSessionPage(sessionId, (page) =>
-      runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, shouldStop }),
+      runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, aiAnswers: resumeAnswers, shouldStop }),
     );
   } catch (error) {
     // Stopped by the student: stopAutofill already saved where things stand.

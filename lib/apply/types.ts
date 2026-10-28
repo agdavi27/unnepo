@@ -60,6 +60,8 @@ export type FillReport = {
   /** "created" when Unnepo made a job-site account on this run, "signed_in" when it used an existing one. */
   account?: "created" | "signed_in" | null;
   host?: string;
+  /** Questions answered from the student's resume by AI during autofill, for the student to check. */
+  fromResume?: string[];
   /** Required questions on the page where autofill stopped that the student can answer in Unnepo. */
   pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
 };

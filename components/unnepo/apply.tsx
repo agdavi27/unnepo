@@ -294,6 +294,12 @@ function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { a
           {live ? (
             <iframe title="Live application browser" src={live} className="h-[560px] w-full rounded-xl border border-line bg-black" sandbox="allow-same-origin allow-scripts" allow="clipboard-read; clipboard-write" />
           ) : <p className="text-sm text-muted">The live view isn&apos;t available for this session.</p>}
+          {app.status !== "filling" && (app.fillReport.fromResume ?? []).length > 0 && (
+            <div className="rounded-xl border border-sky-900/60 bg-sky-950/20 p-3 text-sm">
+              <p className="font-medium text-sky-200">Written from your resume. Check these in the live view</p>
+              <ul className="mt-1 list-disc pl-5 text-sky-100/80">{(app.fillReport.fromResume ?? []).map((label) => <li key={label}>{label}</li>)}</ul>
+            </div>
+          )}
           {app.status !== "filling" && app.fillReport.failed.length > 0 && (
             <div className="rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-sm">
               <p className="font-medium text-amber-200">Finish these in the live view</p>

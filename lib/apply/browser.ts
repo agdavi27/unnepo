@@ -254,6 +254,8 @@ export type FlowOptions = {
   shouldStop?: () => Promise<boolean>;
   /** Answers for fields the job board didn't publish ahead of time, matched by label. Null leaves the field for the student. */
   answerFor: (label: string, kind: ApplicationQuestion["kind"], options: string[]) => string | null;
+  /** Answers, by label, for questions nothing on file covers, written only from the student's resume and profile. */
+  aiAnswers?: (questions: Array<{ label: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => Promise<Record<string, string>>;
 };
 
 export type FlowResult = Omit<FillReport, "liveViewUrl" | "screenshotAt"> & { stoppedAt: NonNullable<FillReport["stoppedAt"]>; host: string };
@@ -515,6 +517,11 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
   let resumeUploaded = false;
   /** Required questions Unnepo couldn't answer, with their options, so the student can answer them in Unnepo. */
   const ask = new Map<string, { kind: ApplicationQuestion["kind"]; options: string[] }>();
+  /** Resume-based answers, kept for the whole run so a redrawn page doesn't ask again. */
+  const aiKnown = new Map<string, string>();
+  const askedAi = new Set<string>();
+  const fromResume = new Set<string>();
+  const answerOf = (label: string, kind: ApplicationQuestion["kind"], choices: string[]) => options.answerFor(label, kind, choices) ?? aiKnown.get(label) ?? aiKnown.get(label.slice(0, 160)) ?? null;
   const host = () => {
     try {
       return new URL(page.url()).hostname;
@@ -529,6 +536,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     pages,
     account,
     host: host(),
+    fromResume: [...fromResume].filter((label) => filled.has(label)),
     pending: [...ask].filter(([label]) => failed.has(label)).map(([label, item]) => ({ label, kind: item.kind, options: item.options })).slice(0, 25),
   });
 
@@ -616,78 +624,107 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     }
     // Everything else on the page, matched by label to what Unnepo knows for sure.
     const pageText = await bodyText(page);
+    /** Questions on this page nothing on file answers yet, for one resume-based AI pass. */
+    const unknown = new Map<string, { kind: ApplicationQuestion["kind"]; options: string[] }>();
+    const note = (label: string, kind: ApplicationQuestion["kind"], choices: string[]) => {
+      if (kind !== "file" && !askedAi.has(label)) unknown.set(label, { kind, options: choices });
+    };
     // Sites like Workday redraw the form after each choice, so the page is scanned again after every field.
-    const handled = new Set<string>();
-    for (let guard = 0; guard < 60; guard += 1) {
-      await checkStop();
-      const field = (await scanFields(page)).find((item) => !handled.has(item.label));
-      if (!field) break;
-      handled.add(field.label);
-      if (field.listbox) {
-        const result = await decideListbox(page, page.locator(field.selector).first(), (choices) => options.answerFor(field.label, "select", choices)).catch(() => null);
-        if (result?.picked) {
+    const fillFields = async (only: Set<string> | null) => {
+      const handled = new Set<string>();
+      for (let guard = 0; guard < 60; guard += 1) {
+        await checkStop();
+        const field = (await scanFields(page)).find((item) => !handled.has(item.label) && (!only || only.has(item.label)));
+        if (!field) break;
+        handled.add(field.label);
+        if (field.listbox) {
+          const result = await decideListbox(page, page.locator(field.selector).first(), (choices) => answerOf(field.label, "select", choices)).catch(() => null);
+          if (result && !result.answer) note(field.label, "select", result.options);
+          if (result?.picked) {
+            filled.add(field.label);
+            failed.delete(field.label);
+            ask.delete(field.label);
+          } else if (result?.answer) {
+            failed.set(field.label, "Couldn't pick this option. Choose it in the live view.");
+            if (field.required) ask.set(field.label, { kind: "select", options: result.options });
+          } else if (field.required) {
+            ask.set(field.label, { kind: "select", options: result?.options ?? [] });
+            failed.set(field.label, result ? "Required. Answer it below or in the live view." : "Couldn't open this dropdown. Choose it in the live view.");
+          }
+          continue;
+        }
+        const fieldOptions = field.options;
+        let answer: string | null = null;
+        if (field.kind === "file") {
+          // One resume upload per run, on a page that asks for a resume or CV.
+          const wantsResume = /resume|cv|curriculum/i.test(field.label) || /\b(resume|cv)\b/i.test(pageText);
+          answer = wantsResume && options.resume && !resumeUploaded && !pageText.includes(options.resume.name) ? options.resume.name : null;
+        } else {
+          answer = answerOf(field.label, field.kind, fieldOptions);
+          if (!answer) note(field.label, field.kind, fieldOptions);
+        }
+        if (!answer) {
+          if (field.required && field.kind !== "file") {
+            ask.set(field.label, { kind: field.kind, options: fieldOptions });
+            failed.set(field.label, "Required. Answer it below or in the live view.");
+          }
+          continue;
+        }
+        try {
+          // The marker from the scan may be gone after a redraw; then find the field again by its label.
+          const marked = (await page.locator(field.selector).count()) > 0;
+          const fresh = marked ? null : (await scanFields(page)).find((item) => item.label === field.label);
+          const locator = page.locator(fresh?.selector ?? field.selector).first();
+          const question: ApplicationQuestion = { key: field.selector, label: field.label, kind: field.kind, required: false, options: fieldOptions, sensitive: false, answer, source: null, evidence: null };
+          await setValue(page, locator, question, answer, options.resume);
           filled.add(field.label);
           failed.delete(field.label);
           ask.delete(field.label);
-        } else if (result?.answer) {
-          failed.set(field.label, "Couldn't pick this option. Choose it in the live view.");
-          if (field.required) ask.set(field.label, { kind: "select", options: result.options });
-        } else if (field.required) {
-          ask.set(field.label, { kind: "select", options: result?.options ?? [] });
-          failed.set(field.label, result ? "Required. Answer it below or in the live view." : "Couldn't open this dropdown. Choose it in the live view.");
+          if (field.kind === "file") resumeUploaded = true;
+        } catch {
+          failed.set(field.label, "Couldn't fill this field. Fill it in the live view.");
+          if (field.required) ask.set(field.label, { kind: field.kind, options: fieldOptions });
         }
-        continue;
       }
-      const fieldOptions = field.options;
-      let answer: string | null = null;
-      if (field.kind === "file") {
-        // One resume upload per run, on a page that asks for a resume or CV.
-        const wantsResume = /resume|cv|curriculum/i.test(field.label) || /\b(resume|cv)\b/i.test(pageText);
-        answer = wantsResume && options.resume && !resumeUploaded && !pageText.includes(options.resume.name) ? options.resume.name : null;
-      } else {
-        answer = options.answerFor(field.label, field.kind, fieldOptions);
-      }
-      if (!answer) {
-        if (field.required && field.kind !== "file") {
-          ask.set(field.label, { kind: field.kind, options: fieldOptions });
-          failed.set(field.label, "Required. Answer it below or in the live view.");
-        }
-        continue;
-      }
-      try {
-        // The marker from the scan may be gone after a redraw; then find the field again by its label.
-        const marked = (await page.locator(field.selector).count()) > 0;
-        const fresh = marked ? null : (await scanFields(page)).find((item) => item.label === field.label);
-        const locator = page.locator(fresh?.selector ?? field.selector).first();
-        const question: ApplicationQuestion = { key: field.selector, label: field.label, kind: field.kind, required: false, options: fieldOptions, sensitive: false, answer, source: null, evidence: null };
-        await setValue(page, locator, question, answer, options.resume);
-        filled.add(field.label);
-        failed.delete(field.label);
-        ask.delete(field.label);
-        if (field.kind === "file") resumeUploaded = true;
-      } catch {
-        failed.set(field.label, "Couldn't fill this field. Fill it in the live view.");
-        if (field.required) ask.set(field.label, { kind: field.kind, options: fieldOptions });
-      }
-    }
+    };
 
-    for (const group of await scanRadioGroups(page)) {
-      const answer = radioAnswer(group, options.answerFor);
-      const label = group.question.slice(0, 160);
-      if (!answer) {
-        if (group.required) {
-          failed.set(label, "Required. Answer it below or in the live view.");
-          ask.set(label, { kind: "select", options: group.options.map((option) => option.label) });
+    const fillRadios = async () => {
+      for (const group of await scanRadioGroups(page)) {
+        const answer = radioAnswer(group, answerOf);
+        const label = group.question.slice(0, 160);
+        if (!answer && !OPT_IN_QUESTION.test(group.question)) note(label, "select", group.options.map((option) => option.label));
+        if (!answer) {
+          if (group.required) {
+            failed.set(label, "Required. Answer it below or in the live view.");
+            ask.set(label, { kind: "select", options: group.options.map((option) => option.label) });
+          }
+          continue;
         }
-        continue;
+        try {
+          await page.locator(group.selector(answer.value)).first().check({ force: true });
+          filled.add(label);
+          failed.delete(label);
+          ask.delete(label);
+        } catch {
+          failed.set(label, "Couldn't pick an answer. Choose it in the live view.");
+        }
       }
-      try {
-        await page.locator(group.selector(answer.value)).first().check({ force: true });
-        filled.add(label);
-        failed.delete(label);
-        ask.delete(label);
-      } catch {
-        failed.set(label, "Couldn't pick an answer. Choose it in the live view.");
+    };
+
+    await fillFields(null);
+    await fillRadios();
+    // One AI pass per page for the questions nothing on file answers, using only the resume and profile.
+    if (options.aiAnswers && unknown.size) {
+      await checkStop();
+      const asked = [...unknown].slice(0, 30);
+      for (const [label] of asked) askedAi.add(label);
+      const got = await options.aiAnswers(asked.map(([label, item]) => ({ label, ...item }))).catch(() => ({}) as Record<string, string>);
+      const labels = Object.keys(got).filter((label) => got[label]?.trim());
+      if (labels.length) {
+        for (const label of labels) aiKnown.set(label, got[label].trim());
+        await fillFields(new Set(labels));
+        await fillRadios();
+        for (const label of labels) if (filled.has(label)) fromResume.add(label);
       }
     }
 
