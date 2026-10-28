@@ -54,17 +54,20 @@ export async function liveViewUrl(sessionId: string) {
 }
 
 export async function releaseBrowserSession(sessionId: string) {
-  const { projectId } = requireConfig();
-  await bb(`/sessions/${encodeURIComponent(sessionId)}`, { method: "POST", body: JSON.stringify({ projectId, status: "REQUEST_RELEASE" }) }).catch(() => null);
+  await bb(`/sessions/${encodeURIComponent(sessionId)}`, { method: "POST", body: JSON.stringify({ status: "REQUEST_RELEASE" }) }).catch(() => null);
 }
 
 /** Connects to an open session and hands back its page. The browser keeps running after disconnect. */
 export async function withSessionPage<T>(sessionId: string, run: (page: Page) => Promise<T>): Promise<T> {
-  const { apiKey } = requireConfig();
+  // Each session has its own connect URL; Browserbase returns it with the session.
+  const session = await bb<{ status?: string; connectUrl?: string }>(`/sessions/${encodeURIComponent(sessionId)}`);
+  if (session.status !== "RUNNING" || !session.connectUrl) {
+    throw new ServiceError("The autofill browser for this application has closed. Run autofill again, or if you submitted it yourself, press I applied.", "browser_closed", 409);
+  }
   const { chromium } = await import("playwright-core");
   let browser: Browser | null = null;
   try {
-    browser = await chromium.connectOverCDP(`wss://connect.browserbase.com?apiKey=${encodeURIComponent(apiKey)}&sessionId=${encodeURIComponent(sessionId)}`, { timeout: 30_000 });
+    browser = await chromium.connectOverCDP(session.connectUrl, { timeout: 30_000 });
     const context = browser.contexts()[0] ?? (await browser.newContext());
     const page = context.pages()[0] ?? (await context.newPage());
     return await run(page);

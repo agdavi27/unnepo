@@ -13,6 +13,8 @@ import type { ApplicationContact, ContactRole, JobApplication } from "@/lib/appl
  */
 
 export const MAX_CONTACTS = 5;
+/** A couple of extra candidates, so people without a verified email can be swapped out. */
+const MAX_CANDIDATES = 7;
 const HUNTER_CENTS = 3;
 
 export type FoundPerson = Omit<ApplicationContact, "id" | "applicationId" | "userId" | "createdAt" | "updatedAt" | "outreachStatus" | "emailSubject" | "emailBody">;
@@ -141,7 +143,7 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   const seen = new Set<string>();
   const take = (person: FoundPerson, source?: Contact) => {
     const key = person.name.toLowerCase();
-    if (seen.has(key) || chosen.length >= MAX_CONTACTS) return;
+    if (seen.has(key) || chosen.length >= MAX_CANDIDATES) return;
     seen.add(key);
     chosen.push({ person, source });
   };
@@ -176,7 +178,7 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   const team = mainDepartment(app.department);
   const core = coreTitle(app.title);
   const steps: Array<{ role: ContactRole; limit: number; query: Parameters<typeof searchPeopleQuery>[1] }> = [
-    { role: "recruiter", limit: 2, query: { q_organization_domains_list: [domain], person_titles: RECRUITER_TITLES } },
+    { role: "recruiter", limit: 3, query: { q_organization_domains_list: [domain], person_titles: RECRUITER_TITLES } },
     {
       role: "hiring_manager",
       limit: 2,
@@ -186,11 +188,11 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
         person_seniorities: ["manager", "director", "head"],
       },
     },
-    { role: "team_member", limit: MAX_CONTACTS, query: { q_organization_domains_list: [domain], person_titles: [core || app.title] } },
-    { role: "team_member", limit: MAX_CONTACTS, query: { q_organization_domains_list: [domain], person_titles: team ? [team] : [] } },
+    { role: "team_member", limit: MAX_CANDIDATES, query: { q_organization_domains_list: [domain], person_titles: [core || app.title] } },
+    { role: "team_member", limit: MAX_CANDIDATES, query: { q_organization_domains_list: [domain], person_titles: team ? [team] : [] } },
   ];
   for (const step of steps) {
-    if (chosen.length >= MAX_CONTACTS) break;
+    if (chosen.length >= MAX_CANDIDATES) break;
     if (!step.query.person_titles?.length) continue;
     const { people } = await searchPeopleQuery(userId, step.query, 1, 10);
     let added = 0;
@@ -207,17 +209,21 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   const fromApollo = chosen.filter((item) => item.source && !item.person.email).map((item) => item.source!);
   const enriched = await enrichPeopleBatch(fromApollo, userId);
   for (const item of chosen) {
-    if (!item.source || item.person.email) continue;
+    if (!item.source) continue;
     const result = enriched.get(item.source.id);
-    if (result?.email && result.emailStatus === "verified") {
+    if (!result) continue;
+    // Photo, LinkedIn, and full last name are kept even when Apollo couldn't verify the email.
+    if (result.patch.lastName) item.person.name = `${item.source.firstName} ${result.patch.lastName}`.trim();
+    if (result.patch.photoUrl) item.person.photoUrl = result.patch.photoUrl;
+    if (result.patch.profileUrl) item.person.linkedinUrl = result.patch.profileUrl;
+    if (!item.person.email && result.email && result.emailStatus === "verified") {
       item.person.email = result.email;
       item.person.emailSource = "apollo";
-      if (result.patch.lastName) item.person.name = `${item.source.firstName} ${result.patch.lastName}`.trim();
-      if (result.patch.photoUrl) item.person.photoUrl = result.patch.photoUrl;
-      if (result.patch.profileUrl) item.person.linkedinUrl = result.patch.profileUrl;
     }
   }
+  // Hunter only for as many people as it takes to reach five verified emails.
   for (const item of chosen) {
+    if (chosen.filter((entry) => entry.person.email).length >= MAX_CONTACTS) break;
     if (item.person.email || !hunterReady()) continue;
     const [first, ...rest] = item.person.name.split(" ");
     const email = await hunterFindEmail(userId, first, rest.join(" "), domain).catch(() => null);
@@ -228,7 +234,9 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   }
   if (!hunterReady()) notes.push("Hunter isn't connected, so only emails Apollo verified are shown.");
   if (!chosen.length) notes.push(`Apollo didn't find anyone at ${app.company} for this role.`);
-  return { people: chosen.map((item, index) => ({ ...item.person, rank: index + 1 })), domain, notes };
+  // People with a verified email come first; within each group the role order stays (posting, recruiters, managers, team).
+  const ranked = [...chosen.filter((item) => item.person.email), ...chosen.filter((item) => !item.person.email)].slice(0, MAX_CONTACTS);
+  return { people: ranked.map((item, index) => ({ ...item.person, rank: index + 1 })), domain, notes };
 }
 
 export const OUTREACH_EMAIL_PROMPT = `You write short cold emails from a college student to people at a company where the student just applied.

@@ -238,6 +238,7 @@ function mapApolloPerson(raw: Record<string, unknown>): Contact | null {
     location: [raw.city, raw.state].filter(Boolean).join(", ") || String(raw.country ?? ""),
     school,
     profileUrl: typeof raw.linkedin_url === "string" ? raw.linkedin_url : null,
+    photoUrl: urlOrNull(raw.photo_url),
     email: null,
     emailStatus: raw.has_email ? "available" : "unknown",
     phone: null,

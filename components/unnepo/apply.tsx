@@ -382,9 +382,10 @@ function ProfileDetails({ profile, resume, onSaved }: { profile: ApplicationProf
 }
 
 function AppliedPage({ data, onReload, onContinue }: { data: ApplyData; onReload: () => Promise<void>; onContinue: (id: string) => void }) {
-  const [open, setOpen] = useState<string | null>(null);
-  const [problem, setProblem] = useState("");
   const apps = data.applications;
+  // The most recent applied job starts open so its people are visible right away.
+  const [open, setOpen] = useState<string | null>(() => apps.find((app) => app.status === "submitted" || app.status === "applied_manual")?.id ?? null);
+  const [problem, setProblem] = useState("");
   async function act(path: string, method: string, body: unknown) {
     setProblem("");
     try {
@@ -410,14 +411,19 @@ function AppliedPage({ data, onReload, onContinue }: { data: ApplyData; onReload
             const applied = app.status === "submitted" || app.status === "applied_manual";
             return (
               <li key={app.id} className="border-b border-line last:border-b-0">
-                <button type="button" className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.03] sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_7rem_auto]" onClick={() => setOpen(expanded ? null : app.id)} aria-expanded={expanded}>
+                <button type="button" className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.03] sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_7rem_auto_auto]" onClick={() => setOpen(expanded ? null : app.id)} aria-expanded={expanded}>
                   <span className="min-w-0"><span className="block truncate font-medium">{app.company}</span><span className="block truncate text-sm text-muted sm:hidden">{app.title}</span></span>
                   <span className="hidden truncate text-sm text-muted sm:block">{app.title}</span>
                   <span className="hidden text-sm text-muted sm:block">{when(app.submittedAt ?? app.createdAt)}</span>
-                  <StatusChip status={app.status} />
+                  <span className="hidden sm:block"><StatusChip status={app.status} /></span>
+                  <span className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium ${expanded ? "border-white/40 text-white" : "border-line text-ink"}`}>
+                    {applied ? `${app.contacts?.length ? `${app.contacts.length} ` : ""}People` : "Details"}
+                    <span aria-hidden className={`transition-transform ${expanded ? "rotate-180" : ""}`}>▾</span>
+                  </span>
                 </button>
                 {expanded && (
                   <div className="space-y-4 border-t border-line bg-card/40 px-4 py-4">
+                    <div className="flex flex-wrap items-center gap-2 sm:hidden"><StatusChip status={app.status} /><span className="text-xs text-faint">{when(app.submittedAt ?? app.createdAt)}</span></div>
                     {!applied ? (
                       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
                         <p>People are found after you apply.</p>
@@ -442,6 +448,15 @@ function AppliedPage({ data, onReload, onContinue }: { data: ApplyData; onReload
       )}
     </div>
   );
+}
+
+function Avatar({ name, photoUrl }: { name: string; photoUrl: string | null }) {
+  const [failed, setFailed] = useState(false);
+  const initials = name.split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
+  if (photoUrl && !failed) {
+    return <img src={photoUrl} alt="" className="h-12 w-12 shrink-0 rounded-full border border-line object-cover" onError={() => setFailed(true)} />;
+  }
+  return <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line bg-card text-sm font-medium text-muted">{initials}</span>;
 }
 
 function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contactId: string, status: OutreachState) => void; onRetry: () => void }) {
@@ -471,7 +486,7 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
           <article key={contact.id} className="rounded-xl border border-line bg-panel p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
-                {contact.photoUrl ? <img src={contact.photoUrl} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover" /> : <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-card text-sm text-muted">{contact.name.slice(0, 1)}</span>}
+                <Avatar name={contact.name} photoUrl={contact.photoUrl} />
                 <div className="min-w-0">
                   <p className="truncate font-medium">{contact.name} <span className="ml-1 rounded-full border border-line px-2 py-0.5 align-middle text-[10px] text-muted">{ROLE_LABEL[contact.role]}</span></p>
                   <p className="truncate text-sm text-muted">{contact.title}</p>
@@ -487,7 +502,12 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
                 <button type="button" className="text-ink underline-offset-4 hover:underline" onClick={() => void copy(`${contact.id}:email`, contact.email!)}>{copied === `${contact.id}:email` ? "Copied ✓" : contact.email}</button>
               ) : <span className="text-muted">No verified email</span>}
               {contact.emailSource && <span className="text-[11px] text-faint">via {contact.emailSource === "job_posting" ? "the posting, verified by Hunter" : contact.emailSource === "hunter" ? "Hunter" : "Apollo"}</span>}
-              {contact.linkedinUrl && <a className="text-xs text-muted hover:text-white" href={contact.linkedinUrl} target="_blank" rel="noreferrer">LinkedIn ↗</a>}
+              {contact.linkedinUrl && (
+                <a className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-white/5" href={contact.linkedinUrl} target="_blank" rel="noreferrer" aria-label={`${contact.name} on LinkedIn`}>
+                  <span aria-hidden className="flex h-4 w-4 items-center justify-center rounded-[3px] bg-[#0A66C2] text-[9px] font-bold text-white">in</span>
+                  LinkedIn
+                </a>
+              )}
             </div>
             {email && (
               <div className="mt-3">

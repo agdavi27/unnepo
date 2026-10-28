@@ -222,7 +222,7 @@ describe("applications", () => {
 });
 
 describe("people after applying", () => {
-  it("ranks the named recruiter first, keeps only verified emails, and writes an email for each person", async () => {
+  it("ranks people with verified emails first, keeps photos, and writes an email for each person", async () => {
     process.env.APOLLO_API_KEY = "apollo";
     process.env.HUNTER_API_KEY = "hunter";
     process.env.ANTHROPIC_API_KEY = "anthropic";
@@ -249,10 +249,14 @@ describe("people after applying", () => {
       }
       if (url.includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
-        // Apollo verifies everyone except Taylor.
-        return Response.json({ matches: details.map((item) => ({ id: item.id, email: item.id === "m1" ? "taylor@acme.com" : `${item.id}@acme.com`, email_status: item.id === "m1" ? "guessed" : "verified" })) });
+        // Apollo verifies everyone except Taylor and the extra recruiter, and returns photos for all.
+        const unverified = new Set(["m1", "r3"]);
+        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@acme.com`, email_status: unverified.has(item.id) ? "guessed" : "verified", photo_url: `https://img.example.com/${item.id}.jpg` })) });
       }
-      if (url.includes("email-finder")) return Response.json({ data: { email: "taylor.brooks@acme.com", verification: { status: "valid" } } });
+      if (url.includes("email-finder")) {
+        const found = new URL(url).searchParams.get("first_name") === "Taylor";
+        return Response.json({ data: found ? { email: "taylor.brooks@acme.com", verification: { status: "valid" } } : { email: null } });
+      }
       return new Response("unexpected", { status: 500 });
     });
     model.replies.push(JSON.stringify({ emails: [1, 2, 3, 4, 5].map((index) => ({ index, subject: `Subject ${index}`, body: `Hi ${index}, I applied to the Product Analyst Intern role.` })) }));
@@ -272,7 +276,10 @@ describe("people after applying", () => {
     ]);
     expect(contacts[0]).toMatchObject({ email: "jordan.smith@acme.com", emailSource: "apollo", title: "Senior Recruiter" });
     // Apollo's guess is dropped; Hunter's verified address is used instead.
-    expect(contacts[3]).toMatchObject({ email: "taylor.brooks@acme.com", emailSource: "hunter" });
+    expect(contacts[3]).toMatchObject({ email: "taylor.brooks@acme.com", emailSource: "hunter", photoUrl: "https://img.example.com/m1.jpg" });
+    expect(contacts[1]).toMatchObject({ photoUrl: "https://img.example.com/r1.jpg", linkedinUrl: "https://linkedin.com/in/r1" });
+    // The third recruiter had no verified email, so verified people outranked them.
+    expect(contacts.map((item) => item.name)).not.toContain("Extra Person");
     expect(contacts.every((item) => item.emailBody?.includes("Product Analyst Intern"))).toBe(true);
     expect(model.calls.at(-1)).toContain("Jordan Smith");
     expect(seen.some((url) => url.includes("api_key=hunter"))).toBe(false);
