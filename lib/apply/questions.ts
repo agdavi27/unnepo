@@ -1,3 +1,4 @@
+import { bestOption } from "@/lib/apply/options";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 
 /**
@@ -6,13 +7,17 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
   [/^(legal )?last name\b|^surname|^family name/i, "lastName"],
   [/^(full |legal )?name\b(?!.*(company|school|employer|reference|university))/i, "fullName"],
   [/\be-?mail\b/i, "email"],
+  [/^(address line 1|street address|address 1|address|street)$/i, "addressLine1"],
+  [/^(state|province|state\/province|state or province|region)$/i, "state"],
+  [/^(postal code|zip|zip code|zip\/postal code|postcode)$/i, "postalCode"],
+  [/^(country|country\/territory|country\/region|country phone code|phone country code)$/i, "country"],
   [/\b(phone|mobile|cell)\b/i, "phone"],
   [/linkedin/i, "linkedin"],
   [/github/i, "github"],
@@ -67,6 +72,10 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
     case "github": return pick(p.github);
     case "website": return pick(p.website);
     case "city": return pick(p.city);
+    case "addressLine1": return pick(p.addressLine1 ?? "");
+    case "state": return pick(p.state ?? "");
+    case "postalCode": return pick(p.postalCode ?? "");
+    case "country": return pick(p.country ?? "");
     case "school": return pick(context.school);
     case "major": return pick(context.majors[0] ?? "");
     case "graduationYear": return pick(context.graduationYear);
@@ -77,8 +86,7 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
 
 function matchOption(answer: string, options: string[]) {
   if (!options.length) return answer;
-  const lower = answer.trim().toLowerCase();
-  return options.find((option) => option.trim().toLowerCase() === lower) ?? null;
+  return bestOption(answer, options);
 }
 
 /**

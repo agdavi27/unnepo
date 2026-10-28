@@ -1,4 +1,4 @@
-export type Ats = "greenhouse" | "lever" | "ashby" | "other";
+export type Ats = "greenhouse" | "lever" | "ashby" | "workday" | "other";
 
 export type ApplicationStatus =
   | "extracted" // job read; answers not reviewed yet
@@ -60,6 +60,8 @@ export type FillReport = {
   /** "created" when Unnepo made a job-site account on this run, "signed_in" when it used an existing one. */
   account?: "created" | "signed_in" | null;
   host?: string;
+  /** Required questions on the page where autofill stopped that the student can answer in Unnepo. */
+  pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
 };
 
 export type Confirmation = { url: string; text: string; detectedAt: string };
@@ -127,6 +129,10 @@ export type ApplicationProfile = {
   website: string;
   github: string;
   city: string;
+  addressLine1?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
   /** Answers the student saved from earlier forms, keyed by a normalized question label. */
   saved: Record<string, { label: string; answer: string; updatedAt: string }>;
   /** The student's one job-site password, encrypted. Never sent to the browser page. */

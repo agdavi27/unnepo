@@ -97,6 +97,24 @@ describe("reading job links", () => {
     expect(jobKeyFor(parseJobUrl("https://acme.com/careers/role/?utm_source=x#top"))).toBe("url:acme.com/careers/role");
   });
 
+  it("reads Workday links through Workday's job API and keys them by requisition", async () => {
+    const wd = parseJobUrl("https://acme.wd5.myworkdayjobs.com/en-US/AcmeCareers/job/US-ME-Portland/Marketing-Analyst_JR123/apply");
+    expect(wd).toMatchObject({ ats: "workday", board: "acme.wd5.myworkdayjobs.com|acme|AcmeCareers", jobId: "US-ME-Portland/Marketing-Analyst_JR123" });
+    expect(jobKeyFor(wd)).toBe("workday:acme:jr123");
+    expect(jobKeyFor(parseJobUrl("https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/Remote/Marketing-Analyst_JR123"))).toBe("workday:acme:jr123");
+    setJobPageFetcherForTests(async (url) => {
+      expect(url).toBe("https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/AcmeCareers/job/US-ME-Portland/Marketing-Analyst_JR123");
+      return Response.json({
+        jobPostingInfo: { title: "Marketing Analyst", location: "US, ME, Portland", canApply: true, externalUrl: "https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/US-ME-Portland/Marketing-Analyst_JR123",
+          jobDescription: "<p>Join us.</p><p><b>What we need to see:</b></p><ul><li>Excel</li><li>Clear writing</li></ul>" },
+        hiringOrganization: { name: "1000 Acme Holdings" },
+      });
+    });
+    const job = await extractJob("https://acme.wd5.myworkdayjobs.com/en-US/AcmeCareers/job/US-ME-Portland/Marketing-Analyst_JR123/apply");
+    expect(job).toMatchObject({ ats: "workday", title: "Marketing Analyst", company: "Acme", location: "US, ME, Portland", requirements: ["Excel", "Clear writing"] });
+    expect(job.applicationUrl).toBe("https://acme.wd5.myworkdayjobs.com/AcmeCareers/job/US-ME-Portland/Marketing-Analyst_JR123/apply");
+  });
+
   it("refuses links to private addresses", async () => {
     await expect(assertPublicUrl("http://localhost:3000/x")).rejects.toThrow(/private/);
     await expect(assertPublicUrl("http://127.0.0.1/x")).rejects.toThrow(/private/);

@@ -183,7 +183,7 @@ export async function updateAnswers(userId: string, raw: unknown) {
   return { application: summary(updated!) };
 }
 
-const PROFILE_FIELDS = ["firstName", "lastName", "email", "phone", "linkedin", "website", "github", "city"] as const;
+const PROFILE_FIELDS = ["firstName", "lastName", "email", "phone", "linkedin", "website", "github", "city", "addressLine1", "state", "postalCode", "country"] as const;
 
 /** The profile as the page sees it: the encrypted password is replaced by whether one is set. */
 function publicProfile(profile: ApplicationProfile) {
@@ -235,7 +235,7 @@ const STOP_MESSAGE: Record<FlowResult["stoppedAt"], (report: FlowResult, email: 
   needs_input: (r) => {
     const names = r.failed.map((item) => item.label);
     const list = names.length ? ` It needs: ${names.slice(0, 4).join("; ")}${names.length > 4 ? ` and ${names.length - 4} more` : ""}.` : "";
-    const profileHint = names.some((label) => classifyQuestion(label).field && ["firstName", "lastName", "fullName", "phone", "email", "city", "linkedin"].includes(classifyQuestion(label).field!))
+    const profileHint = names.some((label) => classifyQuestion(label).field && ["firstName", "lastName", "fullName", "phone", "email", "city", "linkedin", "addressLine1", "state", "postalCode", "country"].includes(classifyQuestion(label).field!))
       ? " Add missing contact details under Your application details so Unnepo fills them next time."
       : "";
     return `Filled ${r.filled.length} fields, then stopped on a page that needs you.${list} Finish it in the live view, then press Continue autofill.${profileHint}`;
@@ -298,6 +298,30 @@ export async function startAutofill(userId: string, raw: unknown) {
     await applications.update(userId, app.id, { status: "failed", browserSessionId: null, statusMessage: message });
     throw error instanceof ServiceError ? error : new ServiceError(message, "browser_failed", 502);
   }
+}
+
+/**
+ * Saves the student's answers to questions autofill stopped on. They're kept by question label, so the
+ * same question on any later application (Workday's are worded the same everywhere) fills itself.
+ */
+export async function answerPending(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; answers?: Record<string, unknown> };
+  const app = await requireApp(userId, body.applicationId);
+  const pending = app.fillReport?.pending ?? [];
+  const info = await student(userId);
+  const saved = { ...info.profile.saved };
+  let count = 0;
+  for (const [label, value] of Object.entries(body.answers ?? {})) {
+    const question = pending.find((item) => item.label === label);
+    const answer = String(value ?? "").trim().slice(0, 2000);
+    if (!question || !answer) continue;
+    if (question.options.length && !question.options.includes(answer)) throw new ServiceError(`Pick one of the options for "${label}".`, "answer", 400);
+    saved[normalizeLabel(label)] = { label, answer, updatedAt: nowIso() };
+    count += 1;
+  }
+  if (!count) throw new ServiceError("Answer at least one question first.", "answer", 400);
+  await applicationProfiles.put(userId, { ...info.profile, saved });
+  return { saved: count };
 }
 
 /** Picks up in the same browser after the student verified an email or finished a page themselves. */

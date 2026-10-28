@@ -1,5 +1,6 @@
 import type { Browser, Locator, Page } from "playwright-core";
 import { ServiceError } from "@/lib/errors";
+import { bestOption } from "@/lib/apply/options";
 import type { ApplicationQuestion, Confirmation, FillReport } from "@/lib/apply/types";
 
 /**
@@ -102,6 +103,55 @@ async function locate(page: Page, question: ApplicationQuestion): Promise<Locato
 
 const YES = /^(yes|true|y|1|i agree|agree)$/i;
 
+/** Clicks through Workday-style invisible click layers when a normal click is blocked. */
+async function clickSmart(page: Page, target: Locator) {
+  try {
+    await target.click({ timeout: 3_000 });
+  } catch {
+    const label = (await target.getAttribute("aria-label").catch(() => null)) || (await target.innerText().catch(() => "")).trim();
+    const overlay = label ? page.locator(`[data-automation-id='click_filter'][aria-label="${cssAttr(label)}"]`) : null;
+    if (overlay && (await overlay.count()) > 0) await overlay.first().click({ timeout: 5_000 });
+    else await target.click({ force: true, timeout: 5_000 });
+  }
+}
+
+/** Options of a custom dropdown (a button that opens a listbox), read by opening and closing it. */
+async function listboxOptions(page: Page, field: Locator) {
+  await clickSmart(page, field);
+  const list = page.locator("[role='listbox']:visible [role='option']");
+  await list.first().waitFor({ timeout: 4_000 }).catch(() => undefined);
+  const options = (await list.allInnerTexts().catch(() => [])).map((text) => text.replace(/\s+/g, " ").trim()).filter(Boolean);
+  await page.keyboard.press("Escape").catch(() => undefined);
+  return options;
+}
+
+async function pickListbox(page: Page, field: Locator, answer: string) {
+  await clickSmart(page, field);
+  const list = page.locator("[role='listbox']:visible [role='option']");
+  await list.first().waitFor({ timeout: 4_000 });
+  const texts = (await list.allInnerTexts()).map((text) => text.replace(/\s+/g, " ").trim());
+  const choice = bestOption(answer, texts);
+  if (!choice) {
+    await page.keyboard.press("Escape").catch(() => undefined);
+    throw new Error("option not found");
+  }
+  await list.nth(texts.indexOf(choice)).click();
+}
+
+/** Workday's searchable prompts ("How did you hear about us?"): type, then pick the matching result. */
+async function pickPrompt(page: Page, field: Locator, answer: string) {
+  await field.click();
+  await field.fill(answer);
+  await field.press("Enter");
+  await page.waitForTimeout(1200);
+  const options = page.locator("[data-automation-id='promptOption']:visible, [role='option']:visible");
+  const texts = (await options.allInnerTexts().catch(() => [])).map((text) => text.replace(/\s+/g, " ").trim());
+  const choice = bestOption(answer, texts) ?? (texts.length === 1 ? texts[0] : null);
+  if (!choice) throw new Error("option not found");
+  await options.nth(texts.indexOf(choice)).click();
+  await page.waitForTimeout(500);
+}
+
 async function setValue(page: Page, field: Locator, question: ApplicationQuestion, answer: string, resume: ResumeFile | null) {
   if (question.kind === "file") {
     if (!resume) throw new Error("no resume file");
@@ -112,7 +162,18 @@ async function setValue(page: Page, field: Locator, question: ApplicationQuestio
   const type = ((await field.getAttribute("type")) || "").toLowerCase();
   const role = ((await field.getAttribute("role")) || "").toLowerCase();
   if (tag === "select") {
-    await field.selectOption({ label: answer });
+    const labels = (await field.locator("option").allInnerTexts()).map((text) => text.trim());
+    const choice = bestOption(answer, labels);
+    if (!choice) throw new Error("option not found");
+    await field.selectOption({ label: choice });
+    return;
+  }
+  if (tag === "button" && (await field.getAttribute("aria-haspopup")) === "listbox") {
+    await pickListbox(page, field, answer);
+    return;
+  }
+  if ((await field.getAttribute("data-automation-id")) === "searchBox" || (await field.evaluate((el) => Boolean(el.closest("[data-automation-id='multiselectInputContainer']"))))) {
+    await pickPrompt(page, field, answer);
     return;
   }
   if (type === "checkbox") {
@@ -146,16 +207,19 @@ async function emptyRequiredLabels(page: Page) {
     const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input[required], textarea[required], select[required], [aria-required='true']"));
     for (const field of fields) {
       const type = (field.getAttribute("type") || "").toLowerCase();
-      if (type === "hidden" || type === "submit" || type === "radio") continue;
+      if (type === "hidden" || type === "submit" || type === "radio" || field.getAttribute("data-automation-id") === "beecatcher") continue;
       const style = window.getComputedStyle(field);
       if (style.display === "none" || style.visibility === "hidden") continue;
-      const empty = type === "checkbox" || type === "radio"
-        ? !document.querySelector(`input[name="${CSS.escape(field.getAttribute("name") || "")}"]:checked`)
-        : type === "file" ? !(field as HTMLInputElement).files?.length : !String((field as HTMLInputElement).value || "").trim();
+      const empty = field.tagName === "BUTTON"
+        ? /^(select one|select|choose( one)?|)$/i.test((field as HTMLElement).innerText.trim())
+        : type === "checkbox"
+          ? !(field as HTMLInputElement).checked
+          : type === "file" ? !(field as HTMLInputElement).files?.length : !String((field as HTMLInputElement).value || "").trim();
       if (!empty) continue;
       const id = field.getAttribute("id");
-      const label = (id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || field.closest("label")?.textContent || field.getAttribute("aria-label") || field.getAttribute("placeholder") || field.getAttribute("name") || "A required field";
-      out.push(label.replace(/\s+/g, " ").replace(/\*$/, "").trim().slice(0, 140));
+      const labelledBy = field.getAttribute("aria-labelledby");
+      const label = (id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || (labelledBy && document.getElementById(labelledBy.split(" ")[0])?.textContent) || field.closest("label")?.textContent || field.getAttribute("aria-label") || field.getAttribute("placeholder") || field.getAttribute("name") || "A required field";
+      out.push(label.replace(/\s+/g, " ").replace(/\b(select one|required)\b/gi, "").replace(/\*/g, "").trim().slice(0, 140));
     }
     return [...new Set(out)];
   });
@@ -206,7 +270,8 @@ export function passwordAllowedOn(pageUrl: string, applicationUrl: string) {
 async function settle(page: Page) {
   await page.waitForLoadState("domcontentloaded", { timeout: 15_000 }).catch(() => undefined);
   await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => undefined);
-  await page.waitForTimeout(500);
+  // Workday draws each step after the page loads.
+  await page.waitForTimeout(/myworkday(jobs|site)\.com/.test(page.url()) ? 2_500 : 500);
 }
 
 async function visible(locator: Locator) {
@@ -215,6 +280,12 @@ async function visible(locator: Locator) {
     if (await locator.nth(index).isVisible().catch(() => false)) return locator.nth(index);
   }
   return null;
+}
+
+/** Buttons inside the form that holds the password box, so a header "Sign In" link isn't clicked by mistake. */
+function formButton(page: Page, name: RegExp) {
+  const form = page.locator("form").filter({ has: page.locator("input[type='password']") });
+  return form.getByRole("button", { name }).or(form.locator("button[type='submit']").filter({ hasText: name }));
 }
 
 function button(page: Page, name: RegExp) {
@@ -236,9 +307,8 @@ async function authKind(page: Page): Promise<"signup" | "signin" | null> {
   let shown = 0;
   for (let index = 0; index < (await passwords.count()); index += 1) if (await passwords.nth(index).isVisible().catch(() => false)) shown += 1;
   if (!shown) return null;
-  const create = await visible(page.getByRole("button", { name: /^(create (an )?account|sign up|register|create)$/i }));
-  if (shown >= 2 || create) return "signup";
-  return "signin";
+  // A single password box is a sign-in form even when a "Create Account" link sits next to it (Workday).
+  return shown >= 2 ? "signup" : "signin";
 }
 
 async function emailField(page: Page) {
@@ -272,15 +342,23 @@ async function acceptSignupTerms(page: Page) {
 }
 
 /** Opens the form from a job page: Apply, Apply now, or Workday's Apply Manually. */
-async function openForm(page: Page) {
-  for (const name of [/^apply( for this job| now)?$/i, /^apply manually$/i]) {
+async function openForm(page: Page, hasResume: boolean) {
+  // Workday's start page: Autofill with Resume reads the resume into My Experience, so it's preferred.
+  const starts = hasResume ? [/^apply( for this job| now)?$/i, /^autofill with resume$/i, /^apply manually$/i] : [/^apply( for this job| now)?$/i, /^apply manually$/i];
+  for (const name of starts) {
     const formFields = await page.locator("input:visible:not([type='search']):not([type='hidden']):not([type='checkbox']), textarea:visible, select:visible").count();
     if (formFields >= 2 || (await authKind(page))) return;
     const entry = await visible(button(page, name));
     if (entry) {
-      await entry.click().catch(() => undefined);
+      await clickSmart(page, entry).catch(() => undefined);
       await settle(page);
     }
+  }
+  // Workday hides the email and password boxes behind "Sign in with email".
+  const withEmail = await visible(page.getByRole("button", { name: /^sign in with email$/i }));
+  if (withEmail && !(await authKind(page))) {
+    await clickSmart(page, withEmail);
+    await settle(page);
   }
 }
 
@@ -324,7 +402,7 @@ async function scanRadioGroups(page: Page): Promise<RadioGroup[]> {
         node = node.parentElement;
       }
       const required = radios.some((radio) => radio.required) || Boolean(radios[0].closest("[aria-required='true'], [role='radiogroup'][aria-required='true']"));
-      if (question) out.push({ name, question: question.slice(0, 600), options, required });
+      if (question) out.push({ name, question: question.replace(/\*/g, "").replace(/\s+/g, " ").trim().slice(0, 600), options, required });
     }
     return out;
   });
@@ -338,27 +416,41 @@ function radioAnswer(group: RadioGroup, answerFor: FlowOptions["answerFor"]) {
   return answer ? group.options.find((option) => option.label.toLowerCase() === answer.toLowerCase()) ?? null : null;
 }
 
-type ScannedField = { selector: string; label: string; kind: ApplicationQuestion["kind"]; options: string[] };
+type ScannedField = { selector: string; label: string; kind: ApplicationQuestion["kind"]; options: string[]; listbox: boolean; required: boolean };
 
 /** Visible empty fields on the page, with their labels, for questions the job board didn't publish. */
 async function scanFields(page: Page): Promise<ScannedField[]> {
   return page.evaluate(() => {
-    const out: Array<{ selector: string; label: string; kind: "text" | "textarea" | "select" | "file"; options: string[] }> = [];
-    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select"));
+    const out: Array<{ selector: string; label: string; kind: "text" | "textarea" | "select" | "file" | "checkbox"; options: string[]; listbox: boolean; required: boolean }> = [];
+    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select, button[aria-haspopup='listbox']"));
     fields.forEach((field, index) => {
       const type = (field.getAttribute("type") || "text").toLowerCase();
-      if (["hidden", "submit", "button", "password", "checkbox", "radio", "search", "image", "reset"].includes(type)) return;
+      const listbox = field.tagName === "BUTTON";
+      const container0 = field.closest("[data-automation-id^='formField']");
+      const checkbox = type === "checkbox";
+      if (!listbox && ["hidden", "submit", "button", "password", "radio", "image", "reset"].includes(type)) return;
+      // Checkboxes only when required and unticked (an agreement on the page); everything else is the student's call.
+      if (checkbox && ((field as HTMLInputElement).checked || !(field.hasAttribute("required") || field.getAttribute("aria-required") === "true" || /\*/.test(container0?.textContent || field.closest("label")?.textContent || "")))) return;
+      // A searchable prompt that already has a choice shows it as a selected item.
+      if (field.closest("[data-automation-id='multiselectInputContainer']") && container0?.querySelector("[data-automation-id='selectedItem']")) return;
+      if (type === "search" && field.getAttribute("data-automation-id") !== "searchBox") return;
+      // Hidden "beecatcher" style fields exist to catch bots; never touch them.
+      if (field.getAttribute("data-automation-id") === "beecatcher" || field.getAttribute("aria-hidden") === "true" || /honeypot|bee-?catcher/i.test(field.getAttribute("name") || "")) return;
       const rect = field.getBoundingClientRect();
       const style = window.getComputedStyle(field);
       if ((!rect.width && !rect.height && type !== "file") || style.visibility === "hidden" || style.display === "none") return;
-      if (type === "file" ? (field as HTMLInputElement).files?.length : String(field.value || "").trim()) return;
+      if (!checkbox && (listbox ? !/^(select one|select|choose( one)?|)$/i.test((field as HTMLElement).innerText.trim()) : type === "file" ? (field as HTMLInputElement).files?.length : String(field.value || "").trim())) return;
       const id = field.getAttribute("id");
-      const label = ((id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || field.closest("label")?.textContent || field.getAttribute("aria-label") || field.getAttribute("placeholder") || "").replace(/\s+/g, " ").replace(/\*$/, "").trim();
+      const labelledBy = field.getAttribute("aria-labelledby");
+      const container = field.closest("[data-automation-id^='formField']");
+      const label = ((id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || (labelledBy && document.getElementById(labelledBy.split(" ")[0])?.textContent) || container?.querySelector("label")?.textContent || field.closest("label")?.textContent || field.getAttribute("aria-label") || field.getAttribute("placeholder") || "")
+        .replace(/\s+/g, " ").replace(/\b(select one|required)\b/gi, "").replace(/\*/g, "").trim();
       if (!label) return;
       field.setAttribute("data-unnepo-field", String(index));
-      const kind = field.tagName === "SELECT" ? "select" : field.tagName === "TEXTAREA" ? "textarea" : type === "file" ? "file" : "text";
-      const options = field.tagName === "SELECT" ? Array.from((field as HTMLSelectElement).options).map((option) => option.text.trim()).filter((text) => text && !/^(select|choose|--)/i.test(text)) : [];
-      out.push({ selector: `[data-unnepo-field="${index}"]`, label: label.slice(0, 200), kind, options });
+      const required = field.hasAttribute("required") || field.getAttribute("aria-required") === "true" || /\*/.test(container?.querySelector("label")?.textContent || "");
+      const kind = checkbox ? "checkbox" : field.tagName === "SELECT" || listbox ? "select" : field.tagName === "TEXTAREA" ? "textarea" : type === "file" ? "file" : "text";
+      const options = checkbox ? ["Yes"] : field.tagName === "SELECT" ? Array.from((field as HTMLSelectElement).options).map((option) => option.text.trim()).filter((text) => text && !/^(select|choose|--)/i.test(text)) : [];
+      out.push({ selector: `[data-unnepo-field="${index}"]`, label: label.slice(0, 200), kind, options, listbox, required });
     });
     return out;
   });
@@ -370,6 +462,8 @@ async function scanFields(page: Page): Promise<ScannedField[]> {
  */
 export async function runApplicationFlow(page: Page, options: FlowOptions): Promise<FlowResult> {
   const startHost = new URL(options.url).hostname;
+  // No single step may hang the run: a missing field fails fast and goes to the student instead.
+  page.setDefaultTimeout(10_000);
   if (options.navigate) {
     await page.goto(options.url, { waitUntil: "domcontentloaded", timeout: 45_000 });
     await settle(page);
@@ -382,6 +476,9 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
   const failed = new Map<string, string>();
   let account: FlowResult["account"] = null;
   let triedSignin = false;
+  let resumeUploaded = false;
+  /** Required questions Unnepo couldn't answer, with their options, so the student can answer them in Unnepo. */
+  const ask = new Map<string, { kind: ApplicationQuestion["kind"]; options: string[] }>();
   const host = () => {
     try {
       return new URL(page.url()).hostname;
@@ -396,10 +493,11 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     pages,
     account,
     host: host(),
+    pending: [...ask].filter(([label]) => failed.has(label)).map(([label, item]) => ({ label, kind: item.kind, options: item.options })).slice(0, 25),
   });
 
   for (let pageIndex = 1; pageIndex <= MAX_PAGES; pageIndex += 1) {
-    await openForm(page);
+    await openForm(page, Boolean(options.resume));
     if (VERIFY_TEXT.test(await bodyText(page)) && !(await authKind(page))) return done("email_verification", pageIndex);
 
     const auth = await authKind(page);
@@ -414,9 +512,9 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
         const email = await emailField(page);
         if (email) await email.fill(options.credentials.email);
         await fillPasswords(page, options.credentials.password);
-        const submit = await visible(button(page, /^(sign in|log ?in|continue|next|submit)$/i));
+        const submit = (await visible(formButton(page, /^(sign in|log ?in|continue|next|submit)$/i))) ?? (await visible(button(page, /^(sign in|log ?in|continue|next|submit)$/i)));
         if (!submit) return done("signin_failed", pageIndex);
-        await submit.click();
+        await clickSmart(page, submit);
         await settle(page);
         if (!(await authKind(page))) {
           account = "signed_in";
@@ -426,7 +524,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
         // No account yet: switch to the create-account form.
         const create = await visible(button(page, /^(create (an )?account|sign up|register|new user\??)$/i));
         if (!create || !options.allowSignup) return done(options.allowSignup ? "signin_failed" : "needs_account", pageIndex);
-        await create.click();
+        await clickSmart(page, create);
         await settle(page);
         continue;
       }
@@ -437,9 +535,9 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
       await email.fill(options.credentials.email);
       await fillPasswords(page, options.credentials.password);
       await acceptSignupTerms(page);
-      const create = await visible(button(page, /^(create (an )?account|sign up|register|create|continue|submit)$/i));
+      const create = (await visible(formButton(page, /^(create (an )?account|sign up|register|create|continue|submit)$/i))) ?? (await visible(button(page, /^(create (an )?account|sign up|register|create|continue|submit)$/i)));
       if (!create) return done("needs_input", pageIndex);
-      await create.click();
+      await clickSmart(page, create);
       await settle(page);
       if (await authKind(page)) {
         const text = await bodyText(page);
@@ -447,7 +545,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
           // An account exists already; go back to sign in with the same password.
           const signin = await visible(button(page, /^(sign in|log ?in)$/i));
           if (signin) {
-            await signin.click();
+            await clickSmart(page, signin);
             await settle(page);
             continue;
           }
@@ -464,6 +562,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     for (const question of options.questions) {
       const answer = question.answer?.trim();
       if (!answer || filled.has(question.label)) continue;
+      if (question.kind === "file" && resumeUploaded) continue;
       const field = await locate(page, question);
       // File inputs are usually hidden behind a styled button, so only other fields must be visible.
       if (!field || (question.kind !== "file" && !(await field.isVisible().catch(() => false)))) continue;
@@ -471,54 +570,99 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
         await setValue(page, field, question, answer, options.resume);
         filled.add(question.label);
         failed.delete(question.label);
+        if (question.kind === "file") resumeUploaded = true;
       } catch (error) {
         failed.set(question.label, error instanceof Error && /no resume/.test(error.message) ? "Upload a resume in Settings first." : "Couldn't fill this field. Fill it in the live view.");
       }
     }
     // Everything else on the page, matched by label to what Unnepo knows for sure.
-    for (const field of await scanFields(page)) {
-      const answer = field.kind === "file" ? (/resume|cv/i.test(field.label) && options.resume ? options.resume.name : null) : options.answerFor(field.label, field.kind, field.options);
-      if (!answer) continue;
+    const pageText = await bodyText(page);
+    // Sites like Workday redraw the form after each choice, so the page is scanned again after every field.
+    const handled = new Set<string>();
+    for (let guard = 0; guard < 60; guard += 1) {
+      const field = (await scanFields(page)).find((item) => !handled.has(item.label));
+      if (!field) break;
+      handled.add(field.label);
+      let fieldOptions = field.options;
+      if (field.listbox) fieldOptions = await listboxOptions(page, page.locator(field.selector).first()).catch(() => []);
+      let answer: string | null = null;
+      if (field.kind === "file") {
+        // One resume upload per run, on a page that asks for a resume or CV.
+        const wantsResume = /resume|cv|curriculum/i.test(field.label) || /\b(resume|cv)\b/i.test(pageText);
+        answer = wantsResume && options.resume && !resumeUploaded && !pageText.includes(options.resume.name) ? options.resume.name : null;
+      } else {
+        answer = options.answerFor(field.label, field.kind, fieldOptions);
+      }
+      if (!answer) {
+        if (field.required && field.kind !== "file") {
+          ask.set(field.label, { kind: field.kind, options: fieldOptions });
+          failed.set(field.label, "Required. Answer it below or in the live view.");
+        }
+        continue;
+      }
       try {
-        const locator = page.locator(field.selector).first();
-        const question: ApplicationQuestion = { key: field.selector, label: field.label, kind: field.kind, required: false, options: field.options, sensitive: false, answer, source: null, evidence: null };
+        // Find the field again by its label: the marker from the scan may be gone after a redraw.
+        const fresh = (await scanFields(page)).find((item) => item.label === field.label);
+        const locator = page.locator(fresh?.selector ?? field.selector).first();
+        const question: ApplicationQuestion = { key: field.selector, label: field.label, kind: field.kind, required: false, options: fieldOptions, sensitive: false, answer, source: null, evidence: null };
         await setValue(page, locator, question, answer, options.resume);
         filled.add(field.label);
+        failed.delete(field.label);
+        ask.delete(field.label);
+        if (field.kind === "file") resumeUploaded = true;
       } catch {
         failed.set(field.label, "Couldn't fill this field. Fill it in the live view.");
+        if (field.required) ask.set(field.label, { kind: field.kind, options: fieldOptions });
       }
     }
 
     for (const group of await scanRadioGroups(page)) {
       const answer = radioAnswer(group, options.answerFor);
+      const label = group.question.slice(0, 160);
       if (!answer) {
-        if (group.required) failed.set(group.question.slice(0, 120), "Required. Only you can answer this one. Choose it in the live view.");
+        if (group.required) {
+          failed.set(label, "Required. Answer it below or in the live view.");
+          ask.set(label, { kind: "select", options: group.options.map((option) => option.label) });
+        }
         continue;
       }
       try {
         await page.locator(group.selector(answer.value)).first().check({ force: true });
-        filled.add(group.question.slice(0, 120));
+        filled.add(label);
+        failed.delete(label);
+        ask.delete(label);
       } catch {
-        failed.set(group.question.slice(0, 120), "Couldn't pick an answer. Choose it in the live view.");
+        failed.set(label, "Couldn't pick an answer. Choose it in the live view.");
       }
     }
 
     const empty = await emptyRequiredLabels(page);
+    for (const label of empty) if (!failed.has(label)) failed.set(label, "Required. Answer it below or in the live view.");
     const next = await visible(button(page, NEXT_BUTTON));
     const submit = await visible(page.getByRole("button", { name: /^(submit( application)?|send application|complete application|submit my application)$/i }).or(page.locator("input[type='submit'][value*='Submit' i]")));
-    if (submit && !next) {
-      for (const label of empty) if (!failed.has(label)) failed.set(label, "Required. Fill it in the live view.");
-      return done("review", pageIndex);
+    if (submit && !next) return done("review", pageIndex);
+    const unanswered = [...ask.keys()].some((label) => failed.has(label));
+    if (empty.length || unanswered || !next) return done("needs_input", pageIndex);
+
+    const before = page.url() + (await bodyText(page));
+    await clickSmart(page, next);
+    // Workday moves between steps without a page load; wait for the content to change.
+    const deadline = Date.now() + 12_000;
+    let after = before;
+    while (Date.now() < deadline && after === before) {
+      await page.waitForTimeout(700);
+      after = page.url() + (await bodyText(page));
     }
-    const unansweredRadios = [...failed.keys()].some((label) => failed.get(label)?.startsWith("Required. Only you"));
-    if (empty.length || unansweredRadios || !next) {
-      for (const label of empty) if (!failed.has(label)) failed.set(label, "Required. Fill it in the live view.");
+    await settle(page);
+    if (after === before) {
+      // The site refused to move on. Its own error messages say why.
+      const errors = await page.locator("[data-automation-id='errorMessage'], [role='alert']:visible, .error:visible, [aria-invalid='true']").allInnerTexts().catch(() => []);
+      for (const message of errors.map((text) => text.replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 8)) failed.set(message.slice(0, 160), "The site flagged this. Fix it below or in the live view.");
       return done("needs_input", pageIndex);
     }
-    const before = page.url() + (await bodyText(page)).slice(0, 400);
-    await next.click();
-    await settle(page);
-    if (page.url() + (await bodyText(page)).slice(0, 400) === before) return done("needs_input", pageIndex);
+    // A new page: earlier "needs you" notes belong to the page just left.
+    for (const [label, reason] of failed) if (reason.startsWith("Required")) failed.delete(label);
+    ask.clear();
   }
   return done("needs_input", MAX_PAGES);
 }

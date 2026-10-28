@@ -40,7 +40,7 @@ export function htmlToText(html: string) {
     .trim();
 }
 
-const REQUIREMENT_HEADINGS = /^(?:•\s*)?(?:basic |minimum |preferred |required |key )?(?:requirements|qualifications|what you(?:'|’)?ll (?:need|bring)|what you bring|what we(?:'|’)?re looking for|who you are|you (?:have|might be a fit|are)|about you|skills(?: and| &) experience|must[- ]haves?|nice[- ]to[- ]haves?|your (?:expertise|experience|background|skills)|(?:the )?ideal candidate|you(?:'|’)?ll bring|you bring)\b.{0,40}$/i;
+const REQUIREMENT_HEADINGS = /^(?:•\s*)?(?:basic |minimum |preferred |required |key )?(?:requirements|qualifications|what you(?:'|’)?ll (?:need|bring)|what you bring|what we(?:'|’)?re looking for|who you are|you (?:have|might be a fit|are)|about you|skills(?: and| &) experience|must[- ]haves?|nice[- ]to[- ]haves?|your (?:expertise|experience|background|skills)|(?:the )?ideal candidate|you(?:'|’)?ll bring|you bring|what we need to see|ways to stand out(?: from the crowd)?|basic qualifications|preferred qualifications|minimum qualifications)\b.{0,40}$/i;
 const SECTION_HEADING = /^[A-Z][^.!?•]{2,60}:?$/;
 
 /** Bullet lines under requirement-style headings. Only text that is in the posting. */
@@ -118,11 +118,46 @@ export function parseJobUrl(raw: string): ParsedUrl {
   }
   if (/(^|\.)lever\.co$/.test(host) && parts.length >= 2) return { ats: "lever", board: parts[0], jobId: parts[1], url };
   if (host === "jobs.ashbyhq.com" && parts.length >= 2) return { ats: "ashby", board: parts[0], jobId: parts[1], url };
+  const workday = parseWorkday(url);
+  if (workday) return workday;
   return { ats: "other", board: host, jobId: "", url };
+}
+
+/**
+ * Workday links: {tenant}.wd5.myworkdayjobs.com/{locale}/{site}/job/{location}/{title}_{req}
+ * or wd5.myworkdaysite.com/{locale}/recruiting/{tenant}/{site}/job/... The board is "host|tenant|site".
+ */
+function parseWorkday(url: URL): ParsedUrl | null {
+  const host = url.hostname.toLowerCase();
+  const parts = url.pathname.split("/").filter(Boolean).filter((part) => !/^[a-z]{2}-[A-Z]{2}$/.test(part));
+  let tenant = "";
+  let site = "";
+  let rest: string[] = [];
+  if (host.endsWith(".myworkdayjobs.com")) {
+    tenant = host.split(".")[0];
+    site = parts[0] ?? "";
+    rest = parts.slice(1);
+  } else if (host.endsWith("myworkdaysite.com") && parts[0] === "recruiting") {
+    tenant = parts[1] ?? "";
+    site = parts[2] ?? "";
+    rest = parts.slice(3);
+  } else {
+    return null;
+  }
+  const jobIndex = rest.findIndex((part) => part === "job" || part === "details");
+  if (!tenant || !site || jobIndex < 0) return null;
+  const path = rest.slice(jobIndex + 1).filter((part) => !["apply", "applyManually", "autofillWithResume", "useMyLastApplication"].includes(part));
+  if (!path.length) return null;
+  return { ats: "workday", board: `${host}|${tenant}|${site}`, jobId: path.join("/"), url };
 }
 
 /** One key per job, so pasting the same posting twice finds the first application. */
 export function jobKeyFor(parsed: ParsedUrl) {
+  if (parsed.ats === "workday") {
+    // The requisition id at the end of the slug identifies the job, whatever the location path.
+    const req = parsed.jobId.split("/").pop()!.split("_").pop()!;
+    return `workday:${parsed.board.split("|")[1]}:${req.toLowerCase()}`;
+  }
   if (parsed.ats !== "other") return `${parsed.ats}:${parsed.board.toLowerCase()}:${parsed.jobId.toLowerCase()}`;
   const url = new URL(parsed.url.toString());
   url.hash = "";
@@ -281,6 +316,45 @@ async function readAshby(parsed: ParsedUrl): Promise<Omit<JobDetails, "jobKey" |
   };
 }
 
+type WorkdayJob = {
+  jobPostingInfo?: {
+    title?: string;
+    jobDescription?: string;
+    location?: string;
+    additionalLocations?: string[];
+    externalUrl?: string;
+    canApply?: boolean;
+    jobReqId?: string;
+  };
+  hiringOrganization?: { name?: string };
+};
+
+/** Workday's public job API, the same one its career sites load. */
+async function readWorkday(parsed: ParsedUrl): Promise<Omit<JobDetails, "jobKey" | "jobUrl">> {
+  const [host, tenant, site] = parsed.board.split("|");
+  const job = await safeGetJson<WorkdayJob>(`https://${host}/wday/cxs/${encodeURIComponent(tenant)}/${encodeURIComponent(site)}/job/${parsed.jobId.split("/").map(encodeURIComponent).join("/")}`);
+  const info = job?.jobPostingInfo;
+  if (!info?.title) throw new ServiceError("Workday didn't return this job. It may have closed. Check the link and try again.", "job_not_found", 404);
+  if (info.canApply === false) throw new ServiceError("This Workday job isn't accepting applications right now.", "job_closed", 409);
+  const description = htmlToText(info.jobDescription ?? "");
+  // Workday's organization is often a legal entity like "2100 NVIDIA USA"; prefer the tenant's name inside it.
+  const org = (job?.hiringOrganization?.name ?? "").replace(/^\d+\s+/, "").trim();
+  const inOrg = org.match(new RegExp(tenant.replace(/[^a-z0-9]/gi, ""), "i"))?.[0];
+  const externalUrl = info.externalUrl || `https://${host}/${site}/job/${parsed.jobId}`;
+  return {
+    ats: "workday",
+    title: info.title.trim(),
+    company: inOrg || org || humanize(tenant),
+    department: null,
+    location: [info.location, ...(info.additionalLocations ?? [])].filter(Boolean).join(" · ") || null,
+    description,
+    requirements: extractRequirements(description),
+    applicationUrl: `${externalUrl.replace(/\/$/, "")}/apply`,
+    postedRecruiter: findPostedRecruiter(description),
+    questions: [],
+  };
+}
+
 type JsonLdJob = {
   "@type"?: string | string[];
   title?: string;
@@ -394,6 +468,11 @@ async function extractWithModel(parsed: ParsedUrl, pageUrl: string, text: string
 /** Reads a job posting link into structured details. Never fills in a field the posting doesn't state. */
 export async function extractJob(rawUrl: string): Promise<JobDetails> {
   const parsed = parseJobUrl(rawUrl);
-  const details = parsed.ats === "greenhouse" ? await readGreenhouse(parsed) : parsed.ats === "lever" ? await readLever(parsed) : parsed.ats === "ashby" ? await readAshby(parsed) : await readOther(parsed);
+  const details =
+    parsed.ats === "greenhouse" ? await readGreenhouse(parsed)
+    : parsed.ats === "lever" ? await readLever(parsed)
+    : parsed.ats === "ashby" ? await readAshby(parsed)
+    : parsed.ats === "workday" ? await readWorkday(parsed)
+    : await readOther(parsed);
   return { ...details, jobKey: jobKeyFor(parsed), jobUrl: parsed.url.toString(), description: details.description.slice(0, 20000) };
 }

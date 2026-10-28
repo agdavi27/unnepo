@@ -164,7 +164,7 @@ function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone 
         <input className={field} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://jobs.lever.co/company/…" inputMode="url" aria-label="Job posting link" />
         <button className={`${primary} shrink-0 px-5`} disabled={reading || !url.trim()}>{reading ? "Reading job…" : "Read job"}</button>
       </form>
-      <p className="-mt-3 text-xs text-faint">Works best with Greenhouse, Lever, and Ashby links. LinkedIn and Indeed don&apos;t allow automated applications. Paste the company&apos;s own application link instead.</p>
+      <p className="-mt-3 text-xs text-faint">Works best with Workday, Greenhouse, Lever, and Ashby links. LinkedIn and Indeed don&apos;t allow automated applications. Paste the company&apos;s own application link instead.</p>
       {problem && <p role="alert" className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{problem}</p>}
       {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
       {notice && <p className="text-sm text-muted">{notice}</p>}
@@ -288,6 +288,26 @@ function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; 
         </div>
       )}
 
+      {app.status === "review" && app.fillReport?.stoppedAt === "needs_input" && (app.fillReport.pending ?? []).length > 0 && (
+        <PendingQuestions
+          pending={app.fillReport.pending ?? []}
+          busy={Boolean(working)}
+          onSubmit={async (values) => {
+            setWorking("pending");
+            setProblem("");
+            try {
+              await call("/pending", "POST", { applicationId: app.id, answers: values });
+            } catch (reason) {
+              setProblem(reason instanceof Error ? reason.message : "Couldn't save those answers.");
+              setWorking("");
+              return;
+            }
+            setWorking("");
+            await run("continue", "/continue");
+          }}
+        />
+      )}
+
       {problem && <p role="alert" className="text-sm text-red-300">{problem}</p>}
       {message && <p className="text-sm text-muted">{message}</p>}
 
@@ -317,6 +337,37 @@ function ApplicationCard({ app, data, onChanged, onClose, onDone }: { app: App; 
         {done && <button type="button" className={primary} onClick={onDone}>See people to email →</button>}
       </div>
     </section>
+  );
+}
+
+function PendingQuestions({ pending, busy, onSubmit }: { pending: NonNullable<NonNullable<JobApplication["fillReport"]>["pending"]>; busy: boolean; onSubmit: (values: Record<string, string>) => void | Promise<void> }) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const answered = Object.values(values).filter((value) => value.trim()).length;
+  return (
+    <div className="space-y-3 rounded-xl border border-sky-900/60 bg-sky-950/20 p-4">
+      <div>
+        <p className="text-sm font-semibold">Answer these to keep going</p>
+        <p className="mt-1 text-xs text-muted">Unnepo won&apos;t guess these. Your answers are saved, so the same question on later applications fills itself.</p>
+      </div>
+      {pending.map((item) => (
+        <div key={item.label}>
+          <label className={labelClass}>{item.label}</label>
+          {item.options.length > 0 ? (
+            <select className={field} value={values[item.label] ?? ""} onChange={(event) => setValues({ ...values, [item.label]: event.target.value })}>
+              <option value="">Choose…</option>
+              {item.options.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          ) : item.kind === "textarea" ? (
+            <textarea className={`${field} min-h-20`} value={values[item.label] ?? ""} onChange={(event) => setValues({ ...values, [item.label]: event.target.value })} />
+          ) : (
+            <input className={field} value={values[item.label] ?? ""} onChange={(event) => setValues({ ...values, [item.label]: event.target.value })} />
+          )}
+        </div>
+      ))}
+      <button type="button" className={primary} disabled={busy || !answered} onClick={() => void onSubmit(values)}>
+        {busy ? "Saving and continuing…" : "Save answers & continue autofill"}
+      </button>
+    </div>
   );
 }
 
@@ -357,7 +408,7 @@ function ProfileDetails({ profile, resume, onSaved }: { profile: PublicProfile; 
   const [state, setState] = useState("");
   const [password, setPassword] = useState("");
   const [consent, setConsent] = useState(Boolean(profile.accountConsentAt));
-  const fields: Array<[keyof PublicProfile, string]> = [["firstName", "First name"], ["lastName", "Last name"], ["email", "Email for applications"], ["phone", "Phone"], ["linkedin", "LinkedIn URL"], ["website", "Website or portfolio"], ["github", "GitHub URL"], ["city", "City"]];
+  const fields: Array<[keyof PublicProfile, string]> = [["firstName", "First name"], ["lastName", "Last name"], ["email", "Email for applications"], ["phone", "Phone"], ["linkedin", "LinkedIn URL"], ["website", "Website or portfolio"], ["github", "GitHub URL"], ["addressLine1", "Street address"], ["city", "City"], ["state", "State (full name, e.g. Maine)"], ["postalCode", "ZIP code"], ["country", "Country (e.g. United States)"]];
   async function save() {
     setState("Saving…");
     try {
