@@ -254,6 +254,8 @@ export type FlowOptions = {
   shouldStop?: () => Promise<boolean>;
   /** Answers for fields the job board didn't publish ahead of time, matched by label. Null leaves the field for the student. */
   answerFor: (label: string, kind: ApplicationQuestion["kind"], options: string[]) => string | null;
+  /** A cover letter written for this job from the resume, as text and as a PDF. Asked for only when the form wants one. */
+  coverLetter?: () => Promise<{ text: string; file: ResumeFile } | null>;
   /** Answers, by label, for questions nothing on file covers, written only from the student's resume and profile. */
   aiAnswers?: (questions: Array<{ label: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => Promise<Record<string, string>>;
 };
@@ -268,6 +270,8 @@ export class AutofillStopped extends Error {
 }
 
 const MAX_PAGES = 10;
+
+const COVER_LETTER = /cover ?letter|letter of (interest|motivation)|motivation(al)? letter/i;
 
 /** Job systems that host a company's applications on their own domain. */
 const ATS_DOMAINS = ["myworkdayjobs.com", "myworkdaysite.com", "workday.com", "icims.com", "taleo.net", "successfactors.com", "successfactors.eu", "sapsf.com", "oraclecloud.com", "greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "jobvite.com", "brassring.com", "ultipro.com", "ukg.com", "paylocity.com", "adp.com", "bamboohr.com", "workable.com", "recruitee.com", "breezy.hr", "jazzhr.com", "applytojob.com"];
@@ -521,6 +525,31 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
   const aiKnown = new Map<string, string>();
   const askedAi = new Set<string>();
   const fromResume = new Set<string>();
+  // The letter is written at most once per run, the first time a form asks for one.
+  let letter: { text: string; file: ResumeFile } | null | undefined;
+  let letterUsed = false;
+  const putLetter = async (field: Locator, kind: ApplicationQuestion["kind"]) => {
+    if (letter === undefined) letter = options.coverLetter ? await options.coverLetter().catch(() => null) : null;
+    if (!letter) return false;
+    try {
+      if (kind === "file") await field.setInputFiles({ name: letter.file.name, mimeType: letter.file.mimeType, buffer: letter.file.buffer });
+      else await field.fill(letter.text);
+    } catch {
+      return false;
+    }
+    letterUsed = true;
+    return true;
+  };
+  const letterResult = (label: string, ok: boolean, required: boolean, kind: ApplicationQuestion["kind"]) => {
+    if (ok) {
+      filled.add(label);
+      failed.delete(label);
+      ask.delete(label);
+    } else if (required) {
+      failed.set(label, "Couldn't write a cover letter for this. Add one in the live view.");
+      if (kind !== "file") ask.set(label, { kind, options: [] });
+    }
+  };
   const answerOf = (label: string, kind: ApplicationQuestion["kind"], choices: string[]) => options.answerFor(label, kind, choices) ?? aiKnown.get(label) ?? aiKnown.get(label.slice(0, 160)) ?? null;
   const host = () => {
     try {
@@ -536,6 +565,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     pages,
     account,
     host: host(),
+    coverLetter: letterUsed && letter ? letter.text : undefined,
     fromResume: [...fromResume].filter((label) => filled.has(label)),
     pending: [...ask].filter(([label]) => failed.has(label)).map(([label, item]) => ({ label, kind: item.kind, options: item.options })).slice(0, 25),
   });
@@ -607,6 +637,12 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     // Questions the job board published ahead of time.
     for (const question of options.questions) {
       const answer = question.answer?.trim();
+      if (!answer && !filled.has(question.label) && COVER_LETTER.test(question.label) && (question.kind === "file" || question.kind === "textarea")) {
+        await checkStop();
+        const field = await locate(page, question);
+        if (field && (question.kind === "file" || (await field.isVisible().catch(() => false)))) letterResult(question.label, await putLetter(field, question.kind), question.required, question.kind);
+        continue;
+      }
       if (!answer || filled.has(question.label)) continue;
       await checkStop();
       if (question.kind === "file" && resumeUploaded) continue;
@@ -655,6 +691,10 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
         }
         const fieldOptions = field.options;
         let answer: string | null = null;
+        if (COVER_LETTER.test(field.label) && (field.kind === "file" || field.kind === "textarea") && !answerOf(field.label, field.kind, fieldOptions)) {
+          letterResult(field.label, await putLetter(page.locator(field.selector).first(), field.kind), field.required, field.kind);
+          continue;
+        }
         if (field.kind === "file") {
           // One resume upload per run, on a page that asks for a resume or CV.
           const wantsResume = /resume|cv|curriculum/i.test(field.label) || /\b(resume|cv)\b/i.test(pageText);

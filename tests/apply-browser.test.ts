@@ -237,4 +237,37 @@ describe.skipIf(!hasChrome)("application form filler (local Chrome)", () => {
     expect(confirmation?.text).toMatch(/Thank you for applying/);
     await page.close();
   }, 90_000);
+
+  it("writes the cover letter into a text box and uploads it as a PDF, never in place of the resume", async () => {
+    const page = await browser.newPage();
+    await page.goto(base);
+    await page.setContent(`<form>
+      <label for="resume">Resume/CV *</label><input id="resume" type="file" required>
+      <label for="cover_letter">Cover Letter *</label><input id="cover_letter" type="file" required>
+      <label for="cl_text">Cover letter (paste)</label><textarea id="cl_text"></textarea>
+      <button type="submit">Submit application</button></form>`);
+    let written = 0;
+    const letter = "Dear Hiring Team,\n\nI am a junior at Colby College applying for the Analyst role.\n\nSincerely,\nPat Doe";
+    const report = await runApplicationFlow(page, {
+      url: base,
+      navigate: false,
+      questions: [q("resume", "Resume/CV", "file", "resume.pdf", true), q("cover_letter", "Cover Letter", "file", null, true)],
+      resume: { name: "resume.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4") },
+      credentials: null,
+      allowSignup: false,
+      answerFor: () => null,
+      coverLetter: async () => {
+        written += 1;
+        return { text: letter, file: { name: "Pat Doe Cover Letter.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4") } };
+      },
+    });
+    const fileName = (selector: string) => page.locator(selector).evaluate((el) => (el as HTMLInputElement).files?.[0]?.name);
+    expect(await fileName("#resume")).toBe("resume.pdf");
+    expect(await fileName("#cover_letter")).toBe("Pat Doe Cover Letter.pdf");
+    expect(await page.inputValue("#cl_text")).toBe(letter);
+    expect(written).toBe(1);
+    expect(report).toMatchObject({ stoppedAt: "review", coverLetter: letter });
+    expect(report.filled).toEqual(expect.arrayContaining(["Cover Letter", "Cover letter (paste)"]));
+    await page.close();
+  }, 60_000);
 });

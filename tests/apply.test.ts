@@ -8,6 +8,7 @@ import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJ
 import { acceptAiAnswer, classifyQuestion, missingAnswers, planAnswers } from "@/lib/apply/questions";
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
 import { coreTitle } from "@/lib/apply/contacts";
+import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { applyState, saveApplicationProfile, checkSubmission, createApplication, markApplied, runContactDiscovery, setDeferForTests, startAutofill, updateAnswers } from "@/lib/apply/service";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -169,6 +170,20 @@ describe("answers", () => {
       q("phone", "Phone Number"),
     ], context);
     expect(planned.map((item) => item.answer)).toEqual(["Mobile", "Cell", null, "207-555-0100"]);
+  });
+
+  it("doesn't hold up autofill for a cover letter, which autofill writes", () => {
+    expect(missingAnswers([q("cl", "Cover Letter", "file"), q("cl2", "Cover letter", "textarea")])).toEqual([]);
+  });
+
+  it("makes a readable cover letter PDF, even with curly quotes and dashes", async () => {
+    const pdf = await coverLetterPdf("Dear Hiring Team,\n\nI\u2019m a junior at Colby \u2014 and I built a dashboard used by 40 students. ".repeat(3) + "\n\nSincerely,\nPat Doe", { name: "Pat Doe", contact: ["pat@colby.edu", "207-555-0100"] });
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    const { extractText, getDocumentProxy } = await import("unpdf");
+    const { text } = await extractText(await getDocumentProxy(new Uint8Array(pdf)), { mergePages: true });
+    expect(text).toContain("Pat Doe");
+    expect(text).toContain("pat@colby.edu");
+    expect(text).toContain("I'm a junior at Colby - and I built a dashboard");
   });
 
   it("keeps an AI answer only with evidence quoted from the student's own text", () => {

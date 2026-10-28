@@ -300,6 +300,7 @@ function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { a
               <ul className="mt-1 list-disc pl-5 text-sky-100/80">{(app.fillReport.fromResume ?? []).map((label) => <li key={label}>{label}</li>)}</ul>
             </div>
           )}
+          {app.status !== "filling" && app.fillReport.coverLetter && <CoverLetter text={app.fillReport.coverLetter} />}
           {app.status !== "filling" && app.fillReport.failed.length > 0 && (
             <div className="rounded-xl border border-amber-900/60 bg-amber-950/20 p-3 text-sm">
               <p className="font-medium text-amber-200">Finish these in the live view</p>
@@ -364,6 +365,19 @@ function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { a
         {done && <button type="button" className={primary} onClick={onDone}>See people to email →</button>}
       </div>
     </section>
+  );
+}
+
+/** The cover letter autofill wrote and put on the form (as text, or as a PDF upload). */
+function CoverLetter({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <details className="rounded-xl border border-line p-3 text-sm">
+      <summary className="cursor-pointer font-medium">Cover letter Unnepo wrote from your resume</summary>
+      <p className="mt-2 text-xs text-faint">It&apos;s already on the form. Read it in the live view, and edit it there if anything&apos;s off.</p>
+      <p className="mt-3 whitespace-pre-wrap text-zinc-300">{text}</p>
+      <button type="button" className={`${secondary} mt-3`} onClick={() => { void navigator.clipboard.writeText(text).then(() => setCopied(true)); }}>{copied ? "Copied" : "Copy letter"}</button>
+    </details>
   );
 }
 

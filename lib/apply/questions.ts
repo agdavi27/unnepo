@@ -130,7 +130,8 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
 
 /** Required questions that still have no answer. */
 export function missingAnswers(questions: ApplicationQuestion[]) {
-  return questions.filter((question) => question.required && !question.answer?.trim());
+  // Autofill writes the cover letter from the resume and the posting, so it doesn't block starting.
+  return questions.filter((question) => question.required && !question.answer?.trim() && classifyQuestion(question.label).field !== "coverLetter");
 }
 
 function squash(text: string) {

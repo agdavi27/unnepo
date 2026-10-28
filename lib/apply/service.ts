@@ -6,6 +6,7 @@ import { splitProfileList } from "@/lib/profile/lists";
 import { readStoredResume } from "@/lib/services/resume";
 import { AutofillStopped, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
 import { decryptSecret, encryptSecret } from "@/lib/security";
+import { coverLetterPdf, writeCoverLetter } from "@/lib/apply/cover-letter";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
 import { extractJob } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
@@ -65,7 +66,7 @@ async function student(userId: string) {
 
 /** Answers open, non-sensitive questions from the profile and resume. Answers without quoted evidence are dropped. */
 async function aiAnswers(userId: string, questions: ApplicationQuestion[], sources: string) {
-  const open = questions.filter((question) => !question.answer && !question.sensitive && !classifyQuestion(question.label).sensitive && question.kind !== "file" && question.kind !== "unknown").slice(0, 30);
+  const open = questions.filter((question) => !question.answer && !question.sensitive && !classifyQuestion(question.label).sensitive && question.kind !== "file" && question.kind !== "unknown" && classifyQuestion(question.label).field !== "coverLetter").slice(0, 30);
   if (!open.length || !sources.trim()) return questions;
   const apiKey = await readAnthropicKey();
   if (!apiKey) return questions;
@@ -266,6 +267,14 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
     const answered = await aiAnswers(userId, asked, sources);
     return Object.fromEntries(answered.filter((question) => question.source === "ai" && question.answer).map((question) => [question.label, question.answer!]));
   };
+  // A cover letter is written only when the form asks for one, and reused if this job already has one.
+  const coverLetter = async () => {
+    const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
+    const text = app.fillReport?.coverLetter || (await writeCoverLetter(userId, app, { name, resumeText: info.resumeText, profile: info.profileText }));
+    if (!text) return null;
+    const buffer = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
+    return { text, file: { name: `${name} Cover Letter.pdf`, mimeType: "application/pdf", buffer } };
+  };
   const shouldStop = async () => (await applications.get(userId, app.id))?.status !== "filling";
   // Show the live view while filling, so the student can watch and stop it.
   const live = await liveViewUrl(sessionId);
@@ -273,7 +282,7 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
   let report: FlowResult;
   try {
     report = await withSessionPage(sessionId, (page) =>
-      runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, aiAnswers: resumeAnswers, shouldStop }),
+      runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, aiAnswers: resumeAnswers, coverLetter, shouldStop }),
     );
   } catch (error) {
     // Stopped by the student: stopAutofill already saved where things stand.
@@ -294,7 +303,7 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
   const updated = await applications.update(userId, app.id, {
     status: "review",
     browserSessionId: sessionId,
-    fillReport: { ...report, liveViewUrl: live, screenshotAt: nowIso() },
+    fillReport: { ...report, coverLetter: report.coverLetter ?? app.fillReport?.coverLetter, liveViewUrl: live, screenshotAt: nowIso() },
     statusMessage: STOP_MESSAGE[report.stoppedAt](report, info.profile.email),
   });
   return { application: summary(updated!) };
