@@ -7,6 +7,7 @@ import { readStoredResume } from "@/lib/services/resume";
 import { AutofillStopped, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
 import { decryptSecret, encryptSecret } from "@/lib/security";
 import { coverLetterPdf, writeCoverLetter } from "@/lib/apply/cover-letter";
+import { decideFixes } from "@/lib/apply/fixer";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
 import { extractJob } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
@@ -42,6 +43,7 @@ async function student(userId: string) {
     postalCode: stored?.postalCode ?? "",
     country: stored?.country ?? "",
     saved: stored?.saved ?? {},
+    eligibility: stored?.eligibility ?? {},
     jobSitePasswordEncrypted: stored?.jobSitePasswordEncrypted ?? null,
     accountConsentAt: stored?.accountConsentAt ?? null,
     jobAccounts: stored?.jobAccounts ?? [],
@@ -210,6 +212,14 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     }
     next.jobSitePasswordEncrypted = encryptSecret(password);
   }
+  if (body.eligibility && typeof body.eligibility === "object") {
+    const given = body.eligibility as Record<string, unknown>;
+    const eligibility = { ...(info.profile.eligibility ?? {}) };
+    for (const key of ["workAuthorized", "needsSponsorship", "over18"] as const) {
+      if (key in given) eligibility[key] = given[key] === "Yes" || given[key] === "No" ? String(given[key]) : "";
+    }
+    next.eligibility = eligibility;
+  }
   if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? info.profile.accountConsentAt || nowIso() : null;
   await applicationProfiles.put(userId, next);
   return { profile: publicProfile(next) };
@@ -236,7 +246,7 @@ async function resumeFile(userId: string): Promise<ResumeFile | null> {
 }
 
 const STOP_MESSAGE: Record<FlowResult["stoppedAt"], (report: FlowResult, email: string) => string> = {
-  review: (r) => `Filled ${r.filled.length} fields${r.pages && r.pages > 1 ? ` across ${r.pages} pages` : ""}${r.fromResume?.length ? `, ${r.fromResume.length} written from your resume` : ""}.${r.failed.length ? ` ${r.failed.length} still need you in the live view.` : ""} Check the form in the live view, then approve.`,
+  review: (r) => `Filled ${r.filled.length} fields${r.pages && r.pages > 1 ? ` across ${r.pages} pages` : ""}${r.fromResume?.length ? `, ${r.fromResume.length} written from your resume` : ""}${r.decided?.length ? `, ${r.decided.length} worked out for you to check` : ""}.${r.failed.length ? ` ${r.failed.length} still need you in the live view.` : ""} Check the form in the live view, then approve.`,
   needs_input: (r) => {
     const names = r.failed.map((item) => item.label);
     const list = names.length ? ` It needs: ${names.slice(0, 4).join("; ")}${names.length > 4 ? ` and ${names.length - 4} more` : ""}.` : "";
@@ -275,6 +285,22 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
     const buffer = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
     return { text, file: { name: `${name} Cover Letter.pdf`, mimeType: "application/pdf", buffer } };
   };
+  // The student's own details as plain lines: the only facts the fix-up pass may use besides the resume.
+  const p = info.profile;
+  const said = (value: string | undefined) => value?.trim() || "(not set)";
+  const facts = [
+    `First name: ${said(p.firstName)}`, `Last name: ${said(p.lastName)}`, `Email: ${said(p.email)}`, `Phone: ${said(p.phone)}`,
+    `Street address: ${said(p.addressLine1)}`, `City: ${said(p.city)}`, `State: ${said(p.state)}`, `ZIP code: ${said(p.postalCode)}`, `Country: ${said(p.country)}`,
+    `LinkedIn: ${said(p.linkedin)}`, `Website: ${said(p.website)}`, `GitHub: ${said(p.github)}`,
+    `School: ${said(info.context.school)}`, `Majors: ${said(info.context.majors.join(", "))}`, `Graduation year: ${said(info.context.graduationYear)}`,
+    `Authorized to work in the United States: ${said(p.eligibility?.workAuthorized)}`,
+    `Will now or in the future need visa sponsorship: ${said(p.eligibility?.needsSponsorship)}`,
+    `At least 18 years old: ${said(p.eligibility?.over18)}`,
+    `Unnepo may accept privacy notices and candidate terms for the student: ${p.accountConsentAt ? "Yes" : "No"}`,
+    `Applying to: ${app.title} at ${app.company}`,
+    ...Object.values(p.saved).slice(0, 60).map((item) => `Saved answer. ${item.label}: ${item.answer}`),
+  ].join("\n");
+  const fixFields = (fields: Parameters<typeof decideFixes>[1], errors: string[]) => decideFixes(userId, fields, errors, { facts, sources, consent: Boolean(p.accountConsentAt) });
   const shouldStop = async () => (await applications.get(userId, app.id))?.status !== "filling";
   // Show the live view while filling, so the student can watch and stop it.
   const live = await liveViewUrl(sessionId);
@@ -282,7 +308,7 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
   let report: FlowResult;
   try {
     report = await withSessionPage(sessionId, (page) =>
-      runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, aiAnswers: resumeAnswers, coverLetter, shouldStop }),
+      runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, aiAnswers: resumeAnswers, coverLetter, fixFields, shouldStop }),
     );
   } catch (error) {
     // Stopped by the student: stopAutofill already saved where things stand.

@@ -1,6 +1,7 @@
 import type { Browser, Locator, Page } from "playwright-core";
 import { ServiceError } from "@/lib/errors";
 import { bestOption } from "@/lib/apply/options";
+import { answerChoices } from "@/lib/apply/questions";
 import type { ApplicationQuestion, Confirmation, FillReport } from "@/lib/apply/types";
 
 /**
@@ -153,17 +154,24 @@ async function pickListbox(page: Page, field: Locator, answer: string) {
 
 /** Workday's searchable prompts ("How did you hear about us?"): type, then pick the matching result. */
 async function pickPrompt(page: Page, field: Locator, answer: string) {
-  await field.click();
-  await field.fill(answer);
-  await field.press("Enter");
   const options = page.locator("[data-automation-id='promptOption']:visible, [role='option']:visible");
-  await options.first().waitFor({ timeout: 3_000 }).catch(() => undefined);
-  await page.waitForTimeout(250);
-  const texts = (await options.allInnerTexts().catch(() => [])).map((text) => text.replace(/\s+/g, " ").trim());
-  const choice = bestOption(answer, texts) ?? (texts.length === 1 ? texts[0] : null);
-  if (!choice) throw new Error("option not found");
-  await options.nth(texts.indexOf(choice)).click();
-  await page.waitForTimeout(200);
+  // Sites word the same choice differently ("Company Website", "Careers Site"); try a few.
+  for (const attempt of answerChoices(answer).slice(0, 6)) {
+    await field.click();
+    await field.fill(attempt);
+    await field.press("Enter");
+    await options.first().waitFor({ timeout: 2_500 }).catch(() => undefined);
+    await page.waitForTimeout(250);
+    const texts = (await options.allInnerTexts().catch(() => [])).map((text) => text.replace(/\s+/g, " ").trim());
+    const choice = bestOption(attempt, texts) ?? (texts.length === 1 && !/no (items|results|matches)/i.test(texts[0]) ? texts[0] : null);
+    if (choice) {
+      await options.nth(texts.indexOf(choice)).click();
+      await page.waitForTimeout(200);
+      return;
+    }
+  }
+  await field.fill("").catch(() => undefined);
+  throw new Error("option not found");
 }
 
 async function setValue(page: Page, field: Locator, question: ApplicationQuestion, answer: string, resume: ResumeFile | null) {
@@ -214,29 +222,204 @@ async function setValue(page: Page, field: Locator, question: ApplicationQuestio
   await field.fill(answer);
 }
 
-/** Labels of required fields still empty on the page, including ones the job board didn't publish ahead of time. */
-async function emptyRequiredLabels(page: Page) {
-  return page.evaluate(() => {
-    const out: string[] = [];
-    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input[required], textarea[required], select[required], [aria-required='true']"));
-    for (const field of fields) {
-      const type = (field.getAttribute("type") || "").toLowerCase();
-      if (type === "hidden" || type === "submit" || type === "radio" || field.getAttribute("data-automation-id") === "beecatcher") continue;
-      const style = window.getComputedStyle(field);
-      if (style.display === "none" || style.visibility === "hidden") continue;
-      const empty = field.tagName === "BUTTON"
-        ? /^(select one|select|choose( one)?|)$/i.test((field as HTMLElement).innerText.trim())
-        : type === "checkbox"
-          ? !(field as HTMLInputElement).checked
-          : type === "file" ? !(field as HTMLInputElement).files?.length : !String((field as HTMLInputElement).value || "").trim();
-      if (!empty) continue;
-      const id = field.getAttribute("id");
-      const labelledBy = field.getAttribute("aria-labelledby");
-      const label = (id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || (labelledBy && document.getElementById(labelledBy.split(" ")[0])?.textContent) || field.closest("label")?.textContent || field.getAttribute("aria-label") || field.getAttribute("placeholder") || field.getAttribute("name") || "A required field";
-      out.push(label.replace(/\s+/g, " ").replace(/\b(select one|required)\b/gi, "").replace(/\*/g, "").trim().slice(0, 140));
+/**
+ * Page-side helpers, installed once per page: the question a control asks (walking up the page when
+ * the label is missing or is only a format like "MM/YYYY"), the section it sits in, and whether it's
+ * still empty. Plain JavaScript so the bundler can't rewrite it.
+ */
+const PAGE_HELPERS = `(() => {
+  if (window.__unnepo) return;
+  const clean = (t) => (t || "").replace(/\\s+/g, " ").replace(/\\b(select one|required)\\b/gi, "").replace(/\\*/g, "").trim();
+  const machine = (t) => !/\\s/.test(t) && /[\\[\\]_]/.test(t);
+  const formatOnly = /^(mm\\/yyyy|mm\\/dd\\/yyyy|dd\\/mm\\/yyyy|yyyy|mm|month|year|select|search|choose|type to search)$/i;
+  const byIds = (ids) => ids.split(/\\s+/).map((i) => document.getElementById(i)?.textContent || "").join(" ");
+  const optionText = (node) => {
+    const parts = [];
+    node.querySelectorAll("option, [role=option]").forEach((o) => parts.push(o.textContent || ""));
+    node.querySelectorAll("input[type=radio], input[type=checkbox]").forEach((r) => {
+      const l = (r.id && document.querySelector('label[for="' + CSS.escape(r.id) + '"]')) || r.closest("label");
+      if (l) parts.push(l.textContent || "");
+    });
+    return parts.map(clean).filter(Boolean);
+  };
+  const ownText = (node) => {
+    let text = clean(node.innerText || "");
+    for (const part of optionText(node)) if (part) text = text.split(part).join(" ");
+    return clean(text);
+  };
+  const controls = "input:not([type=hidden]), select, textarea, button[aria-haspopup]";
+  // A radio button's own label is its option ("Yes"); the question is the text around the whole group.
+  const groupQuestion = (el) => {
+    const group = el.closest("[role=radiogroup], fieldset");
+    const named = group && (clean(group.querySelector("legend")?.textContent) || (group.getAttribute("aria-labelledby") && clean(byIds(group.getAttribute("aria-labelledby")))) || clean(group.getAttribute("aria-label")));
+    if (named) return named.slice(0, 300);
+    const radios = el.name ? Array.from(document.querySelectorAll('input[type=radio][name="' + CSS.escape(el.name) + '"]')) : [el];
+    let node = el.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < 8; depth += 1, node = node.parentElement) {
+      if (!radios.every((r) => node.contains(r))) continue;
+      // Past the group's own block: the text would be a whole section, not this question.
+      if (node.querySelectorAll(controls).length > radios.length + 3) break;
+      const text = ownText(node);
+      if (text.length >= 3) return text.slice(0, 300);
     }
-    return [...new Set(out)];
+    return "";
+  };
+  const questionText = (el) => {
+    if ((el.getAttribute("type") || "").toLowerCase() === "radio" || el.getAttribute("role") === "radiogroup") {
+      const asked = el.getAttribute("role") === "radiogroup" ? groupQuestion(el.querySelector("input[type=radio]") || el) : groupQuestion(el);
+      if (asked) return asked;
+    }
+    const id = el.getAttribute("id");
+    const labelledBy = el.getAttribute("aria-labelledby");
+    const direct = [
+      id && document.querySelector('label[for="' + CSS.escape(id) + '"]')?.textContent,
+      labelledBy && byIds(labelledBy),
+      el.closest("[data-automation-id^='formField']")?.querySelector("label")?.textContent,
+      el.closest("label")?.textContent,
+      el.getAttribute("aria-label"),
+      el.closest("fieldset")?.querySelector("legend")?.textContent,
+    ].map(clean).find((t) => t && t.length > 1 && !machine(t));
+    if (direct && !formatOnly.test(direct)) return direct.slice(0, 300);
+    let node = el.parentElement;
+    for (let depth = 0; node && node !== document.body && depth < 6; depth += 1, node = node.parentElement) {
+      if (node.querySelectorAll(controls).length > 6) break;
+      const text = ownText(node);
+      if (text.length >= 3 && !formatOnly.test(text)) return (direct ? text + " (" + direct + ")" : text).slice(0, 300);
+    }
+    const hint = direct || clean(el.getAttribute("placeholder"));
+    if (hint) return hint;
+    const name = el.getAttribute("name") || "";
+    return clean(name.replace(/[\\[\\]_.]+/g, " "));
+  };
+  const heading = "h1, h2, h3, h4, h5, legend, [role=heading], [data-automation-id*='Header' i]";
+  const section = (el) => {
+    let node = el;
+    for (let depth = 0; node && node !== document.body && depth < 12; depth += 1, node = node.parentElement) {
+      let sib = node.previousElementSibling;
+      for (let hops = 0; sib && hops < 25; hops += 1, sib = sib.previousElementSibling) {
+        const found = sib.matches(heading) ? sib : Array.from(sib.querySelectorAll(heading)).pop();
+        const text = clean(found?.textContent);
+        if (text && text.length < 90) return text;
+      }
+    }
+    return "";
+  };
+  const blank = /^(select one|select|choose( one)?|please select|--.*|)$/i;
+  const isEmpty = (el) => {
+    const type = (el.getAttribute("type") || "").toLowerCase();
+    if (el.tagName === "BUTTON") return blank.test(clean(el.innerText));
+    if (el.tagName === "SELECT") return !el.value || blank.test(clean(el.selectedOptions[0]?.textContent));
+    if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+      if (type === "checkbox") return !el.checked;
+      if (type === "radio") return !document.querySelector('input[type=radio][name="' + CSS.escape(el.name) + '"]:checked');
+      if (type === "file") return !el.files?.length;
+      return !String(el.value || "").trim();
+    }
+    // A wrapper marked required: look at what's inside it.
+    if (el.querySelector("[data-automation-id='selectedItem']")) return false;
+    const radios = el.querySelectorAll("input[type=radio]");
+    if (radios.length) return !Array.from(radios).some((r) => r.checked);
+    const inner = Array.from(el.querySelectorAll("input:not([type=hidden]), select, textarea, button[aria-haspopup]"));
+    if (inner.length) return inner.every((c) => isEmpty(c));
+    return false;
+  };
+  window.__unnepo = { questionText, section, isEmpty };
+})()`;
+
+async function helpers(page: Page) {
+  await page.evaluate(PAGE_HELPERS).catch(() => undefined);
+}
+
+type PageHelpers = { questionText: (el: Element) => string; section: (el: Element) => string; isEmpty: (el: Element) => boolean };
+
+/** A required control still empty on the page, with what Unnepo needs to fill it. */
+export type EmptyField = { selector: string; label: string; section: string; control: "text" | "textarea" | "select" | "listbox" | "prompt" | "checkbox" | "radio" | "date" | "file"; options: string[]; format: string | null };
+
+/** Required controls still empty, including ones the job board didn't publish ahead of time. */
+async function emptyRequired(page: Page): Promise<EmptyField[]> {
+  await helpers(page);
+  return page.evaluate(() => {
+    const u = (window as unknown as { __unnepo: PageHelpers }).__unnepo;
+    const out: EmptyField[] = [];
+    const seenRadio = new Set<string>();
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>("input[required], textarea[required], select[required], [aria-required='true'], [role='radiogroup'][aria-required='true']"));
+    nodes.forEach((el, index) => {
+      const type = (el.getAttribute("type") || "").toLowerCase();
+      if (["hidden", "submit", "button", "password"].includes(type) || el.getAttribute("data-automation-id") === "beecatcher" || el.getAttribute("aria-hidden") === "true") return;
+      // A wrapper whose required control is also listed is counted once, by the control.
+      if (!["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(el.tagName) && el.querySelector("input[required], select[required], textarea[required]")) return;
+      const style = window.getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      if (style.display === "none" || style.visibility === "hidden" || (!rect.width && !rect.height && type !== "file" && type !== "radio" && type !== "checkbox")) return;
+      if (!u.isEmpty(el)) return;
+      const radioName = type === "radio" ? (el as HTMLInputElement).name : "";
+      if (radioName) {
+        if (seenRadio.has(radioName)) return;
+        seenRadio.add(radioName);
+      }
+      const radios = radioName ? Array.from(document.querySelectorAll<HTMLInputElement>(`input[type=radio][name="${CSS.escape(radioName)}"]`)) : Array.from(el.querySelectorAll<HTMLInputElement>("input[type=radio]"));
+      const labelOf = (input: HTMLInputElement) => ((input.id && document.querySelector(`label[for="${CSS.escape(input.id)}"]`)?.textContent) || input.closest("label")?.textContent || input.value || "").replace(/\s+/g, " ").trim();
+      const control: EmptyField["control"] = radios.length ? "radio"
+        : el.tagName === "SELECT" ? "select"
+          : el.tagName === "BUTTON" ? "listbox"
+            : el.tagName === "TEXTAREA" ? "textarea"
+              : type === "checkbox" ? "checkbox"
+                : type === "file" ? "file"
+                  : type === "date" ? "date"
+                    : el.getAttribute("data-automation-id") === "searchBox" || el.getAttribute("role") === "combobox" ? "prompt" : "text";
+      const options = control === "select" ? Array.from((el as HTMLSelectElement).options).map((o) => o.text.trim()).filter((t) => t && !/^(select|choose|please select|--)/i.test(t))
+        : control === "radio" ? radios.map(labelOf).filter(Boolean)
+          : control === "checkbox" ? ["Yes"] : [];
+      const target = radioName ? radios[0] : el;
+      target.setAttribute("data-unnepo-empty", String(index));
+      const placeholder = el.getAttribute("placeholder") || "";
+      out.push({ selector: `[data-unnepo-empty="${index}"]`, label: u.questionText(target).slice(0, 300) || "A required field", section: u.section(target), control, options: options.slice(0, 60), format: /[my]{2}|dd/i.test(placeholder) ? placeholder : null });
+    });
+    return out;
   });
+}
+
+/** The site's own error messages on the page. */
+async function siteErrors(page: Page) {
+  const texts = await page.locator("[data-automation-id='errorMessage'], [role='alert']:visible, .error:visible, [class*='error' i]:visible:not(input):not(select)").allInnerTexts().catch(() => []);
+  return [...new Set(texts.map((text) => text.replace(/\s+/g, " ").trim()).filter((text) => text && text.length < 300))].slice(0, 12);
+}
+
+/** Puts a decided answer into an empty required control, whatever kind of control it is. */
+async function applyFix(page: Page, field: EmptyField, value: string) {
+  const target = page.locator(field.selector).first();
+  switch (field.control) {
+    case "radio": {
+      const name = await target.getAttribute("name");
+      const radios = name ? page.locator(`input[type="radio"][name="${cssAttr(name)}"]`) : target.locator("input[type=radio]");
+      const labels = await radios.evaluateAll((inputs) => inputs.map((input) => (((input as HTMLInputElement).id && document.querySelector(`label[for="${CSS.escape((input as HTMLInputElement).id)}"]`)?.textContent) || input.closest("label")?.textContent || (input as HTMLInputElement).value || "").replace(/\s+/g, " ").trim()));
+      const choice = bestOption(value, labels);
+      if (!choice) throw new Error("option not found");
+      await radios.nth(labels.indexOf(choice)).check({ force: true });
+      return;
+    }
+    case "select": {
+      const labels = (await target.locator("option").allInnerTexts()).map((text) => text.trim());
+      const choice = bestOption(value, labels);
+      if (!choice) throw new Error("option not found");
+      await target.selectOption({ label: choice });
+      return;
+    }
+    case "listbox":
+      await pickListbox(page, target, value);
+      return;
+    case "prompt":
+      await pickPrompt(page, target, value);
+      return;
+    case "checkbox":
+      if (YES.test(value)) await target.check({ force: true });
+      return;
+    case "file":
+      throw new Error("file");
+    default:
+      await target.fill(value);
+      await target.blur().catch(() => undefined);
+  }
 }
 
 export type Credentials = { email: string; password: string };
@@ -254,6 +437,11 @@ export type FlowOptions = {
   shouldStop?: () => Promise<boolean>;
   /** Answers for fields the job board didn't publish ahead of time, matched by label. Null leaves the field for the student. */
   answerFor: (label: string, kind: ApplicationQuestion["kind"], options: string[]) => string | null;
+  /**
+   * Last resort for required fields still empty after everything else: decides an answer for each from
+   * the student's details, saved answers, and resume. Returns answers by index, with why, for the student to check.
+   */
+  fixFields?: (fields: EmptyField[], siteErrors: string[]) => Promise<Array<{ index: number; value: string; why: string }>>;
   /** A cover letter written for this job from the resume, as text and as a PDF. Asked for only when the form wants one. */
   coverLetter?: () => Promise<{ text: string; file: ResumeFile } | null>;
   /** Answers, by label, for questions nothing on file covers, written only from the student's resume and profile. */
@@ -334,6 +522,9 @@ async function bodyText(page: Page) {
 const VERIFY_TEXT = /((verify|confirm|activate) your (email|account)|check your (email|inbox)|we(?:'|’)?ve sent (you )?an? (email|verification|link)|verification (email|link) (has been|was) sent)/i;
 const SIGNIN_ERROR = /(invalid|incorrect|wrong) (email|password|username|credentials)|(account|user) (not found|does not exist|doesn(?:'|’)t exist)|no account (found|exists)|sign[- ]in failed/i;
 const SAFE_CONSENT = /(agree|terms|privacy|consent|acknowledge|accept)/i;
+/** "I have read the Applicant Privacy Notice and agree": covered when the student allowed Unnepo to accept candidate terms and privacy policies. */
+const PRIVACY_ACK = /(privacy (notice|policy|statement|terms)|applicant (privacy|notice|terms)|candidate (privacy|terms)|terms (and|&) conditions|terms of (use|service)|data (privacy|protection|processing) (notice|policy|statement))/i;
+const ACK_WORDS = /\b(read|understand|agree|acknowledge|accept|consent|reviewed)\b/i;
 const NOT_CONSENT = /(marketing|newsletter|offers|promotion|sms|text messages?|job alerts?|talent community)/i;
 
 /** "signup" when the page asks to create an account, "signin" when it asks to log in, null otherwise. */
@@ -407,7 +598,9 @@ type RadioGroup = { name: string; question: string; options: Array<{ label: stri
 
 /** Unanswered radio-button questions, with the question text found around them. */
 async function scanRadioGroups(page: Page): Promise<RadioGroup[]> {
+  await helpers(page);
   const groups = await page.evaluate(() => {
+    const u = (window as unknown as { __unnepo: PageHelpers }).__unnepo;
     const byName = new Map<string, HTMLInputElement[]>();
     for (const radio of Array.from(document.querySelectorAll<HTMLInputElement>("input[type='radio']"))) {
       const name = radio.getAttribute("name");
@@ -419,23 +612,7 @@ async function scanRadioGroups(page: Page): Promise<RadioGroup[]> {
       if (radios.some((radio) => radio.checked)) continue;
       const labelOf = (radio: HTMLInputElement) => ((radio.id && document.querySelector(`label[for="${CSS.escape(radio.id)}"]`)?.textContent) || radio.closest("label")?.textContent || radio.getAttribute("aria-label") || radio.value || "").replace(/\s+/g, " ").trim();
       const options = radios.map((radio) => ({ label: labelOf(radio), value: radio.value }));
-      // The question is the nearest text around the group that is more than its own option labels.
-      let node: HTMLElement | null = radios[0].parentElement;
-      let question = "";
-      const optionText = options.map((option) => option.label).join(" ");
-      while (node && node !== document.body && !question) {
-        const contains = radios.every((radio) => node!.contains(radio));
-        if (contains) {
-          const legend = node.querySelector("legend")?.textContent?.trim();
-          const text = (legend || node.innerText || "").replace(/\s+/g, " ").trim();
-          if (text.replace(optionText, "").trim().length > 12) question = text.replace(optionText, "").trim();
-          else if (node.previousElementSibling) {
-            const before = (node.previousElementSibling as HTMLElement).innerText?.replace(/\s+/g, " ").trim() ?? "";
-            if (before.length > 12) question = before;
-          }
-        }
-        node = node.parentElement;
-      }
+      const question = u.questionText(radios[0]);
       const required = radios.some((radio) => radio.required) || Boolean(radios[0].closest("[aria-required='true'], [role='radiogroup'][aria-required='true']"));
       if (question) out.push({ name, question: question.replace(/\*/g, "").replace(/\s+/g, " ").trim().slice(0, 600), options, required });
     }
@@ -451,12 +628,14 @@ function radioAnswer(group: RadioGroup, answerFor: FlowOptions["answerFor"]) {
   return answer ? group.options.find((option) => option.label.toLowerCase() === answer.toLowerCase()) ?? null : null;
 }
 
-type ScannedField = { selector: string; label: string; kind: ApplicationQuestion["kind"]; options: string[]; listbox: boolean; required: boolean };
+type ScannedField = { selector: string; label: string; section: string; kind: ApplicationQuestion["kind"]; options: string[]; listbox: boolean; required: boolean };
 
 /** Visible empty fields on the page, with their labels, for questions the job board didn't publish. */
 async function scanFields(page: Page): Promise<ScannedField[]> {
+  await helpers(page);
   return page.evaluate(() => {
-    const out: Array<{ selector: string; label: string; kind: "text" | "textarea" | "select" | "file" | "checkbox"; options: string[]; listbox: boolean; required: boolean }> = [];
+    const u = (window as unknown as { __unnepo: PageHelpers }).__unnepo;
+    const out: Array<{ selector: string; label: string; section: string; kind: "text" | "textarea" | "select" | "file" | "checkbox"; options: string[]; listbox: boolean; required: boolean }> = [];
     const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select, button[aria-haspopup='listbox']"));
     fields.forEach((field, index) => {
       const type = (field.getAttribute("type") || "text").toLowerCase();
@@ -475,17 +654,14 @@ async function scanFields(page: Page): Promise<ScannedField[]> {
       const style = window.getComputedStyle(field);
       if ((!rect.width && !rect.height && type !== "file") || style.visibility === "hidden" || style.display === "none") return;
       if (!checkbox && (listbox ? !/^(select one|select|choose( one)?|)$/i.test((field as HTMLElement).innerText.trim()) : type === "file" ? (field as HTMLInputElement).files?.length : String(field.value || "").trim())) return;
-      const id = field.getAttribute("id");
-      const labelledBy = field.getAttribute("aria-labelledby");
       const container = field.closest("[data-automation-id^='formField']");
-      const label = ((id && document.querySelector(`label[for="${CSS.escape(id)}"]`)?.textContent) || (labelledBy && document.getElementById(labelledBy.split(" ")[0])?.textContent) || container?.querySelector("label")?.textContent || field.closest("label")?.textContent || field.getAttribute("aria-label") || field.getAttribute("placeholder") || "")
-        .replace(/\s+/g, " ").replace(/\b(select one|required)\b/gi, "").replace(/\*/g, "").trim();
+      const label = u.questionText(field);
       if (!label) return;
       field.setAttribute("data-unnepo-field", String(index));
       const required = field.hasAttribute("required") || field.getAttribute("aria-required") === "true" || /\*/.test(container?.querySelector("label")?.textContent || "");
       const kind = checkbox ? "checkbox" : field.tagName === "SELECT" || listbox ? "select" : field.tagName === "TEXTAREA" ? "textarea" : type === "file" ? "file" : "text";
       const options = checkbox ? ["Yes"] : field.tagName === "SELECT" ? Array.from((field as HTMLSelectElement).options).map((option) => option.text.trim()).filter((text) => text && !/^(select|choose|--)/i.test(text)) : [];
-      out.push({ selector: `[data-unnepo-field="${index}"]`, label: label.slice(0, 200), kind, options, listbox, required });
+      out.push({ selector: `[data-unnepo-field="${index}"]`, label: label.slice(0, 200), section: u.section(field), kind, options, listbox, required });
     });
     return out;
   });
@@ -525,6 +701,9 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
   const aiKnown = new Map<string, string>();
   const askedAi = new Set<string>();
   const fromResume = new Set<string>();
+  /** Answers the fix-up pass decided, with why, so the student can check them. */
+  const decided = new Map<string, { answer: string; why: string }>();
+  const fixTried = new Set<string>();
   // The letter is written at most once per run, the first time a form asks for one.
   let letter: { text: string; file: ResumeFile } | null | undefined;
   let letterUsed = false;
@@ -550,7 +729,11 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
       if (kind !== "file") ask.set(label, { kind, options: [] });
     }
   };
-  const answerOf = (label: string, kind: ApplicationQuestion["kind"], choices: string[]) => options.answerFor(label, kind, choices) ?? aiKnown.get(label) ?? aiKnown.get(label.slice(0, 160)) ?? null;
+  const privacyAck = (label: string, choices: string[]) => {
+    if (!options.allowSignup || !PRIVACY_ACK.test(label) || !ACK_WORDS.test(label) || NOT_CONSENT.test(label) || /\b(certify|attest|true and (complete|accurate)|background|non-?compete|arbitration)\b/i.test(label)) return null;
+    return choices.length ? choices.find((choice) => /^(yes|i agree|agree|i accept|accept|i acknowledge|acknowledged?)\b/i.test(choice)) ?? null : "Yes";
+  };
+  const answerOf = (label: string, kind: ApplicationQuestion["kind"], choices: string[]) => options.answerFor(label, kind, choices) ?? aiKnown.get(label) ?? aiKnown.get(label.slice(0, 160)) ?? (kind === "checkbox" || kind === "select" ? privacyAck(label, kind === "checkbox" ? [] : choices) : null);
   const host = () => {
     try {
       return new URL(page.url()).hostname;
@@ -567,6 +750,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     host: host(),
     coverLetter: letterUsed && letter ? letter.text : undefined,
     fromResume: [...fromResume].filter((label) => filled.has(label)),
+    decided: [...decided].map(([label, item]) => ({ label, ...item })),
     pending: [...ask].filter(([label]) => failed.has(label)).map(([label, item]) => ({ label, kind: item.kind, options: item.options })).slice(0, 25),
   });
 
@@ -768,8 +952,39 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
       }
     }
 
-    const empty = await emptyRequiredLabels(page);
-    for (const label of empty) if (!failed.has(label)) failed.set(label, "Required. Answer it below or in the live view.");
+    // Fix-up: anything required still empty gets one decision pass (two if new fields appear), never a blind guess.
+    for (let round = 0; round < 2 && options.fixFields; round += 1) {
+      await checkStop();
+      const open = (await emptyRequired(page)).filter((field) => field.control !== "file" && !fixTried.has(field.label));
+      if (!open.length) break;
+      for (const field of open) {
+        fixTried.add(field.label);
+        if (field.control === "listbox") field.options = (await decideListbox(page, page.locator(field.selector).first(), () => null).catch(() => null))?.options ?? [];
+      }
+      const actions = await options.fixFields(open, await siteErrors(page)).catch(() => []);
+      if (!actions.length) break;
+      for (const action of actions) {
+        const field = open[action.index];
+        if (!field || !action.value.trim()) continue;
+        try {
+          await applyFix(page, field, action.value.trim());
+          decided.set(field.label, { answer: action.value.trim(), why: action.why });
+          filled.add(field.label);
+          failed.delete(field.label);
+          ask.delete(field.label);
+        } catch {
+          // Left for the student below.
+        }
+      }
+    }
+
+    // Whatever is still empty comes back to the student as a question they can answer in Unnepo.
+    const remaining = await emptyRequired(page);
+    const empty = [...new Set(remaining.map((field) => field.label))];
+    for (const field of remaining) {
+      if (!failed.has(field.label)) failed.set(field.label, field.control === "file" ? "Upload this in the live view." : "Required. Answer it below or in the live view.");
+      if (field.control !== "file") ask.set(field.label, { kind: field.control === "textarea" ? "textarea" : field.control === "checkbox" ? "checkbox" : field.options.length ? "select" : "text", options: field.options });
+    }
     const next = await visible(button(page, NEXT_BUTTON));
     const submit = await visible(page.getByRole("button", { name: /^(submit( application)?|send application|complete application|submit my application)$/i }).or(page.locator("input[type='submit'][value*='Submit' i]")));
     if (submit && !next) return done("review", pageIndex);

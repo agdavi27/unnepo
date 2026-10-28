@@ -9,6 +9,7 @@ import { acceptAiAnswer, classifyQuestion, missingAnswers, planAnswers } from "@
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
 import { coreTitle } from "@/lib/apply/contacts";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
+import { acceptFixes } from "@/lib/apply/fixer";
 import { applyState, saveApplicationProfile, checkSubmission, createApplication, markApplied, runContactDiscovery, setDeferForTests, startAutofill, updateAnswers } from "@/lib/apply/service";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -156,7 +157,8 @@ describe("answers", () => {
     expect(by.grad.answer).toBe("2027");
     expect(by.visa).toMatchObject({ answer: null, sensitive: true });
     expect(by.gender).toMatchObject({ answer: null, sensitive: true });
-    expect(missingAnswers(planned).map((item) => item.key)).toEqual(["visa", "hear"]);
+    expect(by.hear).toMatchObject({ answer: "Company website", source: "default" });
+    expect(missingAnswers(planned).map((item) => item.key)).toEqual(["visa"]);
 
     const withSaved = planAnswers(questions, { ...context, profile: { ...profile, saved: { "will you now or in the future require sponsorship": { label: "x", answer: "No", updatedAt: "" } } } });
     expect(withSaved.find((item) => item.key === "visa")).toMatchObject({ answer: "No", source: "saved" });
@@ -170,6 +172,41 @@ describe("answers", () => {
       q("phone", "Phone Number"),
     ], context);
     expect(planned.map((item) => item.answer)).toEqual(["Mobile", "Cell", null, "207-555-0100"]);
+  });
+
+  it("uses the student's eligibility answers however the form words them, and never without them", () => {
+    const withAnswers = { ...context, profile: { ...profile, eligibility: { workAuthorized: "Yes", needsSponsorship: "No", over18: "Yes" } } };
+    const questions = [
+      q("a", "Are you legally authorized to work in the United States?", "select", ["Yes", "No"]),
+      q("b", "Will you now or in the future require sponsorship for employment visa status?", "select", ["Yes", "No"]),
+      q("c", "Are you 18 years of age or older?", "select", ["Yes", "No"]),
+      q("hear", "How did you hear about us?", "select", ["LinkedIn", "Careers Site", "Referral"]),
+    ];
+    expect(planAnswers(questions, withAnswers).map((item) => item.answer)).toEqual(["Yes", "No", "Yes", "Careers Site"]);
+    expect(planAnswers(questions, context).map((item) => item.answer)).toEqual([null, null, null, "Careers Site"]);
+  });
+
+  it("keeps a worked-out answer only with a real source", () => {
+    const field = (label: string, options: string[] = [], section = "") => ({ selector: "x", label, section, control: options.length ? "select" as const : "text" as const, options, format: null });
+    const fields = [
+      field("Gender", ["Male", "Female", "I don't wish to answer"]),
+      field("Gender", ["Male", "Female"]),
+      field("Are you authorized to work in the US?", ["Yes", "No"]),
+      field("Job title", [], "Work Experience"),
+      field("GPA"),
+      field("I have read the Applicant Privacy Notice and agree", ["Yes"]),
+    ];
+    const resume = "Data Analyst Intern, Maine Credit Union";
+    const kept = acceptFixes(fields, [
+      { index: 0, value: "I don't wish to answer", source: "default" },
+      { index: 1, value: "Female", source: "default" },
+      { index: 2, value: "Yes", source: "resume", evidence: "Data Analyst Intern" },
+      { index: 3, value: "Data Analyst Intern", source: "resume", evidence: "Data Analyst Intern" },
+      { index: 4, value: "3.8", source: "resume", evidence: "GPA 3.8" },
+      { index: 5, value: "Yes", source: "default" },
+    ], { facts: "First name: Pat", sources: resume, consent: false });
+    expect(kept.map((item) => [item.index, item.value])).toEqual([[0, "I don't wish to answer"], [3, "Data Analyst Intern"]]);
+    expect(acceptFixes(fields, [{ index: 5, value: "Yes", source: "default" }], { facts: "", sources: "", consent: true }).map((item) => item.index)).toEqual([5]);
   });
 
   it("doesn't hold up autofill for a cover letter, which autofill writes", () => {
@@ -208,7 +245,8 @@ describe("applications", () => {
     expect(first.duplicate).toBe(false);
     const by = Object.fromEntries(first.application.questions.map((item) => [item.key, item]));
     expect(by.question_1).toMatchObject({ source: "ai", evidence: "Led the Colby Data Club" });
-    expect(by.question_3.answer).toBeNull();
+    // The AI's unsupported "LinkedIn" is dropped; the company's own site is the honest default.
+    expect(by.question_3).toMatchObject({ answer: "Company website", source: "default" });
     expect(by.question_2.answer).toBeNull();
     expect(model.calls[0]).not.toContain("visa sponsorship");
     // No resume uploaded in this test, so the required resume stays missing rather than faked.

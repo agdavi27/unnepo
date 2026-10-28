@@ -7,7 +7,7 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
@@ -22,6 +22,7 @@ const STANDARD: Array<[RegExp, StandardField]> = [
   [/\b(phone|device) (device )?type\b|type of (phone|device)|phone number type/i, "phoneType"],
   [/\b(phone )?extension\b|^ext\.?$/i, "phoneExtension"],
   [/\b(phone|mobile|cell)\b/i, "phone"],
+  [/how did you (hear|find out|learn) (about|of)|where did you (hear|find|see)|(referral|application|candidate|lead) source|^source$/i, "hearAbout"],
   [/linkedin/i, "linkedin"],
   [/github/i, "github"],
   [/\b(website|portfolio|personal site|blog)\b/i, "website"],
@@ -87,11 +88,34 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
     // A student's application number is their own cell; they can change it in the live view.
     case "phoneType": return { answer: "Mobile", source: "default" };
     case "phoneExtension": return null;
+    // Unnepo opened the company's own posting, so its careers site is where the student found it.
+    case "hearAbout": return { answer: "Company website", source: "default" };
   }
 }
 
+/** Eligibility questions answered from what the student set once in their details. Nothing here is guessed. */
+const ELIGIBILITY: Array<[RegExp, keyof NonNullable<ApplicationProfile["eligibility"]>]> = [
+  [/sponsor/i, "needsSponsorship"],
+  [/(authori[sz]ed|eligible|permitted|legally (able|allowed)) to work|right to work|work authori[sz]ation|employment eligibility/i, "workAuthorized"],
+  [/\b(at least|over|older than) (the age of )?18\b|\b18 (years )?(of age )?or older\b|\b18\+|legal (working )?age/i, "over18"],
+];
+
+export function eligibilityAnswer(label: string, profile: ApplicationProfile) {
+  const key = ELIGIBILITY.find(([pattern]) => pattern.test(label))?.[1];
+  const value = key ? profile.eligibility?.[key]?.trim() : "";
+  return value || null;
+}
+
 /** Other names sites use for the same answer. */
-const SAME_ANSWER: Record<string, string[]> = { mobile: ["Cell", "Cell Phone", "Mobile Phone", "Cellular", "Personal Mobile"] };
+const SAME_ANSWER: Record<string, string[]> = {
+  mobile: ["Cell", "Cell Phone", "Mobile Phone", "Cellular", "Personal Mobile"],
+  "company website": ["Company Careers Site", "Company Career Site", "Careers Site", "Career Site", "Careers Page", "Career Website", "Corporate Website", "Website", "Company Web Site", "Job Board", "Online Job Board", "Internet", "Online", "Other"],
+};
+
+/** The answer and the other ways sites word it, in order of preference. */
+export function answerChoices(answer: string) {
+  return [answer, ...(SAME_ANSWER[answer.toLowerCase()] ?? [])];
+}
 
 function matchOption(answer: string, options: string[]) {
   if (!options.length) return answer;
@@ -114,6 +138,11 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
       const answer = question.kind === "select" ? matchOption(saved.answer, question.options) : saved.answer;
       if (answer) return { ...question, answer, source: "saved", evidence: null };
     }
+    const eligible = eligibilityAnswer(question.label, context.profile);
+    if (eligible && question.kind !== "file" && question.kind !== "textarea") {
+      const answer = question.kind === "select" || question.options.length ? matchOption(eligible, question.options) : eligible;
+      if (answer) return { ...question, answer, source: "student", evidence: null };
+    }
     const { field, sensitive } = classifyQuestion(question.label);
     if (sensitive || question.sensitive) return { ...question, sensitive: true, answer: null, source: null, evidence: null };
     const fileMatches = (field === "resume" || field === "coverLetter") === (question.kind === "file");
@@ -134,7 +163,7 @@ export function missingAnswers(questions: ApplicationQuestion[]) {
   return questions.filter((question) => question.required && !question.answer?.trim() && classifyQuestion(question.label).field !== "coverLetter");
 }
 
-function squash(text: string) {
+export function squash(text: string) {
   return text.toLowerCase().replace(/[\s ]+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
 }
 

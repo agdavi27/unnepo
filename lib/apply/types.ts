@@ -62,6 +62,8 @@ export type FillReport = {
   host?: string;
   /** The cover letter autofill wrote for this job and put on the form, for the student to read or copy. */
   coverLetter?: string;
+  /** Required fields Unnepo worked out after the normal fill, with the answer and why. */
+  decided?: Array<{ label: string; answer: string; why: string }>;
   /** Questions answered from the student's resume by AI during autofill, for the student to check. */
   fromResume?: string[];
   /** Required questions on the page where autofill stopped that the student can answer in Unnepo. */
@@ -139,6 +141,8 @@ export type ApplicationProfile = {
   country?: string;
   /** Answers the student saved from earlier forms, keyed by a normalized question label. */
   saved: Record<string, { label: string; answer: string; updatedAt: string }>;
+  /** Eligibility answers the student gave once, used on every form that asks: "Yes", "No", or unset. */
+  eligibility?: { workAuthorized?: string; needsSponsorship?: string; over18?: string };
   /** The student's one job-site password, encrypted. Never sent to the browser page. */
   jobSitePasswordEncrypted?: string | null;
   /** When the student allowed Unnepo to create job-site accounts and accept their candidate terms. */

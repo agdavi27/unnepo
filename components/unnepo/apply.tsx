@@ -177,6 +177,11 @@ function ApplyPage({ data, current, error, onPick, onChanged, onPatch, onProfile
           Add your {[!data.profile.lastName.trim() && "legal last name", !data.profile.phone.trim() && "phone number"].filter(Boolean).join(" and ")} under <span className="font-medium">Your application details</span> below. Almost every application requires {!data.profile.lastName.trim() && !data.profile.phone.trim() ? "them" : "it"}, and Unnepo won&apos;t guess.
         </p>
       )}
+      {(!data.profile.eligibility?.workAuthorized || !data.profile.eligibility?.needsSponsorship || !data.profile.eligibility?.over18) && (
+        <p className="rounded-xl border border-amber-900/60 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
+          Answer the three <span className="font-medium">Eligibility questions</span> under Your application details (work authorization, sponsorship, 18 or older). Most forms require them, and Unnepo only uses your own answers.
+        </p>
+      )}
       {inProgress.length > 0 && !current && (
         <section className={card}>
           <h2 className="text-sm font-semibold">In progress</h2>
@@ -298,6 +303,12 @@ function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { a
             <div className="rounded-xl border border-sky-900/60 bg-sky-950/20 p-3 text-sm">
               <p className="font-medium text-sky-200">Written from your resume. Check these in the live view</p>
               <ul className="mt-1 list-disc pl-5 text-sky-100/80">{(app.fillReport.fromResume ?? []).map((label) => <li key={label}>{label}</li>)}</ul>
+            </div>
+          )}
+          {app.status !== "filling" && (app.fillReport.decided ?? []).length > 0 && (
+            <div className="rounded-xl border border-sky-900/60 bg-sky-950/20 p-3 text-sm">
+              <p className="font-medium text-sky-200">Unnepo worked these out. Check them in the live view</p>
+              <ul className="mt-1 space-y-1 text-sky-100/80">{(app.fillReport.decided ?? []).map((item) => <li key={item.label}><span className="text-sky-100">{item.label}</span>: {item.answer} <span className="text-xs text-sky-200/60">({item.why})</span></li>)}</ul>
             </div>
           )}
           {app.status !== "filling" && app.fillReport.coverLetter && <CoverLetter text={app.fillReport.coverLetter} />}
@@ -449,11 +460,13 @@ function ProfileDetails({ profile, resume, onSaved }: { profile: PublicProfile; 
   const [state, setState] = useState("");
   const [password, setPassword] = useState("");
   const [consent, setConsent] = useState(Boolean(profile.accountConsentAt));
+  const eligibility = draft.eligibility ?? {};
+  const setEligibility = (key: "workAuthorized" | "needsSponsorship" | "over18", value: string) => setDraft({ ...draft, eligibility: { ...eligibility, [key]: value } });
   const fields: Array<[keyof PublicProfile, string]> = [["firstName", "First name"], ["lastName", "Last name"], ["email", "Email for applications"], ["phone", "Phone"], ["linkedin", "LinkedIn URL"], ["website", "Website or portfolio"], ["github", "GitHub URL"], ["addressLine1", "Street address"], ["city", "City"], ["state", "State (full name, e.g. Maine)"], ["postalCode", "ZIP code"], ["country", "Country (e.g. United States)"]];
   async function save() {
     setState("Saving…");
     try {
-      const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { ...draft, jobSitePassword: password || undefined, accountConsent: consent });
+      const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { ...draft, eligibility, jobSitePassword: password || undefined, accountConsent: consent });
       onSaved(result.profile);
       setPassword("");
       setState("Saved. New jobs will use these details.");
@@ -481,6 +494,24 @@ function ProfileDetails({ profile, resume, onSaved }: { profile: PublicProfile; 
             ))}
           </div>
           <p className="text-xs text-faint">Phone, LinkedIn, and GitHub are pulled from your resume when it lists them. Unnepo never makes up details.</p>
+          <div className="space-y-3 rounded-xl border border-line p-4">
+            <div>
+              <p className="text-sm font-semibold">Eligibility questions</p>
+              <p className="mt-1 text-xs text-muted">Almost every application asks these. Answer once and Unnepo uses your answers on every form, however it&apos;s worded. Unnepo never answers them for you.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              {([["workAuthorized", "Authorized to work in the US?"], ["needsSponsorship", "Need visa sponsorship, now or later?"], ["over18", "18 or older?"]] as const).map(([key, title]) => (
+                <div key={key}>
+                  <label className={labelClass} htmlFor={`eligibility-${key}`}>{title}</label>
+                  <select id={`eligibility-${key}`} className={field} value={eligibility[key] ?? ""} onChange={(event) => setEligibility(key, event.target.value)}>
+                    <option value="">Not set</option>
+                    <option value="Yes">Yes</option>
+                    <option value="No">No</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="space-y-3 rounded-xl border border-line p-4">
             <div>
               <p className="text-sm font-semibold">Job-site accounts</p>

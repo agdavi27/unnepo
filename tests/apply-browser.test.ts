@@ -4,7 +4,9 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Browser } from "playwright-core";
 import { detectConfirmation, fillApplicationForm, passwordAllowedOn, runApplicationFlow, submitAndConfirm } from "@/lib/apply/browser";
-import type { ApplicationQuestion } from "@/lib/apply/types";
+import { acceptFixes } from "@/lib/apply/fixer";
+import { planAnswers } from "@/lib/apply/questions";
+import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 
 /** Runs the real form filler in a local Chrome against local test forms. Skipped where Chrome isn't installed. */
 const CHROME = process.env.CHROME_PATH || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
@@ -270,4 +272,92 @@ describe.skipIf(!hasChrome)("application form filler (local Chrome)", () => {
     expect(report.filled).toEqual(expect.arrayContaining(["Cover Letter", "Cover letter (paste)"]));
     await page.close();
   }, 60_000);
+});
+
+/** A copy of the form a student got stuck on: unlabeled questionnaire radios, a required wrapper, "MM/YYYY" date boxes. */
+const STUCK_FORM = `<!doctype html><html><body><form onsubmit="event.preventDefault()">
+  <h2>Personal information</h2>
+  <div class="field" aria-required="true"><label>First Name</label><div><input name="candidate[first_name]"></div></div>
+  <div class="field"><label for="ln">Last Name *</label><input id="ln" name="candidate[last_name]" required></div>
+  <div class="field"><label for="hear">How did you hear about us? *</label><select id="hear" required><option value="">Select</option><option>LinkedIn</option><option>Company Website</option><option>Referral</option><option>Other</option></select></div>
+  <div class="field"><label for="st">State *</label><select id="st" required><option value="">Select</option><option>MA - Massachusetts</option><option>ME - Maine</option></select></div>
+  <h2>Work Experience</h2>
+  <div class="row"><div>Job title</div><input name="experience[0][title]" required></div>
+  <div class="row"><div>Company</div><input name="experience[0][company]" required></div>
+  <div class="row"><div>Start date</div><input name="experience[0][from]" placeholder="MM/YYYY" required></div>
+  <h2>Education</h2>
+  <div class="row"><div>School or University</div><input name="education[0][school]" required></div>
+  <div class="row"><div>Degree</div><select name="education[0][degree]" required><option value="">Select</option><option>High School Diploma</option><option>Bachelor's Degree</option><option>Master's Degree</option></select></div>
+  <h2>Questions</h2>
+  <div class="q"><div>Are you legally authorized to work in the United States?</div><label><input type="radio" name="application_questionnaire[REC_US_Disqualification][a]" value="1" required>Yes</label><label><input type="radio" name="application_questionnaire[REC_US_Disqualification][a]" value="0">No</label></div>
+  <div class="q"><div>Will you now or in the future require visa sponsorship?</div><label><input type="radio" name="application_questionnaire[REC_US_Disqualification][b]" value="1" required>Yes</label><label><input type="radio" name="application_questionnaire[REC_US_Disqualification][b]" value="0">No</label></div>
+  <div class="q"><div>Are you at least 18 years of age?</div><label><input type="radio" name="application_questionnaire[REC_US_Disqualification][c]" value="1" required>Yes</label><label><input type="radio" name="application_questionnaire[REC_US_Disqualification][c]" value="0">No</label></div>
+  <div class="q"><div>Have you ever been employed by Acme?</div><label><input type="radio" name="application_questionnaire[REC_US_Disqualification][d]" value="1" required>Yes</label><label><input type="radio" name="application_questionnaire[REC_US_Disqualification][d]" value="0">No</label></div>
+  <label><input type="checkbox" id="privacy" required> I have read and understand the Applicant Privacy Notice and Terms and I agree to proceed.</label>
+  <button type="submit">Submit application</button>
+</form></body></html>`;
+
+describe.skipIf(!hasChrome)("working out fields a form leaves empty (local Chrome)", () => {
+  let browser: Browser;
+  beforeAll(async () => {
+    const { chromium } = await import("playwright-core");
+    browser = await chromium.launch({ executablePath: CHROME, headless: true });
+  }, 30_000);
+  afterAll(async () => {
+    await browser?.close();
+  });
+
+  it("reads real question text, uses the student's answers, fills from the resume with quotes, and leaves the rest to the student", async () => {
+    const page = await browser.newPage();
+    await page.setContent(STUCK_FORM);
+    const profile: ApplicationProfile = { firstName: "Pat", lastName: "Doe", email: "pat@colby.edu", phone: "207-555-0100", linkedin: "", website: "", github: "", city: "Waterville", state: "Maine", saved: {}, eligibility: { workAuthorized: "Yes", needsSponsorship: "No", over18: "Yes" } };
+    const context = { profile, school: "Colby College", majors: ["Economics"], graduationYear: "2027", resumeFileName: null };
+    const resume = "Colby College, B.A. Economics, expected May 2027. Data Analyst Intern, Maine Credit Union, May 2024 - August 2024.";
+    const seen: string[][] = [];
+    const report = await runApplicationFlow(page, {
+      url: "https://jobs.acme.com/apply",
+      navigate: false,
+      questions: [],
+      resume: null,
+      credentials: null,
+      allowSignup: true,
+      answerFor: (label, kind, options) => {
+        const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], context);
+        return planned.answer && planned.source !== "resume_file" ? planned.answer : null;
+      },
+      // Stands in for the model: good answers with quotes, one unsupported guess that must be dropped.
+      fixFields: async (fields) => {
+        seen.push(fields.map((field) => `${field.section} | ${field.label}`));
+        const at = (pattern: RegExp) => fields.findIndex((field) => pattern.test(field.label));
+        return acceptFixes(fields, [
+          { index: at(/^Job title/), value: "Data Analyst Intern", source: "resume", evidence: "Data Analyst Intern" },
+          { index: at(/^Company/), value: "Maine Credit Union", source: "resume", evidence: "Maine Credit Union" },
+          { index: at(/^Start date/), value: "05/2024", source: "resume", evidence: "May 2024" },
+          { index: at(/^School/), value: "Colby College", source: "resume", evidence: "Colby College" },
+          { index: at(/^Degree/), value: "Bachelor's Degree", source: "resume", evidence: "B.A. Economics" },
+          { index: at(/employed by Acme/), value: "No", source: "resume", evidence: "never worked at Acme" },
+        ], { facts: "First name: Pat", sources: resume, consent: true });
+      },
+    });
+
+    expect(await page.inputValue("[name='candidate[first_name]']")).toBe("Pat");
+    expect(await page.inputValue("#hear")).toBe("Company Website");
+    expect(await page.inputValue("#st")).toBe("ME - Maine");
+    expect(await page.isChecked("[name='application_questionnaire[REC_US_Disqualification][a]'][value='1']")).toBe(true);
+    expect(await page.isChecked("[name='application_questionnaire[REC_US_Disqualification][b]'][value='0']")).toBe(true);
+    expect(await page.isChecked("[name='application_questionnaire[REC_US_Disqualification][c]'][value='1']")).toBe(true);
+    expect(await page.isChecked("#privacy")).toBe(true);
+    expect(await page.inputValue("[name='experience[0][title]']")).toBe("Data Analyst Intern");
+    expect(await page.inputValue("[name='experience[0][from]']")).toBe("05/2024");
+    expect(await page.inputValue("[name='education[0][degree]']")).toBe("Bachelor's Degree");
+    // The fix-up pass saw real questions with their sections, never field names.
+    expect(seen[0]).toEqual(expect.arrayContaining(["Work Experience | Job title", "Work Experience | Start date", "Education | Degree"]));
+    expect(seen.flat().join(" ")).not.toMatch(/application_questionnaire|education\[/);
+    expect(report.decided?.map((item) => item.label)).toEqual(expect.arrayContaining(["Job title", "Degree"]));
+    // The unsupported guess was dropped: that question goes back to the student, worded as the site asks it.
+    expect(await page.isChecked("[name='application_questionnaire[REC_US_Disqualification][d]'][value='0']")).toBe(false);
+    expect(report.pending).toEqual([{ label: "Have you ever been employed by Acme?", kind: "select", options: ["Yes", "No"] }]);
+    expect(report.failed.map((item) => item.label)).not.toContain("First Name");
+    await page.close();
+  }, 90_000);
 });
