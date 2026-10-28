@@ -67,6 +67,28 @@ function foundCutoff(filter: FoundFilter) {
   return 0;
 }
 
+const SOCIAL_LABEL = { linkedin: "LinkedIn", x: "X", github: "GitHub", facebook: "Facebook" } as const;
+
+function SocialIcon({ kind }: { kind: keyof typeof SOCIAL_LABEL }) {
+  const paths = {
+    linkedin: "M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5ZM3 9.75h4v11H3v-11Zm6.5 0h3.8v1.6h.06c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.77 2.6 4.77 6v5.45h-4v-4.83c0-1.15-.02-2.63-1.6-2.63-1.6 0-1.85 1.25-1.85 2.55v4.91h-4V9.75Z",
+    x: "M17.75 3h3.07l-6.7 7.66L22 21h-6.17l-4.83-6.32L5.47 21H2.4l7.17-8.2L2 3h6.33l4.37 5.78L17.75 3Zm-1.08 16.18h1.7L7.4 4.73H5.58l11.09 14.45Z",
+    github: "M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.56 9.56 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z",
+    facebook: "M13.5 21v-7.5h2.53l.38-2.94H13.5V8.69c0-.85.24-1.43 1.46-1.43h1.56V4.63a20.9 20.9 0 0 0-2.27-.12c-2.25 0-3.79 1.37-3.79 3.9v2.15H7.92v2.94h2.54V21h3.04Z",
+  };
+  return <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5 fill-current"><path d={paths[kind]} /></svg>;
+}
+
+/** Apollo's photo when it has one; initials when it doesn't or the image fails to load. */
+function ContactPhoto({ name, url }: { name: string; url?: string }) {
+  const [failed, setFailed] = useState(false);
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+  if (url && !failed) {
+    return <img src={url} alt="" className="h-9 w-9 shrink-0 rounded-full border border-line object-cover" onError={() => setFailed(true)} referrerPolicy="no-referrer" />;
+  }
+  return <span aria-hidden className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line bg-card text-xs font-semibold text-zinc-300">{initials || "?"}</span>;
+}
+
 function foundLabel(iso?: string) {
   if (!iso) return "";
   const date = new Date(iso);
@@ -396,7 +418,7 @@ export function AppHome() {
   });
   const filtersOn = foundFilter !== "any" || statusFilter !== "all";
   const allSelected = filteredContacts.length > 0 && filteredContacts.every((contact) => selected.has(contact.id));
-  const tableColumns = "lg:grid-cols-[2rem_minmax(0,1.1fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_9.5rem_4.5rem_12.5rem]";
+  const tableColumns = "lg:grid-cols-[2rem_minmax(0,1.3fr)_minmax(0,1.3fr)_minmax(0,1.3fr)_9.5rem_4.5rem_12.5rem]";
 
   const renderContactTable = (list: Contact[], selectable: boolean) => (
     <section className="overflow-hidden rounded-2xl border border-line">
@@ -421,8 +443,25 @@ export function AppHome() {
             ) : (
               <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-zinc-600" />
             )}
-            <p className="truncate font-medium">{contact.name}</p>
-            <p className="col-start-2 truncate text-sm text-muted lg:col-start-auto">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
+            <div className="flex min-w-0 items-center gap-3">
+              <ContactPhoto name={contact.name} url={contact.photoUrl} />
+              <div className="min-w-0">
+                <p className="truncate font-medium">{contact.name}</p>
+                {contact.links?.length ? (
+                  <div className="mt-0.5 flex items-center gap-2 text-faint">
+                    {contact.links.map((link) => (
+                      <a key={link.kind} href={link.url} target="_blank" rel="noopener noreferrer" aria-label={`${contact.name} on ${SOCIAL_LABEL[link.kind]}`} title={SOCIAL_LABEL[link.kind]} className="hover:text-white">
+                        <SocialIcon kind={link.kind} />
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+            <div className="col-start-2 min-w-0 lg:col-start-auto">
+              <p className="truncate text-sm text-muted">{contact.title}{contact.company ? ` · ${contact.company}` : ""}</p>
+              {contact.location && <p className="truncate text-xs text-faint">{contact.location}</p>}
+            </div>
             <div className="col-start-2 min-w-0 text-sm lg:col-start-auto">
               {contact.email ? (
                 <a href={`mailto:${contact.email}`} className="block truncate text-zinc-300 hover:text-white">{contact.email}</a>

@@ -193,6 +193,11 @@ export type Contact = {
   location: string;
   school: string | null;
   profileUrl: string | null;
+  /** Photo and social links from Apollo's person lookup, when it has them. */
+  photoUrl?: string | null;
+  twitterUrl?: string | null;
+  githubUrl?: string | null;
+  facebookUrl?: string | null;
   email: string | null;
   emailStatus: "unknown" | "available" | "verified" | "unverified" | "unavailable";
   phone: string | null;
@@ -571,6 +576,8 @@ export type Database = {
   manualDrafts: ManualEmailDraft[];
   /** Server-only. Never return this from an API response. */
   serverSecrets?: { apolloApiKey?: string; anthropicApiKey?: string };
+  /** Company name (lowercase) to the domains Apollo knows it by, so each name is looked up once. */
+  companyDomains?: Record<string, string[]>;
 };
 
 export function emptyDatabase(): Database {

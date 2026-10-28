@@ -3,6 +3,7 @@ import { repo, id, nowIso, readApolloKey } from "@/lib/db/file-store";
 import type { Contact } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
 import { expandSchools } from "@/lib/schools";
+import { COMPANY_DOMAINS, type ApolloPeopleQuery } from "@/lib/search/apollo-query";
 import { contactFetch } from "./http";
 import { closestSampleContacts, filterSampleDirectory, SAMPLE_CONTACTS, type SearchFilters } from "./sample-directory";
 
@@ -24,6 +25,7 @@ export type EnrichResult =
       costCents: number;
       estimated: boolean;
       provider: string;
+      patch?: Partial<Contact>;
     }
   | { ok: false; reason: string; message: string; costCents: number; estimated: boolean; provider: string };
 
@@ -188,17 +190,18 @@ async function apolloSearch(apiKey: string, filters: SearchFilters, schools: str
   });
   if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 300));
   const body = (await response.json()) as { people?: Array<Record<string, unknown>> };
-  return (body.people ?? []).map((person) => mapApolloPerson(person, schools)).filter((person) => person !== null) as Contact[];
+  return (body.people ?? []).map((person) => mapApolloPerson(person)).filter((person) => person !== null) as Contact[];
 }
 
-function mapApolloPerson(raw: Record<string, unknown>, schools: string[]): Contact | null {
+function mapApolloPerson(raw: Record<string, unknown>): Contact | null {
   const first = String(raw.first_name ?? "").trim();
-  const last = String(raw.last_name ?? raw.last_name_obfuscated ?? "").trim();
+  const last = String(raw.last_name || raw.last_name_obfuscated || "").trim();
   const fullName = `${first} ${last}`.trim();
   const externalId = String(raw.id ?? "");
   if (!fullName || !externalId) return null;
   const organization = (raw.organization ?? {}) as Record<string, unknown>;
-  const school = schools[0] ?? null;
+  // People search returns no education, so a school is never assumed for the contact.
+  const school = null;
   return {
     id: `apollo_${externalId}`,
     externalId,
@@ -267,6 +270,7 @@ export async function enrichPerson(contact: Contact, userId: string): Promise<En
   let phoneStatus = contact.phoneStatus;
   let cost = 0;
   let provider = contact.provider;
+  let patch: Partial<Contact> = {};
 
   if (apolloKey) {
     const estimate = estimateRequestCost("enrich");
@@ -275,6 +279,7 @@ export async function enrichPerson(contact: Contact, userId: string): Promise<En
     try {
       const matched = await apolloMatch(apolloKey, contact);
       cost += estimate.cents;
+      patch = matched.patch;
       email = matched.email ?? email;
       phone = matched.phone ?? phone;
       emailStatus = matched.emailStatus;
@@ -314,7 +319,7 @@ export async function enrichPerson(contact: Contact, userId: string): Promise<En
     };
   }
 
-  return { ok: true, email, phone, emailStatus, phoneStatus, costCents: cost, estimated: true, provider };
+  return { ok: true, email, phone, emailStatus, phoneStatus, costCents: cost, estimated: true, provider, patch };
 }
 
 async function apolloMatch(apiKey: string, contact: Contact) {
@@ -343,7 +348,36 @@ async function apolloMatch(apiKey: string, contact: Contact) {
     phone,
     emailStatus: email ? (person.email_status === "verified" ? "verified" : "unverified") : "unavailable",
     phoneStatus: phone ? "verified" : "unavailable",
+    patch: personPatch(person, contact),
   } as const;
+}
+
+const urlOrNull = (value: unknown) => (typeof value === "string" && /^https?:\/\//i.test(value) ? value : null);
+
+/** Fields Apollo's person lookup adds beyond the email: full last name, city, links, and photo. */
+function personPatch(person: Record<string, unknown>, contact: Contact): Partial<Contact> {
+  const patch: Partial<Contact> = {};
+  const last = String(person.last_name ?? "").trim();
+  if (last) {
+    patch.lastName = last;
+    patch.fullName = `${contact.firstName} ${last}`.trim();
+  }
+  const place = [person.city, person.state].filter(Boolean).join(", ") || String(person.country ?? "");
+  if (place) patch.location = place;
+  const organization = (person.organization ?? {}) as Record<string, unknown>;
+  if (typeof organization.primary_domain === "string") patch.companyDomain = organization.primary_domain;
+  const links: Array<[keyof Contact, unknown]> = [
+    ["profileUrl", person.linkedin_url],
+    ["photoUrl", person.photo_url],
+    ["twitterUrl", person.twitter_url],
+    ["githubUrl", person.github_url],
+    ["facebookUrl", person.facebook_url],
+  ];
+  for (const [key, value] of links) {
+    const url = urlOrNull(value);
+    if (url) (patch as Record<string, unknown>)[key] = url;
+  }
+  return patch;
 }
 
 /** Apollo bulk match takes at most 10 people per request. */
@@ -354,7 +388,7 @@ const APOLLO_BULK_SIZE = 10;
  * search, when Apollo errors or the daily spend limit is reached.
  */
 export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
-  const results = new Map<string, { email: string | null; emailStatus: Contact["emailStatus"] }>();
+  const results = new Map<string, { email: string | null; emailStatus: Contact["emailStatus"]; patch: Partial<Contact> }>();
   const apolloKey = await readApolloKey();
   if (!apolloKey) return results;
   const perPerson = estimateRequestCost("enrich").cents;
@@ -390,7 +424,8 @@ export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
         const person = matches.find((item) => item && String(item.id ?? "") === contact.externalId) ?? matches[index] ?? null;
         const email = person && typeof person.email === "string" ? person.email : null;
         const verified = Boolean(email) && person?.email_status === "verified";
-        results.set(contact.id, { email: verified ? email : null, emailStatus: verified ? "verified" : email ? "unverified" : "unavailable" });
+        const patch = person ? personPatch(person, contact) : {};
+        results.set(contact.id, { email: verified ? email : null, emailStatus: verified ? "verified" : email ? "unverified" : "unavailable", patch });
       });
       await recordUsage({ userId, provider: "apollo", operation: "enrich", success: true, latencyMs: Date.now() - started, costCents, estimated: true });
     } catch (error) {
@@ -408,6 +443,86 @@ export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
     }
   }
   return results;
+}
+
+/** Turns company names into Apollo domains: known list, then cache, then one Apollo company search per new name. */
+export async function resolveCompanyDomains(userId: string, names: string[], maxLookups = 6) {
+  const domains = new Set<string>();
+  const unresolved: string[] = [];
+  const unique = [...new Set(names.map((name) => name.trim()).filter(Boolean))];
+  const cached = await repo.getCompanyDomains(unique);
+  const apolloKey = await readApolloKey();
+  let lookups = 0;
+  for (const name of unique) {
+    const key = name.toLowerCase();
+    const known = COMPANY_DOMAINS[key] ?? cached[key];
+    if (known) {
+      known.forEach((domain) => domains.add(domain));
+      continue;
+    }
+    if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(name)) {
+      domains.add(name.toLowerCase().replace(/^www\./, ""));
+      continue;
+    }
+    if (!apolloKey || lookups >= maxLookups) {
+      unresolved.push(name);
+      continue;
+    }
+    lookups += 1;
+    const estimate = estimateRequestCost("enrich");
+    const started = Date.now();
+    try {
+      await assertSpendAllowed(userId, estimate.cents);
+      const response = await contactFetch("https://api.apollo.io/api/v1/mixed_companies/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apolloKey },
+        body: JSON.stringify({ q_organization_name: name, page: 1, per_page: 1 }),
+      });
+      if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 200));
+      const body = (await response.json()) as { organizations?: Array<Record<string, unknown>> };
+      const domain = String(body.organizations?.[0]?.primary_domain ?? "").trim().toLowerCase();
+      await recordUsage({ userId, provider: "apollo", operation: "company_lookup", success: Boolean(domain), latencyMs: Date.now() - started, costCents: estimate.cents, estimated: true });
+      if (domain) {
+        domains.add(domain);
+        await repo.setCompanyDomains(name, [domain]);
+      } else {
+        unresolved.push(name);
+      }
+    } catch (error) {
+      await recordUsage({
+        userId, provider: "apollo", operation: "company_lookup", success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true,
+        error: error instanceof Error ? error.message : "company_lookup_failed",
+      });
+      unresolved.push(name);
+    }
+  }
+  return { domains: [...domains], unresolved };
+}
+
+/** One page of Apollo People API Search. It costs no Apollo credits. */
+export async function searchPeopleQuery(userId: string, query: ApolloPeopleQuery, page: number, perPage: number) {
+  const apolloKey = await readApolloKey();
+  if (!apolloKey) throw new ServiceError("Live people search is not available right now. No credits were used.", "provider_missing", 503);
+  const started = Date.now();
+  try {
+    const response = await contactFetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apolloKey },
+      body: JSON.stringify({ ...query, ...(query.person_titles?.length ? { include_similar_titles: true } : {}), page, per_page: perPage }),
+    });
+    if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 300));
+    const body = (await response.json()) as { people?: Array<Record<string, unknown>>; total_entries?: number };
+    const people = (body.people ?? []).map((person) => mapApolloPerson(person)).filter((person) => person !== null) as Contact[];
+    await recordUsage({ userId, provider: "apollo", operation: "search", success: true, latencyMs: Date.now() - started, costCents: 0, estimated: true });
+    await repo.upsertContacts(people);
+    return { people, total: Number(body.total_entries ?? people.length) };
+  } catch (error) {
+    await recordUsage({
+      userId, provider: "apollo", operation: "search", success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true,
+      error: error instanceof Error ? error.message : "apollo_failed",
+    });
+    throw new ServiceError(`${apolloSearchMessage(error)} No credits were used.`, "provider_failed", 502);
+  }
 }
 
 export function findSampleById(contactId: string) {

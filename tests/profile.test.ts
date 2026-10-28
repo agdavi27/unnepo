@@ -156,7 +156,8 @@ describe("structured profile", () => {
     expect(first.status).toBe("completed");
     expect(first.people).toHaveLength(30);
     expect(first.charged).toBe(2);
-    expect(bodies[0].person_titles).toEqual(["Brand marketing"]);
+    expect(bodies[0]).toMatchObject({ person_titles: ["Brand marketing"], q_organization_domains_list: ["patagonia.com"], person_locations: ["Boston"] });
+    expect(bodies[0].q_keywords).toBeUndefined();
     expect((await repo.getAccount(userId))?.balance).toBe(23);
     expect((await repo.listSaved(userId))).toHaveLength(30);
 
@@ -166,6 +167,116 @@ describe("structured profile", () => {
     expect(second.people).toHaveLength(0);
     expect(second.charged).toBe(0);
     expect((await repo.getAccount(userId))?.balance).toBe(23);
+  });
+
+  it("loosens a search step by step and says what matched", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    process.env.SIGNUP_CREDITS = "25";
+    const userId = await verifiedStudent("ladder@colby.edu", "Ladder");
+    await saveStructuredProfile(userId, form, "Ladder");
+    const bodies: Array<Record<string, unknown>> = [];
+    setContactFetcher(async (input, init) => {
+      if (String(input).includes("bulk_match")) return Response.json({ matches: [] });
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      bodies.push(body);
+      // Only the step without a company filter finds anyone.
+      if (body.q_organization_domains_list) return Response.json({ people: [] });
+      return Response.json({ people: [{ id: "x1", first_name: "Sam", last_name_obfuscated: "R***", title: "Brand Manager", organization: { name: "REI" } }] });
+    });
+    const result = await recordPeopleSearch(userId, { mode: "custom", quantity: 25, prompt: "Find relevant professionals at companies matching my interests.", filters: { suggestion: "People at my dream companies" } });
+    expect(result.people).toHaveLength(1);
+    expect(bodies[0].q_organization_domains_list).toEqual(["patagonia.com"]);
+    expect(bodies.some((body) => Array.isArray(body.organization_industries) && (body.organization_industries as string[]).includes("marketing & advertising"))).toBe(true);
+    expect(result.message).toMatch(/Matched: people at companies in your interests/);
+    const contact = await repo.getContact("apollo_x1");
+    expect(contact?.school).toBeNull();
+  });
+
+  it("reads roles, cities, and industries from a typed search", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    const userId = await verifiedStudent("typed@colby.edu", "Typer");
+    await saveStructuredProfile(userId, form, "Typer");
+    const bodies: Array<Record<string, unknown>> = [];
+    setContactFetcher(async (input, init) => {
+      if (String(input).includes("bulk_match")) return Response.json({ matches: [] });
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return Response.json({ people: [] });
+    });
+    await recordPeopleSearch(userId, { mode: "custom", quantity: 25, prompt: "Marketing managers at outdoor brands in Boston", filters: {} });
+    expect(bodies[0].person_titles).toEqual(["Marketing Manager"]);
+    expect(bodies[0].person_locations).toEqual(["Boston, MA"]);
+    expect(bodies[0].organization_industries).toContain("sporting goods");
+    expect(bodies[0].q_keywords).toBeUndefined();
+  });
+
+  it("falls back to broader searches instead of returning nobody", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    const userId = await verifiedStudent("fallback@colby.edu", "Fallback");
+    await saveStructuredProfile(userId, form, "Fallback");
+    const bodies: Array<Record<string, unknown>> = [];
+    setContactFetcher(async (input, init) => {
+      if (String(input).includes("bulk_match")) return Response.json({ matches: [] });
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      bodies.push(body);
+      // Only the broadest step finds anyone.
+      const keys = Object.keys(body).filter((key) => !["page", "per_page", "include_similar_titles"].includes(key));
+      if (keys.length === 1 && keys[0] === "person_seniorities") {
+        return Response.json({ people: [{ id: `b${bodies.length}`, first_name: "Alex", last_name_obfuscated: "K***", title: "Manager", organization: { name: "Acme" } }] });
+      }
+      return Response.json({ people: [] });
+    });
+    const alumni = await recordPeopleSearch(userId, { mode: "custom", quantity: 25, prompt: "x", filters: { suggestion: "Alumni from my school" } });
+    expect(alumni.people.length).toBeGreaterThan(0);
+    expect(alumni.message).toMatch(/can't filter people by school/);
+    expect(alumni.message).toMatch(/professionals \(broad match\)/);
+    expect(alumni.message).toMatch(/match only part of your search/);
+    const vague = await recordPeopleSearch(userId, { mode: "custom", quantity: 25, prompt: "Someone kind who wants to help students like me figure things out", filters: {} });
+    expect(vague.people.length).toBeGreaterThan(0);
+    expect(vague.message).toMatch(/based on your profile/);
+  });
+
+  it("saves photos and social links from the email lookup", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    const userId = await verifiedStudent("socials@colby.edu", "Socials");
+    await saveStructuredProfile(userId, form, "Socials");
+    setContactFetcher(async (input, init) => {
+      if (String(input).includes("bulk_match")) {
+        const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
+        return Response.json({ matches: details.map((item) => ({
+          id: item.id, last_name: "Rivera", city: "Boston", state: "Massachusetts", email: null,
+          photo_url: "https://example.com/p.jpg", linkedin_url: "https://linkedin.com/in/sam", twitter_url: "https://x.com/sam", github_url: "javascript:alert(1)",
+        })) });
+      }
+      return Response.json({ people: [{ id: "sam", first_name: "Sam", last_name_obfuscated: "R***", title: "Brand Manager", organization: { name: "Patagonia" } }] });
+    });
+    await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
+    const contact = (await workspaceState(userId)).contacts.find((item) => item.id === "apollo_sam");
+    expect(contact).toMatchObject({ name: "Sam Rivera", location: "Boston, Massachusetts", photoUrl: "https://example.com/p.jpg" });
+    expect(contact?.links).toEqual([
+      { kind: "linkedin", url: "https://linkedin.com/in/sam" },
+      { kind: "x", url: "https://x.com/sam" },
+    ]);
+  });
+
+  it("looks up an unknown company in Apollo once and reuses the answer", async () => {
+    process.env.APOLLO_API_KEY = "test-key";
+    process.env.DAILY_USER_SPEND_CENTS = "100000";
+    const userId = await verifiedStudent("lookup@colby.edu", "Looker");
+    await saveStructuredProfile(userId, { ...form, dreamCompanies: "Acme Outdoor Co" }, "Looker");
+    const urls: string[] = [];
+    const bodies: Array<Record<string, unknown>> = [];
+    setContactFetcher(async (input, init) => {
+      const url = String(input);
+      urls.push(url);
+      if (url.includes("mixed_companies")) return Response.json({ organizations: [{ id: "o1", name: "Acme Outdoor Co", primary_domain: "acmeoutdoor.com" }] });
+      if (url.includes("bulk_match")) return Response.json({ matches: [] });
+      bodies.push(JSON.parse(String(init?.body ?? "{}")));
+      return Response.json({ people: [] });
+    });
+    await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
+    await recordPeopleSearch(userId, { mode: "automatic", quantity: 25 });
+    expect(urls.filter((url) => url.includes("mixed_companies"))).toHaveLength(1);
+    expect(bodies[0].q_organization_domains_list).toEqual(["acmeoutdoor.com"]);
   });
 
   it("refuses a live search the balance cannot cover without calling Apollo", async () => {

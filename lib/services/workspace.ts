@@ -3,8 +3,18 @@ import { readAnthropicKey, id, nowIso, repo } from "@/lib/db/file-store";
 import type { Contact, ManualEmailDraft, PeopleSearchRequest, ProfileDocument, SavedContact } from "@/lib/db/types";
 import { serverConfig } from "@/lib/config";
 import { PEOPLE_PER_CREDIT, creditsForPeople, prepareSearchDebit, prepareUnlockDebit } from "@/lib/credits/quote";
-import { enrichPeopleBatch, enrichPerson, searchPeople } from "@/lib/providers/contacts/router";
-import { emptyFilters, filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
+import { enrichPeopleBatch, enrichPerson, resolveCompanyDomains, searchPeopleQuery } from "@/lib/providers/contacts/router";
+import {
+  EMPLOYEE_RANGES,
+  HIRING_MANAGER_SENIORITIES,
+  INTEREST_INDUSTRIES,
+  RECRUITER_TITLES,
+  SMALL_COMPANY_RANGES,
+  industriesFor,
+  ladder,
+  type LadderStep,
+} from "@/lib/search/apollo-query";
+import { COMPANY_SUGGESTIONS, LOCATION_SUGGESTIONS, ROLE_SUGGESTIONS } from "@/lib/suggestions";
 import { integrations } from "@/lib/integrations/flags";
 import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligence";
 import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
@@ -178,49 +188,214 @@ function uniqueList(values: string[]) {
   });
 }
 
-async function profileSearchFilters(userId: string) {
-  const [document, goals] = await Promise.all([repo.getProfileDocument(userId), repo.getGoals(userId)]);
-  const expanded = goals
-    ? {
-        ...goals,
-        roles: goals.roles.flatMap((entry) => splitProfileList(entry)),
-        companies: goals.companies.flatMap((entry) => splitProfileList(entry)),
-        locations: goals.locations.flatMap(splitLocations).map((entry) => parseLocation(entry).place),
-      }
-    : null;
-  return filtersFromProfile(expanded, document?.form.school || null, "").filters;
+const PROMPT_INDUSTRY_WORDS: Array<[RegExp, string]> = [
+  [/\boutdoor/i, "Outdoor & Adventure"], [/\bmusic/i, "Music"], [/\bsports?\b/i, "Sports"], [/\bfashion|\bapparel/i, "Fashion"],
+  [/\bdesign/i, "Design"], [/\bhealth/i, "Healthcare"], [/\bmedia\b|\bpublishing/i, "Media"], [/\bengineering/i, "Engineering"],
+  [/\bfinanc|\bbanking/i, "Finance"], [/\bconsulting/i, "Consulting"], [/\bmarketing|\badvertising/i, "Marketing"], [/\breal estate/i, "Real Estate"],
+  [/\beducation|\bedtech/i, "Education"], [/\bnonprofit|\bnon-profit/i, "Nonprofits"], [/\bgovernment|\bpolicy/i, "Government"],
+  [/\bfood|\bbeverage/i, "Food & Beverage"], [/\bgaming|\bvideo games?/i, "Gaming"], [/\bsustainab|\bclimate/i, "Sustainability"], [/\btech\b|\btechnology|\bsoftware/i, "Technology"],
+];
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-async function liveSearchFilters(userId: string, mode: "automatic" | "custom", prompt: string, raw: Record<string, unknown>) {
-  if (mode === "automatic") return profileSearchFilters(userId);
+/** Pulls only known roles, companies, cities, and industries out of free text. It never guesses a title from a sentence. */
+function parsePrompt(text: string) {
+  const mentions = (option: string) => new RegExp(`\\b${escapeRegExp(option)}`, "i").test(text);
+  const titles = ROLE_SUGGESTIONS.filter(mentions);
+  return {
+    titles: titles.filter((title) => !titles.some((other) => other !== title && other.toLowerCase().includes(title.toLowerCase()))),
+    companies: COMPANY_SUGGESTIONS.filter(mentions),
+    locations: LOCATION_SUGGESTIONS.filter((place) => !/^(remote|anywhere)/i.test(place) && mentions(place.split(",")[0])),
+    interests: PROMPT_INDUSTRY_WORDS.filter(([pattern]) => pattern.test(text)).map(([, interest]) => interest),
+  };
+}
+
+async function profileInputs(userId: string) {
+  const [document, goals] = await Promise.all([repo.getProfileDocument(userId), repo.getGoals(userId)]);
+  const form = document?.form;
+  const roles = uniqueList([...(goals?.roles ?? []).flatMap((entry) => splitProfileList(entry)), ...splitProfileList(form?.targetRoles ?? "")]).slice(0, 8);
+  const companies = uniqueList([...(goals?.companies ?? []).flatMap((entry) => splitProfileList(entry)), ...splitProfileList(form?.dreamCompanies ?? "")]).slice(0, 15);
+  const remote = form?.workPreference === "remote";
+  const locations = remote
+    ? []
+    : uniqueList(splitLocations(form?.locations ?? "").map((entry) => parseLocation(entry).place).filter((place) => !/^(remote|anywhere)/i.test(place))).slice(0, 6);
+  return { roles, companies, locations, industries: industriesFor(form?.interests ?? []) };
+}
+
+type SearchPlan = { steps: LadderStep[]; notes: string[] };
+type ProfileInputs = Awaited<ReturnType<typeof profileInputs>>;
+
+/**
+ * Last steps of every search: broad enough that a search returns people instead of nothing,
+ * even when they match only part of what the student wanted. The message says which steps matched.
+ */
+function fallbackSteps(me: ProfileInputs): LadderStep[] {
+  return [
+    { label: "people in your industries", query: { organization_industries: me.industries } },
+    { label: "people with titles like your target roles", query: { person_titles: me.roles } },
+    { label: "people in your cities", query: { person_locations: me.locations } },
+    { label: "early-career professionals in your industries", query: { person_seniorities: ["entry", "senior"], organization_industries: me.industries } },
+    { label: "experienced professionals in your cities", query: { person_seniorities: ["manager", "director", "senior"], person_locations: me.locations } },
+    { label: "professionals (broad match)", query: { person_seniorities: ["manager", "senior", "entry"] } },
+  ];
+}
+
+async function profilePlan(userId: string, me: ProfileInputs, notes: string[] = []): Promise<SearchPlan> {
+  const resolved = await resolveCompanyDomains(userId, me.companies);
+  const at = resolved.domains;
+  return {
+    notes: [...notes, ...(resolved.unresolved.length ? [`Apollo didn't recognize ${resolved.unresolved.join(", ")}.`] : [])],
+    steps: ladder([
+      { label: "your target roles at your dream companies", query: { person_titles: me.roles, q_organization_domains_list: at, person_locations: me.locations } },
+      { label: "your target roles at your dream companies", query: { person_titles: me.roles, q_organization_domains_list: at } },
+      { label: "people at your dream companies", query: { q_organization_domains_list: at, person_locations: me.locations } },
+      { label: "people at your dream companies", query: { q_organization_domains_list: at } },
+      { label: "your target roles in your industries", query: { person_titles: me.roles, organization_industries: me.industries, person_locations: me.locations } },
+      { label: "your target roles", query: { person_titles: me.roles, person_locations: me.locations } },
+      { label: "your target roles", query: { person_titles: me.roles } },
+      { label: "people in your industries", query: { organization_industries: me.industries, person_locations: me.locations } },
+      ...fallbackSteps(me),
+    ]),
+  };
+}
+
+/** Suggested searches each get their own plan instead of one sentence of keywords. */
+async function suggestionPlan(userId: string, suggestion: string): Promise<SearchPlan | null> {
+  const known = new Set(["Alumni from my school", "People with similar backgrounds", "Recent graduates in my field", "Recruiters in my target industry", "Hiring managers", "People who could refer me", "People with my dream job", "People who changed careers", "People with similar career paths", "People at my dream companies", "Founders at growing startups", "People at small companies", "Professionals in a specific city", "Professionals near me"]);
+  if (!known.has(suggestion)) return null;
+  const me = await profileInputs(userId);
+  if (suggestion === "Alumni from my school") {
+    return profilePlan(userId, me, ["Apollo can't filter people by school, so these match your roles, companies, and interests instead."]);
+  }
+  const resolved = await resolveCompanyDomains(userId, me.companies);
+  const notes = resolved.unresolved.length ? [`Apollo didn't recognize ${resolved.unresolved.join(", ")}.`] : [];
+  const roles = me.roles;
+  const where = me.locations;
+  const at = resolved.domains;
+  const inIndustry = me.industries;
+  const plans: Record<string, LadderStep[]> = {
+    "People with similar backgrounds": [
+      { label: "your target roles in your industries", query: { person_titles: roles, organization_industries: inIndustry, person_locations: where } },
+      { label: "your target roles in your industries", query: { person_titles: roles, organization_industries: inIndustry } },
+      { label: "your target roles", query: { person_titles: roles } },
+    ],
+    "Recent graduates in my field": [
+      { label: "entry-level people in your target roles", query: { person_titles: roles, person_seniorities: ["entry"], person_locations: where } },
+      { label: "entry-level people in your target roles", query: { person_titles: roles, person_seniorities: ["entry"] } },
+      { label: "entry-level people in your industries", query: { person_seniorities: ["entry"], organization_industries: inIndustry } },
+    ],
+    "Recruiters in my target industry": [
+      { label: "recruiters at your dream companies", query: { person_titles: RECRUITER_TITLES, q_organization_domains_list: at } },
+      { label: "recruiters in your industries", query: { person_titles: RECRUITER_TITLES, organization_industries: inIndustry, person_locations: where } },
+      { label: "recruiters in your industries", query: { person_titles: RECRUITER_TITLES, organization_industries: inIndustry } },
+    ],
+    "Hiring managers": [
+      { label: "managers at your dream companies", query: { person_seniorities: HIRING_MANAGER_SENIORITIES, q_organization_domains_list: at, person_titles: roles } },
+      { label: "managers at your dream companies", query: { person_seniorities: HIRING_MANAGER_SENIORITIES, q_organization_domains_list: at } },
+      { label: "managers in your target roles", query: { person_seniorities: HIRING_MANAGER_SENIORITIES, person_titles: roles, person_locations: where } },
+      { label: "managers in your target roles", query: { person_seniorities: HIRING_MANAGER_SENIORITIES, person_titles: roles } },
+    ],
+    "People who could refer me": [
+      { label: "people at your dream companies", query: { q_organization_domains_list: at, person_titles: roles } },
+      { label: "people at your dream companies", query: { q_organization_domains_list: at } },
+    ],
+    "People with my dream job": [
+      { label: "people in your target roles", query: { person_titles: roles, person_locations: where } },
+      { label: "people in your target roles", query: { person_titles: roles } },
+    ],
+    "People who changed careers": [
+      { label: "people in your target roles", query: { person_titles: roles, person_locations: where } },
+      { label: "people in your target roles", query: { person_titles: roles } },
+    ],
+    "People with similar career paths": [
+      { label: "people in your target roles", query: { person_titles: roles, organization_industries: inIndustry } },
+      { label: "people in your target roles", query: { person_titles: roles } },
+    ],
+    "People at my dream companies": [
+      { label: "people at your dream companies", query: { q_organization_domains_list: at, person_titles: roles } },
+      { label: "people at your dream companies", query: { q_organization_domains_list: at } },
+      { label: "people at companies in your interests", query: { organization_industries: inIndustry, person_titles: roles } },
+      { label: "people at companies in your interests", query: { organization_industries: inIndustry, person_locations: where } },
+      { label: "people at companies in your interests", query: { organization_industries: inIndustry } },
+    ],
+    "Founders at growing startups": [
+      { label: "founders of small companies in your industries", query: { person_seniorities: ["founder", "owner"], organization_num_employees_ranges: SMALL_COMPANY_RANGES, organization_industries: inIndustry } },
+      { label: "founders of small companies", query: { person_seniorities: ["founder", "owner"], organization_num_employees_ranges: SMALL_COMPANY_RANGES, person_locations: where } },
+    ],
+    "People at small companies": [
+      { label: "people at small companies in your industries", query: { organization_num_employees_ranges: SMALL_COMPANY_RANGES, organization_industries: inIndustry, person_titles: roles } },
+      { label: "people at small companies in your industries", query: { organization_num_employees_ranges: SMALL_COMPANY_RANGES, organization_industries: inIndustry } },
+    ],
+    "Professionals in a specific city": [
+      { label: "people in your target roles in your cities", query: { person_locations: where, person_titles: roles } },
+      { label: "people in your industries in your cities", query: { person_locations: where, organization_industries: inIndustry } },
+    ],
+    "Professionals near me": [
+      { label: "people in your target roles in your cities", query: { person_locations: where, person_titles: roles } },
+      { label: "people in your industries in your cities", query: { person_locations: where, organization_industries: inIndustry } },
+    ],
+  };
+  return { steps: ladder([...plans[suggestion], ...fallbackSteps(me)]), notes };
+}
+
+async function buildSearchPlan(userId: string, mode: "automatic" | "custom", prompt: string, raw: Record<string, unknown>): Promise<SearchPlan> {
+  if (mode === "automatic") return profilePlan(userId, await profileInputs(userId));
+
+  const fromSuggestion = await suggestionPlan(userId, String(raw.suggestion ?? ""));
+  if (fromSuggestion) return fromSuggestion;
+
   const text = prompt.trim();
-  // Suggested searches say "my college" or "my interests", so they start from the saved profile.
-  const filters = /\bmy\b/i.test(text) ? await profileSearchFilters(userId) : emptyFilters();
-  const parsed = text ? interpretPrompt(text).filters : emptyFilters();
-  const guessedTitle = /^find\b/i.test(text) ? [] : parsed.titles;
-  filters.titles = uniqueList([...splitList(raw.title), ...guessedTitle, ...filters.titles]).slice(0, 6);
-  filters.companies = uniqueList([...splitList(raw.company), ...parsed.companies, ...filters.companies]).slice(0, 6);
-  filters.locations = uniqueList([...splitList(raw.location), ...parsed.locations, ...filters.locations]).slice(0, 6);
-  filters.industries = uniqueList([...splitList(raw.industry), ...parsed.industries, ...filters.industries]).slice(0, 6);
-  filters.schools = uniqueList([...splitList(raw.school), ...filters.schools]).slice(0, 3);
-  const seniority = APOLLO_SENIORITY[String(raw.seniority ?? "")];
-  if (seniority) filters.seniorities = [seniority];
-  // A whole sentence is a poor keyword search, so it is only sent when nothing structured came out of it.
-  const structured = filters.titles.length + filters.companies.length + filters.locations.length + filters.schools.length;
-  filters.query = structured ? undefined : text.slice(0, 180) || undefined;
-  return filters;
+  const parsed = text ? parsePrompt(text) : null;
+  const profile = await profileInputs(userId);
+  const me = /\bmy\b/i.test(text) ? profile : null;
+  const titles = uniqueList([...splitList(raw.title), ...(parsed?.titles ?? []), ...(me?.roles ?? [])]).slice(0, 8);
+  const companyNames = uniqueList([...splitList(raw.company), ...splitList(raw.previousEmployer), ...(parsed?.companies ?? []), ...(me?.companies ?? [])]);
+  const locations = uniqueList([...splitList(raw.location), ...(parsed?.locations ?? []), ...(me?.locations ?? [])]).slice(0, 6);
+  const industryWords = splitList(raw.industry);
+  const industries = uniqueList([
+    ...industriesFor([...industryWords, ...(parsed?.interests ?? [])]),
+    ...industryWords.filter((word) => !INTEREST_INDUSTRIES[word]).map((word) => word.toLowerCase()),
+    ...(me?.industries ?? []),
+  ]);
+  const seniorities = [APOLLO_SENIORITY[String(raw.seniority ?? "")], raw.recent ? "entry" : ""].filter(Boolean);
+  const sizes = EMPLOYEE_RANGES[String(raw.companySize ?? "")] ?? [];
+  const resolved = await resolveCompanyDomains(userId, companyNames);
+  const notes = resolved.unresolved.length ? [`Apollo didn't recognize ${resolved.unresolved.join(", ")}.`] : [];
+  if (String(raw.school ?? "").trim() || raw.alumni) notes.push("School isn't a filter Apollo's people search supports, so it was left out.");
+  const structured = titles.length + resolved.domains.length + locations.length + industries.length + seniorities.length + sizes.length;
+  // A full sentence as keywords matches almost no one, so keywords are only used for short phrases.
+  const keywords = !structured && text && text.split(/\s+/).length <= 6 ? text : undefined;
+  if (!structured && !keywords) {
+    return profilePlan(userId, profile, ["Your description didn't name a role, company, city, or industry Apollo can search, so these are based on your profile."]);
+  }
+  const full = { person_titles: titles, q_organization_domains_list: resolved.domains, person_locations: locations, organization_industries: industries, person_seniorities: seniorities, organization_num_employees_ranges: sizes, q_keywords: keywords };
+  return {
+    notes,
+    steps: ladder([
+      { label: "all of your filters", query: full },
+      { label: "your filters without location", query: { ...full, person_locations: [] } },
+      { label: "your filters without industry or company size", query: { ...full, person_locations: [], organization_industries: [], organization_num_employees_ranges: [] } },
+      { label: "your roles", query: { person_titles: titles } },
+      { label: "your companies", query: { q_organization_domains_list: resolved.domains } },
+      { label: "your industries", query: { organization_industries: industries } },
+      { label: "your cities", query: { person_locations: locations } },
+      ...fallbackSteps(profile),
+    ]),
+  };
 }
 
 async function runLivePeopleSearch(
   userId: string,
   input: { mode: "automatic" | "custom"; quantity: number; creditsQuoted: number; prompt: string; filters: Record<string, unknown> },
 ) {
-  const filters = await liveSearchFilters(userId, input.mode, input.prompt, input.filters);
-  if (!filters.titles.length && !filters.companies.length && !filters.locations.length && !filters.schools.length && !filters.query) {
+  const plan = await buildSearchPlan(userId, input.mode, input.prompt, input.filters);
+  if (!plan.steps.length) {
     throw new ServiceError(
       input.mode === "automatic"
-        ? "Add target roles, dream companies, or locations to your profile so Find for Me knows who to look for. No credits were used."
-        : "Describe who you're looking for or add a filter. No credits were used.",
+        ? "Add target roles, dream companies, or interests to your profile so Find for Me knows who to look for. No credits were used."
+        : "Add a role, company, location, or industry. No credits were used.",
       "empty_search",
       400,
     );
@@ -237,16 +412,23 @@ async function runLivePeopleSearch(
   const excludeSaved = input.filters.excludeSaved !== false;
   const excluded = new Set(excludeSaved ? (await repo.listSaved(userId)).map((row) => row.contactId) : []);
   const found: Contact[] = [];
-  const maxPages = Math.ceil(input.quantity / APOLLO_PAGE_SIZE) + 2;
-  for (let page = 1; page <= maxPages && found.length < input.quantity; page += 1) {
-    const result = await searchPeople(userId, filters, page, APOLLO_PAGE_SIZE);
-    if (result.source !== "apollo") {
-      throw new ServiceError("Live people search is not available right now. No credits were used.", "provider_missing", 503);
+  const matched: string[] = [];
+  let firstMatchedStep = -1;
+  const maxPages = Math.ceil(input.quantity / APOLLO_PAGE_SIZE) + 1;
+  for (const step of plan.steps) {
+    if (found.length >= input.quantity) break;
+    const before = found.length;
+    for (let page = 1; page <= maxPages && found.length < input.quantity; page += 1) {
+      const result = await searchPeopleQuery(userId, step.query, page, APOLLO_PAGE_SIZE);
+      for (const person of result.people) {
+        if (!excluded.has(person.id) && !found.some((item) => item.id === person.id)) found.push(person);
+      }
+      if (result.people.length < APOLLO_PAGE_SIZE) break;
     }
-    for (const person of result.people) {
-      if (!excluded.has(person.id) && !found.some((item) => item.id === person.id)) found.push(person);
+    if (found.length > before) {
+      if (firstMatchedStep < 0) firstMatchedStep = plan.steps.indexOf(step);
+      if (!matched.includes(step.label)) matched.push(step.label);
     }
-    if (result.people.length < APOLLO_PAGE_SIZE) break;
   }
   const people = found.slice(0, input.quantity);
   // Partial results are charged per started block of 25, never more than the quote.
@@ -273,7 +455,7 @@ async function runLivePeopleSearch(
     await repo.upsertContacts(
       people.map((person) => {
         const found = emails.get(person.id);
-        return found ? { ...person, email: found.email, emailStatus: found.emailStatus, fetchedAt: nowIso() } : person;
+        return found ? { ...person, ...found.patch, email: found.email, emailStatus: found.emailStatus, fetchedAt: nowIso() } : person;
       }),
     );
   }
@@ -301,9 +483,16 @@ async function runLivePeopleSearch(
     people: people.map((person) => ({ id: person.id, name: person.fullName, title: person.title, company: person.company })),
     charged,
     status: "completed" as const,
-    message: people.length
-      ? `Found ${people.length} ${people.length === 1 ? "person" : "people"} (${withEmail} with a verified work email) and added them to My Contacts. ${charged} ${charged === 1 ? "credit was" : "credits were"} used.`
-      : "Apollo found no new people for that search. No credits were used.",
+    message: [
+      people.length
+        ? `Found ${people.length} ${people.length === 1 ? "person" : "people"} (${withEmail} with a verified work email) and added them to My Contacts. ${charged} ${charged === 1 ? "credit was" : "credits were"} used.`
+        : "Apollo found no new people for that search, even after loosening the filters. No credits were used.",
+      matched.length ? `Matched: ${matched.join("; then ")}.` : "",
+      people.length && firstMatchedStep > 0 ? "Exact matches were limited, so some people match only part of your search." : "",
+      ...plan.notes,
+    ]
+      .filter(Boolean)
+      .join(" "),
   };
 }
 
@@ -323,7 +512,7 @@ export async function unlockWorkspaceEmail(userId: string, raw: unknown) {
   if (!enriched.ok || !enriched.email || enriched.emailStatus !== "verified") {
     return { ok: false, code: "no_verified_email", charged: 0, email: null, message: "Apollo still has no verified work email for this person. No credits were used." };
   }
-  await repo.upsertContacts([{ ...contact, email: enriched.email, emailStatus: "verified", fetchedAt: nowIso() }]);
+  await repo.upsertContacts([{ ...contact, ...enriched.patch, email: enriched.email, emailStatus: "verified", fetchedAt: nowIso() }]);
   return { ok: true, code: "found", charged: 0, email: enriched.email, message: "Found a verified work email. No credits were used." };
 }
 
@@ -556,6 +745,14 @@ export async function workspaceState(userId: string) {
       email: contact.email && contact.emailStatus === "verified" ? contact.email : undefined,
       status: row.status,
       foundAt: row.unlockedAt,
+      location: contact.location || undefined,
+      photoUrl: contact.photoUrl ?? undefined,
+      links: [
+        contact.profileUrl ? { kind: "linkedin" as const, url: contact.profileUrl } : null,
+        contact.twitterUrl ? { kind: "x" as const, url: contact.twitterUrl } : null,
+        contact.githubUrl ? { kind: "github" as const, url: contact.githubUrl } : null,
+        contact.facebookUrl ? { kind: "facebook" as const, url: contact.facebookUrl } : null,
+      ].filter((link): link is { kind: "linkedin" | "x" | "github" | "facebook"; url: string } => Boolean(link)),
       facts: verifiedFacts,
     }];
   });
