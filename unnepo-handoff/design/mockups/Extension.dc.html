@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Extension side panel</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#070708}
+a{color:#F7F7F8}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width: 400px; height: 780px; box-sizing: border-box; background: #070708; color: #F7F7F8; font-family: Geist, system-ui, sans-serif; display: flex; flex-direction: column; border: 1px solid #1F1F24">
+
+<header style="display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid #17171B">
+<span style="font-size: 18px; font-weight: 700; letter-spacing: -0.5px">unnepo<span style="color: {{accent}}">.</span></span>
+<div style="display: flex; align-items: center; gap: 8px">
+<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #8B8B94">BATCH 3</span>
+<button type="button" aria-label="Settings" style="width: 36px; height: 36px; border-radius: 9px; border: 1px solid #26262C; background: transparent; color: #9A9AA3; display: inline-flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>
+</div>
+</header>
+
+<section aria-label="Batch progress" style="padding: 20px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid #17171B">
+<div style="display: flex; align-items: baseline; justify-content: space-between">
+<span style="font-size: 28px; font-weight: 700; letter-spacing: -1px">3<span style="color: #8B8B94; font-weight: 500"> / 8 sent</span></span>
+<span style="font-size: 13px; color: #8B8B94">~2 min left</span>
+</div>
+<div style="height: 4px; border-radius: 4px; background: #1A1A1F; overflow: hidden"><div style="width: 38%; height: 100%; background: {{accent}}"></div></div>
+</section>
+
+<ul style="list-style: none; margin: 0; padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; flex: 1; overflow: auto">
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px">
+<span style="width: 8px; height: 8px; border-radius: 8px; background: {{accent}}; flex: none"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 500">Northwind</span><span style="font-size: 12px; color: #8B8B94">SWE Intern · Greenhouse</span></div>
+<span style="font-size: 12px; color: {{accent}}">Submitted</span>
+</li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px">
+<span style="width: 8px; height: 8px; border-radius: 8px; background: {{accent}}; flex: none"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 500">Halcyon Labs</span><span style="font-size: 12px; color: #8B8B94">Data Science Intern · Lever</span></div>
+<span style="font-size: 12px; color: {{accent}}">Submitted</span>
+</li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px">
+<span style="width: 8px; height: 8px; border-radius: 8px; background: {{accent}}; flex: none"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 500">Fernway</span><span style="font-size: 12px; color: #8B8B94">Product Intern · Ashby</span></div>
+<span style="font-size: 12px; color: {{accent}}">Submitted</span>
+</li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 10px; background: #111114; border: 1px solid #26262C">
+<span style="width: 8px; height: 8px; border-radius: 8px; border: 1.5px solid #F7F7F8; box-sizing: border-box; flex: none"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 500">Brightline Health</span><span style="font-size: 12px; color: #8B8B94">Ready · 34 fields filled</span></div>
+<button type="button" style="background: #F7F7F8; color: #070708; border: 0; border-radius: 8px; font: 500 13px Geist, sans-serif; padding: 0 14px; height: 36px; cursor: pointer">Submit</button>
+</li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px">
+<span style="width: 8px; height: 8px; border-radius: 8px; background: #F5A524; flex: none"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 500">Orchard Analytics</span><span style="font-size: 12px; color: #8B8B94">Workday · solve the CAPTCHA</span></div>
+<a href="#" style="font-size: 12px; color: #F5A524; text-decoration: none; padding: 10px 0">Open tab</a>
+</li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px">
+<span style="width: 8px; height: 8px; border-radius: 8px; background: #3A3A42; flex: none"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px"><span style="font-size: 14px; font-weight: 500">Lumen Freight</span><div style="height: 2px; background: #1A1A1F; border-radius: 2px; overflow: hidden"><div style="width: 64%; height: 100%; background: #9A9AA3"></div></div></div>
+<span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8B8B94">Filling</span>
+</li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px">
+<span style="width: 8px; height: 8px; border-radius: 8px; background: #3A3A42; flex: none"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 500">Pebble &amp; Pine</span><span style="font-size: 12px; color: #8B8B94">Workday · creating account</span></div>
+<span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8B8B94">Queued</span>
+</li>
+<li style="display: flex; align-items: center; gap: 12px; padding: 12px 8px; border-radius: 10px">
+<span style="width: 8px; height: 8px; border-radius: 8px; background: #3A3A42; flex: none"></span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px; font-weight: 500">Atlas Robotics</span><span style="font-size: 12px; color: #8B8B94">Mechanical Intern · Greenhouse</span></div>
+<span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8B8B94">Queued</span>
+</li>
+</ul>
+
+<footer style="padding: 16px 20px 20px; border-top: 1px solid #17171B; display: flex; flex-direction: column; gap: 14px">
+<label style="display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: #9A9AA3; min-height: 32px">Pause before each submit<input type="checkbox" checked="" style="width: 18px; height: 18px; accent-color: {{accent}}"></label>
+<button type="button" style="height: 48px; border-radius: 12px; border: 0; background: #F7F7F8; color: #070708; font: 500 15px Geist, sans-serif; cursor: pointer">Submit all ready (1)</button>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#3D8BFF","options":["#3D8BFF","#F7F7F8","#7C6CFF"]},"$preview":{"width":400,"height":780}}'>
+class Component extends DCLogic {
+renderVals() {
+return { accent: this.props.accent ?? '#3D8BFF' };
+}
+}
+</script>
+</body>
+</html>

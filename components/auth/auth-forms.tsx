@@ -32,7 +32,7 @@ export function SignupForm() {
     const response = await fetch("/api/auth/signup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...values, referralCode: params.get("ref") || undefined }),
+      body: JSON.stringify(values),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -73,7 +73,6 @@ export function SignupForm() {
   return (
     <AuthShell title="Create your account" subtitle="Use a school email such as name@college.edu. Personal addresses like Gmail are not eligible.">
       <form method="post" action="/api/auth/signup" onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
-        <input type="hidden" name="referralCode" value={params.get("ref") || ""} suppressHydrationWarning />
         <input className="field" placeholder="Full name" autoComplete="name" suppressHydrationWarning {...form.register("name")} />
         {form.formState.errors.name ? <p className="text-sm text-red-300">{form.formState.errors.name.message}</p> : null}
         <SchoolEmailField value={form.watch("email")} placeholder="School email" autoComplete="email" {...form.register("email")} />

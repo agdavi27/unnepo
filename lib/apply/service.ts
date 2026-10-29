@@ -1,17 +1,11 @@
 import { after } from "next/server";
 import { APPLICATIONS_PER_CREDIT, serverConfig } from "@/lib/config";
-import { dataDir, id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
+import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { splitProfileList } from "@/lib/profile/lists";
-import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
-import { AutofillStopped, formFields, readFormAnswers, setFormFields, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
-import { decryptSecret, encryptSecret } from "@/lib/security";
-import { coverLetterPdf, writeCoverLetter } from "@/lib/apply/cover-letter";
-import { decideFixes } from "@/lib/apply/fixer";
+import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
-import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, mappingFromQuestions, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
-import { fillGreenhouse, greenhouseNeedsCode } from "@/lib/apply/fast/greenhouse";
-import type { Page } from "playwright-core";
+import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
 import { extractJob } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
@@ -148,8 +142,8 @@ function answerWith(info: Awaited<ReturnType<typeof student>>, company: string) 
   };
 }
 
-/** Saves what the student entered in the live view, so the same question fills itself next time. */
-async function learnAnswers(userId: string, info: Awaited<ReturnType<typeof student>>, entries: Array<{ label: string; section: string; value: string }>) {
+/** Saves answers the student entered on a form, so the same question fills itself next time. */
+export async function learnAnswers(userId: string, info: Awaited<ReturnType<typeof student>>, entries: Array<{ label: string; section: string; value: string }>) {
   const saved = { ...info.profile.saved };
   const next: ApplicationProfile = { ...info.profile };
   let learned = 0;
@@ -203,7 +197,7 @@ export async function applyState(userId: string) {
     applications: apps.map((app) => ({ ...summary(app), contacts: contacts.filter((contact) => contact.applicationId === app.id) })),
     profile: publicProfile(info.profile),
     resume: info.resume ? { fileName: info.resume.fileName, stored: Boolean(info.resume.storagePath) } : null,
-    ready: { autofill: browserReady(), hunter: hunterReady(), profile: Boolean(info.document?.ready) },
+    ready: { hunter: hunterReady(), profile: Boolean(info.document?.ready) },
     applicationsPerCredit: APPLICATIONS_PER_CREDIT,
   };
 }
@@ -261,6 +255,8 @@ export async function createApplication(userId: string, raw: unknown) {
     attempts: 0,
   });
   if (timings && created) logTimings(app.id, "mapping", timings);
+  // Credits are spent when Unnepo prepares a job's answers (1 credit covers APPLICATIONS_PER_CREDIT jobs).
+  if (created) await ensureCharged(userId, app);
   return { application: summary(app), duplicate: !created, message: created ? "Job added." : "You already added this job." };
 }
 
@@ -274,7 +270,7 @@ async function requireApp(userId: string, applicationId: unknown) {
 export async function updateAnswers(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { applicationId?: unknown; answers?: Record<string, unknown>; save?: unknown };
   const app = await requireApp(userId, body.applicationId);
-  if (!["extracted", "review", "unconfirmed", "failed"].includes(app.status)) throw new ServiceError("This application can't be edited right now.", "state", 409);
+  if (!["extracted", "review", "unconfirmed", "failed", "filling", "submitting"].includes(app.status)) throw new ServiceError("This application can't be edited right now.", "state", 409);
   const answers = body.answers ?? {};
   const save = new Set((Array.isArray(body.save) ? body.save : []).map(String));
   const info = await student(userId);
@@ -310,14 +306,6 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
   const next: ApplicationProfile = { ...info.profile };
   for (const field of PROFILE_FIELDS) if (typeof body[field] === "string") next[field] = String(body[field]).trim().slice(0, 300);
   if (next.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(next.email)) throw new ServiceError("Enter a valid email address.", "email", 400);
-  if (typeof body.jobSitePassword === "string" && body.jobSitePassword) {
-    const password = body.jobSitePassword;
-    // Job sites commonly want 8+ characters with upper, lower, a number, and a symbol.
-    if (password.length < 10 || password.length > 128 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
-      throw new ServiceError("Use at least 10 characters with an uppercase letter, a lowercase letter, a number, and a symbol. Most job sites require that.", "password", 400);
-    }
-    next.jobSitePasswordEncrypted = encryptSecret(password);
-  }
   if (body.eligibility && typeof body.eligibility === "object") {
     const given = body.eligibility as Record<string, unknown>;
     const eligibility = { ...(info.profile.eligibility ?? {}) };
@@ -344,41 +332,9 @@ async function ensureCharged(userId: string, app: JobApplication) {
   await applications.update(userId, app.id, { charged: true });
 }
 
-async function resumeFile(userId: string): Promise<ResumeFile | null> {
-  const resume = await repo.getLatestResume(userId);
-  if (!resume) return null;
-  const bytes = await readStoredResume(resume.storagePath);
-  if (!bytes?.byteLength) return null;
-  return { name: resume.fileName, mimeType: resume.mime || "application/pdf", buffer: Buffer.from(bytes) };
-}
-
-const STOP_MESSAGE: Record<FlowResult["stoppedAt"], (report: FlowResult, email: string) => string> = {
-  review: (r) => `Filled ${r.filled.length} fields${r.pages && r.pages > 1 ? ` across ${r.pages} pages` : ""}${r.fromResume?.length ? `, ${r.fromResume.length} written from your resume` : ""}${r.decided?.length ? `, ${r.decided.length} worked out for you to check` : ""}.${r.failed.length ? ` ${r.failed.length} still need you in the live view.` : ""} Check the form in the live view, then approve.`,
-  needs_input: (r) => {
-    const names = r.failed.map((item) => item.label);
-    const list = names.length ? ` It needs: ${names.slice(0, 4).join("; ")}${names.length > 4 ? ` and ${names.length - 4} more` : ""}.` : "";
-    const profileHint = names.some((label) => classifyQuestion(label).field && ["firstName", "lastName", "fullName", "phone", "email", "city", "linkedin", "addressLine1", "state", "postalCode", "country"].includes(classifyQuestion(label).field!))
-      ? " Add missing contact details under Your application details so Unnepo fills them next time."
-      : "";
-    return `Filled ${r.filled.length} fields, then stopped on a page that needs you.${list} Finish it in the live view, then press Continue autofill.${profileHint}`;
-  },
-  email_verification: (r, email) => `${r.account === "created" ? `Created your account on ${r.host}. ` : ""}${r.host} sent a verification email to ${email}. Click the link in that email, then press Continue autofill.`,
-  needs_account: (r) => `${r.host} needs an account. Set your job-site password and allow account creation under Your application details, then press Continue autofill.`,
-  signin_failed: (r) => `Couldn't sign in on ${r.host} with your email and job-site password. Sign in (or reset the password) in the live view, then press Continue autofill.`,
-};
-
-/** Runs the page-by-page fill in a session and records where it stopped. Never submits. */
-/** What every fill needs: the student's facts and resume text, a cover letter on demand, and the fix-up pass. */
+/** The student's facts and resume text: the only things the mapping's AI call may use. */
 function runContext(userId: string, info: Awaited<ReturnType<typeof student>>, app: JobApplication) {
   const sources = [info.profileText, info.resumeText].join("\n\n");
-  // A cover letter is written only when the form asks for one, and reused if this job already has one.
-  const coverLetter = async () => {
-    const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
-    const text = app.fillReport?.coverLetter || (await writeCoverLetter(userId, app, { name, resumeText: info.resumeText, profile: info.profileText }));
-    if (!text) return null;
-    const buffer = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
-    return { text, file: { name: `${name} Cover Letter.pdf`, mimeType: "application/pdf", buffer } };
-  };
   // The student's own details as plain lines: the only facts the AI may use besides the resume.
   const p = info.profile;
   const said = (value: string | undefined) => value?.trim() || "(not set)";
@@ -394,59 +350,7 @@ function runContext(userId: string, info: Awaited<ReturnType<typeof student>>, a
     `Applying to: ${app.title} at ${app.company}`,
     ...Object.values(p.saved).slice(0, 60).map((item) => `Saved answer. ${item.label}: ${item.answer}`),
   ].join("\n");
-  const fixFields = (fields: Parameters<typeof decideFixes>[1], errors: string[]) => decideFixes(userId, fields, errors, { facts, sources, consent: Boolean(p.accountConsentAt) });
-  return { sources, facts, coverLetter, fixFields };
-}
-
-async function runFlow(userId: string, app: JobApplication, sessionId: string, navigate: boolean) {
-  await ensureResumeProfile(userId);
-  const info = await student(userId);
-  const resume = await resumeFile(userId);
-  const password = info.profile.jobSitePasswordEncrypted ? decryptSecret(info.profile.jobSitePasswordEncrypted) : "";
-  const credentials = password && info.profile.email ? { email: info.profile.email, password } : null;
-  const answerFor = answerWith(info, app.company);
-  const { sources, coverLetter, fixFields } = runContext(userId, info, app);
-  const resumeAnswers = async (items: Array<{ label: string; section: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => {
-    // The section ("Work Experience 2") tells the model which part of the resume a question is about.
-    const asked = items.map((item, index) => ({ key: `q${index}`, label: item.section ? `${item.section}: ${item.label}` : item.label, kind: item.kind, required: false, options: item.options, sensitive: classifyQuestion(item.label).sensitive, answer: null, source: null, evidence: null }));
-    const answered = await aiAnswers(userId, asked, sources);
-    return Object.fromEntries(answered.flatMap((question, index) => (question.source === "ai" && question.answer ? [[items[index].label, question.answer]] : [])));
-  };
-  const shouldStop = async () => (await applications.get(userId, app.id))?.status !== "filling";
-  // Show the live view while filling, so the student can watch and stop it.
-  const live = await liveViewUrl(sessionId);
-  await applications.update(userId, app.id, { browserSessionId: sessionId, fillReport: { ...(app.fillReport ?? { filled: [], failed: [] }), liveViewUrl: live, screenshotAt: nowIso() } });
-  let report: FlowResult;
-  let learned = 0;
-  try {
-    report = await withSessionPage(sessionId, async (page) => {
-      // Picking up after the student worked in the live view: keep what they entered for next time.
-      if (!navigate) learned = await learnAnswers(userId, info, await readFormAnswers(page).catch(() => []));
-      return runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, aiAnswers: resumeAnswers, coverLetter, fixFields, shouldStop });
-    });
-  } catch (error) {
-    // Stopped by the student: stopAutofill already saved where things stand.
-    if (!(error instanceof AutofillStopped) && !(await shouldStop().catch(() => false))) throw error;
-    const current = (await applications.get(userId, app.id))!;
-    // Stopped before the browser was recorded: close it so it doesn't keep running.
-    if (current.status === "extracted") {
-      await releaseBrowserSession(sessionId);
-      return { application: summary((await applications.update(userId, app.id, { browserSessionId: null, fillReport: null }))!) };
-    }
-    return { application: summary(current) };
-  }
-  if (report.account === "created") {
-    const jobAccounts = [...(info.profile.jobAccounts ?? []).filter((item) => item.host !== report.host), { host: report.host, email: info.profile.email, createdAt: nowIso() }];
-    await applicationProfiles.put(userId, { ...info.profile, jobAccounts });
-  }
-  if (await shouldStop()) return { application: summary((await applications.get(userId, app.id))!) };
-  const updated = await applications.update(userId, app.id, {
-    status: "review",
-    browserSessionId: sessionId,
-    fillReport: { ...report, coverLetter: report.coverLetter ?? app.fillReport?.coverLetter, liveViewUrl: live, screenshotAt: nowIso() },
-    statusMessage: `${learned ? `Saved ${learned} answer${learned === 1 ? "" : "s"} you entered, for future applications. ` : ""}${STOP_MESSAGE[report.stoppedAt](report, info.profile.email)}`,
-  });
-  return { application: summary(updated!) };
+  return { sources, facts };
 }
 
 /** The fast mapping for a Greenhouse job: its form from the job board API, answers with at most one AI call. */
@@ -467,276 +371,10 @@ async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof stu
   return { schema, questions: questionsFromMapping(schema, mapped.answers), timings };
 }
 
-/** Keeps a screenshot of the site's confirmation page as the student's receipt. */
-async function saveReceipt(page: Page, userId: string, applicationId: string) {
-  const bytes = await page.screenshot({ type: "jpeg", quality: 60, fullPage: true, timeout: 10_000 }).catch(() => null);
-  if (!bytes) return undefined;
-  return (await saveResumeBytes(dataDir(), `receipts/${userId}/${applicationId}.jpg`, new Uint8Array(bytes), "image/jpeg").catch(() => "")) || undefined;
-}
-
-/**
- * Fast fill for Greenhouse: one browser pass from the approved answers, then a check that every required
- * field has a value. With submit, it also clicks the real Submit and keeps the confirmation as a receipt.
- * The browser stays open 10 minutes for the student to look; it's closed as soon as the work is done.
- */
-async function fastFill(userId: string, app: JobApplication, submit: boolean) {
-  const info = await student(userId);
-  const context = runContext(userId, info, app);
-  const { schema, ms: schemaMs } = await greenhouseSchema(app.jobKey);
-  const answers = mappingFromQuestions(schema, app.questions);
-  const resume = await resumeFile(userId);
-  let letter: string | undefined;
-  const files = { resume, coverLetter: async () => { const written = await context.coverLetter(); letter = written?.text; return written?.file ?? null; } };
-  const sessionId = await createBrowserSession(600);
-  const live = await liveViewUrl(sessionId);
-  await applications.update(userId, app.id, { browserSessionId: sessionId, fillReport: { ...(app.fillReport ?? { filled: [], failed: [] }), liveViewUrl: live, screenshotAt: nowIso() } });
-  let result: { fill: Awaited<ReturnType<typeof fillGreenhouse>>; confirmation?: JobApplication["confirmation"]; needsCode?: boolean; submitMs?: number };
-  try {
-    result = await withSessionPage(sessionId, async (page) => {
-      const fill = await fillGreenhouse(page, schema, answers, files, context.fixFields);
-      if (!submit || fill.failed.length) return { fill };
-      const submitted = Date.now();
-      const confirmation = await submitAndConfirm(page);
-      const receiptPath = confirmation ? await saveReceipt(page, userId, app.id) : undefined;
-      return { fill, confirmation: confirmation ? { ...confirmation, receiptPath } : null, needsCode: !confirmation && (await greenhouseNeedsCode(page)), submitMs: Date.now() - submitted };
-    });
-  } catch (error) {
-    await releaseBrowserSession(sessionId);
-    throw error;
-  }
-  const previous = app.fillReport?.timings;
-  const timings: Timings = {
-    pipeline: "fast",
-    schemaMs: (previous?.schemaMs ?? 0) + schemaMs,
-    mappingMs: previous?.mappingMs,
-    fillMs: result.fill.ms,
-    submitMs: result.submitMs,
-    llmCalls: (previous?.llmCalls ?? 0) + result.fill.llmCalls + (letter && !app.fillReport?.coverLetter ? 1 : 0),
-    fallback: result.fill.fallback,
-  };
-  logTimings(app.id, submit ? "fill_and_submit" : "fill", timings);
-  const labelOf = (fieldId: string) => schema.fields.find((field) => field.id === fieldId)?.label ?? fieldId;
-  const report = {
-    filled: result.fill.filled.map(labelOf),
-    failed: result.fill.failed.map((item) => ({ label: item.label, reason: item.reason })),
-    liveViewUrl: live,
-    screenshotAt: nowIso(),
-    stoppedAt: result.fill.failed.length ? ("needs_input" as const) : ("review" as const),
-    pages: 1,
-    host: "job-boards.greenhouse.io",
-    pending: [],
-    decided: result.fill.fallback.map((label) => ({ label, answer: "Filled by the fallback pass", why: "Nothing on file answered it directly." })),
-    coverLetter: letter ?? app.fillReport?.coverLetter,
-    timings,
-  };
-  const seconds = ((timings.fillMs ?? 0) + (timings.submitMs ?? 0)) / 1000;
-  if (result.confirmation) {
-    await applications.update(userId, app.id, { fillReport: report, browserSessionId: sessionId });
-    return { application: summary((await recordSubmitResult(userId, { ...app, browserSessionId: sessionId }, result.confirmation))!) };
-  }
-  // Stopped by the student while filling: keep what they set.
-  if (!submit && (await applications.get(userId, app.id))?.status !== "filling") return { application: summary((await applications.get(userId, app.id))!) };
-  const statusMessage = submit
-    ? result.needsCode
-      ? `Filled in ${seconds.toFixed(0)}s and submitted. Greenhouse emailed ${info.profile.email} a security code: enter it in the live view, then press Check again.`
-      : result.fill.failed.length
-        ? `Filled ${report.filled.length} fields, but ${result.fill.failed.length} still need you, so Unnepo didn't submit. Fix them below or in the live view.`
-        : "Clicked Submit, but the site didn't confirm yet. Check the live view (a CAPTCHA, maybe), then press Check again."
-    : result.fill.failed.length
-      ? `Filled ${report.filled.length} fields in ${seconds.toFixed(0)}s. ${result.fill.failed.length} need you: fix them below with Edit fields here, or in the live view.`
-      : `Filled and checked every required field in ${seconds.toFixed(0)}s${timings.llmCalls ? ` with ${timings.llmCalls} AI call${timings.llmCalls === 1 ? "" : "s"} in all` : ""}. Look it over, then approve.`;
-  const updated = await applications.update(userId, app.id, { status: submit && !result.fill.failed.length ? "unconfirmed" : "review", browserSessionId: sessionId, fillReport: report, statusMessage });
-  return { application: summary(updated!) };
-}
-
-/** Opens the application in a browser and fills it page by page. Stops before submitting. */
-export async function startAutofill(userId: string, raw: unknown) {
-  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  if (!app.applicationUrl) throw new ServiceError("This posting has no application form link.", "no_form", 409);
-  if (!browserReady()) throw new ServiceError("Autofill isn't connected yet. Add the Browserbase keys in Vercel, or apply yourself and press I applied.", "browser_not_configured", 503);
-  const missing = missingAnswers(app.questions);
-  // "Autofill all" doesn't wait on questions: the run stops where it needs the student, and they finish it there.
-  const bulk = Boolean((raw as { bulk?: unknown } | null)?.bulk);
-  if (missing.length && !bulk) throw new ServiceError(`Answer ${missing.length === 1 ? `"${missing[0].label}"` : `${missing.length} required questions`} first.`, "missing", 400);
-  const claimed = await applications.transition(userId, app.id, ["extracted", "review", "failed"], { status: "filling", statusMessage: "Filling the form…", attempts: app.attempts + 1 });
-  if (!claimed) throw new ServiceError("This application is already being filled or was submitted.", "state", 409);
-  try {
-    await ensureCharged(userId, app);
-  } catch (error) {
-    await applications.update(userId, app.id, { status: app.status, statusMessage: app.statusMessage });
-    throw error;
-  }
-  if (app.browserSessionId) await releaseBrowserSession(app.browserSessionId);
-  if (fastApplyOn(app, (await applicationProfiles.get(userId)) ?? {})) {
-    try {
-      return await fastFill(userId, { ...app, browserSessionId: null }, false);
-    } catch (error) {
-      const message = error instanceof ServiceError ? error.message : "The form couldn't be filled. Nothing was submitted.";
-      await applications.update(userId, app.id, { status: "failed", browserSessionId: null, statusMessage: message });
-      throw error instanceof ServiceError ? error : new ServiceError(message, "browser_failed", 502);
-    }
-  }
-  let sessionId: string | null = null;
-  try {
-    sessionId = await createBrowserSession();
-    return await runFlow(userId, app, sessionId, true);
-  } catch (error) {
-    if (sessionId) await releaseBrowserSession(sessionId);
-    const message = error instanceof ServiceError ? error.message : "The form couldn't be filled. Nothing was submitted.";
-    await applications.update(userId, app.id, { status: "failed", browserSessionId: null, statusMessage: message });
-    throw error instanceof ServiceError ? error : new ServiceError(message, "browser_failed", 502);
-  }
-}
-
-/**
- * Saves the student's answers to questions autofill stopped on. They're kept by question label, so the
- * same question on any later application (Workday's are worded the same everywhere) fills itself.
- */
-export async function answerPending(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; answers?: Record<string, unknown> };
-  const app = await requireApp(userId, body.applicationId);
-  const pending = app.fillReport?.pending ?? [];
-  const info = await student(userId);
-  const saved = { ...info.profile.saved };
-  let count = 0;
-  for (const [label, value] of Object.entries(body.answers ?? {})) {
-    const question = pending.find((item) => item.label === label);
-    const answer = String(value ?? "").trim().slice(0, 2000);
-    if (!question || !answer) continue;
-    if (question.options.length && !question.options.includes(answer)) throw new ServiceError(`Pick one of the options for "${label}".`, "answer", 400);
-    saved[normalizeLabel(label)] = { label, answer, updatedAt: nowIso() };
-    count += 1;
-  }
-  if (!count) throw new ServiceError("Answer at least one question first.", "answer", 400);
-  await applicationProfiles.put(userId, { ...info.profile, saved });
-  return { saved: count };
-}
-
-/** A form field as the page sees it: no page selectors. */
-function publicField(field: Awaited<ReturnType<typeof formFields>>[number]) {
-  return { label: field.label, section: field.section, control: field.control, options: field.options, format: field.format, value: field.value, required: field.required };
-}
-
-/** Every field on the page the browser stopped on, with its current value, for editing from Unnepo. */
-export async function editableFields(userId: string, raw: unknown) {
-  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  if (!app.browserSessionId || !["review", "unconfirmed"].includes(app.status)) throw new ServiceError("Run autofill first. Fields can be edited once it stops.", "state", 409);
-  const fields = await withSessionPage(app.browserSessionId, (page) => formFields(page));
-  return { fields: fields.map(publicField) };
-}
-
-/** Puts the student's edits into the form and saves them as answers for next time. */
-export async function updateFields(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; values?: unknown; remember?: unknown };
-  const app = await requireApp(userId, body.applicationId);
-  if (!app.browserSessionId || !["review", "unconfirmed"].includes(app.status)) throw new ServiceError("This application isn't waiting on you right now.", "state", 409);
-  const values = (Array.isArray(body.values) ? body.values : [])
-    .slice(0, 80)
-    .map((item) => ({ label: String((item as { label?: unknown }).label ?? "").slice(0, 300), section: String((item as { section?: unknown }).section ?? "").slice(0, 120), value: String((item as { value?: unknown }).value ?? "").slice(0, 4000) }))
-    .filter((item) => item.label);
-  if (!values.length) throw new ServiceError("Change at least one field first.", "values", 400);
-  const info = await student(userId);
-  const result = await withSessionPage(app.browserSessionId, async (page) => {
-    const applied = await setFormFields(page, values);
-    const learned = body.remember === false ? 0 : await learnAnswers(userId, info, values.filter((item) => applied.done.includes(item.label) && item.value.trim()).map((item) => ({ ...item, section: item.section ?? "" })));
-    const fields = await formFields(page);
-    return { ...applied, learned, fields: fields.map(publicField) };
-  });
-  // The fields the student just filled no longer need them.
-  if (app.fillReport && result.done.length) {
-    const filledNow = new Set(result.done);
-    await applications.update(userId, app.id, { fillReport: { ...app.fillReport, failed: app.fillReport.failed.filter((item) => !filledNow.has(item.label)), pending: (app.fillReport.pending ?? []).filter((item) => !filledNow.has(item.label)) } });
-  }
-  return { ...result, application: summary((await applications.get(userId, app.id))!) };
-}
-
-/** Picks up in the same browser after the student verified an email or finished a page themselves. */
-export async function continueAutofill(userId: string, raw: unknown) {
-  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  if (!app.browserSessionId) throw new ServiceError("The browser for this application has closed. Press Autofill application to start again.", "state", 409);
-  const claimed = await applications.transition(userId, app.id, ["review"], { status: "filling", statusMessage: "Continuing…" });
-  if (!claimed) throw new ServiceError("This application isn't waiting on you right now.", "state", 409);
-  try {
-    return await runFlow(userId, app, app.browserSessionId, false);
-  } catch (error) {
-    const message = error instanceof ServiceError ? error.message : "Couldn't continue in the browser. Nothing was submitted.";
-    await applications.update(userId, app.id, { status: "review", statusMessage: message });
-    throw error instanceof ServiceError ? error : new ServiceError(message, "browser_failed", 502);
-  }
-}
-
-/** Stops a running autofill. The browser stays open so the student can finish in the live view or continue later. */
-export async function stopAutofill(userId: string, raw: unknown) {
-  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  if (app.status !== "filling") return { application: summary(app) };
-  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
-  const updated = await applications.transition(userId, app.id, ["filling"], {
-    status: app.browserSessionId ? "review" : "extracted",
-    fillReport: app.browserSessionId ? { ...report, stoppedAt: "needs_input", pending: [] } : app.fillReport,
-    statusMessage: app.browserSessionId
-      ? "You stopped autofill. Nothing was submitted. Finish in the live view, or press Continue autofill to pick up where it stopped."
-      : "You stopped autofill before the browser opened. Nothing was submitted.",
-  });
-  return { application: summary(updated ?? (await requireApp(userId, app.id))) };
-}
-
 function startContacts(userId: string, applicationId: string) {
   defer(async () => {
     await runContactDiscovery(userId, applicationId).catch((error) => console.error("contact discovery failed", error));
   });
-}
-
-/** Clicks submit after the student approves, then waits for the site's own confirmation. */
-export async function approveAndSubmit(userId: string, raw: unknown) {
-  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  if (!app.browserSessionId) throw new ServiceError("Run autofill first.", "state", 409);
-  if (app.fillReport?.stoppedAt && app.fillReport.stoppedAt !== "review") {
-    throw new ServiceError("Autofill hasn't reached the final page yet. Finish the step it stopped on, then press Continue autofill.", "state", 409);
-  }
-  const claimed = await applications.transition(userId, app.id, ["review"], { status: "submitting", statusMessage: "Submitting…" });
-  if (!claimed) throw new ServiceError("This application isn't waiting for approval.", "state", 409);
-  const fast = fastApplyOn(app, (await applicationProfiles.get(userId)) ?? {});
-  try {
-    const info = await student(userId);
-    const confirmation = await withSessionPage(app.browserSessionId, async (page) => {
-      await learnAnswers(userId, info, await readFormAnswers(page).catch(() => [])).catch(() => 0);
-      const confirmed = await submitAndConfirm(page);
-      return confirmed ? { ...confirmed, receiptPath: await saveReceipt(page, userId, app.id) } : null;
-    }).catch(async (error) => {
-      // The fast pipeline's browser closes after 10 minutes; fill and submit again in one pass.
-      if (fast && error instanceof ServiceError && error.code === "browser_closed") return "refill" as const;
-      throw error;
-    });
-    if (confirmation === "refill") return await fastFill(userId, { ...app, browserSessionId: null }, true);
-    return { application: summary((await recordSubmitResult(userId, app, confirmation))!) };
-  } catch (error) {
-    await applications.update(userId, app.id, { status: "unconfirmed", statusMessage: error instanceof ServiceError ? error.message : "Couldn't confirm the submission. Check the live view." });
-    throw error;
-  }
-}
-
-async function recordSubmitResult(userId: string, app: JobApplication, confirmation: JobApplication["confirmation"]) {
-  if (!confirmation) {
-    return applications.update(userId, app.id, {
-      status: "unconfirmed",
-      statusMessage: "The site didn't show a confirmation yet. Check the live view: finish any CAPTCHA or fix any errors and submit there, then press Check again.",
-    });
-  }
-  const updated = await applications.update(userId, app.id, { status: "submitted", confirmation, submittedAt: confirmation.detectedAt, statusMessage: "Submitted. The site confirmed your application." });
-  if (app.browserSessionId) await releaseBrowserSession(app.browserSessionId);
-  await applications.update(userId, app.id, { browserSessionId: null });
-  startContacts(userId, app.id);
-  return updated;
-}
-
-/** Looks at the live page again for a confirmation, after the student finished a step themselves. */
-export async function checkSubmission(userId: string, raw: unknown) {
-  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  if (app.status !== "unconfirmed" && app.status !== "review") throw new ServiceError("Nothing to check for this application.", "state", 409);
-  if (!app.browserSessionId) throw new ServiceError("The browser for this application has closed. If you submitted it, press I applied.", "state", 409);
-  const confirmation = await withSessionPage(app.browserSessionId, (page) => detectConfirmation(page));
-  if (!confirmation) return { application: summary(app), confirmed: false, message: "Still no confirmation on the page." };
-  return { application: summary((await recordSubmitResult(userId, app, confirmation))!), confirmed: true, message: "Confirmed." };
 }
 
 /** The confirmation screenshot Unnepo kept when the site confirmed the application. */
@@ -751,9 +389,7 @@ export async function receiptImage(userId: string, applicationId: string) {
 export async function markApplied(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
   if (app.status === "submitted" || app.status === "applied_manual") return { application: summary(app) };
-  if (app.status === "filling" || app.status === "submitting") throw new ServiceError("Wait for the current step to finish.", "state", 409);
   await ensureCharged(userId, app);
-  if (app.browserSessionId) await releaseBrowserSession(app.browserSessionId);
   const updated = await applications.update(userId, app.id, { status: "applied_manual", browserSessionId: null, submittedAt: nowIso(), statusMessage: "You marked this as applied." });
   startContacts(userId, app.id);
   return { application: summary(updated!) };
@@ -810,7 +446,6 @@ export async function updateOutreach(userId: string, raw: unknown) {
 
 export async function deleteApplication(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  if (app.browserSessionId) await releaseBrowserSession(app.browserSessionId);
   await applications.remove(userId, app.id);
   return { ok: true };
 }

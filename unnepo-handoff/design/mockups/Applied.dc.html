@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Applied jobs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#070708}
+a{color:#F7F7F8}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width: 100%; min-height: 900px; box-sizing: border-box; background: #070708; color: #F7F7F8; font-family: Geist, system-ui, sans-serif; display: flex; flex-direction: column">
+
+<header style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 40px; border-bottom: 1px solid #17171B">
+<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 36px">
+<span style="font-size: 20px; font-weight: 700; letter-spacing: -0.6px">unnepo<span style="color: {{accent}}">.</span></span>
+<nav aria-label="App" style="display: flex; flex-wrap: wrap; gap: 24px; font-size: 14px">
+<a href="#" aria-current="page" style="color: #F7F7F8; text-decoration: none; font-weight: 500">Applied</a>
+<a href="#" style="color: #8B8B94; text-decoration: none">Jobs for you</a>
+<a href="#" style="color: #8B8B94; text-decoration: none">People</a>
+<a href="#" style="color: #8B8B94; text-decoration: none">Stats</a>
+</nav>
+</div>
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8B8B94">12 UNLOCKS LEFT</span>
+<button type="button" aria-label="Account" style="width: 36px; height: 36px; border-radius: 36px; border: 1px solid #26262C; background: #111114; color: #F7F7F8; font: 600 13px Geist, sans-serif; cursor: pointer">AD</button>
+</div>
+</header>
+
+<main style="width: 100%; max-width: 1160px; margin: 0 auto; padding: 56px 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h1 style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -1.4px">Applied</h1>
+<p style="margin: 0; font-size: 15px; color: #8B8B94">48 applications · 17 this week</p>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px" role="group" aria-label="Filter by status">
+<button type="button" aria-pressed="true" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #F7F7F8; background: #F7F7F8; color: #070708; font: 500 13px Geist, sans-serif; cursor: pointer">All</button>
+<button type="button" aria-pressed="false" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #26262C; background: transparent; color: #9A9AA3; font: 500 13px Geist, sans-serif; cursor: pointer">Submitted</button>
+<button type="button" aria-pressed="false" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #26262C; background: transparent; color: #9A9AA3; font: 500 13px Geist, sans-serif; cursor: pointer">Interviewing</button>
+<button type="button" aria-pressed="false" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #26262C; background: transparent; color: #9A9AA3; font: 500 13px Geist, sans-serif; cursor: pointer">Offer</button>
+</div>
+</div>
+
+<div style="overflow-x: auto; border-top: 1px solid #1F1F24">
+<table style="width: 100%; min-width: 760px; border-collapse: collapse; font-size: 14px">
+<thead>
+<tr style="text-align: left">
+<th scope="col" style="padding: 14px 8px; font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 1.2px; color: #8B8B94; font-weight: 500">COMPANY</th>
+<th scope="col" style="padding: 14px 8px; font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 1.2px; color: #8B8B94; font-weight: 500">ROLE</th>
+<th scope="col" style="padding: 14px 8px; font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 1.2px; color: #8B8B94; font-weight: 500">APPLIED</th>
+<th scope="col" style="padding: 14px 8px; font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 1.2px; color: #8B8B94; font-weight: 500">STATUS</th>
+<th scope="col" style="padding: 14px 8px; font-family: 'Geist Mono', monospace; font-size: 11px; letter-spacing: 1.2px; color: #8B8B94; font-weight: 500; text-align: right">PEOPLE</th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="7">
+<tr style="border-top: 1px solid #17171B">
+<td style="padding: 16px 8px; font-weight: 500">{{r.company}}</td>
+<td style="padding: 16px 8px; color: #9A9AA3">{{r.role}}<span style="color: #8B8B94"> · {{r.ats}}</span></td>
+<td style="padding: 16px 8px; color: #8B8B94; font-family: 'Geist Mono', monospace; font-size: 13px">{{r.date}}</td>
+<td style="padding: 16px 8px"><span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: {{r.color}}"><span style="width: 6px; height: 6px; border-radius: 6px; background: {{r.color}}"></span>{{r.status}}</span></td>
+<td style="padding: 10px 8px; text-align: right">
+<sc-if value="{{r.unlocked}}" hint-placeholder-val="{{ false }}"><a href="People.dc.html" style="font-size: 13px; color: #F7F7F8; text-decoration: none">{{r.people}} people →</a></sc-if>
+<sc-if value="{{r.locked}}" hint-placeholder-val="{{ true }}"><a href="People.dc.html" style="display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 9px; border: 1px solid #26262C; font-size: 13px; color: #F7F7F8; text-decoration: none">Unlock</a></sc-if>
+</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#3D8BFF","options":["#3D8BFF","#F7F7F8","#7C6CFF"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const accent = this.props.accent ?? '#3D8BFF';
+const c = { Submitted: '#9A9AA3', Interviewing: accent, Offer: '#4ADE80', Rejected: '#8B8B94' };
+const raw = [
+['Northwind','Software Engineering Intern','Greenhouse','Oct 29','Submitted',5],
+['Halcyon Labs','Data Science Intern','Lever','Oct 29','Submitted',0],
+['Fernway','Product Intern','Ashby','Oct 28','Interviewing',5],
+['Brightline Health','Analytics Intern','Greenhouse','Oct 27','Submitted',0],
+['Meridian Bank','Summer Analyst','Workday','Oct 24','Offer',4],
+['Quill & Co','Design Intern','Lever','Oct 22','Rejected',0],
+['Lumen Freight','Operations Intern','Workday','Oct 21','Submitted',3]
+];
+return { accent, rows: raw.map(([company, role, ats, date, status, people]) => ({ company, role, ats, date, status, people, color: c[status], unlocked: people > 0, locked: people === 0 })) };
+}
+}
+</script>
+</body>
+</html>

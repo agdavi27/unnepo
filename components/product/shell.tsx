@@ -3,23 +3,16 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bell, Briefcase, Gift, Home, Link2, LogOut, Menu, Search, Send, Settings, Bookmark, X } from "lucide-react";
+import { Bell, Home, LogOut, Menu, Settings, X } from "lucide-react";
 import { Avatar } from "@/components/product/bits";
 import { Logo } from "@/components/brand/logo";
 
 type Me = {
-  user: { id: string; name: string; email: string; referralCode: string; onboardingStep: string };
+  user: { id: string; name: string; email: string; onboardingStep: string };
   credits: { balance: number; includedAllowance: number; plan: string } | null;
-  followups: number;
 };
 
-const NAV = [
-  { href: "/home", label: "Home", icon: Home },
-  { href: "/contacts", label: "Find New Contacts", icon: Search },
-  { href: "/outreach", label: "Outreach & Analytics", icon: Send },
-  { href: "/jobs", label: "Job Postings", icon: Briefcase },
-  { href: "/saved", label: "Saved Contacts", icon: Bookmark },
-];
+const NAV = [{ href: "/home", label: "Home", icon: Home }];
 
 export function Shell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -75,14 +68,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
-          <Link href="/refer" onClick={() => setOpen(false)} className={`mt-2 block rounded-xl border px-3 py-2.5 ${pathname === "/refer" ? "border-gold bg-gold/15" : "border-gold/35 bg-gold/10 hover:bg-gold/15"}`}>
-            <span className="flex items-center gap-2 text-sm font-medium text-cream"><Gift className="h-4 w-4" /> Refer a friend</span>
-            <span className="mt-0.5 block pl-6 text-xs text-muted">A verified friend gives you 25 credits</span>
-          </Link>
         </nav>
         <div className="space-y-1 px-3 pb-3">
           <Link href="/settings" className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm ${pathname === "/settings" ? "bg-card text-white" : "text-muted hover:bg-white/5"}`}><Settings className="h-4 w-4" /> Settings</Link>
-          <Link href="/settings?tab=integrations" className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-muted hover:bg-white/5"><Link2 className="h-4 w-4" /> Connected Accounts</Link>
         </div>
         <div className="border-t border-line px-4 py-4">
           <div className="flex items-center justify-between text-xs text-muted">

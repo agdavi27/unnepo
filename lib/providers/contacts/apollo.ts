@@ -1,7 +1,6 @@
 /**
- * Builds Apollo People API Search requests. Every filter Apollo receives is ANDed, so a search
- * runs as a ladder: the strictest useful filters first, then looser steps until enough people
- * are found. People API Search costs no Apollo credits, so extra steps only add latency.
+ * Shared pieces of Apollo People Search for contact unlocks: the query shape, known company domains,
+ * and the titles that mean "recruiter".
  */
 
 export type ApolloPeopleQuery = {
@@ -14,7 +13,6 @@ export type ApolloPeopleQuery = {
   q_keywords?: string;
 };
 
-export type LadderStep = { label: string; query: ApolloPeopleQuery };
 
 /** Domains for companies the onboarding suggests. Anything else is looked up in Apollo once and cached. */
 export const COMPANY_DOMAINS: Record<string, string[]> = {
@@ -48,65 +46,5 @@ export const COMPANY_DOMAINS: Record<string, string[]> = {
 };
 
 /** Onboarding interests as Apollo industry names (exact, lowercase). */
-export const INTEREST_INDUSTRIES: Record<string, string[]> = {
-  Technology: ["information technology & services", "computer software", "internet"],
-  Marketing: ["marketing & advertising"],
-  Finance: ["financial services", "investment banking", "banking", "investment management"],
-  Consulting: ["management consulting"],
-  Entrepreneurship: ["internet", "computer software", "venture capital & private equity"],
-  Music: ["music", "entertainment"],
-  Sports: ["sports", "sporting goods"],
-  "Outdoor & Adventure": ["sporting goods", "apparel & fashion", "recreational facilities & services"],
-  Fashion: ["apparel & fashion", "luxury goods & jewelry", "retail"],
-  Design: ["design", "graphic design"],
-  Healthcare: ["hospital & health care", "pharmaceuticals", "medical devices"],
-  Media: ["media production", "online media", "publishing", "broadcast media", "entertainment"],
-  Engineering: ["mechanical or industrial engineering", "civil engineering", "aviation & aerospace", "automotive"],
-  "Real Estate": ["real estate", "commercial real estate"],
-  Education: ["education management", "e-learning", "higher education"],
-  Nonprofits: ["nonprofit organization management", "philanthropy"],
-  Government: ["government administration", "public policy"],
-  "Food & Beverage": ["food & beverages", "food production", "consumer goods"],
-  Gaming: ["computer games"],
-  Sustainability: ["renewables & environment", "environmental services"],
-};
-
-export function industriesFor(interests: string[]) {
-  return [...new Set(interests.flatMap((interest) => INTEREST_INDUSTRIES[interest] ?? []))];
-}
-
-export const EMPLOYEE_RANGES: Record<string, string[]> = {
-  "1-10": ["1,10"],
-  "11-50": ["11,50"],
-  "51-200": ["51,200"],
-  "201-500": ["201,500"],
-  "501-1000": ["501,1000"],
-  "1001+": ["1001,1000000"],
-};
-export const SMALL_COMPANY_RANGES = ["1,10", "11,50", "51,200"];
 
 export const RECRUITER_TITLES = ["recruiter", "talent acquisition", "university recruiter", "campus recruiter", "technical recruiter"];
-export const HIRING_MANAGER_SENIORITIES = ["manager", "director", "head"];
-
-/** Drops empty filters so Apollo only sees what is set. */
-export function cleanQuery(query: ApolloPeopleQuery): ApolloPeopleQuery {
-  const out: ApolloPeopleQuery = {};
-  for (const [key, value] of Object.entries(query) as Array<[keyof ApolloPeopleQuery, ApolloPeopleQuery[keyof ApolloPeopleQuery]]>) {
-    if (Array.isArray(value) ? value.length : typeof value === "string" && value.trim()) (out as Record<string, unknown>)[key] = value;
-  }
-  return out;
-}
-
-/** Keeps the first time each distinct query appears and skips steps with no filters at all. */
-export function ladder(steps: LadderStep[]) {
-  const seen = new Set<string>();
-  const out: LadderStep[] = [];
-  for (const step of steps) {
-    const query = cleanQuery(step.query);
-    const key = JSON.stringify(query);
-    if (!Object.keys(query).length || seen.has(key)) continue;
-    seen.add(key);
-    out.push({ label: step.label, query });
-  }
-  return out;
-}

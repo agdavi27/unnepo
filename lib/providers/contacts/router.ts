@@ -2,32 +2,8 @@ import { serverConfig } from "@/lib/config";
 import { repo, id, nowIso, readApolloKey } from "@/lib/db/file-store";
 import type { Contact } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
-import { expandSchools } from "@/lib/schools";
-import { COMPANY_DOMAINS, type ApolloPeopleQuery } from "@/lib/search/apollo-query";
+import { COMPANY_DOMAINS, type ApolloPeopleQuery } from "@/lib/providers/contacts/apollo";
 import { contactFetch } from "./http";
-import { closestSampleContacts, filterSampleDirectory, SAMPLE_CONTACTS, type SearchFilters } from "./sample-directory";
-
-export type PeopleSearchResult = {
-  people: Contact[];
-  total: number;
-  source: "sample" | "apollo";
-  notice: string | null;
-  estimated: boolean;
-};
-
-export type EnrichResult =
-  | {
-      ok: true;
-      email: string | null;
-      phone: string | null;
-      emailStatus: Contact["emailStatus"];
-      phoneStatus: Contact["phoneStatus"];
-      costCents: number;
-      estimated: boolean;
-      provider: string;
-      patch?: Partial<Contact>;
-    }
-  | { ok: false; reason: string; message: string; costCents: number; estimated: boolean; provider: string };
 
 async function recordUsage(input: {
   userId: string | null;
@@ -100,99 +76,6 @@ export function estimateRequestCost(operation: "search" | "enrich") {
   return { cents: config.apolloEnrichCostCents, provider: "apollo", estimated: true };
 }
 
-export async function searchPeople(userId: string, filters: SearchFilters, page: number, pageSize: number): Promise<PeopleSearchResult> {
-  const schools = expandSchools(filters.schools, filters.includeSimilarSchools);
-  const apolloKey = await readApolloKey();
-  if (apolloKey) {
-    const estimate = estimateRequestCost("search");
-    await assertSpendAllowed(userId, estimate.cents);
-    const started = Date.now();
-    try {
-      const people = await apolloSearch(apolloKey, filters, schools, page, pageSize);
-      await recordUsage({
-        userId,
-        provider: "apollo",
-        operation: "search",
-        success: true,
-        latencyMs: Date.now() - started,
-        costCents: estimate.cents,
-        estimated: true,
-      });
-      await repo.upsertContacts(people);
-      return { people, total: people.length, source: "apollo", notice: null, estimated: true };
-    } catch (error) {
-      await recordUsage({
-        userId,
-        provider: "apollo",
-        operation: "search",
-        success: false,
-        latencyMs: Date.now() - started,
-        costCents: 0,
-        estimated: true,
-        error: error instanceof Error ? error.message : "apollo_failed",
-      });
-      throw new ServiceError(`${apolloSearchMessage(error)} No credits were used.`, "provider_failed", 502);
-    }
-  }
-
-  if (!serverConfig().sampleDirectory) {
-    return {
-      people: [],
-      total: 0,
-      source: "sample",
-      notice: "Add APOLLO_API_KEY to search live professionals. The sample directory is turned off.",
-      estimated: true,
-    };
-  }
-
-  let matched = filterSampleDirectory(filters, schools);
-  let relaxed = false;
-  if (!matched.length) {
-    matched = closestSampleContacts(filters, Math.max(pageSize, 12));
-    relaxed = true;
-  }
-  const start = Math.max(0, (page - 1) * pageSize);
-  const people = matched.slice(start, start + pageSize);
-  await repo.upsertContacts(people);
-  await recordUsage({
-    userId,
-    provider: "sample",
-    operation: "search",
-    success: true,
-    latencyMs: 1,
-    costCents: 0,
-    estimated: true,
-  });
-  return {
-    people,
-    total: matched.length,
-    source: "sample",
-    notice: relaxed
-      ? "No exact match for those filters. These are the closest people in the sample directory, so you can keep going. They are not live Apollo results."
-      : "Sample directory. These profiles are illustrative and are not live Apollo results. The list is saved to your contacts.",
-    estimated: true,
-  };
-}
-
-async function apolloSearch(apiKey: string, filters: SearchFilters, schools: string[], page: number, pageSize: number) {
-  const keywords = [filters.companies.join(" "), filters.query].filter(Boolean).join(" ");
-  const response = await contactFetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-    body: JSON.stringify({
-      ...(filters.titles.length ? { person_titles: filters.titles } : {}),
-      ...(filters.locations.length ? { person_locations: filters.locations } : {}),
-      ...(filters.seniorities.length ? { person_seniorities: filters.seniorities.map((item) => item.toLowerCase()) } : {}),
-      ...(keywords ? { q_keywords: keywords } : {}),
-      page,
-      per_page: pageSize,
-    }),
-  });
-  if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 300));
-  const body = (await response.json()) as { people?: Array<Record<string, unknown>> };
-  return (body.people ?? []).map((person) => mapApolloPerson(person)).filter((person) => person !== null) as Contact[];
-}
-
 const ORGANIZATION_WORDS = /\b(inc|llc|ltd|corp|corporation|company|startups?|ventures|capital|labs?|studios?|agency|group|team|official|hq|careers|jobs|recruiting|hiring|foundation|association|university|college|club|network|solutions|consulting|partners|marketing|media|news|support|admin|info|store|shop)\b/i;
 const GENERIC_INBOXES = new Set(["info", "hello", "hi", "contact", "contactus", "team", "support", "help", "admin", "office", "sales", "marketing", "press", "media", "pr", "hr", "jobs", "careers", "recruiting", "talent", "hiring", "founders", "partners", "partnerships", "billing", "accounts", "events", "general", "inquiries", "enquiries", "mail", "webmaster", "noreply", "no-reply", "donotreply"]);
 
@@ -261,119 +144,6 @@ function mapApolloPerson(raw: Record<string, unknown>): Contact | null {
     costCents: serverConfig().apolloSearchCostCents,
     costEstimated: true,
   };
-}
-
-export async function enrichPerson(contact: Contact, userId: string): Promise<EnrichResult> {
-  if (contact.provider === "sample" || contact.dataSource === "sample") {
-    if (!contact.email && !contact.phone) {
-      return {
-        ok: false,
-        reason: "no_contact_method",
-        message: "No verified email or business phone is on file. You were not charged.",
-        costCents: 0,
-        estimated: true,
-        provider: "sample",
-      };
-    }
-    return {
-      ok: true,
-      email: contact.email,
-      phone: contact.phone,
-      emailStatus: contact.email ? "verified" : "unavailable",
-      phoneStatus: contact.phone ? "verified" : "unavailable",
-      costCents: 0,
-      estimated: true,
-      provider: "sample",
-    };
-  }
-
-  const apolloKey = await readApolloKey();
-  let email = contact.email;
-  let phone = contact.phone;
-  let emailStatus = contact.emailStatus;
-  let phoneStatus = contact.phoneStatus;
-  let cost = 0;
-  let provider = contact.provider;
-  let patch: Partial<Contact> = {};
-
-  if (apolloKey) {
-    const estimate = estimateRequestCost("enrich");
-    await assertSpendAllowed(userId, estimate.cents);
-    const started = Date.now();
-    try {
-      const matched = await apolloMatch(apolloKey, contact);
-      cost += estimate.cents;
-      patch = matched.patch;
-      email = matched.email ?? email;
-      phone = matched.phone ?? phone;
-      emailStatus = matched.emailStatus;
-      phoneStatus = matched.phoneStatus;
-      await recordUsage({
-        userId,
-        provider: "apollo",
-        operation: "enrich",
-        success: Boolean(email || phone),
-        latencyMs: Date.now() - started,
-        costCents: estimate.cents,
-        estimated: true,
-      });
-      provider = "apollo";
-    } catch (error) {
-      await recordUsage({
-        userId,
-        provider: "apollo",
-        operation: "enrich",
-        success: false,
-        latencyMs: Date.now() - started,
-        costCents: 0,
-        estimated: true,
-        error: error instanceof Error ? error.message : "enrich_failed",
-      });
-    }
-  }
-
-  if (!email && !phone) {
-    return {
-      ok: false,
-      reason: "no_contact_method",
-      message: "The lookup finished without a verified email or business phone. You were not charged.",
-      costCents: cost,
-      estimated: true,
-      provider,
-    };
-  }
-
-  return { ok: true, email, phone, emailStatus, phoneStatus, costCents: cost, estimated: true, provider, patch };
-}
-
-async function apolloMatch(apiKey: string, contact: Contact) {
-  const response = await contactFetch("https://api.apollo.io/api/v1/people/match", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-api-key": apiKey },
-    body: JSON.stringify({
-      id: contact.externalId,
-      first_name: contact.firstName,
-      last_name: contact.lastName,
-      organization_name: contact.company,
-      domain: contact.companyDomain,
-      reveal_personal_emails: false,
-    }),
-  });
-  if (!response.ok) throw new Error(`Apollo match failed (${response.status})`);
-  const body = (await response.json()) as { person?: Record<string, unknown> };
-  const person = body.person ?? {};
-  const email = typeof person.email === "string" ? person.email : null;
-  const phones = Array.isArray(person.phone_numbers) ? person.phone_numbers : [];
-  const phone = phones.length && typeof (phones[0] as { sanitized_number?: string }).sanitized_number === "string"
-    ? (phones[0] as { sanitized_number: string }).sanitized_number
-    : null;
-  return {
-    email,
-    phone,
-    emailStatus: email ? (person.email_status === "verified" ? "verified" : "unverified") : "unavailable",
-    phoneStatus: phone ? "verified" : "unavailable",
-    patch: personPatch(person, contact),
-  } as const;
 }
 
 const urlOrNull = (value: unknown) => (typeof value === "string" && /^https?:\/\//i.test(value) ? value : null);
@@ -548,8 +318,4 @@ export async function searchPeopleQuery(userId: string, query: ApolloPeopleQuery
     });
     throw new ServiceError(`${apolloSearchMessage(error)} No credits were used.`, "provider_failed", 502);
   }
-}
-
-export function findSampleById(contactId: string) {
-  return SAMPLE_CONTACTS.find((contact) => contact.id === contactId) ?? null;
 }

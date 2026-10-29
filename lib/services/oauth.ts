@@ -1,13 +1,11 @@
 import { readFileSync } from "node:fs";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
-import type { Mailbox } from "@/lib/db/types";
-import { decryptSecret, encryptSecret, randomToken } from "@/lib/security";
+import { randomToken } from "@/lib/security";
 import { loginWithOAuth } from "@/lib/services/auth";
 
-type Provider = "google" | "microsoft" | "gmail" | "outlook";
-
-const LOGIN = new Set(["google", "microsoft"]);
+/** Sign in with Google or Microsoft. Unnepo doesn't connect mailboxes or send email. */
+type Provider = "google" | "microsoft";
 
 export async function beginOAuth(provider: Provider, userId: string | null, origin: string) {
   const client = clientFor(provider);
@@ -21,7 +19,7 @@ export async function beginOAuth(provider: Provider, userId: string | null, orig
     state,
     provider,
     userId,
-    purpose: LOGIN.has(provider) ? "login" : "mailbox",
+    purpose: "login",
     redirectOrigin,
     createdAt: nowIso(),
     expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
@@ -33,8 +31,7 @@ export async function beginOAuth(provider: Provider, userId: string | null, orig
   url.searchParams.set("response_type", "code");
   url.searchParams.set("scope", client.scope);
   url.searchParams.set("state", state);
-  if (provider === "google" || provider === "gmail") url.searchParams.set("access_type", "offline");
-  url.searchParams.set("prompt", "consent");
+  url.searchParams.set("prompt", "select_account");
   return url.toString();
 }
 
@@ -68,59 +65,7 @@ export async function finishOAuth(provider: Provider, code: string, state: strin
   const tokens = (await tokenResponse.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
   if (!tokens.access_token) throw new ServiceError("The provider did not return an access token.", "oauth_token", 502);
   const profile = await fetchProfile(provider, tokens.access_token);
-  if (provider === "google" || provider === "microsoft") {
-    return loginWithOAuth({
-      email: profile.email,
-      name: profile.name,
-      provider: provider === "google" ? "google" : "microsoft",
-      emailVerified: profile.verified,
-    });
-  }
-  if (!saved.userId) throw new ServiceError("Sign in before connecting a mailbox.", "auth", 401);
-  await repo.upsertMailbox({
-    id: id(),
-    userId: saved.userId,
-    provider: provider === "gmail" ? "gmail" : "outlook",
-    email: profile.email,
-    accessTokenEncrypted: encryptSecret(tokens.access_token),
-    refreshTokenEncrypted: tokens.refresh_token ? encryptSecret(tokens.refresh_token) : null,
-    expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null,
-    connectedAt: nowIso(),
-  });
-  return { mailbox: profile.email };
-}
-
-/** A usable access token for a connected mailbox, refreshed with the stored refresh token when it is about to expire. */
-export async function mailboxAccessToken(mailbox: Mailbox) {
-  if (!mailbox.accessTokenEncrypted) throw new ServiceError("Reconnect your mailbox in Settings.", "mailbox_required", 409);
-  const expiresAt = mailbox.expiresAt ? new Date(mailbox.expiresAt).getTime() : 0;
-  if (expiresAt && expiresAt - Date.now() > 2 * 60 * 1000) return decryptSecret(mailbox.accessTokenEncrypted);
-  if (!mailbox.refreshTokenEncrypted) {
-    if (!expiresAt) return decryptSecret(mailbox.accessTokenEncrypted);
-    throw new ServiceError("Your mailbox connection expired. Reconnect it in Settings.", "mailbox_expired", 409);
-  }
-  const client = clientFor(mailbox.provider === "outlook" ? "outlook" : "gmail");
-  const response = await fetch(client.token, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: client.id,
-      client_secret: client.secret,
-      refresh_token: decryptSecret(mailbox.refreshTokenEncrypted),
-      grant_type: "refresh_token",
-      ...(mailbox.provider === "outlook" ? { scope: client.scope } : {}),
-    }),
-  });
-  if (!response.ok) throw new ServiceError("Your mailbox connection expired. Reconnect it in Settings.", "mailbox_expired", 409);
-  const tokens = (await response.json()) as { access_token?: string; refresh_token?: string; expires_in?: number };
-  if (!tokens.access_token) throw new ServiceError("Your mailbox connection expired. Reconnect it in Settings.", "mailbox_expired", 409);
-  await repo.upsertMailbox({
-    ...mailbox,
-    accessTokenEncrypted: encryptSecret(tokens.access_token),
-    refreshTokenEncrypted: tokens.refresh_token ? encryptSecret(tokens.refresh_token) : mailbox.refreshTokenEncrypted,
-    expiresAt: tokens.expires_in ? new Date(Date.now() + tokens.expires_in * 1000).toISOString() : null,
-  });
-  return tokens.access_token;
+  return loginWithOAuth({ email: profile.email, name: profile.name, provider, emailVerified: profile.verified });
 }
 
 function envValue(name: string) {
@@ -137,17 +82,13 @@ function envValue(name: string) {
 }
 
 function clientFor(provider: Provider) {
-  if (provider === "google" || provider === "gmail") {
+  if (provider === "google") {
     return {
       id: envValue("GOOGLE_CLIENT_ID"),
       secret: envValue("GOOGLE_CLIENT_SECRET"),
       authorize: "https://accounts.google.com/o/oauth2/v2/auth",
       token: "https://oauth2.googleapis.com/token",
-      scope:
-        provider === "gmail"
-          ? // Send only. Reading mail is a restricted scope that needs a Google security assessment.
-            "openid email profile https://www.googleapis.com/auth/gmail.send"
-          : "openid email profile",
+      scope: "openid email profile",
     };
   }
   return {
@@ -155,12 +96,12 @@ function clientFor(provider: Provider) {
     secret: envValue("MICROSOFT_CLIENT_SECRET"),
     authorize: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
     token: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
-    scope: provider === "outlook" ? "offline_access openid email profile User.Read Mail.Send" : "openid email profile User.Read",
+    scope: "openid email profile User.Read",
   };
 }
 
 async function fetchProfile(provider: Provider, accessToken: string) {
-  if (provider === "google" || provider === "gmail") {
+  if (provider === "google") {
     const response = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", { headers: { Authorization: `Bearer ${accessToken}` } });
     if (!response.ok) throw new ServiceError("Google did not return a profile.", "oauth_profile", 502);
     const body = (await response.json()) as { email?: string; name?: string; email_verified?: boolean };
@@ -176,6 +117,6 @@ async function fetchProfile(provider: Provider, accessToken: string) {
 }
 
 function label(provider: Provider) {
-  if (provider === "google" || provider === "gmail") return "Google";
+  if (provider === "google") return "Google";
   return "Microsoft";
 }

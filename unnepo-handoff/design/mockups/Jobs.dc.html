@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Jobs you may like</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#070708}
+a{color:#F7F7F8}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width: 100%; min-height: 960px; box-sizing: border-box; background: #070708; color: #F7F7F8; font-family: Geist, system-ui, sans-serif; display: flex; flex-direction: column">
+
+<header style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 40px; border-bottom: 1px solid #17171B">
+<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 36px">
+<span style="font-size: 20px; font-weight: 700; letter-spacing: -0.6px">unnepo<span style="color: {{accent}}">.</span></span>
+<nav aria-label="App" style="display: flex; flex-wrap: wrap; gap: 24px; font-size: 14px">
+<a href="Applied.dc.html" style="color: #8B8B94; text-decoration: none">Applied</a>
+<a href="#" aria-current="page" style="color: #F7F7F8; text-decoration: none; font-weight: 500">Jobs for you</a>
+<a href="People.dc.html" style="color: #8B8B94; text-decoration: none">People</a>
+<a href="Stats.dc.html" style="color: #8B8B94; text-decoration: none">Stats</a>
+</nav>
+</div>
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8B8B94">12 UNLOCKS LEFT</span>
+<button type="button" aria-label="Account" style="width: 36px; height: 36px; border-radius: 36px; border: 1px solid #26262C; background: #111114; color: #F7F7F8; font: 600 13px Geist, sans-serif; cursor: pointer">AD</button>
+</div>
+</header>
+
+<main style="width: 100%; max-width: 1160px; margin: 0 auto; padding: 56px 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<h1 style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -1.4px">Jobs you may like</h1>
+<p style="margin: 0; font-size: 15px; color: #8B8B94">Picked from your profile and what you've applied to. Updated this morning.</p>
+</div>
+<button type="button" style="height: 44px; padding: 0 18px; border-radius: 11px; border: 0; background: #F7F7F8; color: #070708; font: 500 14px Geist, sans-serif; cursor: pointer; display: inline-flex; align-items: center; gap: 8px">Apply to 3 selected<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"></path></svg></button>
+</div>
+
+<div style="display: flex; flex-wrap: wrap; gap: 8px" role="group" aria-label="Filters">
+<button type="button" aria-pressed="true" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #F7F7F8; background: #F7F7F8; color: #070708; font: 500 13px Geist, sans-serif; cursor: pointer">Internship</button>
+<button type="button" aria-pressed="true" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #F7F7F8; background: #F7F7F8; color: #070708; font: 500 13px Geist, sans-serif; cursor: pointer">Summer 2027</button>
+<button type="button" aria-pressed="false" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #26262C; background: transparent; color: #9A9AA3; font: 500 13px Geist, sans-serif; cursor: pointer">Remote</button>
+<button type="button" aria-pressed="false" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #26262C; background: transparent; color: #9A9AA3; font: 500 13px Geist, sans-serif; cursor: pointer">New York</button>
+<button type="button" aria-pressed="false" style="height: 36px; padding: 0 14px; border-radius: 36px; border: 1px solid #26262C; background: transparent; color: #9A9AA3; font: 500 13px Geist, sans-serif; cursor: pointer">Boston</button>
+</div>
+
+<ul style="list-style: none; margin: 0; padding: 0; border-top: 1px solid #1F1F24">
+<sc-for list="{{jobs}}" as="j" hint-placeholder-count="6">
+<li style="display: flex; align-items: center; flex-wrap: wrap; gap: 20px; padding: 22px 0; border-bottom: 1px solid #17171B">
+<input type="checkbox" checked="{{j.on}}" aria-label="Select {{j.role}} at {{j.company}}" style="width: 18px; height: 18px; accent-color: {{accent}}; flex: none">
+<div style="flex: 999 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 16px; font-weight: 500">{{j.role}}</span>
+<span style="font-size: 13px; color: #8B8B94">{{j.company}} · {{j.place}} · {{j.ats}} · {{j.age}}</span>
+</div>
+<span style="flex: 1 1 220px; font-size: 13px; color: #B4B4BC">{{j.why}}</span>
+<span style="font-family: 'Geist Mono', monospace; font-size: 13px; color: {{accent}}; width: 48px; text-align: right">{{j.match}}</span>
+<button type="button" aria-label="Save {{j.role}} at {{j.company}}" style="width: 40px; height: 40px; border-radius: 10px; border: 1px solid #26262C; background: transparent; color: #9A9AA3; display: inline-flex; align-items: center; justify-content: center; cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-6-4-6 4z"></path></svg></button>
+</li>
+</sc-for>
+</ul>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#3D8BFF","options":["#3D8BFF","#F7F7F8","#7C6CFF"]},"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+renderVals() {
+const raw = [
+['Software Engineering Intern','Kestrel Systems','New York','Greenhouse','2d ago','Python, React, same team as Fernway','96%',true],
+['Backend Intern','Tidewater','Remote','Lever','1d ago','Go and Postgres from your projects','92%',true],
+['Platform Engineering Intern','Northwind','Boston','Greenhouse','3d ago','You applied to their SWE role','89%',true],
+['Data Engineering Intern','Copperleaf','New York','Ashby','5h ago','SQL, Airflow, class of 2028','84%',false],
+['ML Intern','Halcyon Labs','Remote','Lever','4d ago','PyTorch coursework','81%',false],
+['Full Stack Intern','Saltmarsh','Boston','Workday','1w ago','TypeScript, Next.js','77%',false]
+];
+return {
+accent: this.props.accent ?? '#3D8BFF',
+jobs: raw.map(([role, company, place, ats, age, why, match, on]) => ({ role, company, place, ats, age, why, match, on }))
+};
+}
+}
+</script>
+</body>
+</html>

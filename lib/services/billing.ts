@@ -224,7 +224,7 @@ export async function createStripeCheckout(userId: string, kind: CheckoutKind) {
   const secret = process.env.STRIPE_SECRET_KEY;
   const config = serverConfig();
   const offer = checkoutOffer(kind, config);
-  if (!secret) return { demo: true as const, url: `/checkout/demo?kind=${kind}` };
+  if (!secret) throw new ServiceError("Checkout isn't set up.", "stripe", 409);
   const Stripe = (await import("stripe")).default;
   const stripe = new Stripe(secret);
   const session = await stripe.checkout.sessions.create({

@@ -1,6 +1,5 @@
 import { z } from "zod";
-import type { EmptyField } from "@/lib/apply/browser";
-import { acceptFixes } from "@/lib/apply/fixer";
+import { acceptFixes, type EmptyField } from "@/lib/apply/fast/fields";
 import { bestOption } from "@/lib/apply/options";
 import { answerChoices } from "@/lib/apply/questions";
 import type { FormSchema, SchemaField } from "@/lib/apply/fast/schema";

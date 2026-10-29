@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stats</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&amp;family=Geist+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#070708}
+a{color:#F7F7F8}a:hover{color:#FFFFFF}
+</style>
+</helmet>
+<div style="width: 100%; min-height: 960px; box-sizing: border-box; background: #070708; color: #F7F7F8; font-family: Geist, system-ui, sans-serif; display: flex; flex-direction: column">
+
+<header style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; padding: 20px 40px; border-bottom: 1px solid #17171B">
+<div style="display: flex; align-items: center; flex-wrap: wrap; gap: 36px">
+<span style="font-size: 20px; font-weight: 700; letter-spacing: -0.6px">unnepo<span style="color: {{accent}}">.</span></span>
+<nav aria-label="App" style="display: flex; flex-wrap: wrap; gap: 24px; font-size: 14px">
+<a href="Applied.dc.html" style="color: #8B8B94; text-decoration: none">Applied</a>
+<a href="Jobs.dc.html" style="color: #8B8B94; text-decoration: none">Jobs for you</a>
+<a href="People.dc.html" style="color: #8B8B94; text-decoration: none">People</a>
+<a href="#" aria-current="page" style="color: #F7F7F8; text-decoration: none; font-weight: 500">Stats</a>
+</nav>
+</div>
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8B8B94">12 UNLOCKS LEFT</span>
+<button type="button" aria-label="Account" style="width: 36px; height: 36px; border-radius: 36px; border: 1px solid #26262C; background: #111114; color: #F7F7F8; font: 600 13px Geist, sans-serif; cursor: pointer">AD</button>
+</div>
+</header>
+
+<main style="width: 100%; max-width: 1160px; margin: 0 auto; padding: 56px 32px; box-sizing: border-box; display: flex; flex-direction: column; gap: 48px">
+<div style="display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 16px">
+<h1 style="margin: 0; font-size: 40px; font-weight: 700; letter-spacing: -1.4px">Stats</h1>
+<span style="font-family: 'Geist Mono', monospace; font-size: 12px; color: #8B8B94">LAST 14 DAYS</span>
+</div>
+
+<section aria-label="Totals" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); border-top: 1px solid #1F1F24; border-bottom: 1px solid #1F1F24">
+<div style="padding: 28px 24px 28px 0; display: flex; flex-direction: column; gap: 8px"><span style="font-size: 13px; color: #8B8B94">Applications</span><span style="font-size: 48px; font-weight: 700; letter-spacing: -2px">48</span></div>
+<div style="padding: 28px 24px; display: flex; flex-direction: column; gap: 8px; border-left: 1px solid #17171B"><span style="font-size: 13px; color: #8B8B94">Responses</span><span style="font-size: 48px; font-weight: 700; letter-spacing: -2px">6<span style="font-size: 18px; color: #8B8B94; font-weight: 500; letter-spacing: 0"> · 12.5%</span></span></div>
+<div style="padding: 28px 24px; display: flex; flex-direction: column; gap: 8px; border-left: 1px solid #17171B"><span style="font-size: 13px; color: #8B8B94">People reached</span><span style="font-size: 48px; font-weight: 700; letter-spacing: -2px">31</span></div>
+<div style="padding: 28px 24px; display: flex; flex-direction: column; gap: 8px; border-left: 1px solid #17171B"><span style="font-size: 13px; color: #8B8B94">Avg. time per app</span><span style="font-size: 48px; font-weight: 700; letter-spacing: -2px; color: {{accent}}">38s</span></div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 48px">
+<section aria-label="Applications per day" style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 500">Applications per day</h2>
+<div role="img" aria-label="Applications per day over the last 14 days, peaking at 9 on Oct 27" style="height: 220px; display: flex; align-items: flex-end; gap: 8px; border-bottom: 1px solid #26262C">
+<sc-for list="{{days}}" as="d" hint-placeholder-count="14">
+<div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; height: 100%">
+<span style="font-family: 'Geist Mono', monospace; font-size: 11px; color: #8B8B94">{{d.n}}</span>
+<div style="width: 100%; max-width: 28px; height: {{d.h}}; background: {{d.fill}}; border-radius: 4px 4px 0 0"></div>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; justify-content: space-between; font-family: 'Geist Mono', monospace; font-size: 11px; color: #8B8B94"><span>OCT 16</span><span>OCT 29</span></div>
+</section>
+
+<section aria-label="Funnel" style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 500">Funnel</h2>
+<sc-for list="{{funnel}}" as="f" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; justify-content: space-between; font-size: 14px"><span style="color: #B4B4BC">{{f.label}}</span><span style="font-family: 'Geist Mono', monospace">{{f.n}}</span></div>
+<div style="height: 6px; background: #16161A; border-radius: 6px; overflow: hidden"><div style="height: 100%; width: {{f.w}}; background: {{f.fill}}; border-radius: 6px"></div></div>
+</div>
+</sc-for>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#3D8BFF","options":["#3D8BFF","#F7F7F8","#7C6CFF"]},"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+renderVals() {
+const accent = this.props.accent ?? '#3D8BFF';
+const vals = [1, 2, 0, 3, 4, 2, 1, 5, 3, 6, 4, 9, 4, 4];
+const max = 9;
+const days = vals.map((n, i) => ({ n, h: Math.max(2, Math.round((n / max) * 170)) + 'px', fill: i === vals.length - 1 ? accent : '#3A3A42' }));
+const fun = [['Applied', 48], ['Responded', 6], ['Interviews', 3], ['Offers', 1]];
+const funnel = fun.map(([label, n], i) => ({ label, n, w: Math.max(2, (n / 48) * 100) + '%', fill: i === 0 ? '#9A9AA3' : accent }));
+return { accent, days, funnel };
+}
+}
+</script>
+</body>
+</html>

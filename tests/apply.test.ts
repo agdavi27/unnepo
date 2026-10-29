@@ -9,10 +9,10 @@ import { acceptAiAnswer, classifyQuestion, missingAnswers, planAnswers } from "@
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
 import { coreTitle } from "@/lib/apply/contacts";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
-import { acceptFixes } from "@/lib/apply/fixer";
+import { acceptFixes } from "@/lib/apply/fast/fields";
 import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import { supportedBy } from "@/lib/apply/questions";
-import { applyState, saveApplicationProfile, checkSubmission, createApplication, markApplied, runContactDiscovery, setDeferForTests, startAutofill, updateAnswers } from "@/lib/apply/service";
+import { applyState, saveApplicationProfile, createApplication, markApplied, runContactDiscovery, setDeferForTests, updateAnswers } from "@/lib/apply/service";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
 
@@ -336,14 +336,14 @@ describe("applications", () => {
     await expect(createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" })).rejects.toThrow(/Finish your profile/);
   });
 
-  it("says autofill isn't connected instead of pretending, and changes nothing", async () => {
+  it("spends a credit when it prepares a new job's answers, and not again for the same job", async () => {
     const userId = await student();
-    model.replies.push("{}");
-    const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
-    await updateAnswers(userId, { applicationId: application.id, answers: { question_1: "Because.", question_2: "No" } });
-    await expect(startAutofill(userId, { applicationId: application.id })).rejects.toThrow(/Autofill isn't connected/);
-    expect((await applications.get(userId, application.id))?.status).toBe("extracted");
-    await expect(checkSubmission(userId, { applicationId: application.id })).rejects.toThrow(/Nothing to check/);
+    const before = (await repo.getAccount(userId))!.balance;
+    await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
+    expect((await repo.getAccount(userId))!.balance).toBe(before - 1);
+    const again = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
+    expect(again.duplicate).toBe(true);
+    expect((await repo.getAccount(userId))!.balance).toBe(before - 1);
   });
 
   it("charges 1 credit per 15 applications and stops when credits run out", async () => {
@@ -368,24 +368,14 @@ describe("applications", () => {
   });
 });
 
-describe("job-site password", () => {
-  it("is stored encrypted, never returned, and needs a strong value", async () => {
+describe("job-site passwords", () => {
+  it("are never stored on the server; only the consent to accept candidate terms is", async () => {
     const userId = await student();
-    await expect(saveApplicationProfile(userId, { jobSitePassword: "short" })).rejects.toThrow(/at least 10 characters/);
     const saved = await saveApplicationProfile(userId, { jobSitePassword: "Str0ng!Passw0rd", accountConsent: true });
-    expect(saved.profile).toMatchObject({ hasJobSitePassword: true });
     expect(saved.profile.accountConsentAt).toBeTruthy();
-    const state = await applyState(userId);
-    const text = JSON.stringify(state);
-    expect(text).not.toContain("Str0ng!Passw0rd");
-    expect(text).not.toContain("jobSitePasswordEncrypted");
-    expect(state.profile.hasJobSitePassword).toBe(true);
-    const stored = await applicationProfiles.get(userId);
-    expect(stored?.jobSitePasswordEncrypted).toBeTruthy();
-    expect(stored?.jobSitePasswordEncrypted).not.toContain("Str0ng");
-    // Saving other details keeps the password; turning consent off clears it.
-    await saveApplicationProfile(userId, { phone: "207-555-0100", accountConsent: false });
-    expect((await applicationProfiles.get(userId))?.jobSitePasswordEncrypted).toBe(stored?.jobSitePasswordEncrypted);
+    expect(saved.profile.hasJobSitePassword).toBe(false);
+    expect(JSON.stringify(await applicationProfiles.get(userId))).not.toContain("Str0ng");
+    await saveApplicationProfile(userId, { accountConsent: false });
     expect((await applyState(userId)).profile.accountConsentAt).toBeNull();
   });
 });

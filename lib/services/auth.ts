@@ -6,11 +6,10 @@ import { ServiceError } from "@/lib/errors";
 import { isSchoolEmail, normalizeEmail } from "@/lib/schools";
 import { randomToken, referralCode, sha256 } from "@/lib/security";
 import { appOrigin, sendPasswordResetEmail } from "@/lib/email/transactional";
-import { rewardReferralIfEligible } from "@/lib/services/referrals";
 
 const SESSION_DAYS = 30;
 
-export async function signUp(input: { email: string; password: string; name: string; referralCode?: string | null }) {
+export async function signUp(input: { email: string; password: string; name: string }) {
   const email = input.email.trim().toLowerCase();
   const emailNormalized = normalizeEmail(email);
   if (!isSchoolEmail(email)) {
@@ -20,18 +19,6 @@ export async function signUp(input: { email: string; password: string; name: str
   if (!input.name.trim()) throw new ServiceError("Add your name so outreach can be signed.", "name");
   if (await repo.getUserByEmail(emailNormalized)) {
     throw new ServiceError("An account with this email already exists.", "duplicate", 409);
-  }
-
-  let referredByUserId: string | null = null;
-  let codeUsed: string | null = null;
-  if (input.referralCode) {
-    const referrer = await repo.getUserByReferralCode(input.referralCode.trim().toUpperCase());
-    if (!referrer) throw new ServiceError("That referral code was not found.", "referral");
-    if (referrer.emailNormalized === emailNormalized) {
-      throw new ServiceError("You cannot use your own referral code.", "self_referral");
-    }
-    referredByUserId = referrer.id;
-    codeUsed = referrer.referralCode;
   }
 
   let code = referralCode();
@@ -46,24 +33,13 @@ export async function signUp(input: { email: string; password: string; name: str
     authProvider: "password",
     createdAt: nowIso(),
     referralCode: code,
-    referredByUserId,
+    referredByUserId: null,
     onboardingStep: "profile",
     role: "student",
     deletedAt: null,
     demoUser: false,
   });
-  if (referredByUserId && codeUsed) {
-    await repo.insertReferral({
-      id: id(),
-      referrerId: referredByUserId,
-      referredUserId: user.id,
-      code: codeUsed,
-      status: "pending",
-      reason: null,
-      createdAt: nowIso(),
-      rewardedAt: null,
-    });
-  }
+
   const token = await issueToken(user.id, "verify_email");
   await repo.insertAudit({ userId: user.id, action: "signup", metadata: { provider: "password" } });
   await repo.insertAnalytics({ userId: user.id, name: "signup", properties: { provider: "password" } });
@@ -94,7 +70,6 @@ export async function verifyEmail(rawToken: string) {
   });
   const user = await repo.updateUser(record.userId, { schoolEmailVerifiedAt: nowIso() });
   await repo.consumeToken(sha256(rawToken), "verify_email");
-  if (user) await rewardReferralIfEligible(user.id);
   await repo.insertAudit({ userId: record.userId, action: "email_verified", metadata: {} });
   return user ? publicUser(user) : null;
 }
@@ -160,7 +135,6 @@ export async function loginWithOAuth(input: { email: string; name: string; provi
       idempotencyKey: `signup:${user.id}`,
       includedAllowance: serverConfig().signupCredits,
     });
-    await rewardReferralIfEligible(user.id);
   }
   const token = randomToken();
   await repo.createSession({

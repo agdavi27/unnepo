@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Unnepo — You pick the jobs. We do the crawling.</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700;800&family=Press+Start+2P&display=swap">
+<style>
+  :root { --bg:#070708; --fg:#F7F7F8; --muted:#8B8B94; --muted2:#9A9AA3; --accent:#3D8BFF; --thread:#3A3A44; --shadow:#1E1E26; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font-family:Geist, system-ui, sans-serif; }
+  a { color:var(--fg); }
+  .page { position:relative; min-height:100vh; overflow:hidden; display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:16px; padding:24px 40px; position:relative; z-index:2; }
+  .logo { font-size:20px; font-weight:700; letter-spacing:-0.6px; text-decoration:none; }
+  .logo span { color:var(--accent); }
+  nav { display:flex; gap:28px; font-size:14px; }
+  nav a { color:var(--muted2); text-decoration:none; padding:12px 0; }
+  main { flex:1; display:flex; flex-direction:column; align-items:center; gap:36px; padding:8px 24px 64px; position:relative; }
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; margin:0; }
+  .spider { position:relative; width:min(400px, 82vw); animation:bob 3.2s steps(4) infinite; }
+  .thread { position:absolute; left:calc(50% - 3px); bottom:calc(100% - 18px); width:6px; height:900px; background:var(--thread); }
+  .grid { display:grid; grid-template-columns:repeat(40, minmax(0,1fr)); }
+  .grid div { aspect-ratio:1/1; }
+  .box-wrap { width:100%; max-width:760px; display:flex; flex-direction:column; }
+  .tag { align-self:flex-start; margin-left:24px; position:relative; z-index:1; background:var(--accent); color:#fff; font-family:'Press Start 2P', monospace; font-size:13px; padding:10px 14px 8px; border:4px solid var(--bg); box-shadow:0 0 0 4px var(--fg); margin-bottom:-8px; }
+  .dlg { position:relative; text-align:left; cursor:pointer; background:var(--fg); color:var(--bg); border:4px solid var(--bg); box-shadow:0 0 0 4px var(--fg), 12px 12px 0 4px var(--shadow); padding:30px 32px 34px; min-height:150px; font-family:'Press Start 2P', monospace; font-size:clamp(13px, 1.7vw, 17px); line-height:2; }
+  .dlg:focus-visible { outline:3px solid var(--accent); outline-offset:10px; }
+  .arrow { position:absolute; right:22px; bottom:16px; width:0; height:0; border-left:8px solid transparent; border-right:8px solid transparent; border-top:10px solid var(--bg); animation:blink .9s steps(1) infinite; }
+  .dots { display:flex; justify-content:center; gap:8px; margin-top:28px; }
+  .dots span { width:8px; height:8px; background:#2A2A31; }
+  .dots span.on { background:var(--accent); }
+  .cta-wrap { display:flex; flex-direction:column; align-items:center; gap:16px; }
+  .cta { display:inline-flex; align-items:center; background:var(--fg); color:var(--bg); text-decoration:none; font-family:'Press Start 2P', monospace; font-size:14px; line-height:1.6; padding:18px 26px; border:4px solid var(--bg); box-shadow:6px 6px 0 var(--accent); min-height:48px; }
+  .cta:hover { transform:translate(2px,2px); box-shadow:4px 4px 0 var(--accent); color:var(--bg); }
+  .cta:active { transform:translate(6px,6px); box-shadow:0 0 0 var(--accent); }
+  .fine { margin:0; font-size:13px; color:var(--muted); text-align:center; }
+  @keyframes bob { 0%,100% { transform:translateY(0) } 50% { transform:translateY(14px) } }
+  @keyframes blink { 0%,49% { opacity:1 } 50%,100% { opacity:0 } }
+  @media (prefers-reduced-motion: reduce) { .spider, .arrow { animation:none } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <a class="logo" href="#">unnepo<span>.</span></a>
+    <nav aria-label="Main"><a href="#">Pricing</a><a href="#">Log in</a></nav>
+  </header>
+  <main>
+    <h1 class="sr">Unnepo: you pick the jobs, we do the crawling</h1>
+    <div class="spider" aria-hidden="true">
+      <div class="thread"></div>
+      <div class="grid" id="grid"></div>
+    </div>
+    <div class="box-wrap">
+      <div class="tag">UNNEPO</div>
+      <button type="button" class="dlg" id="dlg" aria-label="Next line">
+        <span id="typed" aria-hidden="true"></span>
+        <span id="live" class="sr" aria-live="polite"></span>
+        <span id="arrow" class="arrow" aria-hidden="true" hidden></span>
+      </button>
+      <div class="dots" id="dots" aria-hidden="true"></div>
+    </div>
+    <div class="cta-wrap">
+      <a class="cta" href="#">Add to Chrome — it's free for students</a>
+      <p class="fine">Works on Greenhouse, Lever, Ashby, Workday and more.</p>
+    </div>
+  </main>
+</div>
+<script>
+  // Copy: three problem lines, then three feature lines.
+  const LINES = [
+    "Applying to internships is brutal. Same resume, retyped into 200 forms.",
+    "Then Workday wants a new account. For every. Single. Company.",
+    "So I crawl them for you. Every field, every dropdown, every Next button.",
+    "I make the accounts, hit submit, and log it the second it lands.",
+    "Then I find the recruiters behind the role and write the email.",
+    "Your job? Pick the jobs. I'll do the crawling."
+  ];
+  const ACCENT = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  const PAL = { o:'#000000', b:'#6E5B6E', h:'#B48FAE', d:'#4E3549', a:ACCENT, k:'#7E6580', K:'#5A4258', l:'#6E5B6E', L:'#4E3549', e:ACCENT, w:'#FFFFFF', m:'#1A0E14', f:'#F7F7F8', p:'#965E8C' };
+
+  // Original 40x30 pixel spider, built from shapes so it's easy to tweak.
+  function buildSpider(open) {
+    const W = 40, H = 30;
+    const g = Array.from({ length: H }, () => Array(W).fill(0));
+    const set = (x, y, c) => { if (x >= 0 && x < W && y >= 0 && y < H) g[y][x] = c; };
+    const brush = (x, y, c) => { set(x, y, c); set(x + 1, y, c); set(x, y + 1, c); set(x + 1, y + 1, c); };
+    function line(x0, y0, x1, y1, c) {
+      let dx = Math.abs(x1 - x0), sx = x0 < x1 ? 1 : -1, dy = -Math.abs(y1 - y0), sy = y0 < y1 ? 1 : -1, err = dx + dy;
+      for (;;) {
+        brush(x0, y0, c);
+        if (x0 === x1 && y0 === y1) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; x0 += sx; }
+        if (e2 <= dx) { err += dx; y0 += sy; }
+      }
+    }
+    const legs = [
+      [[13, 10], [7, 4], [3, 13]],
+      [[12, 13], [5, 9], [1, 19]],
+      [[12, 16], [5, 15], [2, 24]],
+      [[14, 19], [9, 21], [6, 27]]
+    ];
+    for (const L of legs) for (const side of [0, 1]) {
+      const m = (p) => side ? [W - 2 - p[0], p[1]] : p;
+      const a = m(L[0]), k = m(L[1]), f = m(L[2]);
+      line(a[0], a[1], k[0], k[1], 'l');
+      line(k[0], k[1], f[0], f[1], 'L');
+      set(k[0] + (side ? 1 : 0), k[1], 'h');
+    }
+    function blob(cx, cy, rx, ry, base, hi, lo) {
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
+        if (nx * nx + ny * ny <= 1) g[y][x] = (nx < -0.25 && ny < -0.3) ? hi : (ny > 0.55 || nx > 0.6) ? lo : base;
+      }
+    }
+    blob(20, 9, 8.6, 7.2, 'b', 'h', 'd');               // abdomen
+    set(17, 4, 'w'); set(18, 4, 'h');
+    [[19,7],[20,7],[18,8],[21,8],[19,9],[20,9],[19,10],[20,10]].forEach(([x, y]) => set(x, y, 'a')); // blue mark
+    blob(20, 17.8, 6.8, 5.2, 'k', 'h', 'K');            // head
+    [[16,15],[17,15],[16,16],[17,16],[22,15],[23,15],[22,16],[23,16]].forEach(([x, y]) => set(x, y, 'e'));
+    set(16, 15, 'w'); set(22, 15, 'w'); set(14, 14, 'e'); set(25, 14, 'e');
+    if (open) {
+      for (let x = 17; x <= 22; x++) { set(x, 19, 'm'); set(x, 20, 'm'); }
+      for (let x = 18; x <= 21; x++) set(x, 21, 'm');
+      set(19, 21, 'p'); set(20, 21, 'p');
+      set(18, 19, 'f'); set(18, 20, 'f'); set(21, 19, 'f'); set(21, 20, 'f');
+    } else {
+      for (let x = 18; x <= 21; x++) set(x, 20, 'm');
+      set(18, 21, 'f'); set(21, 21, 'f');
+    }
+    const out = g.map((r) => r.slice());
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      if (g[y][x]) continue;
+      if ([[1,0],[-1,0],[0,1],[0,-1]].some(([dx, dy]) => g[y + dy] && g[y + dy][x + dx])) out[y][x] = 'o'; // outline
+    }
+    return out.flat();
+  }
+
+  const OPEN = buildSpider(true), CLOSED = buildSpider(false);
+  const grid = document.getElementById('grid');
+  const cells = CLOSED.map(() => grid.appendChild(document.createElement('div')));
+  let mouthOpen = null;
+  function drawMouth(open) {
+    if (open === mouthOpen) return;
+    mouthOpen = open;
+    const map = open ? OPEN : CLOSED;
+    cells.forEach((el, i) => { el.style.background = map[i] ? PAL[map[i]] : 'transparent'; });
+  }
+
+  const typed = document.getElementById('typed'), live = document.getElementById('live'), arrow = document.getElementById('arrow');
+  const dots = document.getElementById('dots');
+  const dotEls = LINES.map(() => dots.appendChild(document.createElement('span')));
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let line = 0, n = 0, hold = 0;
+
+  function render() {
+    const L = LINES[line], typing = n < L.length;
+    typed.textContent = L.slice(0, n);
+    arrow.hidden = typing;
+    drawMouth(typing && L.charAt(n) !== ' ' && Math.floor(n / 2) % 2 === 0);
+    dotEls.forEach((d, i) => d.classList.toggle('on', i === line));
+  }
+  function show(i) { line = i; n = reduce ? LINES[i].length : 0; hold = 0; live.textContent = LINES[i]; render(); }
+  function next() { show((line + 1) % LINES.length); }
+
+  document.getElementById('dlg').addEventListener('click', () => {
+    if (n < LINES[line].length) { n = LINES[line].length; hold = 0; render(); } else next();
+  });
+
+  show(0);
+  if (!reduce) setInterval(() => {
+    if (n < LINES[line].length) { n++; render(); return; }
+    if (++hold > 60) next();
+  }, 42);
+</script>
+</body>
+</html>

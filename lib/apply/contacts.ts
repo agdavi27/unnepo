@@ -3,7 +3,7 @@ import { id, nowIso, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file
 import type { Contact } from "@/lib/db/types";
 import { contactFetch } from "@/lib/providers/contacts/http";
 import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, resolveCompanyDomains, searchPeopleQuery } from "@/lib/providers/contacts/router";
-import { RECRUITER_TITLES } from "@/lib/search/apollo-query";
+import { RECRUITER_TITLES } from "@/lib/providers/contacts/apollo";
 import type { ApplicationContact, ContactRole, JobApplication } from "@/lib/apply/types";
 
 /**
