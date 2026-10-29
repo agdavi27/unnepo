@@ -69,11 +69,15 @@ export type FillReport = {
   decided?: Array<{ label: string; answer: string; why: string }>;
   /** Fast pipeline: where the time went (schema, mapping, fill, submit), AI calls, and fallback fields. */
   timings?: { pipeline: "fast"; schemaMs?: number; mappingMs?: number; fillMs?: number; submitMs?: number; llmCalls: number; fallback: string[] };
+  /** What happened after applying, set by the student. Kept here (jsonb) so no new column is needed. */
+  outcome?: ApplicationOutcome | null;
   /** Questions answered from the student's resume by AI during autofill, for the student to check. */
   fromResume?: string[];
   /** Required questions on the page where autofill stopped that the student can answer in Unnepo. */
   pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
 };
+
+export type ApplicationOutcome = "interviewing" | "offer" | "rejected";
 
 export type Confirmation = {
   url: string;
@@ -156,6 +160,8 @@ export type ApplicationProfile = {
   saved: Record<string, { label: string; answer: string; updatedAt: string }>;
   /** The resume read into contact details, schools, and jobs; refreshed when the resume changes. */
   resumeProfile?: ResumeProfile | null;
+  /** Applications per week the student is aiming for. */
+  weeklyGoal?: number;
   /** Answers the AI wrote for questions, by question and options, so the same question costs nothing next time. */
   aiCache?: Record<string, { values: string[]; why: string; at: string }>;
   /** The resume-first profile from onboarding. The flat fields above are kept in step with it for autofill. */

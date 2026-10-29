@@ -7,7 +7,7 @@ import { ResumeFirst } from "@/components/onboarding/resume-first";
 import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
 import { APPLICATIONS_PER_CREDIT, ENTERPRISE_PLAN, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
-import { ApplyArea } from "@/components/unnepo/apply";
+import { ApplicationSettings, ApplyArea } from "@/components/unnepo/apply";
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
@@ -23,11 +23,11 @@ type Workspace = {
   integrations: { apollo: boolean; anthropic: boolean };
 };
 
-// Two pages for now. Recommended Jobs stays in the code but is hidden from the menu.
-type View = "apply" | "applied" | "jobs" | "settings";
+// Applications are added by the Chrome extension. Recommended Jobs stays in the code but is hidden from the menu.
+type View = "applied" | "stats" | "jobs" | "settings";
 const VIEWS: { id: View; label: string }[] = [
-  { id: "apply", label: "Apply to Job" },
-  { id: "applied", label: "Jobs Applied To" },
+  { id: "applied", label: "Applied" },
+  { id: "stats", label: "Stats" },
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
@@ -38,7 +38,7 @@ export function AppHome() {
   const [notice, setNotice] = useState("");
   const [resumeBusy, setResumeBusy] = useState(false);
   const [resumeVersion, setResumeVersion] = useState(0);
-  const [view, setView] = useState<View>("apply");
+  const [view, setView] = useState<View>("applied");
   const [editing, setEditing] = useState(false);
   const [highlightsLoading, setHighlightsLoading] = useState(false);
   const [letter, setLetter] = useState<{ job: Job | null; jobs: Job[] } | null>(null);
@@ -241,9 +241,13 @@ export function AppHome() {
             onDone={() => { setEditing(false); setResumeVersion((value) => value + 1); void load(); }}
           />
         )}
-        {data && !showOnboarding && (view === "apply" || view === "applied") && (
-          <ApplyArea view={view} onNavigate={setView} onCreditsChanged={() => void load()} refreshKey={resumeVersion} onEditProfile={() => { setEditing(true); window.scrollTo({ top: 0 }); }} />
+        {data && !showOnboarding && (view === "applied" || view === "stats") && data.completeness < 100 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-4 py-3 text-sm">
+            <p className="text-muted">Your profile is <span className="font-medium text-ink">{data.completeness}%</span> ready. A fuller profile means fewer fields to fill by hand.</p>
+            <button type="button" onClick={() => { setEditing(true); window.scrollTo({ top: 0 }); }} className="rounded-lg border border-line px-3 py-1 text-ink hover:bg-white/5">Finish profile</button>
+          </div>
         )}
+        {data && !showOnboarding && (view === "applied" || view === "stats") && <ApplyArea view={view} refreshKey={resumeVersion} />}
         {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
         {data && !showOnboarding && view === "settings" && (
           <>
@@ -265,6 +269,7 @@ export function AppHome() {
                 <p className="mt-3 text-sm text-muted">The extension fills applications from your profile in your own browser and logs each one you submit. Your job-site passwords stay in the extension.</p>
                 <a href="/extension/connect" className="mt-4 inline-flex rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Connect the extension</a>
               </div>
+              <ApplicationSettings />
             </section>
             <section className="space-y-4">
               <div className="flex flex-wrap items-end justify-between gap-3">

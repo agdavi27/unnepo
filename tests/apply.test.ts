@@ -12,7 +12,8 @@ import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { acceptFixes } from "@/lib/apply/fast/fields";
 import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import { supportedBy } from "@/lib/apply/questions";
-import { applyState, saveApplicationProfile, createApplication, markApplied, runContactDiscovery, setDeferForTests, updateAnswers } from "@/lib/apply/service";
+import { applyState, saveApplicationProfile, createApplication, markApplied, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers } from "@/lib/apply/service";
+import { applicationStats, stageOf } from "@/lib/apply/stats";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
 
@@ -365,6 +366,62 @@ describe("applications", () => {
     // Marking the same job again never charges twice.
     await markApplied(userId, { applicationId: ids[0] });
     expect((await repo.listLedger(userId)).filter((entry) => entry.entryType === "application_debit").length).toBe(1);
+  });
+});
+
+describe("tracking outcomes and goals", () => {
+  const job = (userId: string, index: number) => ({
+    userId, jobKey: `url:acme.com/job/${index}`, jobUrl: `https://acme.com/job/${index}`, ats: "other" as const, title: `Role ${index}`, company: "Acme", companyDomain: null, department: null, location: null,
+    description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "extracted" as const, statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
+    confirmation: null, submittedAt: null, contactsStatus: "idle" as const, contactsMessage: "", charged: false, attempts: 0,
+  });
+
+  it("sets an outcome only on applied jobs, and clears it back to submitted", async () => {
+    const userId = await student();
+    const { app } = await applications.insert(job(userId, 1));
+    await expect(setOutcome(userId, { applicationId: app.id, outcome: "interviewing" })).rejects.toThrow(/applied first/);
+    await markApplied(userId, { applicationId: app.id });
+    await expect(setOutcome(userId, { applicationId: app.id, outcome: "hired" })).rejects.toThrow(/interviewing, offer, or rejected/);
+    const set = await setOutcome(userId, { applicationId: app.id, outcome: "offer" });
+    expect(stageOf(set.application)).toBe("offer");
+    const cleared = await setOutcome(userId, { applicationId: app.id, outcome: null });
+    expect(stageOf(cleared.application)).toBe("submitted");
+  });
+
+  it("keeps a weekly goal between 1 and 200 without touching other settings", async () => {
+    const userId = await student();
+    await saveApplicationProfile(userId, { accountConsent: true });
+    await expect(saveApplicationProfile(userId, { weeklyGoal: 0 })).rejects.toThrow(/between 1 and 200/);
+    await saveApplicationProfile(userId, { weeklyGoal: 12 });
+    const state = await applyState(userId);
+    expect(state.profile.weeklyGoal).toBe(12);
+    expect(state.profile.accountConsentAt).toBeTruthy();
+  });
+
+  it("counts the week, streak, responses, and time per application", () => {
+    const now = new Date(2026, 9, 29, 15); // a Thursday
+    const at = (day: number, hour = 12) => new Date(2026, 9, day, hour).toISOString();
+    const base = { ats: "greenhouse" as const, fillReport: null, contacts: [] };
+    const items = [
+      { ...base, status: "submitted" as const, createdAt: at(29, 11), submittedAt: at(29, 11) },
+      { ...base, status: "submitted" as const, createdAt: new Date(2026, 9, 28, 12, 0).toISOString(), submittedAt: new Date(2026, 9, 28, 12, 4).toISOString(), fillReport: { filled: [], failed: [], liveViewUrl: null, screenshotAt: null, outcome: "interviewing" as const } },
+      { ...base, ats: "lever" as const, status: "applied_manual" as const, createdAt: at(27), submittedAt: at(27), contacts: [{ outreachStatus: "emailed" as const }, { outreachStatus: "not_contacted" as const }] },
+      { ...base, status: "submitted" as const, createdAt: at(20), submittedAt: at(20), fillReport: { filled: [], failed: [], liveViewUrl: null, screenshotAt: null, outcome: "rejected" as const } },
+      { ...base, status: "extracted" as const, createdAt: at(29), submittedAt: null },
+    ];
+    const stats = applicationStats(items, now);
+    expect(stats.applied).toBe(4);
+    expect(stats.inProgress).toBe(1);
+    expect(stats.thisWeek).toBe(3); // Monday Oct 26 onward
+    expect(stats.daysLeft).toBe(4);
+    expect(stats.streak).toBe(3);
+    expect(stats.responses).toBe(2);
+    expect(stats.interviews).toBe(1);
+    expect(stats.peopleReached).toBe(1);
+    expect(stats.medianMinutes).toBe(4);
+    expect(stats.perDay).toHaveLength(14);
+    expect(stats.perDay.at(-1)).toEqual({ date: "2026-10-29", count: 1 });
+    expect(stats.bySystem).toEqual([{ ats: "greenhouse", count: 3 }, { ats: "lever", count: 1 }]);
   });
 });
 

@@ -55,6 +55,7 @@ export async function student(userId: string) {
     jobAccounts: stored?.jobAccounts ?? [],
     student: stored?.student,
     aiCache: stored?.aiCache,
+    weeklyGoal: stored?.weeklyGoal,
   };
   const form = document?.form;
   // The resume-first profile wins; the old onboarding form fills in for students who haven't redone it.
@@ -332,6 +333,11 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     next.eligibility = eligibility;
   }
   if (typeof body.fastApply === "boolean") next.fastApply = body.fastApply;
+  if (body.weeklyGoal !== undefined) {
+    const goal = Math.round(Number(body.weeklyGoal));
+    if (!Number.isFinite(goal) || goal < 1 || goal > 200) throw new ServiceError("Pick a weekly goal between 1 and 200 applications.", "goal", 400);
+    next.weeklyGoal = goal;
+  }
   if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? info.profile.accountConsentAt || nowIso() : null;
   await applicationProfiles.put(userId, next);
   return { profile: publicProfile(next) };
@@ -460,6 +466,20 @@ export async function updateOutreach(userId: string, raw: unknown) {
   const row = await applicationContacts.update(userId, String(body.contactId ?? "").slice(0, 80), { outreachStatus: status });
   if (!row) throw new ServiceError("That contact wasn't found.", "not_found", 404);
   return { contact: row };
+}
+
+const OUTCOMES = ["interviewing", "offer", "rejected"] as const;
+
+/** The student's own note of what happened after applying: interviewing, an offer, or a rejection. */
+export async function setOutcome(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; outcome?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  if (app.status !== "submitted" && app.status !== "applied_manual") throw new ServiceError("Mark the job as applied first.", "state", 409);
+  const outcome = OUTCOMES.find((item) => item === body.outcome) ?? null;
+  if (body.outcome && !outcome) throw new ServiceError("Choose interviewing, offer, or rejected.", "outcome", 400);
+  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  const updated = await applications.update(userId, app.id, { fillReport: { ...report, outcome } });
+  return { application: summary(updated!) };
 }
 
 export async function deleteApplication(userId: string, raw: unknown) {
