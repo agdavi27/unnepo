@@ -43,7 +43,7 @@ export type PanelState = {
   connected: boolean;
   me: { user: { name: string; email: string }; credits: number; profileReady: boolean; completeness: number } | null;
   tab: { id: number; url: string; title: string } | null;
-  job: { tabId: number; applicationId: string; title: string; company: string; step: string; report: FillReport | null; submission: "confirmed" | "likely" | null; error: string | null; llmCalls: number } | null;
+  job: { tabId: number; applicationId: string; title: string; company: string; step: string; report: FillReport | null; submission: "confirmed" | "likely" | null; error: string | null; llmCalls: number; running?: boolean } | null;
   autoSubmit: boolean;
   apiBase: string;
 };

@@ -30,18 +30,23 @@ panel can read it; web pages and content scripts can't ask for it.
 
 ## How a fill works
 
-1. **Fill this application** injects `content/fill.js` into the tab and scans the form.
-2. The background worker opens the job in Unnepo (`/api/extension/jobs`) and gets every answer
-   (`/api/extension/map`): Greenhouse forms are read from Greenhouse's API; other forms send the scanned
-   fields. The student's own data answers first, then cached AI answers, then at most one AI call.
-3. The resume and, when the form asks, a cover letter PDF are attached.
-4. The page script fills every field, checks what's still required and empty, and shows it in the panel.
-   On a multi-page form (Workday and others) it then presses Next and fills each page the same way, stopping
-   on the page with Submit, or earlier if a page has something only the student can answer.
-   With auto-submit on and nothing missing (and no CAPTCHA), it clicks Submit; otherwise the student does.
-5. Submission: a successful POST to the job site right after the Submit click is **confirmed**; the page's
-   "thank you for applying" text alone is **likely**. Either is saved to Unnepo with a screenshot. Answers the
-   student typed themselves are saved so the same question fills itself next time.
+Press **Fill this application** on a job posting or any step of the form. Unnepo keeps going until the
+application is submitted or the student presses **Stop**:
+
+1. On a posting it presses Apply (on Workday, then "Apply Manually").
+2. On an account page it creates the account the first time on that site, and signs in after that
+   (`chrome.storage.local` remembers which sites have one). If the site says the account exists, it signs in.
+3. On each new form page it gets every answer from Unnepo (`/api/extension/map`: the student's own data
+   first, then cached AI answers, then at most one AI call), attaches the resume and cover letter, fills
+   it, and types the job-site password into password boxes.
+4. It presses Next / Save and Continue. If a required field is still empty, a CAPTCHA is up, or the site
+   wants an email verified, it waits and carries on by itself once that's done.
+5. On the last page it presses Submit, unless "Let me press Submit myself" is on (the default).
+6. Submission: a successful POST to the job site right after Submit is **confirmed**; the page's "thank you
+   for applying" text alone is **likely**. Either is saved to Unnepo with a screenshot.
+
+It never fills bot-trap fields (hidden or labelled for robots), never presses header links like Sign In or
+"Apply with LinkedIn", and never solves CAPTCHAs. Buttons are found in `src/content/actions.ts`.
 
 ## Files
 
@@ -50,6 +55,7 @@ panel can read it; web pages and content scripts can't ask for it.
 - `src/content/greenhouse.ts`: Greenhouse's hosted form, by field id (React selects, uploads, checkbox groups)
 - `src/content/generic.ts`: every other form (Lever, Ashby, company sites)
 - `src/content/fill.ts`: the injected entry point
+- `src/content/actions.ts`: finds and presses Apply, Create account, Sign in, Next, and Submit
 - `src/content/spiders.ts`: the pixel spiders that drop in and crawl the page during a fill (skipped with reduced motion)
 - `src/content/connect.ts`: receives the token on the connect page
 - `src/shared/password.ts`: makes the job-site password and checks the rules

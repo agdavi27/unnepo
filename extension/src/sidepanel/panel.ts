@@ -44,20 +44,22 @@ function jobView(state: PanelState) {
       <div class="card">
         <span class="title">${escape(job?.title || tab!.title || "This page")}</span>
         ${job?.company ? `<span class="sub">${escape(job.company)}</span>` : ""}
-        ${job?.step ? `<p>${escape(job.step)}</p>` : `<p class="sub">Unnepo reads the form, prepares every answer from your profile, and fills it. You press Submit.</p>`}
+        ${job?.step ? `<p>${job.running ? `<span class="live" aria-hidden="true"></span>` : ""}${escape(job.step)}</p>` : `<p class="sub">Works from the job posting: Unnepo presses Apply, makes your account or signs in, fills every page, and keeps going until you press Stop.</p>`}
         ${job?.error ? `<p class="error">${escape(job.error)}</p>` : ""}
         ${report?.needsYou.length ? `<p class="warn">Still needs you:</p><ul>${report.needsYou.map((label) => `<li>${escape(label)}</li>`).join("")}</ul>` : ""}
         ${report?.failed.length ? `<p class="sub">Couldn't fill: ${report.failed.map((item) => escape(item.label)).join("; ")}</p>` : ""}
         ${job?.submission ? `<p class="ok">${job.submission === "confirmed" ? "Submission confirmed by the site." : "Looks submitted."} Saved to your tracker.</p>` : ""}
         <div class="actions">
-          <button class="primary" id="fill" ${me.profileReady ? "" : "disabled"}>${report ? "Fill again" : "Fill this application"}</button>
-          ${job?.applicationId && !job.submission ? `<button id="applied">I applied</button>` : ""}
+          ${job?.running
+            ? `<button class="stop" id="stop">Stop</button>`
+            : `<button class="primary" id="fill" ${me.profileReady ? "" : "disabled"}>${report ? "Fill again" : "Fill this application"}</button>`}
+          ${job?.applicationId && !job.submission && !job.running ? `<button id="applied">I applied</button>` : ""}
           ${job?.submission ? `<button id="not-applied">I didn't apply</button>` : ""}
         </div>
       </div>`);
   }
   parts.push(`
-    <label class="toggle"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}> <span>Pause before each submit, so you can check the form and press Submit yourself.</span></label>
+    <label class="toggle"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}> <span>Let me press Submit myself. Turn this off and Unnepo presses Submit too, once every field is filled.</span></label>
     <button id="disconnect">Sign out of the extension</button>`);
   return parts.join("");
 }
@@ -130,6 +132,7 @@ async function render() {
     void render();
   });
   document.getElementById("fill")?.addEventListener("click", () => void ask({ type: "fill", tabId: state.tab!.id }));
+  document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
   document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));

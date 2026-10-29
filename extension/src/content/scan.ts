@@ -148,6 +148,9 @@ export function scanFields(): PageField[] {
     if (el.getAttribute("aria-hidden") === "true" || /honeypot|bee-?catcher/i.test(`${el.getAttribute("name") ?? ""} ${el.getAttribute("data-automation-id") ?? ""}`)) continue;
     if (el.closest("[aria-hidden='true']") || el.id.startsWith("g-recaptcha")) continue;
     if (type !== "file" && type !== "radio" && type !== "checkbox" && !visible(el)) continue;
+    // Bot traps: a box a person can't see (a pixel or two) or one whose label says to leave it empty. Never filled.
+    if (type !== "file" && type !== "radio" && type !== "checkbox" && (el.getBoundingClientRect().width < 4 || el.getBoundingClientRect().height < 4)) continue;
+    if (/robots? only|if you(?:'|’)?re (a )?human|leave (this|it) (field )?(blank|empty)|do not (fill|enter)/i.test(questionText(el as HTMLElement))) continue;
     const required = el.hasAttribute("required") || el.getAttribute("aria-required") === "true" || Boolean(el.closest("[aria-required='true']")) || /[*✱]/.test(el.closest("label")?.textContent ?? (el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent ?? "" : ""));
     let fieldType: FieldType;
     let options: string[] = [];

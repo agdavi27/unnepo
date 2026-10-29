@@ -32,3 +32,7 @@ label.toggle { display: flex; gap: 10px; align-items: flex-start; font-size: 13p
 .rules li.met { color: var(--ok); }
 .rules li.met::before { content: "● "; }
 .actions.small button { min-height: 36px; font-size: 13px; }
+button.stop { background: #F87171; color: #000; border-color: #F87171; font-weight: 600; min-width: 120px; }
+.live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-right: 8px; vertical-align: 1px; animation: live 1.2s ease-in-out infinite; }
+@keyframes live { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .live { animation: none; } }

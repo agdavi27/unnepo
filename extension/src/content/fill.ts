@@ -1,5 +1,6 @@
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
-import { press, sleep, typeInto } from "./dom";
+import { findAction, pageNotes, pressAction, SUBMIT } from "./actions";
+import { sleep, typeInto } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { emptyRequired, isEmpty, labelOf, scanFields, scanPage } from "./scan";
@@ -7,36 +8,14 @@ import { startSpiders, stopSpiders } from "./spiders";
 
 /**
  * Injected into the job page when the student presses Fill. Scans the form, fills it from the plan the
- * background worker got from Unnepo, checks every required field, and watches for the submit. It clicks
- * Submit only when the student turned on auto-submit and nothing is missing.
+ * background worker got from Unnepo, checks every required field, reports which button moves things
+ * along (Apply, Create account, Next, Submit), presses it when asked, and watches for the submit.
  */
 
 declare global {
   interface Window {
     __unnepo?: { scan: typeof scanPage; fill: typeof fill };
   }
-}
-
-const SUBMIT = /^(submit( application| my application)?|send application|apply( now)?|complete application)$/i;
-// "Next" in the words sites use. Workday's is "Save and Continue", with a stable automation id.
-const NEXT = /^(next( step| page)?|continue( to next step)?|save (and|&) continue|save (and|&) next|proceed|next ?›|next ?>|continue ?›)$/i;
-const NEXT_SELECTOR = "[data-automation-id='bottom-navigation-next-button'], [data-automation-id='pageFooterNextButton']";
-
-const buttonText = (el: HTMLElement) => (el.textContent || (el as HTMLInputElement).value || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
-
-/** The visible, enabled button that moves a multi-page form forward, never the final Submit. */
-function nextButton() {
-  const visible = (el: HTMLElement) => el.getBoundingClientRect().height > 0 && !(el as HTMLButtonElement).disabled && el.getAttribute("aria-disabled") !== "true";
-  const known = Array.from(document.querySelectorAll<HTMLElement>(NEXT_SELECTOR)).find(visible);
-  if (known) return known;
-  return Array.from(document.querySelectorAll<HTMLElement>("button, input[type=submit], input[type=button], a[role=button], [role=button]"))
-    .filter(visible)
-    .find((el) => NEXT.test(buttonText(el)) && !SUBMIT.test(buttonText(el))) ?? null;
-}
-
-function submitButton() {
-  const buttons = Array.from(document.querySelectorAll<HTMLElement>("button, input[type=submit]")).filter((el) => el.getBoundingClientRect().height > 0);
-  return buttons.find((el) => SUBMIT.test((el.textContent || (el as HTMLInputElement).value || "").replace(/\s+/g, " ").trim())) ?? null;
 }
 
 /**
@@ -70,17 +49,8 @@ async function fill(plan: FillPlan): Promise<FillReport> {
       if (answer.required && document.getElementById(answer.id) && !greenhouseValue(answer.id, answer.type) && !missing.includes(answer.label)) missing.push(answer.label);
     }
   }
-  const captcha = scanPage().captcha;
-  let submitted = false;
-  if (plan.autoSubmit && !missing.length && !captcha && !result.failed.length) {
-    const button = submitButton();
-    if (button) {
-      announceSubmit();
-      press(button);
-      submitted = true;
-    }
-  }
-  return { filled: result.filled, failed: result.failed, needsYou: [...new Set(missing)], captcha, submitted, ms: Date.now() - started };
+  // Pressing Submit is the background worker's call (see "press"), so a fill never submits by itself.
+  return { filled: result.filled, failed: result.failed, needsYou: [...new Set(missing)], captcha: scanPage().captcha, submitted: false, ms: Date.now() - started };
 }
 
 /** Answers the student typed themselves: anything with a value that Unnepo didn't fill or that they changed. */
@@ -99,7 +69,11 @@ function typedAnswers() {
   });
 }
 
+let announcedAt = 0;
 function announceSubmit() {
+  // Pressing Submit for the student also fires the click watcher; one announcement is enough.
+  if (Date.now() - announcedAt < 3000) return;
+  announcedAt = Date.now();
   void chrome.runtime.sendMessage({ type: "submit-clicked", answers: typedAnswers(), url: location.href });
   // The page's own words count as "likely" if the network didn't already confirm it.
   const until = Date.now() + 20_000;
@@ -117,8 +91,10 @@ function announceSubmit() {
 /** Watches for the student pressing Submit themselves. */
 function watchSubmit() {
   document.addEventListener("click", (event) => {
-    const target = (event.target as Element | null)?.closest("button, input[type=submit]") as HTMLElement | null;
-    if (target && SUBMIT.test((target.textContent || (target as HTMLInputElement).value || "").replace(/\s+/g, " ").trim())) announceSubmit();
+    let target = (event.target as Element | null)?.closest("button, input[type=submit], [data-automation-id='click_filter']") as HTMLElement | null;
+    // Workday's overlay sits on top of the real button.
+    if (target?.matches("[data-automation-id='click_filter']")) target = target.parentElement?.querySelector("button") ?? target;
+    if (target && SUBMIT.test((target.textContent || (target as HTMLInputElement).value || target.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim())) announceSubmit();
   }, true);
 }
 
@@ -136,13 +112,23 @@ if (!window.__unnepo) {
       reply({ ok: true });
       return false;
     }
-    if (message?.type === "next") {
-      const button = nextButton();
-      if (button) {
-        button.scrollIntoView({ block: "center" });
-        press(button);
+    if (message?.type === "status") {
+      // What still needs the student, and which button would move the application along.
+      const fields = scanFields();
+      const action = findAction(Boolean(message.knownAccount), fields.length);
+      reply({ needsYou: emptyRequired(fields).map((field) => field.label), action: action ? { kind: action.kind, label: action.label } : null, captcha: scanPage().captcha, ...pageNotes() });
+      return false;
+    }
+    if (message?.type === "press") {
+      const fields = scanFields();
+      const action = findAction(Boolean(message.knownAccount), fields.length);
+      if (!action || action.kind !== message.kind) {
+        reply({ pressed: false });
+        return false;
       }
-      reply({ pressed: Boolean(button), label: button ? buttonText(button) : undefined });
+      if (action.kind === "submit") announceSubmit();
+      pressAction(action.el);
+      reply({ pressed: true, label: action.label });
       return false;
     }
     if (message?.type === "fill") {
