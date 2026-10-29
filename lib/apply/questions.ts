@@ -99,6 +99,28 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
 export const DEMOGRAPHIC = /\b(gender|sex|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|disabilit|sexual orientation|transgender|lgbt)/i;
 export const DECLINE = /(decline|prefer not|don['’]?t wish|do not wish|not to (say|answer|disclose|self-identify)|choose not|rather not|i don['’]?t want to answer)/i;
 
+/** The words forms use for each self-identification choice in the student profile. */
+const EEO_WORDS: Record<string, string[]> = {
+  woman: ["Woman", "Female"], man: ["Man", "Male"], non_binary: ["Non-binary", "Nonbinary"], other: ["Another gender", "Other"],
+  american_indian: ["American Indian or Alaska Native"], asian: ["Asian"], black: ["Black or African American", "Black"], pacific_islander: ["Native Hawaiian or Other Pacific Islander"],
+  white: ["White"], two_or_more: ["Two or More Races", "Two or more races"],
+  yes: ["Yes"], no: ["No"], not_protected: ["I am not a protected veteran", "Not a protected veteran"], protected: ["I identify as one or more of the classifications of a protected veteran", "Protected veteran"],
+};
+
+function selfIdentified(label: string, options: string[], profile: ApplicationProfile) {
+  const eeo = profile.student?.eeo;
+  if (!eeo) return null;
+  const key = /veteran/i.test(label) ? "veteran" : /disabilit/i.test(label) ? "disability" : /hispanic|latin/i.test(label) ? "hispanicLatino" : /race|ethnic/i.test(label) ? "race" : /gender|\bsex\b/i.test(label) ? "gender" : null;
+  const value = key ? eeo[key as keyof typeof eeo] : "";
+  if (!value || value === "decline") return null;
+  if (key === "disability") return options.find((option) => (value === "yes" ? /^yes/i : /^no/i).test(option)) ?? null;
+  for (const word of EEO_WORDS[value] ?? []) {
+    const match = bestOption(word, options);
+    if (match) return match;
+  }
+  return null;
+}
+
 /** Eligibility questions answered from what the student set once in their details. Nothing here is guessed. */
 const ELIGIBILITY: Array<[RegExp, keyof NonNullable<ApplicationProfile["eligibility"]>]> = [
   [/sponsor/i, "needsSponsorship"],
@@ -150,8 +172,10 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
       if (answer) return { ...question, answer, source: "student", evidence: null };
     }
     const { field, sensitive } = classifyQuestion(question.label);
-    // Voluntary self-identification: decline, when the form offers that. The student can change it.
+    // Voluntary self-identification: the student's own choice when they made one, otherwise decline when offered.
     if (DEMOGRAPHIC.test(question.label) && question.options.length) {
+      const chosen = selfIdentified(question.label, question.options, context.profile);
+      if (chosen) return { ...question, answer: chosen, source: "student", evidence: null };
       const decline = question.options.find((option) => DECLINE.test(option));
       if (decline) return { ...question, answer: decline, source: "default", evidence: null };
     }

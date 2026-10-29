@@ -9,6 +9,7 @@ import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligenc
 import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
 import { highlightProfileWithModel, organizeQuizWithModel, quizSourceText } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
+import { profileState } from "@/lib/profile/service";
 
 function asForm(value: unknown): FormProfile {
   const body = (value ?? {}) as Partial<FormProfile>;
@@ -251,17 +252,20 @@ function parseEmailJson(text: string) {
 }
 
 export async function workspaceState(userId: string) {
-  const [user, document, credits, resume] = await Promise.all([
+  const [user, document, credits, resume, student] = await Promise.all([
     repo.getUserById(userId),
     repo.getProfileDocument(userId),
     repo.getAccount(userId),
     repo.getLatestResume(userId),
+    profileState(userId),
   ]);
   const studentFacts = document ? profileIntelligence.approvedForOutreach(document.facts, document.form.excludedTopics) : [];
   return {
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: { balance: credits?.balance ?? 0, plan: credits?.plan ?? "free", includedAllowance: credits?.includedAllowance ?? 0 },
     profile: document,
+    ready: student.ready,
+    completeness: student.profile.completeness,
     studentFacts,
     highlights: document?.highlights ?? [],
     resume: resume ? { id: resume.id, fileName: resume.fileName, byteSize: resume.byteSize } : null,

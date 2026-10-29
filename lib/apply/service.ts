@@ -10,6 +10,8 @@ import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/li
 import { extractJob } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
+import { profileReady } from "@/lib/profile/service";
+import { EEO_OPTIONS, DECLINE } from "@/lib/profile/student";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState } from "@/lib/apply/types";
 
 /** Background work runs after the response is sent. Tests run it inline. */
@@ -51,22 +53,36 @@ async function student(userId: string) {
     jobSitePasswordEncrypted: stored?.jobSitePasswordEncrypted ?? null,
     accountConsentAt: stored?.accountConsentAt ?? null,
     jobAccounts: stored?.jobAccounts ?? [],
+    student: stored?.student,
   };
   const form = document?.form;
+  // The resume-first profile wins; the old onboarding form fills in for students who haven't redone it.
+  const s = stored?.student;
+  const school = s?.education[0];
   const context: AnswerContext = {
     profile,
-    school: form?.school ?? "",
-    majors: splitProfileList(form?.major ?? ""),
-    graduationYear: form?.graduationYear ?? "",
+    school: school?.school || form?.school || "",
+    majors: school?.major ? splitProfileList(school.major) : splitProfileList(form?.major ?? ""),
+    graduationYear: school?.gradDate?.match(/\b(19|20)\d{2}\b/)?.[0] || form?.graduationYear || "",
     resumeFileName: resume?.storagePath ? resume.fileName : null,
   };
-  const profileText = [
-    form && `School: ${form.school}; Majors: ${form.major}; Graduation year: ${form.graduationYear}`,
-    form?.targetRoles && `Target roles: ${form.targetRoles}`,
-    form?.bio && `About: ${form.bio}`,
-    form?.accomplishments && `Accomplishments: ${form.accomplishments}`,
-    ...(document?.highlights ?? []).map((item) => `- ${item.detail}${item.experienceDetails ? ` ${item.experienceDetails}` : ""}`),
-  ].filter(Boolean).join("\n");
+  const profileText = (s
+    ? [
+      school && `School: ${school.school}; Degree: ${school.degree}; Major: ${school.major}${school.minor ? `; Minor: ${school.minor}` : ""}; Graduation: ${school.gradDate}${school.gpa ? `; GPA: ${school.gpa}` : ""}`,
+      s.preferences.roles.length ? `Target roles: ${s.preferences.roles.join(", ")}` : "",
+      s.essays.aboutMe && `About: ${s.essays.aboutMe}`,
+      s.essays.whyField && `Why this field: ${s.essays.whyField}`,
+      ...s.experience.map((item) => `${item.title} at ${item.company} (${item.startDate}${item.endDate ? ` - ${item.endDate}` : ""}): ${item.bullets.join(" ")}`),
+      ...s.projects.map((item) => `Project ${item.name}${item.role ? ` (${item.role})` : ""}: ${item.bullets.join(" ")}${item.tech?.length ? ` Tech: ${item.tech.join(", ")}` : ""}`),
+      s.skills.technical.length ? `Skills: ${s.skills.technical.join(", ")}` : "",
+    ]
+    : [
+      form && `School: ${form.school}; Majors: ${form.major}; Graduation year: ${form.graduationYear}`,
+      form?.targetRoles && `Target roles: ${form.targetRoles}`,
+      form?.bio && `About: ${form.bio}`,
+      form?.accomplishments && `Accomplishments: ${form.accomplishments}`,
+      ...(document?.highlights ?? []).map((item) => `- ${item.detail}${item.experienceDetails ? ` ${item.experienceDetails}` : ""}`),
+    ]).filter(Boolean).join("\n");
   return { user, document, resume, resumeText, profile, context, profileText, excluded: form?.excludedTopics ?? "" };
 }
 
@@ -197,7 +213,7 @@ export async function applyState(userId: string) {
     applications: apps.map((app) => ({ ...summary(app), contacts: contacts.filter((contact) => contact.applicationId === app.id) })),
     profile: publicProfile(info.profile),
     resume: info.resume ? { fileName: info.resume.fileName, stored: Boolean(info.resume.storagePath) } : null,
-    ready: { hunter: hunterReady(), profile: Boolean(info.document?.ready) },
+    ready: { hunter: hunterReady(), profile: await profileReady(userId) },
     applicationsPerCredit: APPLICATIONS_PER_CREDIT,
   };
 }
@@ -206,7 +222,7 @@ export async function applyState(userId: string) {
 export async function createApplication(userId: string, raw: unknown) {
   const url = String((raw as { url?: unknown } | null)?.url ?? "").trim().slice(0, 2000);
   if (!url) throw new ServiceError("Paste a job posting link.", "job_url", 400);
-  if (!(await repo.getProfileDocument(userId))?.ready) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
+  if (!(await profileReady(userId))) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
   const [job] = await Promise.all([extractJob(url), ensureResumeProfile(userId)]);
   const info = await student(userId);
   const existing = await applications.findByKey(userId, job.jobKey);
@@ -347,6 +363,7 @@ function runContext(userId: string, info: Awaited<ReturnType<typeof student>>, a
     `Will now or in the future need visa sponsorship: ${said(p.eligibility?.needsSponsorship)}`,
     `At least 18 years old: ${said(p.eligibility?.over18)}`,
     `Unnepo may accept privacy notices and candidate terms for the student: ${p.accountConsentAt ? "Yes" : "No"}`,
+    ...Object.entries(p.student?.eeo ?? {}).filter(([, value]) => value && value !== DECLINE).map(([key, value]) => `Self-identification. ${key}: ${EEO_OPTIONS[key as keyof typeof EEO_OPTIONS].find(([option]) => option === value)?.[1] ?? value}`),
     `Applying to: ${app.title} at ${app.company}`,
     ...Object.values(p.saved).slice(0, 60).map((item) => `Saved answer. ${item.label}: ${item.answer}`),
   ].join("\n");

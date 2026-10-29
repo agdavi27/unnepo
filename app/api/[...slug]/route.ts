@@ -11,6 +11,7 @@ import { usingDefaultSecret } from "@/lib/security";
 import { integrations } from "@/lib/integrations/flags";
 import { generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
+import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, updateAnswers, updateOutreach } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
@@ -191,20 +192,19 @@ async function handle(request: Request, slug: string[]) {
   if (root === "app" && action === "highlights" && request.method === "POST") {
     return json(await refreshProfileHighlights(user.id));
   }
-  if (root === "profile" && request.method === "PUT") {
-    const body = await request.json();
-    const profile = await repo.upsertProfile({
-      userId: user.id,
-      name: body.name || user.name,
-      school: body.school || "",
-      major: body.major || "",
-      graduationYear: body.graduationYear || "",
-      bio: (body.bio || "").slice(0, 300),
-      avatarPath: null,
-      updatedAt: nowIso(),
-    });
-    if (body.name) await repo.updateUser(user.id, { name: body.name, onboardingStep: body.onboardingStep || user.onboardingStep });
-    return json({ profile });
+  // The resume-first profile: read and save it, read a resume into it, and the gap cards left.
+  if (root === "profile") {
+    if (!action && request.method === "GET") return json(await profileState(user.id));
+    if (!action && request.method === "PUT") return json(await saveStudentProfile(user.id, await request.json()));
+    if (action === "missing" && request.method === "GET") return json({ missing: (await profileState(user.id)).missing });
+    if (action === "resume" && request.method === "POST") {
+      const form = await request.formData();
+      const file = form.get("file");
+      if (!(file instanceof File)) throw new ServiceError("Choose a resume file.", "file");
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      if (!bytes.byteLength) throw new ServiceError("That file was empty. Choose the resume again.", "file");
+      return json(await uploadProfileResume(user.id, { name: file.name, type: file.type, bytes }));
+    }
   }
 
   if (root === "goals" && request.method === "PUT") {

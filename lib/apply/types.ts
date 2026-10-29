@@ -1,4 +1,5 @@
 import type { ResumeProfile } from "@/lib/apply/resume-profile";
+import type { StudentProfile } from "@/lib/profile/student";
 
 export type Ats = "greenhouse" | "lever" | "ashby" | "workday" | "other";
 
@@ -147,6 +148,8 @@ export type ApplicationProfile = {
   saved: Record<string, { label: string; answer: string; updatedAt: string }>;
   /** The resume read into contact details, schools, and jobs; refreshed when the resume changes. */
   resumeProfile?: ResumeProfile | null;
+  /** The resume-first profile from onboarding. The flat fields above are kept in step with it for autofill. */
+  student?: StudentProfile;
   /** The student turned on the fast Greenhouse pipeline (beta). */
   fastApply?: boolean;
   /** Eligibility answers the student gave once, used on every form that asks: "Yes", "No", or unset. */

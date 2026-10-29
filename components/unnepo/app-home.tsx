@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ProfileOnboarding, emptyProfile, type Highlight, type Profile } from "@/components/unnepo/UnnepoForms";
+import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
+import { ResumeFirst } from "@/components/onboarding/resume-first";
 import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
 import { APPLICATIONS_PER_CREDIT, ENTERPRISE_PLAN, PUBLIC_PLANS, creditMath } from "@/lib/config";
-import { splitProfileList } from "@/lib/profile/lists";
 import { Logo } from "@/components/brand/logo";
 import { ApplyArea } from "@/components/unnepo/apply";
 
@@ -14,6 +14,9 @@ type Workspace = {
   user: { name: string; email: string };
   credits: { balance: number; plan: string; includedAllowance: number };
   profile: { ready: boolean; form: Profile; organizedProfile: unknown | null } | null;
+  /** The resume-first profile is confirmed (or the student finished the old onboarding). */
+  ready: boolean;
+  completeness: number;
   studentFacts: StudentFact[];
   highlights: Highlight[];
   resume: { id: string; fileName: string; byteSize: number } | null;
@@ -26,14 +29,6 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "apply", label: "Apply to Job" },
   { id: "applied", label: "Jobs Applied To" },
 ];
-const PROFILE_SECTIONS: { step: number; label: string; summary: (profile: Profile) => string }[] = [
-  { step: 0, label: "School and majors", summary: (profile) => [profile.school, splitProfileList(profile.major).join(", ")].filter(Boolean).join(" · ") },
-  { step: 1, label: "Interests", summary: (profile) => profile.interests.join(", ") },
-  { step: 2, label: "Roles, dream companies, locations", summary: (profile) => [splitProfileList(profile.targetRoles).join(", "), splitProfileList(profile.dreamCompanies).join(", ")].filter(Boolean).join(" · ") },
-  { step: 3, label: "Networking goals", summary: (profile) => [...profile.goals, ...profile.contactTypes].join(", ") },
-  { step: 4, label: "Your story", summary: (profile) => profile.bio },
-];
-
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
 export function AppHome() {
@@ -45,8 +40,6 @@ export function AppHome() {
   const [resumeVersion, setResumeVersion] = useState(0);
   const [view, setView] = useState<View>("apply");
   const [editing, setEditing] = useState(false);
-  const [editStep, setEditStep] = useState(0);
-  const [saving, setSaving] = useState(false);
   const [highlightsLoading, setHighlightsLoading] = useState(false);
   const [letter, setLetter] = useState<{ job: Job | null; jobs: Job[] } | null>(null);
 
@@ -102,72 +95,25 @@ export function AppHome() {
     router.push("/");
   }
 
-  async function uploadResume(file: File) {
-    const body = new FormData();
-    body.set("file", file);
-    const response = await fetch("/api/resume", { method: "POST", body });
-    const payload = await response.json();
-    if (!response.ok) {
-      setNotice(payload.error || "Could not store that resume.");
-      return;
-    }
-    setNotice(`Stored ${payload.resume.fileName}. The file is saved. AI parsing is not connected. Heading lines are kept for you to review when you save.`);
-    await load();
-  }
-
   /** The header's resume button: the newest upload becomes the resume autofill uses. */
   async function replaceResume(file: File) {
     setResumeBusy(true);
     try {
       const body = new FormData();
       body.set("file", file);
-      const response = await fetch("/api/resume", { method: "POST", body });
+      // The profile endpoint also reads the new resume into the profile, keeping anything the student typed.
+      const response = await fetch("/api/profile/resume", { method: "POST", body });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
         setNotice(payload.error || "Couldn't save that resume. Try a PDF or DOCX under 10 MB.");
         return;
       }
-      setNotice(`${hadResume ? "Replaced your resume with" : "Attached"} ${payload.resume.fileName}. Autofill, answers, and cover letters use it from now on.`);
+      setNotice(`${hadResume ? "Replaced your resume with" : "Attached"} ${payload.resume?.fileName ?? file.name}.${payload.read ? " New details from it were added to your profile; anything you typed yourself was kept." : ""}`);
       await load();
       setResumeVersion((value) => value + 1);
     } finally {
       setResumeBusy(false);
     }
-  }
-
-  async function saveProfile(profile: Profile) {
-    setSaving(true);
-    setNotice("Organizing your answers into profile facts…");
-    try {
-      const response = await fetch("/api/app/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ profile }),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        setNotice(payload.error || "Could not save your profile.");
-        return;
-      }
-      setEditing(false);
-      setNotice(payload.organization === "anthropic" ? "Profile saved." : "Profile saved. The organizer did not return a profile.");
-      await load();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function resetProfile() {
-    if (!window.confirm("Clear your personal profile? Saved contacts, credits, and your resume file stay.")) return;
-    const response = await fetch("/api/app/profile", { method: "DELETE" });
-    if (!response.ok) {
-      const payload = await response.json();
-      setNotice(payload.error || "Could not reset your profile.");
-      return;
-    }
-    setEditing(true);
-    setNotice("Profile cleared. Contacts and credits were kept.");
-    await load();
   }
 
   async function requestUpgrade(planName: string) {
@@ -202,11 +148,7 @@ export function AppHome() {
   }
 
 
-  function editProfile(step: number) {
-    setEditStep(step);
-    setEditing(true);
-    window.scrollTo({ top: 0 });
-  }
+
 
   function openCoverLetter(job: Job | null, jobs: Job[]) {
     setLetter({ job, jobs });
@@ -224,8 +166,7 @@ export function AppHome() {
     return String(payload.body ?? "");
   }
 
-  const profile = data?.profile?.form ?? emptyProfile;
-  const showOnboarding = !data?.profile?.ready || editing;
+  const showOnboarding = !data?.ready || editing;
 
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
 
@@ -294,21 +235,14 @@ export function AppHome() {
           </div>
         )}
         {data && showOnboarding && (
-          <div className="mx-auto w-full max-w-3xl">
-            <ProfileOnboarding
-              key={`${editing}-${editStep}`}
-              initialProfile={profile}
-              saving={saving}
-              editing={Boolean(data.profile?.ready)}
-              initialStep={data.profile?.ready ? editStep : 0}
-              onCancel={() => setEditing(false)}
-              onResumeUpload={uploadResume}
-              onSave={saveProfile}
-            />
-          </div>
+          <ResumeFirst
+            key={editing ? "edit" : "onboarding"}
+            mode={data.ready ? "edit" : "onboarding"}
+            onDone={() => { setEditing(false); setResumeVersion((value) => value + 1); void load(); }}
+          />
         )}
         {data && !showOnboarding && (view === "apply" || view === "applied") && (
-          <ApplyArea view={view} onNavigate={setView} onCreditsChanged={() => void load()} refreshKey={resumeVersion} />
+          <ApplyArea view={view} onNavigate={setView} onCreditsChanged={() => void load()} refreshKey={resumeVersion} onEditProfile={() => { setEditing(true); window.scrollTo({ top: 0 }); }} />
         )}
         {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
         {data && !showOnboarding && view === "settings" && (
@@ -322,22 +256,9 @@ export function AppHome() {
                 <button type="button" onClick={logout} className="mt-4 rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Log out</button>
               </div>
               <div className="rounded-2xl border border-line bg-panel p-5">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className={sectionTitle}>Profile</h2>
-                  <button type="button" onClick={() => void resetProfile()} className="text-xs text-muted hover:text-white">Start over</button>
-                </div>
-                <p className="mt-3 text-sm text-muted">Change one section at a time. Saving updates your highlights.</p>
-                <ul className="mt-3 divide-y divide-line">
-                  {PROFILE_SECTIONS.map((section) => (
-                    <li key={section.step} className="flex items-center justify-between gap-3 py-2.5">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{section.label}</p>
-                        <p className="truncate text-xs text-muted">{section.summary(profile) || "Not filled in yet"}</p>
-                      </div>
-                      <button type="button" onClick={() => editProfile(section.step)} className="shrink-0 rounded-xl border border-line px-3 py-1 text-sm hover:bg-white/5">Edit</button>
-                    </li>
-                  ))}
-                </ul>
+                <h2 className={sectionTitle}>Profile</h2>
+                <p className="mt-3 text-sm text-muted">Your profile is {data.completeness}% ready. It&apos;s what every application is filled from: contact details, schools, jobs, projects, skills, and your answers to common questions.</p>
+                <button type="button" onClick={() => { setEditing(true); window.scrollTo({ top: 0 }); }} className="mt-4 rounded-xl bg-white px-3 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">Edit profile</button>
               </div>
             </section>
             <section className="space-y-4">
@@ -392,14 +313,6 @@ export function AppHome() {
           </>
         )}
       </main>
-      {saving && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-sm rounded-2xl border border-line bg-panel p-6 text-center shadow-2xl">
-            <img src="/creating-profile.gif" alt="A cat typing on a laptop" className="mx-auto h-52 w-full rounded-xl object-cover" />
-            <p className="mt-4 text-lg font-semibold">Creating user profile</p>
-          </div>
-        </div>
-      )}
       {letter && (
         <CoverLetterModal
           key={letter.job?.id ?? "new"}

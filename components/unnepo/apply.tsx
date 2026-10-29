@@ -67,7 +67,7 @@ function StatusChip({ status }: { status: JobApplication["status"] }) {
 }
 
 /** The two V1 pages share one data load: Apply to Job and Jobs Applied To. */
-export function ApplyArea({ view, onNavigate, onCreditsChanged, refreshKey = 0 }: { view: "apply" | "applied"; onNavigate: (view: "apply" | "applied") => void; onCreditsChanged: () => void; refreshKey?: number }) {
+export function ApplyArea({ view, onNavigate, onCreditsChanged, onEditProfile, refreshKey = 0 }: { view: "apply" | "applied"; onNavigate: (view: "apply" | "applied") => void; onCreditsChanged: () => void; onEditProfile: () => void; refreshKey?: number }) {
   const [data, setData] = useState<ApplyData | null>(null);
   const [error, setError] = useState("");
   const [currentId, setCurrentId] = useState<string | null>(null);
@@ -123,15 +123,16 @@ export function ApplyArea({ view, onNavigate, onCreditsChanged, refreshKey = 0 }
       onChanged={(app) => { replace(app); setCurrentId(app.id); void load(); onCreditsChanged(); }}
       onProfile={(profile) => setData({ ...data, profile })}
       onDone={() => onNavigate("applied")}
+      onEditProfile={onEditProfile}
     />
   ) : (
     <AppliedPage data={data} onReload={load} onContinue={(appId) => { setCurrentId(appId); onNavigate("apply"); }} />
   );
 }
 
-function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone }: {
+function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone, onEditProfile }: {
   data: ApplyData; current: App | null; error: string;
-  onPick: (id: string | null) => void; onChanged: (app: App) => void; onProfile: (profile: PublicProfile) => void; onDone: () => void;
+  onPick: (id: string | null) => void; onChanged: (app: App) => void; onProfile: (profile: PublicProfile) => void; onDone: () => void; onEditProfile: () => void;
 }) {
   const [url, setUrl] = useState("");
   const [reading, setReading] = useState(false);
@@ -206,15 +207,11 @@ function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone 
       {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
       {notice && <p className="text-sm text-muted">{notice}</p>}
       <p className="rounded-xl border border-line bg-card px-4 py-3 text-sm text-muted">Autofill is moving into the Unnepo Chrome extension. Until it&apos;s ready, open the application, use the answers Unnepo prepared, and press <span className="text-ink">I applied</span> to find people to email.</p>
-      {(!data.profile.lastName.trim() || !data.profile.phone.trim()) && (
-        <p className="rounded-xl border border-amber-900/60 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
-          Add your {[!data.profile.lastName.trim() && "legal last name", !data.profile.phone.trim() && "phone number"].filter(Boolean).join(" and ")} under <span className="font-medium">Your application details</span> below. Almost every application requires {!data.profile.lastName.trim() && !data.profile.phone.trim() ? "them" : "it"}, and Unnepo won&apos;t guess.
-        </p>
-      )}
-      {(!data.profile.eligibility?.workAuthorized || !data.profile.eligibility?.needsSponsorship || !data.profile.eligibility?.over18) && (
-        <p className="rounded-xl border border-amber-900/60 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
-          Answer the three <span className="font-medium">Eligibility questions</span> under Your application details (work authorization, sponsorship, 18 or older). Most forms require them, and Unnepo only uses your own answers.
-        </p>
+      {(data.profile.student?.completeness ?? 0) < 100 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-900/60 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/90">
+          <p>Your profile is {data.profile.student?.completeness ?? 0}% ready. The more it has, the more of each form Unnepo can answer.</p>
+          <button type="button" className="rounded-lg border border-amber-800/70 px-3 py-1.5 text-amber-50 hover:bg-amber-950/60" onClick={onEditProfile}>Finish profile</button>
+        </div>
       )}
       {inProgress.length > 0 && !current && (
         <section className={card}>
@@ -233,7 +230,7 @@ function ApplyPage({ data, current, error, onPick, onChanged, onProfile, onDone 
         </section>
       )}
       {current && <ApplicationCard key={current.id} app={current} onChanged={onChanged} onClose={() => onPick(null)} onDone={onDone} />}
-      <ProfileDetails profile={data.profile} resume={data.resume} onSaved={onProfile} />
+      <ApplicationSettings profile={data.profile} onSaved={onProfile} onEditProfile={onEditProfile} />
     </div>
   );
 }
@@ -384,74 +381,39 @@ function QuestionField({ question, value, disabled, saveChecked, onChange, onSav
   );
 }
 
-function ProfileDetails({ profile, resume, onSaved }: { profile: PublicProfile; resume: ApplyData["resume"]; onSaved: (profile: PublicProfile) => void }) {
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(profile);
+/** Settings for how answers are prepared. Contact details and eligibility live in the profile. */
+function ApplicationSettings({ profile, onSaved, onEditProfile }: { profile: PublicProfile; onSaved: (profile: PublicProfile) => void; onEditProfile: () => void }) {
   const [state, setState] = useState("");
   const [consent, setConsent] = useState(Boolean(profile.accountConsentAt));
   const [fast, setFast] = useState(Boolean(profile.fastApply));
-  const eligibility = draft.eligibility ?? {};
-  const setEligibility = (key: "workAuthorized" | "needsSponsorship" | "over18", value: string) => setDraft({ ...draft, eligibility: { ...eligibility, [key]: value } });
-  const fields: Array<[keyof PublicProfile, string]> = [["firstName", "First name"], ["lastName", "Last name"], ["email", "Email for applications"], ["phone", "Phone"], ["linkedin", "LinkedIn URL"], ["website", "Website or portfolio"], ["github", "GitHub URL"], ["addressLine1", "Street address"], ["city", "City"], ["state", "State (full name, e.g. Maine)"], ["postalCode", "ZIP code"], ["country", "Country (e.g. United States)"]];
   async function save() {
     setState("Saving…");
     try {
-      const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { ...draft, eligibility, fastApply: fast, accountConsent: consent });
+      const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { fastApply: fast, accountConsent: consent });
       onSaved(result.profile);
-      setState("Saved. New jobs will use these details.");
+      setState("Saved.");
     } catch (reason) {
       setState(reason instanceof Error ? reason.message : "Couldn't save.");
     }
   }
   return (
-    <section className={card}>
-      <button type="button" className="flex w-full items-center justify-between text-left" onClick={() => { setDraft(profile); setOpen(!open); }}>
-        <span>
-          <span className="block text-sm font-semibold">Your application details</span>
-          <span className="block text-xs text-muted">Used to fill forms. Resume: {resume ? resume.fileName : "none uploaded"}</span>
-        </span>
-        <span className="text-faint">{open ? "−" : "+"}</span>
-      </button>
-      {open && (
-        <div className="mt-4 space-y-3">
-          <div className="grid gap-3 sm:grid-cols-2">
-            {fields.map(([key, title]) => (
-              <div key={key}>
-                <label className={labelClass} htmlFor={`profile-${key}`}>{title}</label>
-                <input id={`profile-${key}`} className={field} value={String(draft[key] ?? "")} onChange={(event) => setDraft({ ...draft, [key]: event.target.value })} />
-              </div>
-            ))}
-          </div>
-          <p className="text-xs text-faint">Anything you leave blank is filled from your resume (phone, address, links), and your schools and jobs fill education and work history on every form. Anything you type in the live view is saved for next time. Unnepo never makes up details.</p>
-          <div className="space-y-3 rounded-xl border border-line p-4">
-            <div>
-              <p className="text-sm font-semibold">Eligibility questions</p>
-              <p className="mt-1 text-xs text-muted">Almost every application asks these. Answer once and Unnepo uses your answers on every form, however it&apos;s worded. Unnepo never answers them for you.</p>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {([["workAuthorized", "Authorized to work in the US?"], ["needsSponsorship", "Need visa sponsorship, now or later?"], ["over18", "18 or older?"]] as const).map(([key, title]) => (
-                <div key={key}>
-                  <label className={labelClass} htmlFor={`eligibility-${key}`}>{title}</label>
-                  <select id={`eligibility-${key}`} className={field} value={eligibility[key] ?? ""} onChange={(event) => setEligibility(key, event.target.value)}>
-                    <option value="">Not set</option>
-                    <option value="Yes">Yes</option>
-                    <option value="No">No</option>
-                  </select>
-                </div>
-              ))}
-            </div>
-          </div>
-          <label className="flex items-start gap-2.5 rounded-xl border border-line p-4 text-sm">
-            <input type="checkbox" className="mt-1" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
-            <span>Accept job sites&apos; candidate terms and privacy notices on my behalf when an application asks. Unnepo never opts me into marketing.</span>
-          </label>
-          <label className="flex items-start gap-2.5 rounded-xl border border-line p-4 text-sm">
-            <input type="checkbox" className="mt-1" checked={fast} onChange={(event) => setFast(event.target.checked)} />
-            <span><span className="font-medium">Fast answers for Greenhouse jobs (beta)</span><span className="block text-xs text-muted">Unnepo reads the whole form from Greenhouse and prepares every answer at once, with at most one AI call, for you to review. Applies to Greenhouse jobs you add from now on.</span></span>
-          </label>
-          <div className="flex items-center gap-3"><button type="button" className={primary} onClick={() => void save()}>Save details</button>{state && <span className="text-xs text-muted">{state}</span>}</div>
+    <section className={`${card} space-y-4`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">Application settings</h2>
+          <p className="text-xs text-muted">Your contact details, schools, jobs, and eligibility answers are in your profile.</p>
         </div>
-      )}
+        <button type="button" className={secondary} onClick={onEditProfile}>Edit profile</button>
+      </div>
+      <label className="flex items-start gap-2.5 text-sm">
+        <input type="checkbox" className="mt-1" checked={consent} onChange={(event) => setConsent(event.target.checked)} />
+        <span>Accept job sites&apos; candidate terms and privacy notices on my behalf when an application asks. Unnepo never opts me into marketing.</span>
+      </label>
+      <label className="flex items-start gap-2.5 text-sm">
+        <input type="checkbox" className="mt-1" checked={fast} onChange={(event) => setFast(event.target.checked)} />
+        <span><span className="font-medium">Fast answers for Greenhouse jobs (beta)</span><span className="block text-xs text-muted">Unnepo reads the whole form from Greenhouse and prepares every answer at once, with at most one AI call. Applies to Greenhouse jobs you add from now on.</span></span>
+      </label>
+      <div className="flex items-center gap-3"><button type="button" className={primary} onClick={() => void save()}>Save settings</button>{state && <span className="text-xs text-muted">{state}</span>}</div>
     </section>
   );
 }
