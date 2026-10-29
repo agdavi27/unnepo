@@ -12,6 +12,8 @@ import { integrations } from "@/lib/integrations/flags";
 import { generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
+import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
+import { extensionCoverLetter, extensionJob, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission } from "@/lib/extension/service";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, updateAnswers, updateOutreach } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
@@ -21,7 +23,16 @@ const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests"
 
 async function handle(request: Request, slug: string[]) {
   const [root, action] = slug;
-  if (request.method !== "GET") assertSameOrigin(request);
+  // The extension sends a bearer token, which a browser never attaches on its own, so it skips the origin check.
+  if (request.method !== "GET" && !(root === "extension" && hasExtensionToken(request))) assertSameOrigin(request);
+
+  if (root === "extension") {
+    try {
+      return withExtensionCors(request, await extensionRoute(request, action, slug[2]));
+    } catch (error) {
+      return withExtensionCors(request, await errorResponse(error));
+    }
+  }
 
   if (root === "health" && request.method === "GET") {
     const ready = oauthReady();
@@ -287,6 +298,50 @@ async function handle(request: Request, slug: string[]) {
   throw new ServiceError("Not found.", "not_found", 404);
 }
 
+/** The Chrome extension's API. Connecting needs the website session; everything else needs the extension's token. */
+async function extensionRoute(request: Request, action: string | undefined, sub: string | undefined) {
+  const method = request.method;
+  if (action === "token" && method === "POST") {
+    const user = await requireUser();
+    if (!rateLimit(`extension-token:${user.id}`, 10, 60 * 60 * 1000)) throw new ServiceError("Too many connections in an hour. Try again later.", "rate_limited", 429);
+    return json({ ...(await issueExtensionToken(user.id)), user: publicUser(user) });
+  }
+  const { user, sessionId } = await requireExtensionUser(request);
+  if (action === "token" && method === "DELETE") {
+    await revokeExtensionToken(sessionId);
+    return json({ ok: true });
+  }
+  if (action === "me" && method === "GET") return json(await extensionMe(user.id));
+  if (action === "profile" && method === "GET") return json(await extensionProfile(user.id));
+  if (action === "resume" && method === "GET") {
+    const file = await extensionResume(user.id);
+    return new Response(Buffer.from(file.bytes), { headers: { "Content-Type": file.mime, "Content-Disposition": `attachment; filename="${file.fileName.replace(/"/g, "")}"`, "Cache-Control": "private, no-store" } });
+  }
+  if (action === "jobs" && method === "POST") {
+    if (!rateLimit(`apply:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of jobs in an hour. Try again a bit later.", "rate_limited", 429);
+    return json(await extensionJob(user.id, await request.json()));
+  }
+  if (action === "map" && method === "POST") return json(await extensionMap(user.id, await request.json()));
+  if (action === "answers" && method === "POST") return json(await extensionLearn(user.id, await request.json()));
+  if (action === "cover-letter" && method === "POST") return json(await extensionCoverLetter(user.id, await request.json()));
+  if (action === "submissions" && !sub && method === "POST") return json(await extensionSubmission(user.id, await request.json()));
+  if (action === "submissions" && sub === "undo" && method === "POST") return json(await extensionUndoSubmission(user.id, await request.json()));
+  throw new ServiceError("Not found.", "not_found", 404);
+}
+
+/** Lets the extension's own pages call the API. Only chrome-extension:// origins get these headers. */
+function withExtensionCors(request: Request, response: Response) {
+  const origin = request.headers.get("origin") ?? "";
+  const allowed = process.env.EXTENSION_ID ? origin === `chrome-extension://${process.env.EXTENSION_ID}` : origin.startsWith("chrome-extension://");
+  if (!allowed) return response;
+  const headers = new Headers(response.headers);
+  headers.set("Access-Control-Allow-Origin", origin);
+  headers.set("Access-Control-Allow-Headers", "Authorization, Content-Type");
+  headers.set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  headers.set("Vary", "Origin");
+  return new Response(response.body, { status: response.status, headers });
+}
+
 function oauthReturnUrl(request: Request, message: string) {
   const current = new URL(request.url);
   let path = "/signup";
@@ -316,6 +371,13 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
     }
     return errorResponse(error);
   }
+}
+
+/** The extension's preflight requests. */
+export async function OPTIONS(request: Request, context: { params: Promise<{ slug: string[] }> }) {
+  const slug = (await context.params).slug;
+  if (slug[0] !== "extension") return new Response(null, { status: 404 });
+  return withExtensionCors(request, new Response(null, { status: 204 }));
 }
 
 export async function POST(request: Request, context: { params: Promise<{ slug: string[] }> }) {

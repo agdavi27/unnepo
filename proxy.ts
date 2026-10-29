@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED = ["/home", "/jobs", "/settings", "/onboarding", "/admin"];
+const PROTECTED = ["/home", "/jobs", "/settings", "/onboarding", "/admin", "/extension"];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;

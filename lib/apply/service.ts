@@ -23,7 +23,7 @@ export function setDeferForTests(run: ((task: () => Promise<void>) => void) | nu
 
 const OUTREACH_STATES: OutreachState[] = ["not_contacted", "emailed", "replied", "no_response"];
 
-async function student(userId: string) {
+export async function student(userId: string) {
   const [user, document, resume, stored] = await Promise.all([repo.getUserById(userId), repo.getProfileDocument(userId), repo.getLatestResume(userId), applicationProfiles.get(userId)]);
   if (!user) throw new ServiceError("Sign in to continue.", "auth", 401);
   const resumeText = resume?.text ?? "";
@@ -54,6 +54,7 @@ async function student(userId: string) {
     accountConsentAt: stored?.accountConsentAt ?? null,
     jobAccounts: stored?.jobAccounts ?? [],
     student: stored?.student,
+    aiCache: stored?.aiCache,
   };
   const form = document?.form;
   // The resume-first profile wins; the old onboarding form fills in for students who haven't redone it.
@@ -139,7 +140,7 @@ async function ensureResumeProfile(userId: string) {
 }
 
 /** The answer for a form question: the student's own answers first, then their resume's schools and jobs, then their details. */
-function answerWith(info: Awaited<ReturnType<typeof student>>, company: string) {
+export function answerWith(info: Awaited<ReturnType<typeof student>>, company: string) {
   return (label: string, kind: ApplicationQuestion["kind"], options: string[], where?: { section?: string; format?: string | null }) => {
     const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], info.context);
     if (planned.answer && (planned.source === "saved" || planned.source === "student")) return planned.answer;
@@ -196,7 +197,7 @@ export async function learnAnswers(userId: string, info: Awaited<ReturnType<type
   return learned;
 }
 
-function summary(app: JobApplication) {
+export function summary(app: JobApplication) {
   const missing = missingAnswers(app.questions);
   return { ...app, description: app.description.slice(0, 4000), missing: missing.map((question) => question.key) };
 }
@@ -276,7 +277,7 @@ export async function createApplication(userId: string, raw: unknown) {
   return { application: summary(app), duplicate: !created, message: created ? "Job added." : "You already added this job." };
 }
 
-async function requireApp(userId: string, applicationId: unknown) {
+export async function requireApp(userId: string, applicationId: unknown) {
   const app = await applications.get(userId, String(applicationId ?? "").slice(0, 80));
   if (!app) throw new ServiceError("That application wasn't found.", "not_found", 404);
   return app;
@@ -337,7 +338,7 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
 }
 
 /** 1 credit covers APPLICATIONS_PER_CREDIT applications: charged on the 1st, 16th, 31st… */
-async function ensureCharged(userId: string, app: JobApplication) {
+export async function ensureCharged(userId: string, app: JobApplication) {
   if (app.charged) return;
   const count = await applications.countCharged(userId);
   if (count % APPLICATIONS_PER_CREDIT === 0) {
@@ -349,7 +350,7 @@ async function ensureCharged(userId: string, app: JobApplication) {
 }
 
 /** The student's facts and resume text: the only things the mapping's AI call may use. */
-function runContext(userId: string, info: Awaited<ReturnType<typeof student>>, app: JobApplication) {
+export function runContext(userId: string, info: Awaited<ReturnType<typeof student>>, app: JobApplication) {
   const sources = [info.profileText, info.resumeText].join("\n\n");
   // The student's own details as plain lines: the only facts the AI may use besides the resume.
   const p = info.profile;
@@ -388,7 +389,7 @@ async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof stu
   return { schema, questions: questionsFromMapping(schema, mapped.answers), timings };
 }
 
-function startContacts(userId: string, applicationId: string) {
+export function startContacts(userId: string, applicationId: string) {
   defer(async () => {
     await runContactDiscovery(userId, applicationId).catch((error) => console.error("contact discovery failed", error));
   });

@@ -260,6 +260,11 @@ export function AppHome() {
                 <p className="mt-3 text-sm text-muted">Your profile is {data.completeness}% ready. It&apos;s what every application is filled from: contact details, schools, jobs, projects, skills, and your answers to common questions.</p>
                 <button type="button" onClick={() => { setEditing(true); window.scrollTo({ top: 0 }); }} className="mt-4 rounded-xl bg-white px-3 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">Edit profile</button>
               </div>
+              <div className="rounded-2xl border border-line bg-panel p-5">
+                <h2 className={sectionTitle}>Chrome extension</h2>
+                <p className="mt-3 text-sm text-muted">The extension fills applications from your profile in your own browser and logs each one you submit. Your job-site passwords stay in the extension.</p>
+                <a href="/extension/connect" className="mt-4 inline-flex rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Connect the extension</a>
+              </div>
             </section>
             <section className="space-y-4">
               <div className="flex flex-wrap items-end justify-between gap-3">

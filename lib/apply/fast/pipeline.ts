@@ -59,7 +59,8 @@ export function knownAnswers(context: KnownContext) {
     }
     if (field.id === "discipline--0" && school?.field) return { value: school.field, source: "resume" };
     const kind = schemaKind(field) as ApplicationQuestion["kind"];
-    const answer = context.answerFor(field.label, kind, field.options.map((option) => option.label), { section: field.section === "eeoc" ? "Voluntary self-identification" : field.section === "education" ? "Education" : "" });
+    const section = field.sectionLabel ?? (field.section === "eeoc" ? "Voluntary self-identification" : field.section === "education" ? "Education" : "");
+    const answer = context.answerFor(field.label, kind, field.options.map((option) => option.label), { section, format: field.format });
     return answer ? { value: answer, source: "profile" } : null;
   };
 }

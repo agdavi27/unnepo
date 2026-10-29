@@ -1,4 +1,5 @@
 import { classifyQuestion } from "@/lib/apply/questions";
+import type { Ats } from "@/lib/apply/types";
 
 /**
  * The fast pipeline learns a form from the job board's own data, not from a browser: one normalized
@@ -19,10 +20,14 @@ export type SchemaField = {
   sensitive: boolean;
   /** Fields the form usually has but the board's data doesn't list; filled only if they're on the page. */
   ifPresent?: boolean;
+  /** The heading the field sits under on the page ("Work Experience 2"), when the extension scanned it. */
+  sectionLabel?: string;
+  /** A date format the page shows ("MM/YYYY"). */
+  format?: string | null;
 };
 
 export type FormSchema = {
-  ats: "greenhouse";
+  ats: Ats;
   board: string;
   jobId: string;
   /** Greenhouse's own hosted form, which works even when the company embeds it on its own site. */

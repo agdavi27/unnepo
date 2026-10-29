@@ -75,7 +75,15 @@ export type FillReport = {
   pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
 };
 
-export type Confirmation = { url: string; text: string; detectedAt: string; /** A screenshot of the confirmation page, kept as a receipt. */ receiptPath?: string };
+export type Confirmation = {
+  url: string;
+  text: string;
+  detectedAt: string;
+  /** A screenshot of the confirmation page, kept as a receipt. */
+  receiptPath?: string;
+  /** How sure the extension is: the site's own submit call succeeded, or only the page text says so. */
+  confidence?: "confirmed" | "likely";
+};
 
 export type JobApplication = {
   id: string;
@@ -148,6 +156,8 @@ export type ApplicationProfile = {
   saved: Record<string, { label: string; answer: string; updatedAt: string }>;
   /** The resume read into contact details, schools, and jobs; refreshed when the resume changes. */
   resumeProfile?: ResumeProfile | null;
+  /** Answers the AI wrote for questions, by question and options, so the same question costs nothing next time. */
+  aiCache?: Record<string, { values: string[]; why: string; at: string }>;
   /** The resume-first profile from onboarding. The flat fields above are kept in step with it for autofill. */
   student?: StudentProfile;
   /** The student turned on the fast Greenhouse pipeline (beta). */
