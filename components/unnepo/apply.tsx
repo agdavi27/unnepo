@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AtsBadge, CompanyLogo } from "@/components/unnepo/company";
 import { StatsPage } from "@/components/unnepo/stats";
 import { stageOf, appliedOn, applicationStats, type Stage } from "@/lib/apply/stats";
@@ -100,7 +100,14 @@ export function ApplyArea({ view, refreshKey = 0 }: { view: TrackerView; refresh
       />
     );
   }
-  return <AppliedPage data={data} onReload={load} onReplace={(app) => setData({ ...data, applications: data.applications.map((item) => (item.id === app.id ? { ...item, ...app, contacts: item.contacts } : item)) })} />;
+  return (
+    <AppliedPage
+      data={data}
+      onReload={load}
+      onReplace={(app) => setData({ ...data, applications: data.applications.map((item) => (item.id === app.id ? { ...item, ...app, contacts: item.contacts } : item)) })}
+      onApps={(change) => setData((previous) => (previous ? { ...previous, applications: change(previous.applications) } : previous))}
+    />
+  );
 }
 
 /** Job-site preferences that used to sit on the Apply page. Loads its own data. */
@@ -162,8 +169,15 @@ function StageControl({ app, onChange }: { app: App; onChange: (outcome: Stage) 
 
 const FILTERS: Array<["all" | Stage, string]> = [["all", "All"], ["submitted", "Submitted"], ["interviewing", "Interviewing"], ["offer", "Offer"], ["rejected", "Rejected"], ["in_progress", "In progress"]];
 
-function AppliedPage({ data, onReload, onReplace }: { data: ApplyData; onReload: () => Promise<void>; onReplace: (app: App) => void }) {
+const UNDO_MS = 5000;
+const deleteNow = (applicationId: string, keepalive = false) =>
+  fetch("/api/apply/applications", { method: "DELETE", keepalive, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId }) });
+
+function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
   const apps = data.applications;
+  // Removing is instant: the row goes away and is deleted for real after a few seconds, unless undone.
+  const [removed, setRemoved] = useState<App[]>([]);
+  const pending = useRef(new Map<string, number>());
   const [open, setOpen] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | Stage>("all");
   const [query, setQuery] = useState("");
@@ -181,6 +195,45 @@ function AppliedPage({ data, onReload, onReplace }: { data: ApplyData; onReload:
       .filter((app) => !words || `${app.company} ${app.title} ${app.location ?? ""}`.toLowerCase().includes(words))
       .sort((a, b) => appliedOn(b).getTime() - appliedOn(a).getTime());
   }, [apps, filter, query]);
+
+  function remove(app: App) {
+    onApps((list) => list.filter((item) => item.id !== app.id));
+    setRemoved((list) => [...list, app]);
+    if (open === app.id) setOpen(null);
+    pending.current.set(app.id, window.setTimeout(async () => {
+      pending.current.delete(app.id);
+      setRemoved((list) => list.filter((item) => item.id !== app.id));
+      const response = await deleteNow(app.id).catch(() => null);
+      if (!response?.ok) {
+        onApps((list) => (list.some((item) => item.id === app.id) ? list : [app, ...list]));
+        setProblem(`Couldn't remove ${app.company}. Try again.`);
+      }
+    }, UNDO_MS));
+  }
+  function undo() {
+    for (const app of removed) {
+      clearTimeout(pending.current.get(app.id));
+      pending.current.delete(app.id);
+    }
+    onApps((list) => [...removed.filter((app) => !list.some((item) => item.id === app.id)), ...list]);
+    setRemoved([]);
+  }
+  // Leaving the page (or the tab) finishes any removals still waiting.
+  useEffect(() => {
+    const timers = pending.current;
+    const flush = () => {
+      for (const [id, timer] of timers) {
+        clearTimeout(timer);
+        void deleteNow(id, true).catch(() => undefined);
+      }
+      timers.clear();
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
 
   async function act(path: string, method: string, body: unknown) {
     setProblem("");
@@ -259,8 +312,8 @@ function AppliedPage({ data, onReload, onReplace }: { data: ApplyData; onReload:
             const people = app.contacts?.length ?? 0;
             const toggle = () => setOpen(expanded ? null : app.id);
             return (
-              <li key={app.id} className="border-b border-line">
-                <div className="flex items-center gap-3 py-3.5 sm:grid sm:grid-cols-[minmax(0,1fr)_5.5rem_9rem_6.5rem] sm:gap-4">
+              <li key={app.id} className="group border-b border-line">
+                <div className="flex items-center gap-3 py-3.5 sm:grid sm:grid-cols-[minmax(0,1fr)_5.5rem_9rem_6.5rem_2rem] sm:gap-4">
                   <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={toggle} aria-expanded={expanded}>
                     <CompanyLogo app={app} />
                     <span className="min-w-0">
@@ -283,6 +336,9 @@ function AppliedPage({ data, onReload, onReplace }: { data: ApplyData; onReload:
                     {stage === "in_progress" ? "Details" : `${people} ${people === 1 ? "person" : "people"}`}
                     <span aria-hidden className={`transition-transform ${expanded ? "rotate-90" : ""}`}>→</span>
                   </button>
+                  <button type="button" onClick={() => remove(app)} aria-label={`Remove ${app.title} at ${app.company}`} title="Remove" className="-mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint transition-colors hover:bg-red-500/10 hover:text-red-300 sm:justify-self-end sm:opacity-40 sm:group-hover:opacity-100 sm:focus-visible:opacity-100">
+                    <svg aria-hidden viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 4h11M6.5 4V2.75h3V4M4 4l.7 9.25h6.6L12 4M6.75 6.75v4M9.25 6.75v4" /></svg>
+                  </button>
                 </div>
                 {expanded && (
                   <div className="mb-4 space-y-4 rounded-xl border border-line bg-panel p-4">
@@ -303,7 +359,7 @@ function AppliedPage({ data, onReload, onReplace }: { data: ApplyData; onReload:
                       <span className="flex flex-wrap gap-4">
                         {app.confirmation?.receiptPath && <a className="hover:text-white" href={`/api/apply/receipt?applicationId=${encodeURIComponent(app.id)}`} target="_blank" rel="noreferrer">Receipt ↗</a>}
                         <a className="hover:text-white" href={app.jobUrl} target="_blank" rel="noreferrer">Job posting ↗</a>
-                        <button type="button" className="hover:text-red-300" onClick={() => { if (window.confirm(`Remove ${app.title} at ${app.company} and its contacts from your list?`)) void act("/applications", "DELETE", { applicationId: app.id }); }}>Remove</button>
+                        <button type="button" className="hover:text-red-300" onClick={() => remove(app)}>Remove</button>
                       </span>
                     </div>
                   </div>
@@ -312,6 +368,13 @@ function AppliedPage({ data, onReload, onReplace }: { data: ApplyData; onReload:
             );
           })}
         </ul>
+      )}
+
+      {removed.length > 0 && (
+        <div role="status" className="fixed inset-x-4 bottom-5 z-20 mx-auto flex max-w-md items-center justify-between gap-4 rounded-xl border border-line bg-card px-4 py-3 text-sm shadow-2xl">
+          <span className="min-w-0 truncate">{removed.length === 1 ? `Removed ${removed[0].company}` : `Removed ${removed.length} applications`}</span>
+          <button type="button" onClick={undo} className="shrink-0 font-semibold text-[#3D8BFF] hover:text-white">Undo</button>
+        </div>
       )}
     </div>
   );

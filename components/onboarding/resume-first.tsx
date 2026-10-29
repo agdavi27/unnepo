@@ -50,6 +50,48 @@ function Text({ title, value, onChange, placeholder, tag = false, type = "text" 
   );
 }
 
+/**
+ * A list typed as bubbles: press Enter or comma to turn what you typed into a bubble, × or Backspace to
+ * take one out. Pasting "a, b, c" makes three. Whatever's left in the box when you leave it is kept too.
+ */
+function Tags({ title, values, onChange, placeholder, tag = false }: { title: string; values: string[]; onChange: (values: string[]) => void; placeholder?: string; tag?: boolean }) {
+  const id = useId();
+  const [draft, setDraft] = useState("");
+  const add = (text: string) => {
+    const fresh = text.split(/[,\n]/).map((item) => item.trim()).filter(Boolean)
+      .filter((item, index, list) => list.findIndex((other) => other.toLowerCase() === item.toLowerCase()) === index)
+      .filter((item) => !values.some((value) => value.toLowerCase() === item.toLowerCase()));
+    if (fresh.length) onChange([...values, ...fresh]);
+    setDraft("");
+  };
+  return (
+    <div>
+      <label htmlFor={id} className={label}>{title}<FromResume show={tag} /></label>
+      <div className={`${input} flex min-h-11 flex-wrap items-center gap-1.5 py-1.5 focus-within:border-zinc-500`} onClick={() => document.getElementById(id)?.focus()}>
+        {values.map((value, index) => (
+          <span key={`${value}-${index}`} className="inline-flex items-center gap-1 rounded-full border border-[#26262C] bg-[#17171B] py-0.5 pl-2.5 pr-1 text-[13px] text-ink">
+            {value}
+            <button type="button" aria-label={`Remove ${value}`} className="flex h-5 w-5 items-center justify-center rounded-full text-[#8B8B94] hover:bg-white/10 hover:text-white" onClick={(event) => { event.stopPropagation(); onChange(values.filter((_, other) => other !== index)); }}>×</button>
+          </span>
+        ))}
+        <input
+          id={id}
+          className="min-w-[8rem] flex-1 bg-transparent py-1 text-sm text-ink outline-none placeholder:text-faint"
+          value={draft}
+          placeholder={values.length ? "Add another" : placeholder ?? "Type, then press Enter"}
+          enterKeyHint="done"
+          onChange={(event) => (/[,\n]/.test(event.target.value) ? add(event.target.value) : setDraft(event.target.value))}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); add(draft); }
+            else if (event.key === "Backspace" && !draft && values.length) onChange(values.slice(0, -1));
+          }}
+          onBlur={() => add(draft)}
+        />
+      </div>
+    </div>
+  );
+}
+
 function Area({ title, value, onChange, placeholder, tag = false }: { title: string; value: string | undefined; onChange: (value: string) => void; placeholder?: string; tag?: boolean }) {
   const id = useId();
   return (
@@ -76,8 +118,6 @@ function Choice<T extends string | boolean | null>({ title, value, options, onCh
 const YES_NO: Array<[boolean, string]> = [[true, "Yes"], [false, "No"]];
 const lines = (values: string[] | undefined) => (values ?? []).join("\n");
 const fromLines = (value: string) => value.split("\n").map((item) => item.trim()).filter(Boolean);
-const commas = (values: string[] | undefined) => (values ?? []).join(", ");
-const fromCommas = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
 
 /** Contact, links, education, experience, projects, and skills: every value editable. */
 function Sections({ profile, set }: { profile: StudentProfile; set: (next: StudentProfile) => void }) {
@@ -149,17 +189,17 @@ function Sections({ profile, set }: { profile: StudentProfile; set: (next: Stude
             <Text title="Name" value={item.name} onChange={(value) => updateList("projects", i, { name: value })} tag={tag(`projects.${i}.name`)} />
             <Text title="Link (optional)" value={item.url} onChange={(value) => updateList("projects", i, { url: value })} tag={tag(`projects.${i}.url`)} />
             <div className="sm:col-span-2"><Area title="What you built (one per line)" value={lines(item.bullets)} onChange={(value) => updateList("projects", i, { bullets: fromLines(value) })} tag={tag(`projects.${i}.bullets`)} /></div>
-            <div className="sm:col-span-2"><Text title="Tech (comma-separated)" value={commas(item.tech)} onChange={(value) => updateList("projects", i, { tech: fromCommas(value) })} tag={tag(`projects.${i}.tech`)} /></div>
+            <div className="sm:col-span-2"><Tags title="Tech" values={item.tech ?? []} onChange={(values) => updateList("projects", i, { tech: values })} tag={tag(`projects.${i}.tech`)} /></div>
             <button type="button" className="justify-self-start text-xs text-[#8B8B94] hover:text-red-300" onClick={() => removeAt("projects", i)}>Remove</button>
           </div>
         ))}
       </section>
       <section className={section}>
         <h3 className={eyebrow}>Skills</h3>
-        <Text title="Technical skills (comma-separated)" value={commas(profile.skills.technical)} onChange={(value) => set({ ...profile, skills: { ...profile.skills, technical: fromCommas(value) } })} tag={tag("skills.technical")} />
+        <Tags title="Technical skills" values={profile.skills.technical ?? []} onChange={(values) => set({ ...profile, skills: { ...profile.skills, technical: values } })} tag={tag("skills.technical")} />
         <div className="grid gap-3 sm:grid-cols-2">
-          <Text title="Languages you speak" value={commas(profile.skills.languages)} onChange={(value) => set({ ...profile, skills: { ...profile.skills, languages: fromCommas(value) } })} tag={tag("skills.languages")} />
-          <Text title="Certifications" value={commas(profile.skills.certifications)} onChange={(value) => set({ ...profile, skills: { ...profile.skills, certifications: fromCommas(value) } })} tag={tag("skills.certifications")} />
+          <Tags title="Languages you speak" values={profile.skills.languages ?? []} onChange={(values) => set({ ...profile, skills: { ...profile.skills, languages: values } })} tag={tag("skills.languages")} />
+          <Tags title="Certifications" values={profile.skills.certifications ?? []} onChange={(values) => set({ ...profile, skills: { ...profile.skills, certifications: values } })} tag={tag("skills.certifications")} />
         </div>
       </section>
     </div>
@@ -223,10 +263,10 @@ function GapFields({ id, profile, set }: { id: GapId; profile: StudentProfile; s
     case "preferences":
       return (
         <div className="space-y-4">
-          <Text title="Roles you want (comma-separated)" value={commas(p.preferences.roles)} onChange={(value) => set({ ...p, preferences: { ...p.preferences, roles: fromCommas(value) } })} placeholder="e.g. Data analyst, Product intern" />
+          <Tags title="Roles you want" values={p.preferences.roles ?? []} onChange={(values) => set({ ...p, preferences: { ...p.preferences, roles: values } })} placeholder="e.g. Data analyst, Product intern" />
           <div className="grid gap-3 sm:grid-cols-2">
-            <Text title="Industries" value={commas(p.preferences.industries)} onChange={(value) => set({ ...p, preferences: { ...p.preferences, industries: fromCommas(value) } })} placeholder="e.g. Fintech, Climate" />
-            <Text title="Locations" value={commas(p.preferences.locations)} onChange={(value) => set({ ...p, preferences: { ...p.preferences, locations: fromCommas(value) } })} placeholder="e.g. Boston, New York" />
+            <Tags title="Industries" values={p.preferences.industries ?? []} onChange={(values) => set({ ...p, preferences: { ...p.preferences, industries: values } })} placeholder="e.g. Fintech, Climate" />
+            <Tags title="Locations" values={p.preferences.locations ?? []} onChange={(values) => set({ ...p, preferences: { ...p.preferences, locations: values } })} placeholder="e.g. Boston, New York" />
             <Text title="Start term" value={p.preferences.startTerm} onChange={(value) => set({ ...p, preferences: { ...p.preferences, startTerm: value } })} placeholder="e.g. Summer 2027" />
           </div>
           <Choice title="Remote?" value={p.preferences.remote} options={[["yes", "Remote"], ["no", "In person"], ["either", "Either"]]} onChange={(value) => set({ ...p, preferences: { ...p.preferences, remote: value } })} />

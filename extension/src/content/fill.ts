@@ -2,7 +2,7 @@ import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "..
 import { press, sleep, typeInto } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
-import { emptyRequired, isEmpty, scanFields, scanPage } from "./scan";
+import { emptyRequired, isEmpty, labelOf, scanFields, scanPage } from "./scan";
 
 /**
  * Injected into the job page when the student presses Fill. Scans the form, fills it from the plan the
@@ -17,6 +17,21 @@ declare global {
 }
 
 const SUBMIT = /^(submit( application| my application)?|send application|apply( now)?|complete application)$/i;
+// "Next" in the words sites use. Workday's is "Save and Continue", with a stable automation id.
+const NEXT = /^(next( step| page)?|continue( to next step)?|save (and|&) continue|save (and|&) next|proceed|next ?›|next ?>|continue ?›)$/i;
+const NEXT_SELECTOR = "[data-automation-id='bottom-navigation-next-button'], [data-automation-id='pageFooterNextButton']";
+
+const buttonText = (el: HTMLElement) => (el.textContent || (el as HTMLInputElement).value || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+
+/** The visible, enabled button that moves a multi-page form forward, never the final Submit. */
+function nextButton() {
+  const visible = (el: HTMLElement) => el.getBoundingClientRect().height > 0 && !(el as HTMLButtonElement).disabled && el.getAttribute("aria-disabled") !== "true";
+  const known = Array.from(document.querySelectorAll<HTMLElement>(NEXT_SELECTOR)).find(visible);
+  if (known) return known;
+  return Array.from(document.querySelectorAll<HTMLElement>("button, input[type=submit], input[type=button], a[role=button], [role=button]"))
+    .filter(visible)
+    .find((el) => NEXT.test(buttonText(el)) && !SUBMIT.test(buttonText(el))) ?? null;
+}
 
 function submitButton() {
   const buttons = Array.from(document.querySelectorAll<HTMLElement>("button, input[type=submit]")).filter((el) => el.getBoundingClientRect().height > 0);
@@ -32,7 +47,7 @@ function fillPasswords(password: string | null) {
   const boxes = Array.from(document.querySelectorAll<HTMLInputElement>("input[type=password]"))
     .filter((box) => !box.disabled && !box.readOnly && !box.value && box.getBoundingClientRect().height > 0);
   boxes.forEach((box) => typeInto(box, password));
-  return boxes.map((box, index) => (index === 0 ? "Password" : /confirm|verify|re-?enter|again/i.test(`${box.name} ${box.id} ${box.getAttribute("aria-label") ?? ""} ${box.getAttribute("data-automation-id") ?? ""}`) ? "Confirm password" : `Password ${index + 1}`));
+  return boxes.map((box, index) => (index === 0 ? "Password" : /confirm|verify|re-?enter|again/i.test(`${labelOf(box)} ${box.name} ${box.id} ${box.getAttribute("aria-label") ?? ""} ${box.getAttribute("data-automation-id") ?? ""}`) ? "Confirm password" : `Password ${index + 1}`));
 }
 
 let planned: PageField[] = [];
@@ -112,6 +127,15 @@ if (!window.__unnepo) {
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type === "scan") {
       reply(scanPage());
+      return false;
+    }
+    if (message?.type === "next") {
+      const button = nextButton();
+      if (button) {
+        button.scrollIntoView({ block: "center" });
+        press(button);
+      }
+      reply({ pressed: Boolean(button), label: button ? buttonText(button) : undefined });
       return false;
     }
     if (message?.type === "fill") {

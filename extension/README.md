@@ -36,6 +36,8 @@ panel can read it; web pages and content scripts can't ask for it.
    fields. The student's own data answers first, then cached AI answers, then at most one AI call.
 3. The resume and, when the form asks, a cover letter PDF are attached.
 4. The page script fills every field, checks what's still required and empty, and shows it in the panel.
+   On a multi-page form (Workday and others) it then presses Next and fills each page the same way, stopping
+   on the page with Submit, or earlier if a page has something only the student can answer.
    With auto-submit on and nothing missing (and no CAPTCHA), it clicks Submit; otherwise the student does.
 5. Submission: a successful POST to the job site right after the Submit click is **confirmed**; the page's
    "thank you for applying" text alone is **likely**. Either is saved to Unnepo with a screenshot. Answers the

@@ -239,5 +239,6 @@ export function scanPage(): Scan {
     fields: scanFields(),
     embeddedForm: frame?.src ?? null,
     captcha,
+    passwordBoxes: Array.from(document.querySelectorAll<HTMLInputElement>("input[type=password]")).filter(visible).length,
   };
 }

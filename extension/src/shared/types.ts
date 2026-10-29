@@ -18,6 +18,8 @@ export type Scan = {
   embeddedForm: string | null;
   /** A CAPTCHA is on the page. Unnepo never solves these. */
   captcha: boolean;
+  /** Visible password boxes (sign-in, create account). They aren't in `fields`: the extension fills them itself. */
+  passwordBoxes: number;
 };
 
 export type Answer = { id: string; label: string; type: string; required: boolean; values: string[]; source: string | null; why: string | null };

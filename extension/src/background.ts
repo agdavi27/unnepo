@@ -81,36 +81,110 @@ async function state(): Promise<PanelState> {
 
 const send = <T>(tabId: number, message: unknown) => chrome.tabs.sendMessage(tabId, message) as Promise<T>;
 
-/** Scan the page, open the job in Unnepo, get every answer, attach files, fill, and check. */
+/** Two pages of the same application: same site, and the same job in the path (Workday keeps it in every step). */
+function sameApplication(before: string | undefined, after: string) {
+  if (!before) return false;
+  try {
+    const [a, b] = [new URL(before), new URL(after)];
+    if (a.hostname !== b.hostname) return false;
+    const [x, y] = [a.pathname.split("/").filter(Boolean), b.pathname.split("/").filter(Boolean)];
+    let shared = 0;
+    while (shared < x.length && x[shared] === y[shared]) shared += 1;
+    return a.pathname === b.pathname || shared >= 3;
+  } catch {
+    return false;
+  }
+}
+
+const signature = (scan: Scan) => `${scan.url}|${scan.passwordBoxes}|${scan.fields.map((field) => field.label).join("|")}`;
+const hasForm = (scan: Scan) => scan.useServerSchema || scan.fields.length > 0 || scan.passwordBoxes > 0;
+/** Most multi-page forms (Workday) run 4 to 7 pages; this stops a loop on a site that never ends. */
+const MAX_PAGES = 12;
+
+/** After Next is pressed, waits for a different form: a new page load or the same page swapping its fields. */
+async function nextPage(tabId: number, before: string): Promise<Scan | null> {
+  const until = Date.now() + 12_000;
+  while (Date.now() < until) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    try {
+      // A full page load drops the page script, so it's put back each time (it ignores a second copy).
+      await chrome.scripting.executeScript({ target: { tabId }, files: ["content/fill.js"] });
+      const scan = await send<Scan>(tabId, { type: "scan" });
+      if (signature(scan) !== before && hasForm(scan)) {
+        // Let a page that's still drawing finish before reading it for real.
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return await send<Scan>(tabId, { type: "scan" });
+      }
+    } catch {
+      // The page is between loads; try again.
+    }
+  }
+  return null;
+}
+
+/**
+ * Scan the page, open the job in Unnepo, get every answer, attach files, fill, and check. On a multi-page
+ * form it presses Next and does the same on each page, as long as nothing on the page needs the student.
+ */
 async function fill(tabId: number) {
+  const earlier = (await jobs())[tabId];
   await saveJob(tabId, { step: "Reading the form…", report: null, submission: null, error: null, clickedAt: null, llmCalls: 0 });
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content/fill.js"] });
-    const scan = await send<Scan>(tabId, { type: "scan" });
+    let scan = await send<Scan>(tabId, { type: "scan" });
     if (scan.embeddedForm && !scan.fields.length) throw new Error(`This page shows the form inside another site. Open the form directly, then press Fill: ${scan.embeddedForm}`);
-    if (!scan.useServerSchema && !scan.fields.length) throw new Error("No application form on this page. Open the job's application form, then press Fill.");
-    await saveJob(tabId, { step: "Opening the job in Unnepo…", url: scan.url, host: new URL(scan.url).hostname });
-    const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", { url: scan.url, title: scan.title, company: scan.company });
-    await saveJob(tabId, { applicationId: job.application.id, title: job.application.title, company: job.application.company, step: "Preparing your answers…" });
-    const map = await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId: job.application.id, fields: scan.useServerSchema ? [] : scan.fields });
-    const wantsCoverLetter = scan.useServerSchema ? map.answers.some((answer) => answer.id === "cover_letter") : scan.fields.some((field) => field.type === "file" && /cover ?letter/i.test(field.label));
-    const wantsResume = scan.useServerSchema ? map.answers.some((answer) => answer.id === "resume") : scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
-    await saveJob(tabId, { step: "Filling the form…", llmCalls: map.llmCalls });
-    const [resume, letter] = await Promise.all([
-      wantsResume ? resumeFile() : Promise.resolve(null),
-      wantsCoverLetter ? api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId: job.application.id }).catch(() => null) : Promise.resolve(null),
-    ]);
+    if (!hasForm(scan)) throw new Error("No application form on this page. Open the job's application form, then press Fill.");
+    const host = new URL(scan.url).hostname;
+    // Pressing Fill again partway through a form keeps the same job instead of opening a new one per page.
+    let applicationId = earlier?.applicationId && !earlier.submission && sameApplication(earlier.url, scan.url) ? earlier.applicationId : "";
+    if (!applicationId) {
+      await saveJob(tabId, { step: "Opening the job in Unnepo…", url: scan.url, host });
+      const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", { url: scan.url, title: scan.title, company: scan.company });
+      applicationId = job.application.id;
+      await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: scan.url, host });
+    }
     const { autoSubmit } = await settings();
-    const plan: FillPlan = { ats: scan.ats, useServerSchema: scan.useServerSchema, answers: map.answers, resume, coverLetter: letter ? { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } : null, autoSubmit, password: await jobSitePassword() };
-    const report = await send<FillReport>(tabId, { type: "fill", plan });
-    const step = report.captcha
-      ? "A CAPTCHA is on the page. Solve it, then press Submit. Unnepo never solves CAPTCHAs."
-      : report.needsYou.length
-        ? `Filled ${report.filled.length} fields. ${report.needsYou.length} still need you, highlighted below.`
-        : report.submitted
-          ? "Filled and submitted. Waiting for the site to confirm…"
-          : `Filled ${report.filled.length} fields in ${(report.ms / 1000).toFixed(1)}s. Check the form, then press Submit on the page.`;
-    await saveJob(tabId, { report, step });
+    const password = await jobSitePassword();
+    let resume: FileData | null | undefined;
+    let llmCalls = 0;
+    const filledAll: string[] = [];
+    for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const where = page > 1 ? ` (page ${page})` : "";
+      await saveJob(tabId, { step: `Preparing your answers${where}…` });
+      // A page with only password boxes needs no answers from Unnepo.
+      const map = !scan.useServerSchema && !scan.fields.length ? { answers: [], llmCalls: 0 } : await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : scan.fields });
+      llmCalls += map.llmCalls;
+      const wantsCoverLetter = scan.useServerSchema ? map.answers.some((answer) => answer.id === "cover_letter") : scan.fields.some((field) => field.type === "file" && /cover ?letter/i.test(field.label));
+      const wantsResume = scan.useServerSchema ? map.answers.some((answer) => answer.id === "resume") : scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
+      await saveJob(tabId, { step: `Filling the form${where}…`, llmCalls });
+      // The resume is fetched once and reused on later pages.
+      if (wantsResume && resume === undefined) resume = await resumeFile();
+      const letter = wantsCoverLetter ? await api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null) : null;
+      const plan: FillPlan = { ats: scan.ats, useServerSchema: scan.useServerSchema, answers: map.answers, resume: wantsResume ? resume ?? null : null, coverLetter: letter ? { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } : null, autoSubmit, password };
+      const report = await send<FillReport>(tabId, { type: "fill", plan });
+      filledAll.push(...report.filled);
+      const total = { ...report, filled: [...filledAll] };
+      const step = report.captcha
+        ? "A CAPTCHA is on the page. Solve it, then press Submit. Unnepo never solves CAPTCHAs."
+        : report.needsYou.length
+          ? `Filled ${report.filled.length} fields${where}. ${report.needsYou.length} still need you, highlighted below. Then press Fill again to keep going.`
+          : report.submitted
+            ? "Filled and submitted. Waiting for the site to confirm…"
+            : null;
+      if (step) return await saveJob(tabId, { report: total, step });
+      // Nothing needs the student here: go to the next page if there is one.
+      const next = scan.useServerSchema ? { pressed: false } : await send<{ pressed: boolean; label?: string }>(tabId, { type: "next" });
+      if (!next.pressed) {
+        return await saveJob(tabId, { report: total, step: `Filled ${filledAll.length} fields${page > 1 ? ` across ${page} pages` : ""}. Check the form, then press Submit on the page.` });
+      }
+      await saveJob(tabId, { report: total, step: `Filled page ${page}. Going to the next page…` });
+      const after = await nextPage(tabId, signature(scan));
+      if (!after) {
+        return await saveJob(tabId, { report: total, step: `Pressed "${next.label ?? "Next"}", but the site stayed on this page. It may be asking for something; check the page, then press Fill again.` });
+      }
+      scan = after;
+    }
+    await saveJob(tabId, { step: `Stopped after ${MAX_PAGES} pages. Check the page, then press Fill again to keep going.` });
   } catch (error) {
     await saveJob(tabId, { error: error instanceof Error ? error.message : "Something went wrong.", step: "Stopped." });
   }
