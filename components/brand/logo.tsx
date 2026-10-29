@@ -6,6 +6,7 @@ export function VersionBadge() {
 
 /** The wordmark with the V1 badge. Pass href to make it a link. */
 export function Logo({ href, className = "text-2xl font-semibold tracking-tight" }: { href?: string; className?: string }) {
-  const mark = <>unnepo.<VersionBadge /></>;
+  // The dot is the brand blue.
+  const mark = <>unnepo<span className="text-[#3D8BFF]">.</span><VersionBadge /></>;
   return href ? <Link href={href} className={`${className} inline-flex items-center`}>{mark}</Link> : <span className={`${className} inline-flex items-center`}>{mark}</span>;
 }
