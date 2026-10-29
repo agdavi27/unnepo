@@ -133,7 +133,7 @@ export function ApplicationSettings() {
       <h2 className="text-xs font-semibold uppercase tracking-wider text-faint">Applications</h2>
       <label className="mt-3 flex items-start gap-2.5 text-sm">
         <input type="checkbox" className="mt-1" checked={Boolean(consent)} disabled={consent === null} onChange={(event) => void save(event.target.checked)} />
-        <span>Accept job sites&apos; candidate terms and privacy notices on my behalf when an application asks. Unnepo never opts me into marketing.</span>
+        <span>Accept job sites&apos; terms, privacy notices, and acknowledgements on my behalf when an application asks. Arbitration, background-check, and non-compete agreements are always left for me, and Unnepo never opts me into marketing.</span>
       </label>
       {state && <p className="mt-2 text-xs text-muted">{state}</p>}
     </div>

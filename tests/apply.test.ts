@@ -5,7 +5,7 @@ import { saveStructuredProfile } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { assertPublicUrl, setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
-import { acceptAiAnswer, classifyQuestion, missingAnswers, planAnswers } from "@/lib/apply/questions";
+import { acceptAiAnswer, classifyQuestion, missingAnswers, planAnswers, policyAnswer, RECRUITER_NOTE } from "@/lib/apply/questions";
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
 import { coreTitle } from "@/lib/apply/contacts";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
@@ -369,12 +369,34 @@ describe("applications", () => {
   });
 });
 
-describe("text-message opt-ins", () => {
-  it("are answered No and never confused with the phone number", () => {
-    expect(classifyQuestion("Opt in for texts to this number").field).toBe("smsOptIn");
-    expect(classifyQuestion("Do you consent to receiving text communications related to your job application?").field).toBe("smsOptIn");
+describe("standard answers", () => {
+  const p = (accountConsentAt: string | null = "default") => ({ ...profile, accountConsentAt });
+  it("says no relatives or contacts at the company", () => {
+    expect(policyAnswer("Do you have any relatives currently employed by Bonduelle?", "select", ["Yes", "No"], p())).toBe("No");
+    expect(policyAnswer("Do you know anyone who works here?", "select", ["Yes", "No"], p())).toBe("No");
+    expect(policyAnswer("Are you related to any current employees?", "text", [], p())).toBe("No");
+  });
+
+  it("writes a short thank-you in a message to the recruiter, never in the cover letter box", () => {
+    expect(policyAnswer("Message to the recruiter", "textarea", [], p())).toBe(RECRUITER_NOTE);
+    expect(policyAnswer("Is there anything else you'd like us to know?", "textarea", [], p())).toBe(RECRUITER_NOTE);
+    expect(policyAnswer("Additional information", "textarea", [], p())).toBe(RECRUITER_NOTE);
+    expect(policyAnswer("Cover letter", "textarea", [], p())).toBeNull();
+  });
+
+  it("says yes to texts about the application, no to marketing texts", () => {
+    expect(policyAnswer("I agree to receive text messages from Bonduelle Americas regarding my job application, interview scheduling, and related updates.", "checkbox", ["Yes"], p())).toBe("Yes");
+    expect(policyAnswer("Opt in for texts to this number", "select", ["Yes", "No"], p())).toBe("Yes");
+    expect(policyAnswer("I agree to receive marketing text messages and promotional offers", "select", ["Yes", "No"], p())).toBe("No");
     expect(classifyQuestion("Primary Phone Number").field).toBe("phone");
-    expect(classifyQuestion("Confirm Email").field).toBe("email");
+  });
+
+  it("accepts terms and acknowledgements unless the student turned that off, and never signs away rights", () => {
+    expect(policyAnswer("I acknowledge that I have read the Applicant Privacy Notice", "checkbox", ["Yes"], p())).toBe("Yes");
+    expect(policyAnswer("Do you accept the terms and conditions?", "select", ["I accept", "I do not accept"], p())).toBe("I accept");
+    expect(policyAnswer("I certify that the information provided is true and complete", "checkbox", ["Yes"], p())).toBe("Yes");
+    expect(policyAnswer("Do you accept the terms and conditions?", "select", ["Yes", "No"], p(null))).toBeNull();
+    expect(policyAnswer("I agree to the arbitration agreement", "checkbox", ["Yes"], p())).toBeNull();
   });
 });
 

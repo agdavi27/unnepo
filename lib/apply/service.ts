@@ -23,6 +23,9 @@ export function setDeferForTests(run: ((task: () => Promise<void>) => void) | nu
 
 const OUTREACH_STATES: OutreachState[] = ["not_contacted", "emailed", "replied", "no_response"];
 
+/** Marks consent the student never changed: Settings shows it on, and turning it off saves null. */
+const CONSENT_BY_DEFAULT = "default";
+
 export async function student(userId: string) {
   const [user, document, resume, stored] = await Promise.all([repo.getUserById(userId), repo.getProfileDocument(userId), repo.getLatestResume(userId), applicationProfiles.get(userId)]);
   if (!user) throw new ServiceError("Sign in to continue.", "auth", 401);
@@ -51,7 +54,8 @@ export async function student(userId: string) {
     eligibility: stored?.eligibility ?? {},
     fastApply: stored?.fastApply ?? false,
     jobSitePasswordEncrypted: stored?.jobSitePasswordEncrypted ?? null,
-    accountConsentAt: stored?.accountConsentAt ?? null,
+    // Accepting terms and acknowledgements is on until the student turns it off (which saves null).
+    accountConsentAt: stored?.accountConsentAt === undefined ? CONSENT_BY_DEFAULT : stored.accountConsentAt,
     jobAccounts: stored?.jobAccounts ?? [],
     student: stored?.student,
     aiCache: stored?.aiCache,
@@ -338,7 +342,7 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     if (!Number.isFinite(goal) || goal < 1 || goal > 200) throw new ServiceError("Pick a weekly goal between 1 and 200 applications.", "goal", 400);
     next.weeklyGoal = goal;
   }
-  if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? info.profile.accountConsentAt || nowIso() : null;
+  if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? (info.profile.accountConsentAt && info.profile.accountConsentAt !== CONSENT_BY_DEFAULT ? info.profile.accountConsentAt : nowIso()) : null;
   await applicationProfiles.put(userId, next);
   return { profile: publicProfile(next) };
 }

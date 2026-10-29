@@ -7,7 +7,7 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "smsOptIn";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
@@ -23,8 +23,6 @@ const STANDARD: Array<[RegExp, StandardField]> = [
   // Workday asks what kind of phone the number is before the number itself.
   [/\b(phone|device) (device )?type\b|type of (phone|device)|phone number type/i, "phoneType"],
   [/\b(phone )?extension\b|^ext\.?$/i, "phoneExtension"],
-  // Text-message and marketing opt-ins ("Opt in for texts to this number"). Unnepo never opts the student in.
-  [/\bopt[- ]?in\b.*\b(texts?|sms|messages?|marketing|newsletter|updates)\b|\b(texts?|sms) (messages?|communications?|alerts?|updates)\b.*\b(consent|opt|agree|receive)|\b(consent|agree) to (receive|receiving) (texts?|sms|marketing)/i, "smsOptIn"],
   [/\b(phone|mobile|cell)\b/i, "phone"],
   [/how did you (hear|find out|learn) (about|of)|where did you (hear|find|see)|(referral|application|candidate|lead) source|^source$/i, "hearAbout"],
   [/linkedin/i, "linkedin"],
@@ -94,7 +92,6 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
     case "phoneExtension": return null;
     // Unnepo opened the company's own posting, so its careers site is where the student found it.
     case "hearAbout": return { answer: "Company website", source: "default" };
-    case "smsOptIn": return { answer: "No", source: "default" };
     case "currentStudent": return Number(context.graduationYear) >= new Date().getFullYear() ? { answer: "Yes", source: "profile" } : null;
   }
 }
@@ -157,6 +154,43 @@ function matchOption(answer: string, options: string[]) {
   return null;
 }
 
+// Rules for questions nearly every application asks the same way. Checked before the "sensitive" rule, since
+// several (consent, agree, acknowledge) use words that would otherwise leave them for the student.
+const RELATIVES = /\b(relatives?|family members?|related to|spouse|domestic partner|in-laws?)\b.*\b(work|works|working|employ\w*|company|organi[sz]ation|us|our)\b|\b(know|acquainted with|friends with) (anyone|anybody|someone|somebody|any (current )?employees?)\b|\b(friends?|relatives?|family) (who )?(currently )?(work|works|is employed)\b|referred by (a|an) (current )?employee/i;
+const MESSAGE = /message (to|for) (the )?(recruiter|hiring (team|manager)|employer|us)|anything else (you(?:'|’)?d like|you would like|to (share|add|tell)|we should know)|additional (information|comments?|notes?|details)|^(message|comments?|notes?)$|note to (the )?(recruiter|hiring)|^(your )?message( to us)?$/i;
+const TEXTS = /\b(texts?|sms|text messages?)\b/i;
+const MARKETING = /\b(marketing|promotional|promotions?|newsletters?|offers|advertis)/i;
+const TERMS = /\b(acknowledge?|acknowledgement|i agree|agree to|i accept|accept (the|these|our)|terms (and|&) conditions|terms of (use|service)|privacy (policy|notice|statement)|i have read|read and (understand|understood|agree)|i understand|consent to (the )?(processing|collection|use|storage)|certify that (the |all |my )?(information|answers|statements)|true,? (correct|complete|accurate) and)\b/i;
+// Signing these away is the student's call, not a standard answer.
+const NOT_STANDARD_TERMS = /arbitrat|non-?compete|non-?solicit|background (check|screen)|drug (test|screen)|credit (check|report)|waive/i;
+
+export const RECRUITER_NOTE = "Thank you so much for considering my application. I hope to hear back from you soon!";
+
+/** The yes/no answer in the form's own words: "Yes", "I agree", "I acknowledge", "Accept"… */
+function yesNo(yes: boolean, options: string[]) {
+  if (!options.length) return yes ? "Yes" : "No";
+  const words = yes ? [/^yes\b/i, /\b(i )?(agree|accept|acknowledge|consent|understand|certify)\b/i] : [/^no\b/i, /\b(disagree|decline|do not|don['’]?t)\b/i];
+  for (const word of words) {
+    const match = options.find((option) => word.test(option));
+    if (match) return match;
+  }
+  return null;
+}
+
+/**
+ * The standard answers: no relatives or contacts at the company, a short thank-you to the recruiter, yes to
+ * texts about the application (never to marketing), and yes to acknowledgements and the site's terms when
+ * the student allows Unnepo to accept them (on unless they turn it off in Settings).
+ */
+export function policyAnswer(label: string, kind: ApplicationQuestion["kind"], options: string[], profile: ApplicationProfile): string | null {
+  const text = label.trim();
+  if (RELATIVES.test(text) && kind !== "file") return kind === "textarea" ? "No" : yesNo(false, options);
+  if (MESSAGE.test(text) && (kind === "textarea" || kind === "text") && !/cover letter/i.test(text)) return RECRUITER_NOTE;
+  if (TEXTS.test(text) && /\b(consent|agree|opt[- ]?in|receive|receiving|sign up|subscribe)\b/i.test(text)) return yesNo(!MARKETING.test(text), options);
+  if (TERMS.test(text) && !NOT_STANDARD_TERMS.test(text) && profile.accountConsentAt) return yesNo(true, options);
+  return null;
+}
+
 /**
  * Fills what can be filled without guessing: contact fields, education, the resume file, and answers
  * the student saved before. Sensitive questions stay empty unless the student saved an answer.
@@ -174,6 +208,8 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
       const answer = question.kind === "select" || question.options.length ? matchOption(eligible, question.options) : eligible;
       if (answer) return { ...question, answer, source: "student", evidence: null };
     }
+    const standard = question.kind === "file" ? null : policyAnswer(question.label, question.kind, question.options, context.profile);
+    if (standard) return { ...question, answer: standard, source: "default", evidence: null };
     const { field, sensitive } = classifyQuestion(question.label);
     // Voluntary self-identification: the student's own choice when they made one, otherwise decline when offered.
     if (DEMOGRAPHIC.test(question.label) && question.options.length) {
