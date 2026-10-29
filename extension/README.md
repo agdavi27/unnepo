@@ -50,6 +50,7 @@ panel can read it; web pages and content scripts can't ask for it.
 - `src/content/greenhouse.ts`: Greenhouse's hosted form, by field id (React selects, uploads, checkbox groups)
 - `src/content/generic.ts`: every other form (Lever, Ashby, company sites)
 - `src/content/fill.ts`: the injected entry point
+- `src/content/spiders.ts`: the pixel spiders that drop in and crawl the page during a fill (skipped with reduced motion)
 - `src/content/connect.ts`: receives the token on the connect page
 - `src/shared/password.ts`: makes the job-site password and checks the rules
 - `src/sidepanel/`: the panel

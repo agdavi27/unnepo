@@ -3,6 +3,7 @@ import { press, sleep, typeInto } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { emptyRequired, isEmpty, labelOf, scanFields, scanPage } from "./scan";
+import { startSpiders, stopSpiders } from "./spiders";
 
 /**
  * Injected into the job page when the student presses Fill. Scans the form, fills it from the plan the
@@ -129,6 +130,12 @@ if (!window.__unnepo) {
       reply(scanPage());
       return false;
     }
+    if (message?.type === "spiders") {
+      if (message.on) startSpiders();
+      else stopSpiders();
+      reply({ ok: true });
+      return false;
+    }
     if (message?.type === "next") {
       const button = nextButton();
       if (button) {
@@ -139,6 +146,7 @@ if (!window.__unnepo) {
       return false;
     }
     if (message?.type === "fill") {
+      startSpiders();
       fill(message.plan as FillPlan).then(reply, (error) => reply({ filled: [], failed: [{ label: "Form", reason: error instanceof Error ? error.message : "couldn't fill" }], needsYou: [], captcha: false, submitted: false, ms: 0 } satisfies FillReport));
       return true;
     }

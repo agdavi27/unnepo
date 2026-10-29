@@ -131,6 +131,8 @@ async function fill(tabId: number) {
   await saveJob(tabId, { step: "Reading the form…", report: null, submission: null, error: null, clickedAt: null, llmCalls: 0 });
   try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content/fill.js"] });
+    // The spiders come out while Unnepo works; they never slow the fill down.
+    void send(tabId, { type: "spiders", on: true }).catch(() => undefined);
     let scan = await send<Scan>(tabId, { type: "scan" });
     if (scan.embeddedForm && !scan.fields.length) throw new Error(`This page shows the form inside another site. Open the form directly, then press Fill: ${scan.embeddedForm}`);
     if (!hasForm(scan)) throw new Error("No application form on this page. Open the job's application form, then press Fill.");
@@ -187,6 +189,8 @@ async function fill(tabId: number) {
     await saveJob(tabId, { step: `Stopped after ${MAX_PAGES} pages. Check the page, then press Fill again to keep going.` });
   } catch (error) {
     await saveJob(tabId, { error: error instanceof Error ? error.message : "Something went wrong.", step: "Stopped." });
+  } finally {
+    void send(tabId, { type: "spiders", on: false }).catch(() => undefined);
   }
 }
 
