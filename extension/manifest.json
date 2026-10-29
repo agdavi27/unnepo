@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Unnepo",
+  "short_name": "Unnepo",
+  "version": "0.1.0",
+  "description": "Fills job and internship applications from your Unnepo profile, in your own browser. You approve every submit.",
+  "minimum_chrome_version": "116",
+  "action": {
+    "default_title": "Open Unnepo"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/panel.html"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": [
+    "storage",
+    "sidePanel",
+    "scripting",
+    "tabs",
+    "activeTab",
+    "webRequest"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://localhost/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://unneponew.vercel.app/extension/connect*",
+        "http://localhost/extension/connect*"
+      ],
+      "js": [
+        "content/connect.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

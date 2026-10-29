@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { serverConfig } from "@/lib/config";
 import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
-import { bestOption } from "@/lib/apply/options";
+import { bestOption, degreeAnswer } from "@/lib/apply/options";
+
+export { degreeAnswer };
 import { supportedBy } from "@/lib/apply/questions";
 
 /**
@@ -120,30 +122,6 @@ export function formatDate(raw: string, format: string | null, options: string[]
   if (/YYYY-MM/.test(want)) return `${date.year}-${mm}${/DD/.test(want) ? "-01" : ""}`;
   if (/MM.?DD.?YYYY/.test(want)) return `${mm}/01/${date.year}`;
   return `${mm}/${date.year}`;
-}
-
-const DEGREE_NAMES: Array<[RegExp, string[]]> = [
-  // Graduate degrees first: "M.B.A." also contains "B.A.".
-  [/\b(m\.?\s?b\.?\s?a\b|mba\b)/i, ["Master of Business Administration (M.B.A.)", "MBA", "Master of Business Administration", "Master's Degree", "Masters"]],
-  [/\b(ph\.?\s?d|doctor)/i, ["Doctor of Philosophy (Ph.D.)", "Doctorate", "PhD", "Doctoral Degree"]],
-  [/\b(m\.?\s?a\b\.?|m\.?\s?s\b\.?|m\.?\s?sc|master)/i, ["Master's Degree", "Master's", "Masters", "Master"]],
-  [/\b(b\.?\s?a\b\.?|b\.?\s?s\b\.?|b\.?\s?sc|bachelor)/i, ["Bachelor's Degree", "Bachelor's", "Bachelors", "Bachelor", "Bachelor of Arts", "Bachelor of Science", "BA", "BS", "Undergraduate"]],
-  [/\bassociate/i, ["Associate's Degree", "Associate Degree", "Associates"]],
-  [/high school|diploma|ged/i, ["High School Diploma", "High School", "GED"]],
-];
-
-/** The degree as the form's options word it. */
-export function degreeAnswer(degree: string, options: string[]) {
-  if (!options.length) return degree || null;
-  // Exact wording first; then the degree's usual names. A loose match could turn "B.A." into "M.B.A.".
-  const exact = options.find((option) => option.trim().toLowerCase() === degree.trim().toLowerCase());
-  if (exact) return exact;
-  const names = DEGREE_NAMES.find(([pattern]) => pattern.test(degree))?.[1] ?? [];
-  for (const name of names) {
-    const match = bestOption(name, options);
-    if (match) return match;
-  }
-  return null;
 }
 
 /** Which resume entry a field belongs to: "Work Experience 2" or "education[1]" is the second one. */
