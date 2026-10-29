@@ -5,7 +5,7 @@ import { useEffect, useReducer, useState } from "react";
 /**
  * The home page centerpiece: Unnepo's original pixel spider hanging on a thread, talking through a retro
  * dialogue box. Lines type out while his mouth moves; a click finishes the line or moves to the next one.
- * With reduced motion, lines appear whole and nothing bobs or blinks.
+ * With reduced motion, lines appear whole and nothing bobs or blinks. Poke him and he gets mad.
  */
 
 const LINES = [
@@ -17,17 +17,21 @@ const LINES = [
   "Your job? Pick the jobs. I'll do the crawling.",
 ];
 
+/** What he says when poked, getting crankier each time. */
+const OUCH = ["Ouch!", "Hey! Quit poking me.", "I have eight legs and I'm not afraid to use them.", "OK, that's it. I'm telling the recruiters."];
+const MAD_MS = 2200;
+
 const ACCENT = "#3D8BFF";
 const PALETTE: Record<string, string> = {
   o: "#000000", b: "#6E5B6E", h: "#B48FAE", d: "#4E3549", a: ACCENT, k: "#7E6580", K: "#5A4258",
-  l: "#6E5B6E", L: "#4E3549", e: ACCENT, w: "#FFFFFF", m: "#1A0E14", f: "#F7F7F8", p: "#965E8C",
+  l: "#6E5B6E", L: "#4E3549", e: ACCENT, w: "#FFFFFF", m: "#1A0E14", f: "#F7F7F8", p: "#965E8C", r: "#FF4D4D",
 };
 
 const W = 40;
 const H = 30;
 
-/** The 40×30 spider, drawn from shapes so it's easy to tweak. `open` is the talking frame. */
-function buildSpider(open: boolean): string[] {
+/** The 40×30 spider, drawn from shapes so it's easy to tweak. `open` is the talking frame; `angry` is after a poke. */
+function buildSpider(open: boolean, angry = false): string[] {
   const g: string[][] = Array.from({ length: H }, () => Array<string>(W).fill(""));
   const set = (x: number, y: number, c: string) => { if (x >= 0 && x < W && y >= 0 && y < H) g[y][x] = c; };
   const brush = (x: number, y: number, c: string) => { set(x, y, c); set(x + 1, y, c); set(x, y + 1, c); set(x + 1, y + 1, c); };
@@ -67,6 +71,12 @@ function buildSpider(open: boolean): string[] {
   blob(20, 17.8, 6.8, 5.2, "k", "h", "K"); // head
   for (const [x, y] of [[16, 15], [17, 15], [16, 16], [17, 16], [22, 15], [23, 15], [22, 16], [23, 16]]) set(x, y, "e");
   set(16, 15, "w"); set(22, 15, "w"); set(14, 14, "e"); set(25, 14, "e");
+  if (angry) {
+    // Red eyes under brows that slant down toward the middle.
+    for (const [x, y] of [[16, 15], [17, 15], [16, 16], [17, 16], [22, 15], [23, 15], [22, 16], [23, 16], [14, 14], [25, 14]]) set(x, y, "r");
+    set(17, 16, "w"); set(22, 16, "w");
+    for (const [x, y] of [[15, 13], [16, 13], [17, 14], [18, 14], [24, 13], [23, 13], [22, 14], [21, 14]]) set(x, y, "m");
+  }
   if (open) {
     for (let x = 17; x <= 22; x++) { set(x, 19, "m"); set(x, 20, "m"); }
     for (let x = 18; x <= 21; x++) set(x, 21, "m");
@@ -112,20 +122,28 @@ const SAME = (i: number) => OPEN[i] === CLOSED[i];
 const BASE = runs(CLOSED, SAME);
 const MOUTH_OPEN = runs(OPEN, (i) => !SAME(i));
 const MOUTH_CLOSED = runs(CLOSED, (i) => !SAME(i));
+const ANGRY = runs(buildSpider(true, true), () => true);
 
 function Rects({ list }: { list: Run[] }) {
   return <>{list.map((run) => <rect key={`${run.x}-${run.y}`} x={run.x} y={run.y} width={run.w} height={1} fill={run.fill} />)}</>;
 }
 
-function Spider({ talking }: { talking: boolean }) {
+function Spider({ talking, mad, onPoke }: { talking: boolean; mad: number; onPoke: () => void }) {
   return (
-    <div className="unnepo-bob relative w-[min(400px,82vw)]" aria-hidden>
+    <div className="unnepo-bob relative w-[min(400px,82vw)]">
       <div className="absolute bottom-[calc(100%-18px)] left-[calc(50%-3px)] h-[900px] w-[6px] bg-[#3A3A44]" />
-      <svg viewBox={`0 0 ${W} ${H}`} className="relative block w-full" shapeRendering="crispEdges">
-        <Rects list={BASE} />
-        <g style={{ display: talking ? "inline" : "none" }}><Rects list={MOUTH_OPEN} /></g>
-        <g style={{ display: talking ? "none" : "inline" }}><Rects list={MOUTH_CLOSED} /></g>
-      </svg>
+      <button type="button" onClick={onPoke} aria-label="Poke the spider" className="relative block w-full cursor-pointer focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-4 focus-visible:outline-[#3D8BFF]">
+        {/* A new key on each poke restarts the shake. */}
+        <svg key={mad} viewBox={`0 0 ${W} ${H}`} className={`block w-full ${mad ? "unnepo-shake" : ""}`} shapeRendering="crispEdges" aria-hidden>
+          {mad ? <Rects list={ANGRY} /> : (
+            <>
+              <Rects list={BASE} />
+              <g style={{ display: talking ? "inline" : "none" }}><Rects list={MOUTH_OPEN} /></g>
+              <g style={{ display: talking ? "none" : "inline" }}><Rects list={MOUTH_CLOSED} /></g>
+            </>
+          )}
+        </svg>
+      </button>
     </div>
   );
 }
@@ -148,6 +166,9 @@ function step(state: Typing, action: "tick" | "advance"): Typing {
 export function SpiderDialogue() {
   const [state, dispatch] = useReducer(step, { line: 0, shown: 0, hold: 0 });
   const [reduced, setReduced] = useState(false);
+  // Pokes so far; `mad` is non-zero (the poke number) while he's still cross.
+  const [pokes, setPokes] = useState(0);
+  const [mad, setMad] = useState(0);
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -158,14 +179,26 @@ export function SpiderDialogue() {
   }, []);
 
   useEffect(() => {
-    if (reduced) return;
+    if (reduced || mad) return;
     const timer = setInterval(() => dispatch("tick"), TYPE_MS);
     return () => clearInterval(timer);
-  }, [reduced]);
+  }, [reduced, mad]);
+
+  useEffect(() => {
+    if (!mad) return;
+    const timer = setTimeout(() => setMad(0), MAD_MS);
+    return () => clearTimeout(timer);
+  }, [mad]);
+
+  const poke = () => {
+    const count = pokes + 1;
+    setPokes(count);
+    setMad(count);
+  };
 
   const { line } = state;
-  const text = LINES[line];
-  const typed = reduced ? text.length : state.shown;
+  const text = mad ? OUCH[Math.min(mad, OUCH.length) - 1] : LINES[line];
+  const typed = reduced || mad ? text.length : state.shown;
   const typing = typed < text.length;
   // With reduced motion every line is shown whole, so a click always moves on.
   const advance = () => (reduced ? (dispatch("advance"), dispatch("advance")) : dispatch("advance"));
@@ -180,19 +213,21 @@ export function SpiderDialogue() {
         @keyframes unnepo-blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
         .unnepo-bob { animation: unnepo-bob 3.2s steps(4) infinite; }
         .unnepo-blink { animation: unnepo-blink 0.9s steps(1) infinite; }
-        @media (prefers-reduced-motion: reduce) { .unnepo-bob, .unnepo-blink { animation: none; } }
+        @keyframes unnepo-shake { 0%, 100% { transform: translateX(0) } 20%, 60% { transform: translateX(-10px) rotate(-3deg) } 40%, 80% { transform: translateX(10px) rotate(3deg) } }
+        .unnepo-shake { animation: unnepo-shake .45s steps(5); }
+        @media (prefers-reduced-motion: reduce) { .unnepo-bob, .unnepo-blink, .unnepo-shake { animation: none; } }
       `}</style>
-      <Spider talking={talking} />
+      <Spider talking={talking} mad={mad} onPoke={poke} />
       {/* Buttons take their font from the page (globals.css), so the box's font is set on this wrapper. */}
       <div className="flex w-full max-w-[760px] flex-col font-[family-name:var(--font-pixel)] text-[clamp(13px,1.7vw,17px)] leading-[2]">
-        <div className="relative z-[1] -mb-2 ml-6 self-start border-4 border-bg bg-[#3D8BFF] px-3.5 pb-2 pt-2.5 text-[13px] leading-normal text-white shadow-[0_0_0_4px_#F7F7F8]">UNNEPO</div>
+        <div className={`relative z-[1] -mb-2 ml-6 self-start border-4 border-bg ${mad ? "bg-[#FF4D4D]" : "bg-[#3D8BFF]"} px-3.5 pb-2 pt-2.5 text-[13px] leading-normal text-white shadow-[0_0_0_4px_#F7F7F8]`}>UNNEPO</div>
         <button
           type="button"
-          onClick={advance}
+          onClick={() => (mad ? setMad(0) : advance())}
           aria-label={typing ? "Show the whole line" : "Next line"}
           className="relative min-h-[150px] cursor-pointer border-4 border-bg bg-[#F7F7F8] px-8 pb-[34px] pt-[30px] text-left text-bg shadow-[0_0_0_4px_#F7F7F8,12px_12px_0_4px_#1E1E26] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[10px] focus-visible:outline-[#3D8BFF]"
         >
-          <span aria-hidden>{text.slice(0, typed)}</span>
+          <span aria-hidden className={mad ? "text-[#C81E2E]" : undefined}>{text.slice(0, typed)}</span>
           <span className="sr-only" aria-live="polite">{text}</span>
           {!typing && <span aria-hidden className="unnepo-blink absolute bottom-4 right-[22px] h-0 w-0 border-x-8 border-t-[10px] border-x-transparent border-t-bg" />}
         </button>

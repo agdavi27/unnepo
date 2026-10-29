@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { APPLICATIONS_PER_CREDIT, ENTERPRISE_PLAN, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
+import { ActivityToasts } from "@/components/marketing/activity-toasts";
+import { Schools } from "@/components/marketing/schools";
 import { SpiderDialogue } from "@/components/marketing/spider-dialogue";
 
 /** The Chrome Web Store listing, once the extension is published. Until then the button starts sign-up. */
@@ -20,6 +22,7 @@ export function Landing() {
 
       <main className="relative flex flex-1 flex-col items-center gap-9 px-6 pb-16 pt-2">
         <h1 className="sr-only">Unnepo: you pick the jobs, we do the crawling</h1>
+        <ActivityToasts />
         <SpiderDialogue />
         <div className="flex flex-col items-center gap-4">
           <a
@@ -36,6 +39,8 @@ export function Landing() {
           </p>
         </div>
       </main>
+
+      <Schools />
 
       <section id="pricing" className="relative mx-auto w-full max-w-5xl border-t border-[#17171B] px-6 py-20">
         <p className="font-mono text-xs uppercase tracking-[1.2px] text-[#8B8B94]">Pricing</p>
