@@ -1,5 +1,6 @@
 import { CONFIRM_TEXT } from "../shared/types";
 import { press } from "./dom";
+import { openDialog } from "./scan";
 
 /**
  * The buttons that move an application along: Apply on a job posting, Create account or Sign in, Next,
@@ -12,7 +13,10 @@ export type PageAction = { kind: ActionKind; label: string };
 
 export const SUBMIT = /^(submit( (my )?application)?|send( my)? application|complete( my)? application|submit (and|&) apply|finish( application)?)$/i;
 const APPLY_SUBMIT = /^apply( now)?$/i;
-const NEXT = /^(next( step| page)?|continue( to next step)?|save (and|&) continue|save (and|&) next|proceed|next ?[›>]|continue ?[›>])$/i;
+// "Next", "Continue", "Continue To Application", "Save and Continue", "Proceed to questions"…
+const NEXT = /^(next|continue|proceed|save (and|&) (continue|next|proceed))\b[^.?!]{0,32}$|^(next|continue) ?[›>]$/i;
+// …but not "Continue with LinkedIn" and the like, which hand the student to another sign-in.
+const NOT_NEXT = /\b(with|using|via) (linkedin|google|indeed|facebook|apple|microsoft|seek|email)\b|sign ?in|log ?in|shopping/i;
 const APPLY = /^(apply( now| for this (job|position|role|opportunity)| here| online| today)?|i(?:'|’)?m interested|start (my |your )?application|begin application|apply manually)$/i;
 const CREATE = /^(create (an |my |your )?account|register|sign up|create account (and|&) continue)$/i;
 const SIGN_IN = /^(sign in|log ?in)$/i;
@@ -30,9 +34,9 @@ function usable(el: HTMLElement | null): el is HTMLElement {
 
 const byId = (id: string) => Array.from(document.querySelectorAll<HTMLElement>(`[data-automation-id='${id}']`)).find(usable) ?? null;
 
-/** Buttons and button-like links on the page, minus the site header and footer. */
+/** Buttons and button-like links on the page (or only in the open popup), minus the site header and footer. */
 function buttons() {
-  return Array.from(document.querySelectorAll<HTMLElement>("button, input[type=submit], input[type=button], a, [role=button]"))
+  return Array.from((openDialog() ?? document).querySelectorAll<HTMLElement>("button, input[type=submit], input[type=button], a, [role=button]"))
     .filter(usable)
     .filter((el) => !el.closest("header, footer, nav, [data-automation-id='utilityButtonBar'], [role=banner], [role=navigation]"));
 }
@@ -62,7 +66,7 @@ export function findAction(knownAccount: boolean, formFields: number): (PageActi
   // Workday's footer button says "Next" or "Save and Continue" on every page, and "Submit" on the last.
   const footer = byId("bottom-navigation-next-button") ?? byId("pageFooterNextButton");
   if (footer) return make(SUBMIT.test(text(footer)) ? "submit" : "next", footer);
-  const next = find(NEXT);
+  const next = buttons().find((el) => NEXT.test(text(el)) && !NOT_NEXT.test(text(el))) ?? null;
   if (next) return make("next", next);
   const submit = find(SUBMIT) ?? (formFields >= 3 ? find(APPLY_SUBMIT) : null);
   if (submit) return make("submit", submit);

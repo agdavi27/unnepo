@@ -137,16 +137,29 @@ function mark(el: Element) {
   return el.getAttribute("data-unnepo-id")!;
 }
 
-/** Every answerable field on the page, one per question. */
+/**
+ * An open popup with a form in it (Paycom's "Getting You Started", sign-up modals). While one is up it's
+ * the only part of the page that counts: the page behind it is usually marked hidden, and some sites
+ * wrongly mark parts of the popup itself hidden too.
+ */
+export function openDialog(): HTMLElement | null {
+  return Array.from(document.querySelectorAll<HTMLElement>("[role=dialog], [role=alertdialog], [aria-modal='true'], dialog[open]"))
+    .filter((dialog) => visible(dialog) && dialog.getBoundingClientRect().height > 40)
+    .filter((dialog) => Array.from(dialog.querySelectorAll<HTMLElement>("input:not([type=hidden]), select, textarea")).some((el) => visible(el) && el.getBoundingClientRect().width >= 4))
+    .pop() ?? null;
+}
+
+/** Every answerable field on the page (or in the open popup), one per question. */
 export function scanFields(): PageField[] {
   const out: PageField[] = [];
   const seenGroups = new Set<string>();
-  const controls = Array.from(document.querySelectorAll<HTMLElement>("input, select, textarea, button[aria-haspopup='listbox']"));
+  const dialog = openDialog();
+  const controls = Array.from((dialog ?? document).querySelectorAll<HTMLElement>("input, select, textarea, button[aria-haspopup='listbox']"));
   for (const el of controls) {
     const type = (el.getAttribute("type") ?? (el.tagName === "TEXTAREA" ? "textarea" : el.tagName === "SELECT" ? "select" : "text")).toLowerCase();
     if (["hidden", "submit", "button", "password", "image", "reset", "search"].includes(type) && el.getAttribute("data-automation-id") !== "searchBox") continue;
     if (el.getAttribute("aria-hidden") === "true" || /honeypot|bee-?catcher/i.test(`${el.getAttribute("name") ?? ""} ${el.getAttribute("data-automation-id") ?? ""}`)) continue;
-    if (el.closest("[aria-hidden='true']") || el.id.startsWith("g-recaptcha")) continue;
+    if ((!dialog && el.closest("[aria-hidden='true']")) || el.id.startsWith("g-recaptcha")) continue;
     if (type !== "file" && type !== "radio" && type !== "checkbox" && !visible(el)) continue;
     // Bot traps: a box a person can't see (a pixel or two) or one whose label says to leave it empty. Never filled.
     if (type !== "file" && type !== "radio" && type !== "checkbox" && (el.getBoundingClientRect().width < 4 || el.getBoundingClientRect().height < 4)) continue;

@@ -7,7 +7,7 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "smsOptIn";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
@@ -23,6 +23,8 @@ const STANDARD: Array<[RegExp, StandardField]> = [
   // Workday asks what kind of phone the number is before the number itself.
   [/\b(phone|device) (device )?type\b|type of (phone|device)|phone number type/i, "phoneType"],
   [/\b(phone )?extension\b|^ext\.?$/i, "phoneExtension"],
+  // Text-message and marketing opt-ins ("Opt in for texts to this number"). Unnepo never opts the student in.
+  [/\bopt[- ]?in\b.*\b(texts?|sms|messages?|marketing|newsletter|updates)\b|\b(texts?|sms) (messages?|communications?|alerts?|updates)\b.*\b(consent|opt|agree|receive)|\b(consent|agree) to (receive|receiving) (texts?|sms|marketing)/i, "smsOptIn"],
   [/\b(phone|mobile|cell)\b/i, "phone"],
   [/how did you (hear|find out|learn) (about|of)|where did you (hear|find|see)|(referral|application|candidate|lead) source|^source$/i, "hearAbout"],
   [/linkedin/i, "linkedin"],
@@ -92,6 +94,7 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
     case "phoneExtension": return null;
     // Unnepo opened the company's own posting, so its careers site is where the student found it.
     case "hearAbout": return { answer: "Company website", source: "default" };
+    case "smsOptIn": return { answer: "No", source: "default" };
     case "currentStudent": return Number(context.graduationYear) >= new Date().getFullYear() ? { answer: "Yes", source: "profile" } : null;
   }
 }

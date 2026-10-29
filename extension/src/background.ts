@@ -150,10 +150,11 @@ async function run(tabId: number) {
   let filledKey = "";
   let pressedKey = "";
   let presses = 0;
+  let pressedAt = 0;
   let resume: FileData | null | undefined;
   let llmCalls = 0;
   let lastStep = "";
-  // Spiders crawl while Unnepo works and get out of the way while the student has something to do.
+  // Spiders crawl the whole time Unnepo is running, until it's submitted, something goes wrong, or Stop.
   let spidersOut = false;
   let lastUrl = "";
   const spiders = (on: boolean) => {
@@ -190,7 +191,6 @@ async function run(tabId: number) {
       if (!status) { await wait(400); continue; }
       if (!stillRunning(tabId, runId)) break;
       if (status.accountExists && !known) { await rememberAccount(host); continue; }
-      if (status.captcha || status.verifyEmail || status.needsYou.length) spiders(false);
       if (status.captcha) { await step("A CAPTCHA is on the page. Solve it and Unnepo carries on. Unnepo never solves CAPTCHAs."); await wait(1200); continue; }
       if (status.verifyEmail) { await step("The site sent you an email to verify your account. Open the link, come back to this tab, and Unnepo carries on."); await wait(1500); continue; }
 
@@ -204,7 +204,6 @@ async function run(tabId: number) {
           applicationId = job.application.id;
           await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: where.url, host: firstHost });
         }
-        spiders(true);
         await step("Preparing your answers…");
         const map = !applicationId || (!scan.useServerSchema && !scan.fields.length) ? { answers: [], llmCalls: 0 } : await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : scan.fields });
         llmCalls += map.llmCalls;
@@ -242,21 +241,21 @@ async function run(tabId: number) {
         continue;
       }
       if (action.kind === "submit" && !(await settings()).autoSubmit) {
-        spiders(false);
         await step(`Everything's filled. Check the form, then press "${action.label}" on the page.`);
         await wait(1000);
         continue;
       }
       // Pressing the same button over and over on a page that won't move helps no one.
       const pressKey = `${key}|${action.kind}|${action.label}`;
-      if (pressKey === pressedKey && presses >= 2) {
+      // After two tries it waits, then tries again now and then (the student may have fixed something).
+      if (pressKey === pressedKey && presses >= 2 && Date.now() - pressedAt < 8000) {
         await step(`Pressed "${action.label}", but the page didn't move. Something on the page may need you; Unnepo carries on when it changes.`);
         await wait(1200);
         continue;
       }
-      spiders(true);
       presses = pressKey === pressedKey ? presses + 1 : 1;
       pressedKey = pressKey;
+      pressedAt = Date.now();
       await step(ACTION_STEP[action.kind]);
       const pressed = await send<{ pressed: boolean }>(tabId, { type: "press", kind: action.kind, knownAccount: known }).catch(() => ({ pressed: false }));
       if (!pressed.pressed) { await wait(300); continue; }

@@ -369,6 +369,15 @@ describe("applications", () => {
   });
 });
 
+describe("text-message opt-ins", () => {
+  it("are answered No and never confused with the phone number", () => {
+    expect(classifyQuestion("Opt in for texts to this number").field).toBe("smsOptIn");
+    expect(classifyQuestion("Do you consent to receiving text communications related to your job application?").field).toBe("smsOptIn");
+    expect(classifyQuestion("Primary Phone Number").field).toBe("phone");
+    expect(classifyQuestion("Confirm Email").field).toBe("email");
+  });
+});
+
 describe("tracking outcomes and goals", () => {
   const job = (userId: string, index: number) => ({
     userId, jobKey: `url:acme.com/job/${index}`, jobUrl: `https://acme.com/job/${index}`, ats: "other" as const, title: `Role ${index}`, company: "Acme", companyDomain: null, department: null, location: null,

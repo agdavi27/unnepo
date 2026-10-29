@@ -29,6 +29,7 @@ await build({
   logLevel: "warning",
 });
 cpSync(path.join(here, "manifest.json"), path.join(out, "manifest.json"));
+cpSync(path.join(here, "icons"), path.join(out, "icons"), { recursive: true });
 cpSync(path.join(here, "src/sidepanel/panel.html"), path.join(out, "sidepanel/panel.html"));
 cpSync(path.join(here, "src/sidepanel/panel.css"), path.join(out, "sidepanel/panel.css"));
 console.log(`Built the extension into ${path.relative(root, out)} (server: ${api})`);
