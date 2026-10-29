@@ -1,5 +1,5 @@
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
-import { press, sleep } from "./dom";
+import { press, sleep, typeInto } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { emptyRequired, isEmpty, scanFields, scanPage } from "./scan";
@@ -23,6 +23,18 @@ function submitButton() {
   return buttons.find((el) => SUBMIT.test((el.textContent || (el as HTMLInputElement).value || "").replace(/\s+/g, " ").trim())) ?? null;
 }
 
+/**
+ * Types the student's job-site password into every empty, visible password box: sign-in, create account,
+ * and the "confirm password" box beside it. Boxes the student already filled are left alone.
+ */
+function fillPasswords(password: string | null) {
+  if (!password) return [];
+  const boxes = Array.from(document.querySelectorAll<HTMLInputElement>("input[type=password]"))
+    .filter((box) => !box.disabled && !box.readOnly && !box.value && box.getBoundingClientRect().height > 0);
+  boxes.forEach((box) => typeInto(box, password));
+  return boxes.map((box, index) => (index === 0 ? "Password" : /confirm|verify|re-?enter|again/i.test(`${box.name} ${box.id} ${box.getAttribute("aria-label") ?? ""} ${box.getAttribute("data-automation-id") ?? ""}`) ? "Confirm password" : `Password ${index + 1}`));
+}
+
 let planned: PageField[] = [];
 let plannedValues = new Map<string, string>();
 
@@ -32,6 +44,7 @@ async function fill(plan: FillPlan): Promise<FillReport> {
   const result = plan.useServerSchema
     ? await fillGreenhouse(plan.answers, files)
     : await fillGeneric((planned = scanFields()), plan.answers, files);
+  result.filled.push(...fillPasswords(plan.password));
   plannedValues = new Map(plan.answers.map((answer) => [answer.label, answer.values.join(", ")]));
   await sleep(300);
   // Verify: what the page itself marks required and is still empty is the student's turn.

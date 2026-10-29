@@ -24,7 +24,8 @@ export type Answer = { id: string; label: string; type: string; required: boolea
 
 export type FileData = { name: string; mime: string; base64: string };
 
-export type FillPlan = { ats: Scan["ats"]; useServerSchema: boolean; answers: Answer[]; resume: FileData | null; coverLetter: FileData | null; autoSubmit: boolean };
+/** `password` is the student's job-site password, for account and sign-in fields. It never leaves the browser. */
+export type FillPlan = { ats: Scan["ats"]; useServerSchema: boolean; answers: Answer[]; resume: FileData | null; coverLetter: FileData | null; autoSubmit: boolean; password: string | null };
 
 export type FillReport = {
   filled: string[];

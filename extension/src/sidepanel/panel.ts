@@ -1,9 +1,11 @@
+import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import type { PanelState } from "../shared/types";
 
 /** The side panel: connect, fill the job on this tab, see what still needs you, and mark it applied. */
 
 const app = document.getElementById("app")!;
 const account = document.getElementById("account")!;
+const passwordSection = document.getElementById("password")!;
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
@@ -60,9 +62,67 @@ function jobView(state: PanelState) {
   return parts.join("");
 }
 
+/**
+ * The job-site password card. It's drawn on its own, not with the rest of the panel, so a password being
+ * typed isn't wiped when the panel refreshes.
+ */
+let passwordMode: "hidden" | "shown" | "editing" = "hidden";
+let passwordNote = "";
+
+async function renderPassword() {
+  const { password } = await ask<{ password?: string }>({ type: "get-password" });
+  if (!password) return;
+  const rules = (value: string) => PASSWORD_RULES.map((rule) => `<li class="${rule.test(value) ? "met" : ""}">${escape(rule.label)}</li>`).join("");
+  passwordSection.innerHTML = `
+    <h2>Job-site password</h2>
+    <p class="sub">Unnepo types this when a job site asks you to create an account or sign in. It stays on this computer and never goes to Unnepo.</p>
+    ${passwordMode === "editing" ? `
+      <input type="text" id="new-password" autocomplete="off" spellcheck="false" placeholder="Your new password">
+      <ul class="rules" id="rules">${rules("")}</ul>
+      <p class="sub">Accounts you already made keep their old password.</p>
+      <div class="actions small"><button class="primary" id="save-password" disabled>Save password</button><button id="cancel-password">Cancel</button></div>
+    ` : `
+      <div class="secret">${passwordMode === "shown" ? escape(password) : "•".repeat(Math.min(password.length, 16))}</div>
+      <div class="actions small">
+        <button id="toggle-password">${passwordMode === "shown" ? "Hide" : "Show"}</button>
+        <button id="copy-password">Copy</button>
+        <button id="change-password">Change</button>
+        <button id="regenerate-password">Make a new one</button>
+      </div>
+    `}
+    ${passwordNote ? `<p class="sub">${escape(passwordNote)}</p>` : ""}`;
+  const redraw = (mode: typeof passwordMode, note = "") => { passwordMode = mode; passwordNote = note; void renderPassword(); };
+  document.getElementById("toggle-password")?.addEventListener("click", () => redraw(passwordMode === "shown" ? "hidden" : "shown"));
+  document.getElementById("copy-password")?.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(password).then(() => redraw(passwordMode, "Copied."), () => redraw(passwordMode, "Couldn't copy. Press Show and copy it yourself."));
+  });
+  document.getElementById("change-password")?.addEventListener("click", () => redraw("editing"));
+  document.getElementById("cancel-password")?.addEventListener("click", () => redraw("hidden"));
+  document.getElementById("regenerate-password")?.addEventListener("click", async () => {
+    if (!confirm("Make a new password? Accounts you already made keep the old one, so keep a copy if you'll sign in to them again.")) return;
+    await ask({ type: "new-password" });
+    redraw("shown", "New password made.");
+  });
+  const input = document.getElementById("new-password") as HTMLInputElement | null;
+  const save = document.getElementById("save-password") as HTMLButtonElement | null;
+  input?.focus();
+  input?.addEventListener("input", () => {
+    document.getElementById("rules")!.innerHTML = rules(input.value);
+    save!.disabled = unmetRules(input.value).length > 0;
+  });
+  save?.addEventListener("click", async () => {
+    const result = await ask<{ ok: boolean; unmet?: string[] }>({ type: "set-password", value: input!.value });
+    if (result.ok) redraw("hidden", "Password saved.");
+    else passwordNote = `Still needs: ${(result.unmet ?? []).join(", ").toLowerCase()}.`;
+  });
+}
+
 async function render() {
   const state = await ask<PanelState>({ type: "state" });
   account.textContent = state.connected ? state.me!.user.email : "";
+  const wasHidden = passwordSection.hidden;
+  passwordSection.hidden = !state.connected;
+  if (state.connected && wasHidden) void renderPassword();
   app.innerHTML = state.connected ? jobView(state) : connectView(state);
   document.getElementById("use-code")?.addEventListener("click", async () => {
     const code = (document.getElementById("code") as HTMLInputElement).value.trim();

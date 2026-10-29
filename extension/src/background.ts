@@ -1,3 +1,4 @@
+import { generatePassword, unmetRules } from "./shared/password";
 import type { Answer, FileData, FillPlan, FillReport, PanelState, Scan } from "./shared/types";
 
 /**
@@ -15,6 +16,15 @@ type Job = NonNullable<PanelState["job"]> & { url: string; clickedAt: number | n
 async function settings() {
   const stored = await chrome.storage.local.get(["token", "apiBase", "autoSubmit"]);
   return { token: (stored.token as string | undefined) ?? null, apiBase: (stored.apiBase as string | undefined) ?? DEFAULT_API, autoSubmit: Boolean(stored.autoSubmit) };
+}
+
+/** The password typed into job sites' account and sign-in forms. Made on first use; kept only on this computer. */
+async function jobSitePassword() {
+  const stored = (await chrome.storage.local.get("jobSitePassword")).jobSitePassword as string | undefined;
+  if (stored) return stored;
+  const password = generatePassword();
+  await chrome.storage.local.set({ jobSitePassword: password });
+  return password;
 }
 
 async function jobs(): Promise<Record<string, Job>> {
@@ -91,7 +101,7 @@ async function fill(tabId: number) {
       wantsCoverLetter ? api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId: job.application.id }).catch(() => null) : Promise.resolve(null),
     ]);
     const { autoSubmit } = await settings();
-    const plan: FillPlan = { ats: scan.ats, useServerSchema: scan.useServerSchema, answers: map.answers, resume, coverLetter: letter ? { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } : null, autoSubmit };
+    const plan: FillPlan = { ats: scan.ats, useServerSchema: scan.useServerSchema, answers: map.answers, resume, coverLetter: letter ? { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } : null, autoSubmit, password: await jobSitePassword() };
     const report = await send<FillReport>(tabId, { type: "fill", plan });
     const step = report.captcha
       ? "A CAPTCHA is on the page. Solve it, then press Submit. Unnepo never solves CAPTCHAs."
@@ -158,6 +168,24 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await api("DELETE", "token").catch(() => undefined);
         await chrome.storage.local.remove("token");
         return reply({ ok: true });
+      // Only the side panel (no tab) may read or change the password; web pages never can.
+      case "get-password":
+        if (sender.tab) return reply({ ok: false });
+        return reply({ ok: true, password: await jobSitePassword() });
+      case "set-password": {
+        if (sender.tab) return reply({ ok: false });
+        const value = String(message.value ?? "");
+        const unmet = unmetRules(value);
+        if (unmet.length) return reply({ ok: false, unmet });
+        await chrome.storage.local.set({ jobSitePassword: value });
+        return reply({ ok: true, password: value });
+      }
+      case "new-password": {
+        if (sender.tab) return reply({ ok: false });
+        const password = generatePassword();
+        await chrome.storage.local.set({ jobSitePassword: password });
+        return reply({ ok: true, password });
+      }
       case "set-auto-submit":
         await chrome.storage.local.set({ autoSubmit: Boolean(message.value) });
         return reply({ ok: true });
@@ -190,6 +218,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   return true;
 });
 
+chrome.runtime.onInstalled.addListener(() => void jobSitePassword());
 chrome.tabs.onRemoved.addListener((tabId) => void saveJob(tabId, null));
 chrome.tabs.onActivated.addListener(() => void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined));
 void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);

@@ -20,6 +20,14 @@ Side panel → **Connect on Unnepo** opens `/extension/connect`. Pressing Connec
 token (stored in `chrome.storage.local`, valid 90 days, only for `/api/extension/*`). The page also shows the
 code to paste into the panel if needed.
 
+## Job-site password
+
+On install the extension makes one strong password (16 characters, with upper and lower case, a number,
+and a special character) and types it into every empty password box on a form: sign-in, create account,
+and confirm password. The student can show, copy, change, or remake it in the side panel; a new one has to
+meet the same rules. It's kept only in `chrome.storage.local` and is never sent to Unnepo. Only the side
+panel can read it; web pages and content scripts can't ask for it.
+
 ## How a fill works
 
 1. **Fill this application** injects `content/fill.js` into the tab and scans the form.
@@ -41,6 +49,7 @@ code to paste into the panel if needed.
 - `src/content/generic.ts`: every other form (Lever, Ashby, company sites)
 - `src/content/fill.ts`: the injected entry point
 - `src/content/connect.ts`: receives the token on the connect page
+- `src/shared/password.ts`: makes the job-site password and checks the rules
 - `src/sidepanel/`: the panel
 
 ## Not yet

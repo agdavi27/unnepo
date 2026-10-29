@@ -9,6 +9,7 @@ import { saveStudentProfile } from "@/lib/profile/service";
 import { login, signUp, userFromSessionToken, verifyEmail } from "@/lib/services/auth";
 import { GET, OPTIONS, POST } from "@/app/api/[...slug]/route";
 import { useTempDb } from "./helpers";
+import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 
 const model = vi.hoisted(() => ({ replies: [] as string[], calls: 0 }));
 vi.mock("@anthropic-ai/sdk", () => ({
@@ -168,5 +169,24 @@ describe("extension API", () => {
     expect((await call("POST", "submissions", token, { url: "https://x.example/a", title: "A", company: "B", confidence: "maybe" })).status).toBe(400);
     const undone = await (await call("POST", "submissions/undo", token, { applicationId: logged.application.id })).json();
     expect(undone.application).toMatchObject({ status: "extracted", confirmation: null });
+  });
+});
+
+describe("job-site password", () => {
+  it("makes passwords that meet every rule job sites ask for, and never the same one twice", () => {
+    const made = new Set<string>();
+    for (let index = 0; index < 300; index += 1) {
+      const password = generatePassword();
+      expect(password).toHaveLength(16);
+      expect(unmetRules(password)).toEqual([]);
+      made.add(password);
+    }
+    expect(made.size).toBe(300);
+  });
+
+  it("says which rules a password the student typed still misses", () => {
+    expect(unmetRules("abc")).toEqual(["A numeric character", "An uppercase character", "A special character", "A minimum of 8 characters"]);
+    expect(unmetRules("Summer2026!")).toEqual([]);
+    expect(unmetRules("        ")).toContain("A special character");
   });
 });

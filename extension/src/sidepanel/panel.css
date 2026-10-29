@@ -24,3 +24,11 @@ ul { margin: 0; padding-left: 18px; color: var(--muted2); }
 .error { color: #fca5a5; }
 label.toggle { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted2); }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.settings { padding: 0 20px 24px; display: flex; flex-direction: column; gap: 10px; }
+.settings h2 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 1px; text-transform: uppercase; color: var(--muted); }
+.secret { font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px; padding: 10px; border-radius: 10px; background: #111114; border: 1px solid var(--control); word-break: break-all; user-select: all; }
+.rules { list-style: none; padding: 0; font-size: 12px; display: grid; gap: 2px; }
+.rules li::before { content: "○ "; }
+.rules li.met { color: var(--ok); }
+.rules li.met::before { content: "● "; }
+.actions.small button { min-height: 36px; font-size: 13px; }
