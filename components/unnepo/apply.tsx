@@ -432,6 +432,8 @@ function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { a
         </div>
       )}
       {app.statusMessage && <p className="rounded-xl bg-card px-4 py-3 text-sm text-zinc-300">{app.statusMessage}</p>}
+      {app.fillReport?.timings && <Timing timings={app.fillReport.timings} />}
+      {app.confirmation?.receiptPath && <a className="text-sm text-muted underline-offset-4 hover:text-white hover:underline" href={`/api/apply/receipt?applicationId=${encodeURIComponent(app.id)}`} target="_blank" rel="noreferrer">View your confirmation receipt ↗</a>}
 
       {app.questions.length > 0 && (
         <div className="space-y-4">
@@ -516,7 +518,10 @@ function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { a
             {working === "fill" ? "Filling the form…" : "Autofill application"}
           </button>
         )}
-        {app.status === "review" && app.fillReport?.stoppedAt && app.fillReport.stoppedAt !== "review" && (
+        {app.status === "review" && app.fillReport?.timings?.pipeline === "fast" && app.fillReport.stoppedAt !== "review" && (
+          <button type="button" className={primary} disabled={Boolean(working) || dirty} title={dirty ? "Save your answers first" : undefined} onClick={() => void run("fill", "/autofill")}>{working === "fill" ? "Filling…" : "Fill again"}</button>
+        )}
+        {app.status === "review" && app.fillReport?.timings?.pipeline !== "fast" && app.fillReport?.stoppedAt && app.fillReport.stoppedAt !== "review" && (
           <button type="button" className={primary} disabled={Boolean(working)} onClick={() => void run("continue", "/continue")}>
             {working === "continue" ? "Continuing…" : "Continue autofill"}
           </button>
@@ -643,6 +648,20 @@ function FieldEditor({ app, onChanged }: { app: App; onChanged: (app: App) => vo
   );
 }
 
+/** Where the time went on a fast-pipeline application. */
+function Timing({ timings }: { timings: NonNullable<NonNullable<JobApplication["fillReport"]>["timings"]> }) {
+  const seconds = (ms?: number) => (ms === undefined ? null : `${(ms / 1000).toFixed(1)}s`);
+  const parts = [
+    seconds(timings.schemaMs) && `form read ${seconds(timings.schemaMs)}`,
+    seconds(timings.mappingMs) && `answers ${seconds(timings.mappingMs)}`,
+    seconds(timings.fillMs) && `filled ${seconds(timings.fillMs)}`,
+    seconds(timings.submitMs) && `submitted ${seconds(timings.submitMs)}`,
+    `${timings.llmCalls} AI call${timings.llmCalls === 1 ? "" : "s"}`,
+    timings.fallback.length ? `fallback for ${timings.fallback.length}` : null,
+  ].filter(Boolean);
+  return <p className="text-xs text-faint"><span className="mr-1.5 rounded-full border border-emerald-900/60 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-emerald-300">Fast</span>{parts.join(" · ")}</p>;
+}
+
 /** The cover letter autofill wrote and put on the form (as text, or as a PDF upload). */
 function CoverLetter({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -696,6 +715,18 @@ function QuestionField({ question, value, disabled, saveChecked, onChange, onSav
       <label htmlFor={id} className={labelClass}>{question.label}{question.required && <span className="text-red-300"> *</span>}</label>
       {question.kind === "file" ? (
         <p className="rounded-xl border border-line bg-card px-3 py-2.5 text-sm text-muted">{question.answer ? `📎 ${question.answer}` : question.required ? "Upload a resume in Settings first." : "Optional. Not attached."}</p>
+      ) : question.kind === "multiselect" && question.options.length > 0 ? (
+        <div id={id} className="max-h-48 space-y-1 overflow-y-auto rounded-xl border border-line bg-card p-2.5">
+          {question.options.map((option) => {
+            const chosen = value.split("\n").filter(Boolean);
+            return (
+              <label key={option} className="flex items-center gap-2 text-sm">
+                <input type="checkbox" disabled={disabled} checked={chosen.includes(option)} onChange={(event) => onChange((event.target.checked ? [...chosen, option] : chosen.filter((item) => item !== option)).join("\n"))} />
+                {option}
+              </label>
+            );
+          })}
+        </div>
       ) : question.options.length > 0 ? (
         <select id={id} className={field} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
           <option value="">Choose…</option>
@@ -724,13 +755,14 @@ function ProfileDetails({ profile, resume, onSaved }: { profile: PublicProfile; 
   const [state, setState] = useState("");
   const [password, setPassword] = useState("");
   const [consent, setConsent] = useState(Boolean(profile.accountConsentAt));
+  const [fast, setFast] = useState(Boolean(profile.fastApply));
   const eligibility = draft.eligibility ?? {};
   const setEligibility = (key: "workAuthorized" | "needsSponsorship" | "over18", value: string) => setDraft({ ...draft, eligibility: { ...eligibility, [key]: value } });
   const fields: Array<[keyof PublicProfile, string]> = [["firstName", "First name"], ["lastName", "Last name"], ["email", "Email for applications"], ["phone", "Phone"], ["linkedin", "LinkedIn URL"], ["website", "Website or portfolio"], ["github", "GitHub URL"], ["addressLine1", "Street address"], ["city", "City"], ["state", "State (full name, e.g. Maine)"], ["postalCode", "ZIP code"], ["country", "Country (e.g. United States)"]];
   async function save() {
     setState("Saving…");
     try {
-      const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { ...draft, eligibility, jobSitePassword: password || undefined, accountConsent: consent });
+      const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { ...draft, eligibility, fastApply: fast, jobSitePassword: password || undefined, accountConsent: consent });
       onSaved(result.profile);
       setPassword("");
       setState("Saved. New jobs will use these details.");
@@ -797,6 +829,10 @@ function ProfileDetails({ profile, resume, onSaved }: { profile: PublicProfile; 
               </div>
             )}
           </div>
+          <label className="flex items-start gap-2.5 rounded-xl border border-line p-4 text-sm">
+            <input type="checkbox" className="mt-1" checked={fast} onChange={(event) => setFast(event.target.checked)} />
+            <span><span className="font-medium">Fast autofill for Greenhouse jobs (beta)</span><span className="block text-xs text-muted">Unnepo reads the whole form from Greenhouse, prepares every answer at once for you to review, then fills it in one pass, usually in under a minute. Applies to Greenhouse jobs you add from now on.</span></span>
+          </label>
           <div className="flex items-center gap-3"><button type="button" className={primary} onClick={() => void save()}>Save details</button>{state && <span className="text-xs text-muted">{state}</span>}</div>
         </div>
       )}

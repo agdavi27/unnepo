@@ -51,12 +51,12 @@ async function bb<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
-/** A browser that stays open for up to 30 minutes so the student can review before submitting. */
-export async function createBrowserSession() {
+/** A browser that stays open (30 minutes by default) so the student can review before submitting. */
+export async function createBrowserSession(timeoutSeconds = 1800) {
   const { projectId } = requireConfig();
   const session = await bb<{ id: string; connectUrl?: string }>("/sessions", {
     method: "POST",
-    body: JSON.stringify({ projectId, keepAlive: true, timeout: 1800, browserSettings: { solveCaptchas: false } }),
+    body: JSON.stringify({ projectId, keepAlive: true, timeout: timeoutSeconds, browserSettings: { solveCaptchas: false } }),
   });
   return session.id;
 }
@@ -320,7 +320,18 @@ const PAGE_HELPERS = `(() => {
     const type = (el.getAttribute("type") || "").toLowerCase();
     if (el.tagName === "BUTTON") return blank.test(clean(el.innerText));
     if (el.tagName === "SELECT") return !el.value || blank.test(clean(el.selectedOptions[0]?.textContent));
+    // A React select (Greenhouse, Lever) keeps its choice beside the input, which itself stays empty.
+    if (el.getAttribute("role") === "combobox") {
+      let node = el.parentElement;
+      for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
+        if (node.querySelector("[class*='single-value'], [class*='multi-value']")) return false;
+        if (node.querySelectorAll("[role=combobox]").length > 1) break;
+      }
+    }
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+      // Several checkboxes for one question ("countries you'd work in"): answered once any is ticked.
+      const group = type === "checkbox" ? el.closest("fieldset, [role=group]") : null;
+      if (group && group.querySelectorAll("input[type=checkbox]").length > 1) return !group.querySelector("input[type=checkbox]:checked");
       if (type === "checkbox") return !el.checked;
       if (type === "radio") return !document.querySelector('input[type=radio][name="' + CSS.escape(el.name) + '"]:checked');
       if (type === "file") return !el.files?.length;
@@ -367,6 +378,12 @@ async function scanControls(page: Page, mode: "empty_required" | "all"): Promise
       const rect = el.getBoundingClientRect();
       if (style.display === "none" || style.visibility === "hidden" || (!rect.width && !rect.height && type !== "file" && type !== "radio" && type !== "checkbox")) return;
       if (onlyEmpty && !u.isEmpty(el)) return;
+      // A checkbox group is one question: list it once, by its fieldset.
+      const checkGroup = type === "checkbox" ? el.closest("fieldset, [role=group]") : null;
+      if (checkGroup && checkGroup.querySelectorAll("input[type=checkbox]").length > 1 && onlyEmpty) {
+        if (seenRadio.has(`group:${checkGroup.id || checkGroup.textContent?.slice(0, 40)}`)) return;
+        seenRadio.add(`group:${checkGroup.id || checkGroup.textContent?.slice(0, 40)}`);
+      }
       const radioName = type === "radio" ? (el as HTMLInputElement).name : "";
       if (radioName) {
         if (seenRadio.has(radioName)) return;
@@ -403,7 +420,7 @@ async function scanControls(page: Page, mode: "empty_required" | "all"): Promise
 }
 
 /** Required controls still empty, including ones the job board didn't publish ahead of time. */
-async function emptyRequired(page: Page): Promise<EmptyField[]> {
+export async function emptyRequired(page: Page): Promise<EmptyField[]> {
   return scanControls(page, "empty_required");
 }
 
@@ -485,13 +502,13 @@ export async function readFormAnswers(page: Page): Promise<Array<{ label: string
 }
 
 /** The site's own error messages on the page. */
-async function siteErrors(page: Page) {
+export async function siteErrors(page: Page) {
   const texts = await page.locator("[data-automation-id='errorMessage'], [role='alert']:visible, .error:visible, [class*='error' i]:visible:not(input):not(select)").allInnerTexts().catch(() => []);
   return [...new Set(texts.map((text) => text.replace(/\s+/g, " ").trim()).filter((text) => text && text.length < 300))].slice(0, 12);
 }
 
 /** Puts a decided answer into an empty required control, whatever kind of control it is. */
-async function applyFix(page: Page, field: EmptyField, value: string) {
+export async function applyFix(page: Page, field: EmptyField, value: string) {
   const target = page.locator(field.selector).first();
   switch (field.control) {
     case "radio": {

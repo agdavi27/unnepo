@@ -123,9 +123,11 @@ export function formatDate(raw: string, format: string | null, options: string[]
 }
 
 const DEGREE_NAMES: Array<[RegExp, string[]]> = [
-  [/\b(b\.?\s?a\.?|b\.?\s?s\.?|b\.?\s?sc|bachelor)/i, ["Bachelor's Degree", "Bachelor's", "Bachelors", "Bachelor", "Bachelor of Arts", "Bachelor of Science", "BA", "BS", "Undergraduate"]],
-  [/\b(m\.?\s?a\.?|m\.?\s?s\.?|m\.?\s?sc|master|mba)/i, ["Master's Degree", "Master's", "Masters", "Master", "MBA"]],
-  [/\b(ph\.?\s?d|doctor)/i, ["Doctorate", "PhD", "Doctoral Degree"]],
+  // Graduate degrees first: "M.B.A." also contains "B.A.".
+  [/\b(m\.?\s?b\.?\s?a\b|mba\b)/i, ["Master of Business Administration (M.B.A.)", "MBA", "Master of Business Administration", "Master's Degree", "Masters"]],
+  [/\b(ph\.?\s?d|doctor)/i, ["Doctor of Philosophy (Ph.D.)", "Doctorate", "PhD", "Doctoral Degree"]],
+  [/\b(m\.?\s?a\b\.?|m\.?\s?s\b\.?|m\.?\s?sc|master)/i, ["Master's Degree", "Master's", "Masters", "Master"]],
+  [/\b(b\.?\s?a\b\.?|b\.?\s?s\b\.?|b\.?\s?sc|bachelor)/i, ["Bachelor's Degree", "Bachelor's", "Bachelors", "Bachelor", "Bachelor of Arts", "Bachelor of Science", "BA", "BS", "Undergraduate"]],
   [/\bassociate/i, ["Associate's Degree", "Associate Degree", "Associates"]],
   [/high school|diploma|ged/i, ["High School Diploma", "High School", "GED"]],
 ];
@@ -133,8 +135,9 @@ const DEGREE_NAMES: Array<[RegExp, string[]]> = [
 /** The degree as the form's options word it. */
 export function degreeAnswer(degree: string, options: string[]) {
   if (!options.length) return degree || null;
-  const direct = bestOption(degree, options);
-  if (direct) return direct;
+  // Exact wording first; then the degree's usual names. A loose match could turn "B.A." into "M.B.A.".
+  const exact = options.find((option) => option.trim().toLowerCase() === degree.trim().toLowerCase());
+  if (exact) return exact;
   const names = DEGREE_NAMES.find(([pattern]) => pattern.test(degree))?.[1] ?? [];
   for (const name of names) {
     const match = bestOption(name, options);

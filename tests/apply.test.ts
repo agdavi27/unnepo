@@ -278,6 +278,28 @@ describe("answers", () => {
 });
 
 describe("applications", () => {
+  it("in fast mode, maps a whole Greenhouse form at once with one AI call and records the timings", async () => {
+    const userId = await student();
+    await saveApplicationProfile(userId, { fastApply: true, eligibility: { workAuthorized: "Yes", needsSponsorship: "No", over18: "Yes" } });
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    model.replies.push(JSON.stringify({ answers: [
+      { id: "question_1", value: "I led the Colby Data Club and built a dashboard used by 40 students, and I want to build tools like Acme's.", source: "resume", evidence: "Led the Colby Data Club and built a dashboard used by 40 students." },
+      { id: "question_2", value: "Yes", source: "resume", evidence: "Led the Colby Data Club" },
+    ] }));
+    const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
+    const by = Object.fromEntries(application.questions.map((item) => [item.key, item]));
+    expect(model.calls).toHaveLength(1);
+    expect(by.first_name).toMatchObject({ answer: "Pat" });
+    expect(by.question_1).toMatchObject({ source: "ai", kind: "textarea" });
+    // Sponsorship comes only from the student's own answer; the model's guess is ignored.
+    expect(by.question_2).toMatchObject({ answer: "No", sensitive: true });
+    expect(by.question_3.answer).toBe("Company website");
+    expect(by["school--0"]).toMatchObject({ answer: "Colby College", required: false });
+    expect(by.resume_text).toBeUndefined();
+    expect(application.fillReport?.timings).toMatchObject({ pipeline: "fast", llmCalls: 1 });
+    expect(application.statusMessage).toMatch(/1 AI call/);
+  });
+
   it("adds a job once, drafts grounded answers, and saves the student's answers for next time", async () => {
     const userId = await student();
     process.env.ANTHROPIC_API_KEY = "anthropic";

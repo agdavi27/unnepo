@@ -66,13 +66,15 @@ export type FillReport = {
   coverLetter?: string;
   /** Required fields Unnepo worked out after the normal fill, with the answer and why. */
   decided?: Array<{ label: string; answer: string; why: string }>;
+  /** Fast pipeline: where the time went (schema, mapping, fill, submit), AI calls, and fallback fields. */
+  timings?: { pipeline: "fast"; schemaMs?: number; mappingMs?: number; fillMs?: number; submitMs?: number; llmCalls: number; fallback: string[] };
   /** Questions answered from the student's resume by AI during autofill, for the student to check. */
   fromResume?: string[];
   /** Required questions on the page where autofill stopped that the student can answer in Unnepo. */
   pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
 };
 
-export type Confirmation = { url: string; text: string; detectedAt: string };
+export type Confirmation = { url: string; text: string; detectedAt: string; /** A screenshot of the confirmation page, kept as a receipt. */ receiptPath?: string };
 
 export type JobApplication = {
   id: string;
@@ -145,6 +147,8 @@ export type ApplicationProfile = {
   saved: Record<string, { label: string; answer: string; updatedAt: string }>;
   /** The resume read into contact details, schools, and jobs; refreshed when the resume changes. */
   resumeProfile?: ResumeProfile | null;
+  /** The student turned on the fast Greenhouse pipeline (beta). */
+  fastApply?: boolean;
   /** Eligibility answers the student gave once, used on every form that asks: "Yes", "No", or unset. */
   eligibility?: { workAuthorized?: string; needsSponsorship?: string; over18?: string };
   /** The student's one job-site password, encrypted. Never sent to the browser page. */

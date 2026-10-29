@@ -18,7 +18,7 @@ import { filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
 import { deleteWorkspaceContacts, disconnectWorkspaceMailbox, generateWorkspaceCoverLetter, listRecommendedJobs, sendWorkspaceEmail, generateWorkspaceEmail, recordPeopleSearch, refreshProfileHighlights, updateWorkspaceContact, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, workspaceState } from "@/lib/services/workspace";
 
-import { answerPending, applyState, approveAndSubmit, checkSubmission, continueAutofill, createApplication, deleteApplication, editableFields, updateFields, markApplied, retryContacts, saveApplicationProfile, startAutofill, stopAutofill, updateAnswers, updateOutreach } from "@/lib/apply/service";
+import { answerPending, applyState, approveAndSubmit, checkSubmission, continueAutofill, createApplication, deleteApplication, editableFields, receiptImage, updateFields, markApplied, retryContacts, saveApplicationProfile, startAutofill, stopAutofill, updateAnswers, updateOutreach } from "@/lib/apply/service";
 
 /** Autofill keeps a browser connection open while it fills or submits a form. */
 export const maxDuration = 300;
@@ -184,6 +184,10 @@ async function handle(request: Request, slug: string[]) {
   if (root === "apply") {
     const method = request.method;
     if (!action && method === "GET") return json(await applyState(user.id));
+    if (action === "receipt" && method === "GET") {
+      const bytes = await receiptImage(user.id, new URL(request.url).searchParams.get("applicationId") ?? "");
+      return new Response(Buffer.from(bytes), { headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=3600" } });
+    }
     if (action === "applications" && method === "POST") {
       if (!rateLimit(`apply:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of jobs in an hour. Try again a bit later.", "rate_limited", 429);
       return json(await createApplication(user.id, await request.json()));

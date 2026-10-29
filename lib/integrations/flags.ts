@@ -10,6 +10,8 @@ export const integrations = {
   /** Onboarding answers may be organized into profile facts. */
   profileOrganization: true,
   stripeBilling: false,
+  /** Fast Greenhouse pipeline for everyone. Off until proven; students can turn it on for themselves. */
+  fastApply: false,
   /** Students connect their own mailbox; nothing sends without their click and confirmation. */
   gmail: true,
   outlook: true,

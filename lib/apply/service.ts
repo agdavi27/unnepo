@@ -1,14 +1,17 @@
 import { after } from "next/server";
 import { APPLICATIONS_PER_CREDIT, serverConfig } from "@/lib/config";
-import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
+import { dataDir, id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { splitProfileList } from "@/lib/profile/lists";
-import { readStoredResume } from "@/lib/services/resume";
+import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
 import { AutofillStopped, formFields, readFormAnswers, setFormFields, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
 import { decryptSecret, encryptSecret } from "@/lib/security";
 import { coverLetterPdf, writeCoverLetter } from "@/lib/apply/cover-letter";
 import { decideFixes } from "@/lib/apply/fixer";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
+import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, mappingFromQuestions, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
+import { fillGreenhouse, greenhouseNeedsCode } from "@/lib/apply/fast/greenhouse";
+import type { Page } from "playwright-core";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
 import { extractJob } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
@@ -50,6 +53,7 @@ async function student(userId: string) {
     resumeProfile: parsed,
     saved: stored?.saved ?? {},
     eligibility: stored?.eligibility ?? {},
+    fastApply: stored?.fastApply ?? false,
     jobSitePasswordEncrypted: stored?.jobSitePasswordEncrypted ?? null,
     accountConsentAt: stored?.accountConsentAt ?? null,
     jobAccounts: stored?.jobAccounts ?? [],
@@ -213,14 +217,23 @@ export async function createApplication(userId: string, raw: unknown) {
   const info = await student(userId);
   const existing = await applications.findByKey(userId, job.jobKey);
   if (existing) return { application: summary(existing), duplicate: true, message: `You already added ${existing.title} at ${existing.company}.` };
-  let questions = planAnswers(job.questions, info.context);
-  // Education and work history questions come straight from the resume's entries.
-  questions = questions.map((question) => {
-    if (question.answer || question.sensitive || question.kind === "file") return question;
-    const answer = resumeFieldAnswer(info.profile.resumeProfile, { label: question.label, kind: question.kind, options: question.options });
-    return answer ? { ...question, answer, source: "resume", evidence: null } : question;
-  });
-  questions = await aiAnswers(userId, questions, [info.profileText, info.resumeText].join("\n\n"));
+  let questions: ApplicationQuestion[];
+  let timings: Timings | undefined;
+  if (fastApplyOn(job, info.profile)) {
+    // Fast pipeline: the whole form from Greenhouse's API, mapped with at most one AI call.
+    const fast = await fastQuestions(userId, info, { ...job, fillReport: null });
+    questions = fast.questions;
+    timings = fast.timings;
+  } else {
+    questions = planAnswers(job.questions, info.context);
+    // Education and work history questions come straight from the resume's entries.
+    questions = questions.map((question) => {
+      if (question.answer || question.sensitive || question.kind === "file") return question;
+      const answer = resumeFieldAnswer(info.profile.resumeProfile, { label: question.label, kind: question.kind, options: question.options });
+      return answer ? { ...question, answer, source: "resume", evidence: null } : question;
+    });
+    questions = await aiAnswers(userId, questions, [info.profileText, info.resumeText].join("\n\n"));
+  }
   const { app, created } = await applications.insert({
     userId,
     jobKey: job.jobKey,
@@ -236,10 +249,10 @@ export async function createApplication(userId: string, raw: unknown) {
     applicationUrl: job.applicationUrl,
     postedRecruiter: job.postedRecruiter,
     status: "extracted",
-    statusMessage: job.questions.length ? "Review the answers below." : "This job board doesn't publish its questions ahead of time. Autofill reads them from the live form.",
+    statusMessage: timings ? `Answers ready in ${((timings.schemaMs ?? 0) + (timings.mappingMs ?? 0)) / 1000}s with ${timings.llmCalls} AI call${timings.llmCalls === 1 ? "" : "s"}. Review them, then autofill.` : job.questions.length ? "Review the answers below." : "This job board doesn't publish its questions ahead of time. Autofill reads them from the live form.",
     questions,
     browserSessionId: null,
-    fillReport: null,
+    fillReport: timings ? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null, timings } : null,
     confirmation: null,
     submittedAt: null,
     contactsStatus: "idle",
@@ -247,6 +260,7 @@ export async function createApplication(userId: string, raw: unknown) {
     charged: false,
     attempts: 0,
   });
+  if (timings && created) logTimings(app.id, "mapping", timings);
   return { application: summary(app), duplicate: !created, message: created ? "Job added." : "You already added this job." };
 }
 
@@ -270,6 +284,9 @@ export async function updateAnswers(userId: string, raw: unknown) {
     const value = String(answers[question.key] ?? "").trim().slice(0, 4000);
     if (question.kind === "select" && value && question.options.length && !question.options.includes(value)) {
       throw new ServiceError(`Pick one of the options for "${question.label}".`, "answer", 400);
+    }
+    if (question.kind === "multiselect" && value && question.options.length && value.split("\n").some((item) => !question.options.includes(item))) {
+      throw new ServiceError(`Pick from the options for "${question.label}".`, "answer", 400);
     }
     if (save.has(question.key) && value) saved[normalizeLabel(question.label)] = { label: question.label, answer: value, updatedAt: nowIso() };
     return { ...question, answer: value || null, source: value ? "student" : null, evidence: null };
@@ -309,6 +326,7 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     }
     next.eligibility = eligibility;
   }
+  if (typeof body.fastApply === "boolean") next.fastApply = body.fastApply;
   if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? info.profile.accountConsentAt || nowIso() : null;
   await applicationProfiles.put(userId, next);
   return { profile: publicProfile(next) };
@@ -350,21 +368,9 @@ const STOP_MESSAGE: Record<FlowResult["stoppedAt"], (report: FlowResult, email: 
 };
 
 /** Runs the page-by-page fill in a session and records where it stopped. Never submits. */
-async function runFlow(userId: string, app: JobApplication, sessionId: string, navigate: boolean) {
-  await ensureResumeProfile(userId);
-  const info = await student(userId);
-  const resume = await resumeFile(userId);
-  const password = info.profile.jobSitePasswordEncrypted ? decryptSecret(info.profile.jobSitePasswordEncrypted) : "";
-  const credentials = password && info.profile.email ? { email: info.profile.email, password } : null;
-  const answerFor = answerWith(info, app.company);
-  // New questions on the live form are answered from the resume and profile, with the same evidence rule as before.
+/** What every fill needs: the student's facts and resume text, a cover letter on demand, and the fix-up pass. */
+function runContext(userId: string, info: Awaited<ReturnType<typeof student>>, app: JobApplication) {
   const sources = [info.profileText, info.resumeText].join("\n\n");
-  const resumeAnswers = async (items: Array<{ label: string; section: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => {
-    // The section ("Work Experience 2") tells the model which part of the resume a question is about.
-    const asked = items.map((item, index) => ({ key: `q${index}`, label: item.section ? `${item.section}: ${item.label}` : item.label, kind: item.kind, required: false, options: item.options, sensitive: classifyQuestion(item.label).sensitive, answer: null, source: null, evidence: null }));
-    const answered = await aiAnswers(userId, asked, sources);
-    return Object.fromEntries(answered.flatMap((question, index) => (question.source === "ai" && question.answer ? [[items[index].label, question.answer]] : [])));
-  };
   // A cover letter is written only when the form asks for one, and reused if this job already has one.
   const coverLetter = async () => {
     const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
@@ -373,7 +379,7 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
     const buffer = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
     return { text, file: { name: `${name} Cover Letter.pdf`, mimeType: "application/pdf", buffer } };
   };
-  // The student's own details as plain lines: the only facts the fix-up pass may use besides the resume.
+  // The student's own details as plain lines: the only facts the AI may use besides the resume.
   const p = info.profile;
   const said = (value: string | undefined) => value?.trim() || "(not set)";
   const facts = [
@@ -389,6 +395,23 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
     ...Object.values(p.saved).slice(0, 60).map((item) => `Saved answer. ${item.label}: ${item.answer}`),
   ].join("\n");
   const fixFields = (fields: Parameters<typeof decideFixes>[1], errors: string[]) => decideFixes(userId, fields, errors, { facts, sources, consent: Boolean(p.accountConsentAt) });
+  return { sources, facts, coverLetter, fixFields };
+}
+
+async function runFlow(userId: string, app: JobApplication, sessionId: string, navigate: boolean) {
+  await ensureResumeProfile(userId);
+  const info = await student(userId);
+  const resume = await resumeFile(userId);
+  const password = info.profile.jobSitePasswordEncrypted ? decryptSecret(info.profile.jobSitePasswordEncrypted) : "";
+  const credentials = password && info.profile.email ? { email: info.profile.email, password } : null;
+  const answerFor = answerWith(info, app.company);
+  const { sources, coverLetter, fixFields } = runContext(userId, info, app);
+  const resumeAnswers = async (items: Array<{ label: string; section: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => {
+    // The section ("Work Experience 2") tells the model which part of the resume a question is about.
+    const asked = items.map((item, index) => ({ key: `q${index}`, label: item.section ? `${item.section}: ${item.label}` : item.label, kind: item.kind, required: false, options: item.options, sensitive: classifyQuestion(item.label).sensitive, answer: null, source: null, evidence: null }));
+    const answered = await aiAnswers(userId, asked, sources);
+    return Object.fromEntries(answered.flatMap((question, index) => (question.source === "ai" && question.answer ? [[items[index].label, question.answer]] : [])));
+  };
   const shouldStop = async () => (await applications.get(userId, app.id))?.status !== "filling";
   // Show the live view while filling, so the student can watch and stop it.
   const live = await liveViewUrl(sessionId);
@@ -426,6 +449,106 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
   return { application: summary(updated!) };
 }
 
+/** The fast mapping for a Greenhouse job: its form from the job board API, answers with at most one AI call. */
+async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof student>>, app: Pick<JobApplication, "jobKey" | "title" | "company" | "department" | "description" | "requirements" | "fillReport">) {
+  const { schema, ms: schemaMs } = await greenhouseSchema(app.jobKey);
+  const context = runContext(userId, info, app as JobApplication);
+  const mapped = await buildMapping({
+    userId,
+    ai: true,
+    schema,
+    known: knownAnswers({ answerFor: answerWith(info, schema.company), profile: info.profile, school: info.context.school, resumeProfile: info.profile.resumeProfile }),
+    facts: context.facts,
+    sources: context.sources,
+    consent: Boolean(info.profile.accountConsentAt),
+    resumeFileName: info.context.resumeFileName,
+  });
+  const timings: Timings = { pipeline: "fast", schemaMs, mappingMs: mapped.ms, llmCalls: mapped.llmCalls, fallback: [] };
+  return { schema, questions: questionsFromMapping(schema, mapped.answers), timings };
+}
+
+/** Keeps a screenshot of the site's confirmation page as the student's receipt. */
+async function saveReceipt(page: Page, userId: string, applicationId: string) {
+  const bytes = await page.screenshot({ type: "jpeg", quality: 60, fullPage: true, timeout: 10_000 }).catch(() => null);
+  if (!bytes) return undefined;
+  return (await saveResumeBytes(dataDir(), `receipts/${userId}/${applicationId}.jpg`, new Uint8Array(bytes), "image/jpeg").catch(() => "")) || undefined;
+}
+
+/**
+ * Fast fill for Greenhouse: one browser pass from the approved answers, then a check that every required
+ * field has a value. With submit, it also clicks the real Submit and keeps the confirmation as a receipt.
+ * The browser stays open 10 minutes for the student to look; it's closed as soon as the work is done.
+ */
+async function fastFill(userId: string, app: JobApplication, submit: boolean) {
+  const info = await student(userId);
+  const context = runContext(userId, info, app);
+  const { schema, ms: schemaMs } = await greenhouseSchema(app.jobKey);
+  const answers = mappingFromQuestions(schema, app.questions);
+  const resume = await resumeFile(userId);
+  let letter: string | undefined;
+  const files = { resume, coverLetter: async () => { const written = await context.coverLetter(); letter = written?.text; return written?.file ?? null; } };
+  const sessionId = await createBrowserSession(600);
+  const live = await liveViewUrl(sessionId);
+  await applications.update(userId, app.id, { browserSessionId: sessionId, fillReport: { ...(app.fillReport ?? { filled: [], failed: [] }), liveViewUrl: live, screenshotAt: nowIso() } });
+  let result: { fill: Awaited<ReturnType<typeof fillGreenhouse>>; confirmation?: JobApplication["confirmation"]; needsCode?: boolean; submitMs?: number };
+  try {
+    result = await withSessionPage(sessionId, async (page) => {
+      const fill = await fillGreenhouse(page, schema, answers, files, context.fixFields);
+      if (!submit || fill.failed.length) return { fill };
+      const submitted = Date.now();
+      const confirmation = await submitAndConfirm(page);
+      const receiptPath = confirmation ? await saveReceipt(page, userId, app.id) : undefined;
+      return { fill, confirmation: confirmation ? { ...confirmation, receiptPath } : null, needsCode: !confirmation && (await greenhouseNeedsCode(page)), submitMs: Date.now() - submitted };
+    });
+  } catch (error) {
+    await releaseBrowserSession(sessionId);
+    throw error;
+  }
+  const previous = app.fillReport?.timings;
+  const timings: Timings = {
+    pipeline: "fast",
+    schemaMs: (previous?.schemaMs ?? 0) + schemaMs,
+    mappingMs: previous?.mappingMs,
+    fillMs: result.fill.ms,
+    submitMs: result.submitMs,
+    llmCalls: (previous?.llmCalls ?? 0) + result.fill.llmCalls + (letter && !app.fillReport?.coverLetter ? 1 : 0),
+    fallback: result.fill.fallback,
+  };
+  logTimings(app.id, submit ? "fill_and_submit" : "fill", timings);
+  const labelOf = (fieldId: string) => schema.fields.find((field) => field.id === fieldId)?.label ?? fieldId;
+  const report = {
+    filled: result.fill.filled.map(labelOf),
+    failed: result.fill.failed.map((item) => ({ label: item.label, reason: item.reason })),
+    liveViewUrl: live,
+    screenshotAt: nowIso(),
+    stoppedAt: result.fill.failed.length ? ("needs_input" as const) : ("review" as const),
+    pages: 1,
+    host: "job-boards.greenhouse.io",
+    pending: [],
+    decided: result.fill.fallback.map((label) => ({ label, answer: "Filled by the fallback pass", why: "Nothing on file answered it directly." })),
+    coverLetter: letter ?? app.fillReport?.coverLetter,
+    timings,
+  };
+  const seconds = ((timings.fillMs ?? 0) + (timings.submitMs ?? 0)) / 1000;
+  if (result.confirmation) {
+    await applications.update(userId, app.id, { fillReport: report, browserSessionId: sessionId });
+    return { application: summary((await recordSubmitResult(userId, { ...app, browserSessionId: sessionId }, result.confirmation))!) };
+  }
+  // Stopped by the student while filling: keep what they set.
+  if (!submit && (await applications.get(userId, app.id))?.status !== "filling") return { application: summary((await applications.get(userId, app.id))!) };
+  const statusMessage = submit
+    ? result.needsCode
+      ? `Filled in ${seconds.toFixed(0)}s and submitted. Greenhouse emailed ${info.profile.email} a security code: enter it in the live view, then press Check again.`
+      : result.fill.failed.length
+        ? `Filled ${report.filled.length} fields, but ${result.fill.failed.length} still need you, so Unnepo didn't submit. Fix them below or in the live view.`
+        : "Clicked Submit, but the site didn't confirm yet. Check the live view (a CAPTCHA, maybe), then press Check again."
+    : result.fill.failed.length
+      ? `Filled ${report.filled.length} fields in ${seconds.toFixed(0)}s. ${result.fill.failed.length} need you: fix them below with Edit fields here, or in the live view.`
+      : `Filled and checked every required field in ${seconds.toFixed(0)}s${timings.llmCalls ? ` with ${timings.llmCalls} AI call${timings.llmCalls === 1 ? "" : "s"} in all` : ""}. Look it over, then approve.`;
+  const updated = await applications.update(userId, app.id, { status: submit && !result.fill.failed.length ? "unconfirmed" : "review", browserSessionId: sessionId, fillReport: report, statusMessage });
+  return { application: summary(updated!) };
+}
+
 /** Opens the application in a browser and fills it page by page. Stops before submitting. */
 export async function startAutofill(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
@@ -444,6 +567,15 @@ export async function startAutofill(userId: string, raw: unknown) {
     throw error;
   }
   if (app.browserSessionId) await releaseBrowserSession(app.browserSessionId);
+  if (fastApplyOn(app, (await applicationProfiles.get(userId)) ?? {})) {
+    try {
+      return await fastFill(userId, { ...app, browserSessionId: null }, false);
+    } catch (error) {
+      const message = error instanceof ServiceError ? error.message : "The form couldn't be filled. Nothing was submitted.";
+      await applications.update(userId, app.id, { status: "failed", browserSessionId: null, statusMessage: message });
+      throw error instanceof ServiceError ? error : new ServiceError(message, "browser_failed", 502);
+    }
+  }
   let sessionId: string | null = null;
   try {
     sessionId = await createBrowserSession();
@@ -563,12 +695,19 @@ export async function approveAndSubmit(userId: string, raw: unknown) {
   }
   const claimed = await applications.transition(userId, app.id, ["review"], { status: "submitting", statusMessage: "Submitting…" });
   if (!claimed) throw new ServiceError("This application isn't waiting for approval.", "state", 409);
+  const fast = fastApplyOn(app, (await applicationProfiles.get(userId)) ?? {});
   try {
     const info = await student(userId);
     const confirmation = await withSessionPage(app.browserSessionId, async (page) => {
       await learnAnswers(userId, info, await readFormAnswers(page).catch(() => [])).catch(() => 0);
-      return submitAndConfirm(page);
+      const confirmed = await submitAndConfirm(page);
+      return confirmed ? { ...confirmed, receiptPath: await saveReceipt(page, userId, app.id) } : null;
+    }).catch(async (error) => {
+      // The fast pipeline's browser closes after 10 minutes; fill and submit again in one pass.
+      if (fast && error instanceof ServiceError && error.code === "browser_closed") return "refill" as const;
+      throw error;
     });
+    if (confirmation === "refill") return await fastFill(userId, { ...app, browserSessionId: null }, true);
     return { application: summary((await recordSubmitResult(userId, app, confirmation))!) };
   } catch (error) {
     await applications.update(userId, app.id, { status: "unconfirmed", statusMessage: error instanceof ServiceError ? error.message : "Couldn't confirm the submission. Check the live view." });
@@ -598,6 +737,14 @@ export async function checkSubmission(userId: string, raw: unknown) {
   const confirmation = await withSessionPage(app.browserSessionId, (page) => detectConfirmation(page));
   if (!confirmation) return { application: summary(app), confirmed: false, message: "Still no confirmation on the page." };
   return { application: summary((await recordSubmitResult(userId, app, confirmation))!), confirmed: true, message: "Confirmed." };
+}
+
+/** The confirmation screenshot Unnepo kept when the site confirmed the application. */
+export async function receiptImage(userId: string, applicationId: string) {
+  const app = await requireApp(userId, applicationId);
+  const bytes = app.confirmation?.receiptPath ? await readStoredResume(app.confirmation.receiptPath) : null;
+  if (!bytes) throw new ServiceError("No receipt for this application.", "not_found", 404);
+  return bytes;
 }
 
 /** The student applied on their own. Shown as "Applied (you)", never as confirmed by Unnepo. */
