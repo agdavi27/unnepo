@@ -18,7 +18,7 @@ import { filtersFromProfile, interpretPrompt } from "@/lib/search/interpret";
 import { integrations } from "@/lib/integrations/flags";
 import { deleteWorkspaceContacts, disconnectWorkspaceMailbox, generateWorkspaceCoverLetter, listRecommendedJobs, sendWorkspaceEmail, generateWorkspaceEmail, recordPeopleSearch, refreshProfileHighlights, updateWorkspaceContact, resetStructuredProfile, saveManualEmailDraft, saveStructuredProfile, unlockWorkspaceEmail, workspaceState } from "@/lib/services/workspace";
 
-import { answerPending, applyState, approveAndSubmit, checkSubmission, continueAutofill, createApplication, deleteApplication, markApplied, retryContacts, saveApplicationProfile, startAutofill, stopAutofill, updateAnswers, updateOutreach } from "@/lib/apply/service";
+import { answerPending, applyState, approveAndSubmit, checkSubmission, continueAutofill, createApplication, deleteApplication, editableFields, updateFields, markApplied, retryContacts, saveApplicationProfile, startAutofill, stopAutofill, updateAnswers, updateOutreach } from "@/lib/apply/service";
 
 /** Autofill keeps a browser connection open while it fills or submits a form. */
 export const maxDuration = 300;
@@ -192,6 +192,8 @@ async function handle(request: Request, slug: string[]) {
     if (action === "answers" && method === "PATCH") return json(await updateAnswers(user.id, await request.json()));
     if (action === "profile" && method === "PUT") return json(await saveApplicationProfile(user.id, await request.json()));
     if (action === "autofill" && method === "POST") return json(await startAutofill(user.id, await request.json()));
+    if (action === "fields" && method === "POST") return json(await editableFields(user.id, await request.json()));
+    if (action === "fields" && method === "PATCH") return json(await updateFields(user.id, await request.json()));
     if (action === "stop" && method === "POST") return json(await stopAutofill(user.id, await request.json()));
     if (action === "pending" && method === "POST") return json(await answerPending(user.id, await request.json()));
     if (action === "continue" && method === "POST") return json(await continueAutofill(user.id, await request.json()));

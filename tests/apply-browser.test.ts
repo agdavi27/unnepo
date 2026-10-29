@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Browser } from "playwright-core";
-import { detectConfirmation, fillApplicationForm, passwordAllowedOn, readFormAnswers, runApplicationFlow, submitAndConfirm } from "@/lib/apply/browser";
+import { detectConfirmation, fillApplicationForm, formFields, passwordAllowedOn, readFormAnswers, runApplicationFlow, setFormFields, submitAndConfirm } from "@/lib/apply/browser";
 import { acceptFixes } from "@/lib/apply/fixer";
 import { planAnswers } from "@/lib/apply/questions";
 import { keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
@@ -335,6 +335,31 @@ describe.skipIf(!hasChrome)("working out fields a form leaves empty (local Chrom
     expect(await page.inputValue("[name='education[0][degree]']")).toBe("Bachelor's Degree");
     expect(asked).not.toEqual(expect.arrayContaining(["Job title"]));
     expect(asked.join(" ")).not.toMatch(/Job title|Company|School|Degree|Start date/);
+    await page.close();
+  }, 30_000);
+
+  it("lists every field with its value and puts the student's edits into the form", async () => {
+    const page = await browser.newPage();
+    await page.setContent(STUCK_FORM);
+    await page.fill("#ln", "Doe");
+    const fields = await formFields(page);
+    const by = (label: string) => fields.find((item) => item.label === label);
+    expect(by("Last Name")).toMatchObject({ value: "Doe", required: true, control: "text" });
+    expect(by("State")).toMatchObject({ value: "", control: "select", options: ["MA - Massachusetts", "ME - Maine"] });
+    expect(by("Have you ever been employed by Acme?")).toMatchObject({ control: "radio", options: ["Yes", "No"], value: "" });
+    expect(by("Job title")).toMatchObject({ section: "Work Experience" });
+    const result = await setFormFields(page, [
+      { label: "State", value: "ME - Maine" },
+      { label: "Have you ever been employed by Acme?", value: "No" },
+      { label: "Job title", section: "Work Experience", value: "Analyst" },
+      { label: "Last Name", value: "Doe-Smith" },
+      { label: "Not on this page", value: "x" },
+    ]);
+    expect(result).toEqual({ done: ["State", "Have you ever been employed by Acme?", "Job title", "Last Name"], failed: ["Not on this page"] });
+    expect(await page.inputValue("#st")).toBe("ME - Maine");
+    expect(await page.isChecked("[name='application_questionnaire[REC_US_Disqualification][d]'][value='0']")).toBe(true);
+    expect(await page.inputValue("[name='experience[0][title]']")).toBe("Analyst");
+    expect(await page.inputValue("#ln")).toBe("Doe-Smith");
     await page.close();
   }, 30_000);
 

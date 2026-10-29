@@ -4,7 +4,7 @@ import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { splitProfileList } from "@/lib/profile/lists";
 import { readStoredResume } from "@/lib/services/resume";
-import { AutofillStopped, readFormAnswers, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
+import { AutofillStopped, formFields, readFormAnswers, setFormFields, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
 import { decryptSecret, encryptSecret } from "@/lib/security";
 import { coverLetterPdf, writeCoverLetter } from "@/lib/apply/cover-letter";
 import { decideFixes } from "@/lib/apply/fixer";
@@ -432,7 +432,9 @@ export async function startAutofill(userId: string, raw: unknown) {
   if (!app.applicationUrl) throw new ServiceError("This posting has no application form link.", "no_form", 409);
   if (!browserReady()) throw new ServiceError("Autofill isn't connected yet. Add the Browserbase keys in Vercel, or apply yourself and press I applied.", "browser_not_configured", 503);
   const missing = missingAnswers(app.questions);
-  if (missing.length) throw new ServiceError(`Answer ${missing.length === 1 ? `"${missing[0].label}"` : `${missing.length} required questions`} first.`, "missing", 400);
+  // "Autofill all" doesn't wait on questions: the run stops where it needs the student, and they finish it there.
+  const bulk = Boolean((raw as { bulk?: unknown } | null)?.bulk);
+  if (missing.length && !bulk) throw new ServiceError(`Answer ${missing.length === 1 ? `"${missing[0].label}"` : `${missing.length} required questions`} first.`, "missing", 400);
   const claimed = await applications.transition(userId, app.id, ["extracted", "review", "failed"], { status: "filling", statusMessage: "Filling the form…", attempts: app.attempts + 1 });
   if (!claimed) throw new ServiceError("This application is already being filled or was submitted.", "state", 409);
   try {
@@ -476,6 +478,44 @@ export async function answerPending(userId: string, raw: unknown) {
   if (!count) throw new ServiceError("Answer at least one question first.", "answer", 400);
   await applicationProfiles.put(userId, { ...info.profile, saved });
   return { saved: count };
+}
+
+/** A form field as the page sees it: no page selectors. */
+function publicField(field: Awaited<ReturnType<typeof formFields>>[number]) {
+  return { label: field.label, section: field.section, control: field.control, options: field.options, format: field.format, value: field.value, required: field.required };
+}
+
+/** Every field on the page the browser stopped on, with its current value, for editing from Unnepo. */
+export async function editableFields(userId: string, raw: unknown) {
+  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
+  if (!app.browserSessionId || !["review", "unconfirmed"].includes(app.status)) throw new ServiceError("Run autofill first. Fields can be edited once it stops.", "state", 409);
+  const fields = await withSessionPage(app.browserSessionId, (page) => formFields(page));
+  return { fields: fields.map(publicField) };
+}
+
+/** Puts the student's edits into the form and saves them as answers for next time. */
+export async function updateFields(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; values?: unknown; remember?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  if (!app.browserSessionId || !["review", "unconfirmed"].includes(app.status)) throw new ServiceError("This application isn't waiting on you right now.", "state", 409);
+  const values = (Array.isArray(body.values) ? body.values : [])
+    .slice(0, 80)
+    .map((item) => ({ label: String((item as { label?: unknown }).label ?? "").slice(0, 300), section: String((item as { section?: unknown }).section ?? "").slice(0, 120), value: String((item as { value?: unknown }).value ?? "").slice(0, 4000) }))
+    .filter((item) => item.label);
+  if (!values.length) throw new ServiceError("Change at least one field first.", "values", 400);
+  const info = await student(userId);
+  const result = await withSessionPage(app.browserSessionId, async (page) => {
+    const applied = await setFormFields(page, values);
+    const learned = body.remember === false ? 0 : await learnAnswers(userId, info, values.filter((item) => applied.done.includes(item.label) && item.value.trim()).map((item) => ({ ...item, section: item.section ?? "" })));
+    const fields = await formFields(page);
+    return { ...applied, learned, fields: fields.map(publicField) };
+  });
+  // The fields the student just filled no longer need them.
+  if (app.fillReport && result.done.length) {
+    const filledNow = new Set(result.done);
+    await applications.update(userId, app.id, { fillReport: { ...app.fillReport, failed: app.fillReport.failed.filter((item) => !filledNow.has(item.label)), pending: (app.fillReport.pending ?? []).filter((item) => !filledNow.has(item.label)) } });
+  }
+  return { ...result, application: summary((await applications.get(userId, app.id))!) };
 }
 
 /** Picks up in the same browser after the student verified an email or finished a page themselves. */

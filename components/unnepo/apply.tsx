@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SpiderSprite, SpiderSwarm } from "@/components/unnepo/spiders";
 import type { ApplicationContact, ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState } from "@/lib/apply/types";
 
 const btn = "inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
@@ -50,6 +51,11 @@ const SOURCE_LABEL: Record<string, string> = {
   default: "Standard answer, change if needed",
 };
 
+/** Shortens text at a word, for notifications. */
+function short(text: string, max: number) {
+  return text.length <= max ? text : `${text.slice(0, max).replace(/\s+\S*$/, "")}…`;
+}
+
 async function call<T>(path: string, method: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api/apply${path}`, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
   const payload = await response.json().catch(() => ({}));
@@ -93,6 +99,78 @@ export function ApplyArea({ view, onNavigate, onCreditsChanged, refreshKey = 0 }
     return () => clearInterval(timer);
   }, [busy, load]);
 
+  // "Autofill all": runs two applications at a time from this tab and reports each one as it finishes.
+  const [bulk, setBulk] = useState<{ running: boolean; total: number; done: number } | null>(null);
+  const [toasts, setToasts] = useState<Array<{ id: number; title: string; body: string; tone: "good" | "warn" | "bad"; appId?: string }>>([]);
+  const stopRef = useRef(false);
+  const dismiss = useCallback((toastId: number) => setToasts((list) => list.filter((item) => item.id !== toastId)), []);
+  const notify = useCallback((title: string, body: string, tone: "good" | "warn" | "bad", appId?: string) => {
+    const toastId = Date.now() + Math.random();
+    setToasts((list) => [...list.slice(-3), { id: toastId, title, body, tone, appId }]);
+    setTimeout(() => setToasts((list) => list.filter((item) => item.id !== toastId)), 9000);
+    try {
+      if ("Notification" in window && Notification.permission === "granted" && document.visibilityState !== "visible") new Notification(title, { body, icon: "/favicon.ico", tag: appId });
+    } catch {
+      // Notifications are a convenience; the in-app message still shows.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!bulk?.running) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [bulk?.running]);
+
+  async function runBulk(ids: string[]) {
+    if (bulk?.running || !ids.length) return;
+    try {
+      if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission();
+    } catch {
+      // Some browsers block the prompt; in-app messages still work.
+    }
+    stopRef.current = false;
+    setBulk({ running: true, total: ids.length, done: 0 });
+    const titles = new Map((data?.applications ?? []).map((app) => [app.id, `${app.title} at ${app.company}`]));
+    const queue = [...ids];
+    let ready = 0;
+    let needYou = 0;
+    const worker = async () => {
+      while (queue.length && !stopRef.current) {
+        const appId = queue.shift()!;
+        const name = titles.get(appId) ?? "Application";
+        try {
+          const result = await call<{ application: App }>("/autofill", "POST", { applicationId: appId, bulk: true });
+          const stop = result.application.fillReport?.stoppedAt;
+          if (stop === "review") {
+            ready += 1;
+            notify("Ready to submit", `${name}: filled. Check it and approve.`, "good", appId);
+          } else {
+            needYou += 1;
+            notify("Needs you", `${name}: ${short(result.application.statusMessage, 160)}`, "warn", appId);
+          }
+        } catch (reason) {
+          needYou += 1;
+          notify("Couldn't fill", short(`${name}: ${reason instanceof Error ? reason.message : "something went wrong"}`, 200), "bad", appId);
+        }
+        setBulk((state) => (state ? { ...state, done: state.done + 1 } : state));
+        void load();
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    setBulk(null);
+    void load();
+    onCreditsChanged();
+    notify(stopRef.current ? "Autofill stopped" : "Spider bots finished", `${ready} ready to submit${needYou ? `, ${needYou} need you` : ""}. Nothing was submitted.`, needYou ? "warn" : "good");
+  }
+
+  async function stopBulk() {
+    stopRef.current = true;
+    const running = (data?.applications ?? []).filter((app) => app.status === "filling");
+    await Promise.all(running.map((app) => call("/stop", "POST", { applicationId: app.id }).catch(() => null)));
+    void load();
+  }
+
   const replace = useCallback((app: App) => {
     setData((previous) => {
       if (!previous) return previous;
@@ -113,7 +191,8 @@ export function ApplyArea({ view, onNavigate, onCreditsChanged, refreshKey = 0 }
   if (!data) return <p className="text-sm text-muted">Loading your applications…</p>;
 
   const current = data.applications.find((app) => app.id === currentId) ?? null;
-  return view === "apply" ? (
+  const filling = data.applications.filter((app) => app.status === "filling").length;
+  const page = view === "apply" ? (
     <ApplyPage
       data={data}
       current={current}
@@ -123,37 +202,99 @@ export function ApplyArea({ view, onNavigate, onCreditsChanged, refreshKey = 0 }
       onPatch={replace}
       onProfile={(profile) => setData({ ...data, profile })}
       onDone={() => onNavigate("applied")}
+      onAutofillAll={(ids) => void runBulk(ids)}
+      bulkRunning={Boolean(bulk?.running)}
     />
   ) : (
     <AppliedPage data={data} onReload={load} onContinue={(appId) => { setCurrentId(appId); onNavigate("apply"); }} />
   );
+  return (
+    <>
+      {page}
+      <SpiderSwarm active={Boolean(bulk?.running) || filling > 0} count={bulk?.running ? bulk.total - bulk.done : filling} />
+      {(bulk?.running || filling > 0) && (
+        <div className="fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-line bg-panel/95 px-4 py-3 text-sm shadow-2xl backdrop-blur sm:inset-x-auto sm:left-1/2 sm:w-full sm:-translate-x-1/2" role="status" aria-live="polite">
+          <SpiderSprite walking className="shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="font-medium">Unnepo spider autofill bots are working</p>
+            <p className="text-xs text-muted">{bulk?.running ? `${bulk.done} of ${bulk.total} done. Keep this tab open; you'll get a notification as each one finishes.` : `Filling ${filling} application${filling === 1 ? "" : "s"}…`}</p>
+          </div>
+          {bulk?.running && <button type="button" className="shrink-0 rounded-lg border border-line px-2.5 py-1 text-xs text-muted hover:text-white" onClick={() => void stopBulk()}>Stop all</button>}
+        </div>
+      )}
+      {toasts.length > 0 && (
+        <div className="fixed right-4 top-20 z-50 flex w-[min(22rem,calc(100vw-2rem))] flex-col gap-2">
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`rounded-xl border px-3.5 py-2.5 text-sm shadow-xl backdrop-blur ${toast.tone === "bad" ? "border-red-900/60 bg-red-950/80 text-red-100" : toast.tone === "warn" ? "border-amber-900/60 bg-amber-950/80 text-amber-50" : "border-emerald-900/60 bg-emerald-950/80 text-emerald-50"}`}>
+              <div className="flex items-start justify-between gap-2">
+                <button type="button" className="min-w-0 text-left" onClick={() => { if (toast.appId) { setCurrentId(toast.appId); onNavigate("apply"); } dismiss(toast.id); }}>
+                  <p className="font-medium">{toast.title}</p>
+                  <p className="mt-0.5 text-xs opacity-80">{toast.body}</p>
+                </button>
+                <button type="button" aria-label="Dismiss" className="opacity-60 hover:opacity-100" onClick={() => dismiss(toast.id)}>✕</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
 }
 
-function ApplyPage({ data, current, error, onPick, onChanged, onPatch, onProfile, onDone }: {
+function ApplyPage({ data, current, error, onPick, onChanged, onPatch, onProfile, onDone, onAutofillAll, bulkRunning }: {
   data: ApplyData; current: App | null; error: string;
   onPick: (id: string | null) => void; onChanged: (app: App) => void; onPatch: (app: App) => void; onProfile: (profile: PublicProfile) => void; onDone: () => void;
+  onAutofillAll: (ids: string[]) => void; bulkRunning: boolean;
 }) {
   const [url, setUrl] = useState("");
   const [reading, setReading] = useState(false);
   const [notice, setNotice] = useState("");
   const [problem, setProblem] = useState("");
+  const [results, setResults] = useState<Array<{ url: string; ok: boolean; message: string }>>([]);
   const inProgress = data.applications.filter((app) => ["extracted", "review", "unconfirmed", "failed", "filling", "submitting"].includes(app.status));
+  // Jobs autofill can start on its own: read, not filled yet (or failed), with a form link.
+  const ready = inProgress.filter((app) => (app.status === "extracted" || app.status === "failed") && app.applicationUrl);
+  const links = [...new Set(url.split(/[\s,]+/).map((item) => item.trim()).filter((item) => /^https?:\/\//i.test(item)))].slice(0, 25);
 
   async function read(event: React.FormEvent) {
     event.preventDefault();
-    if (!url.trim()) return;
+    if (!links.length) {
+      setProblem("Paste one or more job links that start with https://");
+      return;
+    }
     setReading(true);
     setProblem("");
     setNotice("");
-    try {
-      const result = await call<{ application: App; duplicate: boolean; message: string }>("/applications", "POST", { url });
-      onChanged(result.application);
-      setNotice(result.message);
-      setUrl("");
-    } catch (reason) {
-      setProblem(reason instanceof Error ? reason.message : "Couldn't read that job.");
-    } finally {
-      setReading(false);
+    setResults([]);
+    const queue = [...links];
+    const found: Array<{ url: string; ok: boolean; message: string }> = [];
+    let last: App | null = null;
+    // Three at a time: each one fetches and reads a posting.
+    const worker = async () => {
+      while (queue.length) {
+        const link = queue.shift()!;
+        try {
+          const result = await call<{ application: App; duplicate: boolean; message: string }>("/applications", "POST", { url: link });
+          last = result.application;
+          found.push({ url: link, ok: true, message: result.duplicate ? `Already added: ${result.application.title} at ${result.application.company}` : `${result.application.title} at ${result.application.company}` });
+        } catch (reason) {
+          found.push({ url: link, ok: false, message: reason instanceof Error ? reason.message : "Couldn't read that job." });
+        }
+        setResults([...found]);
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    setReading(false);
+    setUrl(found.filter((item) => !item.ok).map((item) => item.url).join("\n"));
+    const added = found.filter((item) => item.ok).length;
+    if (links.length === 1 && last) {
+      onChanged(last);
+      setNotice(found[0].message);
+      setResults([]);
+    } else {
+      if (last) onChanged(last);
+      onPick(null);
+      setNotice(added ? `Read ${added} of ${links.length} jobs. Press Autofill all to fill them.${added < links.length ? " The links that didn't work are left in the box, with why below." : ""}` : "None of these links could be read. See why below.");
     }
   }
 
@@ -161,13 +302,21 @@ function ApplyPage({ data, current, error, onPick, onChanged, onPatch, onProfile
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Apply to a job</h1>
-        <p className="mt-2 text-sm text-muted">Paste a job link. Unnepo reads the posting, fills what it can from your profile, and asks you for the rest.</p>
+        <p className="mt-2 text-sm text-muted">Paste one job link, or up to 25 at once (one per line). Unnepo reads each posting, then Autofill all fills them while you do something else.</p>
       </div>
-      <form onSubmit={read} className="flex flex-col gap-3 sm:flex-row">
-        <input className={field} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://jobs.lever.co/company/…" inputMode="url" aria-label="Job posting link" />
-        <button className={`${primary} shrink-0 px-5`} disabled={reading || !url.trim()}>{reading ? "Reading job…" : "Read job"}</button>
+      <form onSubmit={read} className="flex flex-col gap-3">
+        <textarea className={`${field} min-h-[5.5rem] resize-y font-mono text-xs leading-relaxed`} value={url} onChange={(event) => setUrl(event.target.value)} placeholder={"https://jobs.lever.co/company/…\nhttps://company.wd5.myworkdayjobs.com/…\nhttps://job-boards.greenhouse.io/company/jobs/…"} aria-label="Job posting links" spellCheck={false} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-faint">{links.length > 1 ? `${links.length} links` : "Workday, Greenhouse, Lever, Ashby, and most company career sites."}</p>
+          <button className={`${primary} px-5`} disabled={reading || !links.length}>{reading ? `Reading ${results.length} of ${links.length}…` : links.length > 1 ? `Read ${links.length} jobs` : "Read job"}</button>
+        </div>
       </form>
-      <p className="-mt-3 text-xs text-faint">Works best with Workday, Greenhouse, Lever, and Ashby links. LinkedIn and Indeed don&apos;t allow automated applications. Paste the company&apos;s own application link instead.</p>
+      <p className="-mt-3 text-xs text-faint">LinkedIn, Handshake, ZipRecruiter, and Indeed don&apos;t allow automated applying, so Unnepo can&apos;t apply through them or pull their suggested jobs. On their job page, click Apply (it opens the company&apos;s site) and paste that link here.</p>
+      {results.length > 1 && (
+        <ul className="-mt-2 space-y-1 rounded-xl border border-line p-3 text-xs">
+          {results.map((item) => <li key={item.url} className={item.ok ? "text-muted" : "text-red-300"}><span aria-hidden>{item.ok ? "✓ " : "✕ "}</span>{item.message}{!item.ok && <span className="block truncate text-faint">{item.url}</span>}</li>)}
+        </ul>
+      )}
       {problem && <p role="alert" className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{problem}</p>}
       {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
       {notice && <p className="text-sm text-muted">{notice}</p>}
@@ -186,7 +335,15 @@ function ApplyPage({ data, current, error, onPick, onChanged, onPatch, onProfile
       )}
       {inProgress.length > 0 && !current && (
         <section className={card}>
-          <h2 className="text-sm font-semibold">In progress</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold">In progress</h2>
+            {ready.length > 0 && (
+              <button type="button" className={primary} disabled={bulkRunning || !data.ready.autofill} title={!data.ready.autofill ? "Autofill isn't connected yet" : undefined} onClick={() => onAutofillAll(ready.map((app) => app.id))}>
+                <SpiderSprite className="scale-90" />{bulkRunning ? "Spiders working…" : `Autofill all (${ready.length})`}
+              </button>
+            )}
+          </div>
+          <p className="mt-1 text-xs text-faint">Autofill never submits. Each application stops for you to check and approve.</p>
           <ul className="mt-3 divide-y divide-line">
             {inProgress.map((app) => (
               <li key={app.id} className="flex items-center justify-between gap-3 py-2.5">
@@ -321,6 +478,7 @@ function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { a
             </div>
           )}
           <p className="text-xs text-faint">Unnepo doesn&apos;t solve CAPTCHAs. If one appears, complete it in the live view.</p>
+          {app.browserSessionId && <FieldEditor app={app} onChanged={onChanged} />}
         </div>
       )}
 
@@ -378,6 +536,110 @@ function ApplicationCard({ app, data, onChanged, onPatch, onClose, onDone }: { a
         {done && <button type="button" className={primary} onClick={onDone}>See people to email →</button>}
       </div>
     </section>
+  );
+}
+
+type FormField = { label: string; section: string; control: "text" | "textarea" | "select" | "listbox" | "prompt" | "checkbox" | "radio" | "date" | "file"; options: string[]; format: string | null; value: string; required: boolean };
+
+/**
+ * Every field on the page autofill stopped on, editable here: change any answer, and Unnepo types it
+ * into the form and remembers it for next time. Empty required fields are listed first.
+ */
+function FieldEditor({ app, onChanged }: { app: App; onChanged: (app: App) => void }) {
+  const [open, setOpen] = useState(false);
+  const [fields, setFields] = useState<FormField[] | null>(null);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [remember, setRemember] = useState(true);
+  const [state, setState] = useState("");
+  const [busy, setBusy] = useState(false);
+  const keyOf = (item: FormField) => `${item.section}|${item.label}`;
+
+  async function load() {
+    setBusy(true);
+    setState("Reading the form…");
+    try {
+      const result = await call<{ fields: FormField[] }>("/fields", "POST", { applicationId: app.id });
+      setFields(result.fields);
+      setEdits({});
+      setState(result.fields.length ? "" : "No fields on this page. It may be a review or sign-in step: use the live view.");
+    } catch (reason) {
+      setState(reason instanceof Error ? reason.message : "Couldn't read the form.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    if (!fields) return;
+    const values = fields.filter((item) => keyOf(item) in edits).map((item) => ({ label: item.label, section: item.section, value: edits[keyOf(item)] }));
+    if (!values.length) return;
+    setBusy(true);
+    setState("Putting your changes into the form…");
+    try {
+      const result = await call<{ done: string[]; failed: string[]; learned: number; fields: FormField[]; application: App }>("/fields", "PATCH", { applicationId: app.id, values, remember });
+      setFields(result.fields);
+      setEdits({});
+      onChanged(result.application);
+      setState(`Updated ${result.done.length} field${result.done.length === 1 ? "" : "s"} in the form.${result.failed.length ? ` Couldn't set: ${result.failed.slice(0, 3).join("; ")}. Do those in the live view.` : ""}${result.learned ? ` Saved ${result.learned} for future applications.` : ""}`);
+    } catch (reason) {
+      setState(reason instanceof Error ? reason.message : "Couldn't update the form.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const sorted = [...(fields ?? [])].sort((a, b) => Number(b.required && !b.value) - Number(a.required && !a.value));
+  const changed = Object.keys(edits).length;
+  return (
+    <div className="rounded-xl border border-line">
+      <button type="button" className="flex w-full items-center justify-between px-4 py-3 text-left text-sm" onClick={() => { const next = !open; setOpen(next); if (next && !fields) void load(); }} aria-expanded={open}>
+        <span><span className="font-medium">Edit fields here</span><span className="block text-xs text-muted">See every answer on this page and change any of them without the live view.</span></span>
+        <span className="text-faint">{open ? "−" : "+"}</span>
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-line p-4">
+          {fields && sorted.length > 0 && (
+            <div className="max-h-[28rem] space-y-3 overflow-y-auto pr-1">
+              {sorted.map((item) => {
+                const key = keyOf(item);
+                const value = edits[key] ?? item.value;
+                const set = (next: string) => setEdits((prev) => ({ ...prev, [key]: next }));
+                const missing = item.required && !value.trim();
+                const id = `edit-${key.replace(/[^a-z0-9]+/gi, "-")}`;
+                return (
+                  <div key={key} className={`rounded-lg ${missing ? "border border-amber-900/60 bg-amber-950/20 p-2.5" : ""}`}>
+                    <label htmlFor={id} className={labelClass}>
+                      {item.label}{item.required && <span className="text-amber-300"> *</span>}
+                      {item.section && <span className="ml-1.5 font-normal text-faint">· {item.section}</span>}
+                    </label>
+                    {item.control === "file" ? (
+                      <p className="text-xs text-muted">{item.value || "No file yet."} Upload files in the live view.</p>
+                    ) : item.control === "checkbox" ? (
+                      <label className="flex items-center gap-2 text-sm"><input id={id} type="checkbox" checked={/^yes$/i.test(value)} onChange={(event) => set(event.target.checked ? "Yes" : "")} /> Checked</label>
+                    ) : item.options.length ? (
+                      <select id={id} className={field} value={item.options.includes(value) ? value : ""} onChange={(event) => set(event.target.value)}>
+                        <option value="">{value && !item.options.includes(value) ? value : "Choose…"}</option>
+                        {item.options.map((option) => <option key={option} value={option}>{option}</option>)}
+                      </select>
+                    ) : item.control === "textarea" ? (
+                      <textarea id={id} className={`${field} min-h-24`} value={value} onChange={(event) => set(event.target.value)} />
+                    ) : (
+                      <input id={id} className={field} value={value} placeholder={item.format ?? undefined} onChange={(event) => set(event.target.value)} />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="flex flex-wrap items-center gap-3">
+            <button type="button" className={primary} disabled={busy || !changed} onClick={() => void save()}>{busy && changed ? "Saving…" : changed ? `Save ${changed} change${changed === 1 ? "" : "s"} to the form` : "Save changes to the form"}</button>
+            <button type="button" className={secondary} disabled={busy} onClick={() => void load()}>Reload fields</button>
+            <label className="flex items-center gap-2 text-xs text-muted"><input type="checkbox" checked={remember} onChange={(event) => setRemember(event.target.checked)} /> Remember for future applications</label>
+          </div>
+          {state && <p className="text-xs text-muted">{state}</p>}
+        </div>
+      )}
+    </div>
   );
 }
 

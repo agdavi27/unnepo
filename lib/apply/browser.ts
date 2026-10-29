@@ -34,8 +34,19 @@ async function bb<T>(path: string, init: RequestInit = {}): Promise<T> {
   const { apiKey } = requireConfig();
   const response = await fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json", "X-BB-API-Key": apiKey, ...(init.headers ?? {}) }, signal: AbortSignal.timeout(20_000) });
   if (!response.ok) {
-    const detail = (await response.text().catch(() => "")).slice(0, 200);
-    throw new ServiceError(`The autofill browser couldn't start (${response.status}). ${detail}`.trim(), "browser_failed", 502);
+    const body = await response.text().catch(() => "");
+    let detail = "";
+    try {
+      detail = String((JSON.parse(body) as { message?: unknown }).message ?? "");
+    } catch {
+      detail = body;
+    }
+    const reason = response.status === 401 || response.status === 403
+      ? "Browserbase didn't accept the API key. Check BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID in Vercel."
+      : response.status === 429
+        ? "Your Browserbase plan is running as many browsers as it allows. Try again in a minute, or run fewer at once."
+        : `Browserbase said: ${detail.replace(/\s+/g, " ").slice(0, 140) || `error ${response.status}`}.`;
+    throw new ServiceError(`The autofill browser couldn't start. ${reason} Nothing was submitted.`, "browser_failed", 502);
   }
   return (await response.json()) as T;
 }
@@ -335,23 +346,27 @@ type PageHelpers = { questionText: (el: Element) => string; section: (el: Elemen
 /** A required control still empty on the page, with what Unnepo needs to fill it. */
 export type EmptyField = { selector: string; label: string; section: string; control: "text" | "textarea" | "select" | "listbox" | "prompt" | "checkbox" | "radio" | "date" | "file"; options: string[]; format: string | null };
 
-/** Required controls still empty, including ones the job board didn't publish ahead of time. */
-async function emptyRequired(page: Page): Promise<EmptyField[]> {
+/** Every visible control on the page, for the student to edit from Unnepo; or only the empty required ones. */
+async function scanControls(page: Page, mode: "empty_required" | "all"): Promise<Array<EmptyField & { value: string; required: boolean }>> {
   await helpers(page);
-  return page.evaluate(() => {
+  return page.evaluate((onlyEmpty) => {
     const u = (window as unknown as { __unnepo: PageHelpers }).__unnepo;
-    const out: EmptyField[] = [];
+    const out: Array<EmptyField & { value: string; required: boolean }> = [];
     const seenRadio = new Set<string>();
-    const nodes = Array.from(document.querySelectorAll<HTMLElement>("input[required], textarea[required], select[required], [aria-required='true'], [role='radiogroup'][aria-required='true']"));
+    const marker = onlyEmpty ? "data-unnepo-empty" : "data-unnepo-edit";
+    const nodes = Array.from(document.querySelectorAll<HTMLElement>(onlyEmpty
+      ? "input[required], textarea[required], select[required], [aria-required='true'], [role='radiogroup'][aria-required='true']"
+      : "input, textarea, select, button[aria-haspopup='listbox']"));
     nodes.forEach((el, index) => {
       const type = (el.getAttribute("type") || "").toLowerCase();
       if (["hidden", "submit", "button", "password"].includes(type) || el.getAttribute("data-automation-id") === "beecatcher" || el.getAttribute("aria-hidden") === "true") return;
       // A wrapper whose required control is also listed is counted once, by the control.
       if (!["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(el.tagName) && el.querySelector("input[required], select[required], textarea[required]")) return;
+      if (!onlyEmpty && (["search", "image", "reset"].includes(type) || /honeypot|bee-?catcher/i.test(el.getAttribute("name") || ""))) return;
       const style = window.getComputedStyle(el);
       const rect = el.getBoundingClientRect();
       if (style.display === "none" || style.visibility === "hidden" || (!rect.width && !rect.height && type !== "file" && type !== "radio" && type !== "checkbox")) return;
-      if (!u.isEmpty(el)) return;
+      if (onlyEmpty && !u.isEmpty(el)) return;
       const radioName = type === "radio" ? (el as HTMLInputElement).name : "";
       if (radioName) {
         if (seenRadio.has(radioName)) return;
@@ -371,12 +386,59 @@ async function emptyRequired(page: Page): Promise<EmptyField[]> {
         : control === "radio" ? radios.map(labelOf).filter(Boolean)
           : control === "checkbox" ? ["Yes"] : [];
       const target = radioName ? radios[0] : el;
-      target.setAttribute("data-unnepo-empty", String(index));
+      target.setAttribute(marker, String(index));
       const placeholder = el.getAttribute("placeholder") || "";
-      out.push({ selector: `[data-unnepo-empty="${index}"]`, label: u.questionText(target).slice(0, 300) || "A required field", section: u.section(target), control, options: options.slice(0, 60), format: /[my]{2}|dd/i.test(placeholder) ? placeholder : null });
+      const checked = radios.find((radio) => radio.checked);
+      const value = control === "radio" ? (checked ? labelOf(checked) : "")
+        : control === "checkbox" ? ((el as HTMLInputElement).checked ? "Yes" : "")
+          : control === "select" ? ((el as HTMLSelectElement).value ? (el as HTMLSelectElement).selectedOptions[0]?.textContent?.trim() ?? "" : "")
+            : control === "listbox" ? (/^(select one|select|choose( one)?|)$/i.test(el.innerText.trim()) ? "" : el.innerText.trim())
+              : control === "file" ? ((el as HTMLInputElement).files?.[0]?.name ?? "")
+                : String((el as HTMLInputElement).value ?? "");
+      const required = el.hasAttribute("required") || el.getAttribute("aria-required") === "true" || Boolean(el.closest("[aria-required='true']")) || radios.some((radio) => radio.required);
+      out.push({ selector: `[${marker}="${index}"]`, label: u.questionText(target).slice(0, 300) || (onlyEmpty ? "A required field" : ""), section: u.section(target), control, options: options.slice(0, 60), format: /[my]{2}|dd/i.test(placeholder) ? placeholder : null, value: value.slice(0, 4000), required });
     });
-    return out;
-  });
+    return out.filter((field) => field.label);
+  }, mode === "empty_required");
+}
+
+/** Required controls still empty, including ones the job board didn't publish ahead of time. */
+async function emptyRequired(page: Page): Promise<EmptyField[]> {
+  return scanControls(page, "empty_required");
+}
+
+export type EditableField = EmptyField & { value: string; required: boolean };
+
+/** Every field on the page the browser is on, with its current value, for editing from Unnepo. */
+export async function formFields(page: Page): Promise<EditableField[]> {
+  const fields = await scanControls(page, "all");
+  // Custom dropdowns show their options only when opened.
+  for (const field of fields) {
+    if (field.control === "listbox" && !field.options.length) field.options = (await decideListbox(page, page.locator(field.selector).first(), () => null).catch(() => null))?.options ?? [];
+  }
+  return fields;
+}
+
+/** Puts the student's edits into the form, matched by question. Returns which ones went in. */
+export async function setFormFields(page: Page, values: Array<{ label: string; section?: string; value: string }>) {
+  const fields = await scanControls(page, "all");
+  const done: string[] = [];
+  const failedLabels: string[] = [];
+  for (const edit of values) {
+    const field = fields.find((item) => item.label === edit.label && (!edit.section || item.section === edit.section)) ?? fields.find((item) => item.label === edit.label);
+    if (!field || field.control === "file") {
+      failedLabels.push(edit.label);
+      continue;
+    }
+    try {
+      if (field.control === "checkbox" && !YES.test(edit.value)) await page.locator(field.selector).first().uncheck({ force: true });
+      else await applyFix(page, field, edit.value);
+      done.push(edit.label);
+    } catch {
+      failedLabels.push(edit.label);
+    }
+  }
+  return { done, failed: failedLabels };
 }
 
 /**
