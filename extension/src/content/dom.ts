@@ -1,5 +1,5 @@
 import { bestOption } from "@/lib/apply/options";
-import { answerChoices } from "@/lib/apply/questions";
+import { answerChoices, DECLINE } from "@/lib/apply/questions";
 import type { FileData } from "../shared/types";
 
 /**
@@ -52,6 +52,8 @@ export function chooseNativeSelect(el: HTMLSelectElement, answer: string) {
 /** Matches an answer to visible option texts; `pick` overrides the matching (degrees, cities). */
 export function matchOption(answer: string, texts: string[], pick?: (texts: string[]) => string | null) {
   if (pick) return pick(texts);
+  // "Decline to answer" is worded a dozen ways ("I don't wish to answer", "Prefer not to say").
+  if (DECLINE.test(answer)) return texts.find((option) => DECLINE.test(option)) ?? null;
   return answerChoices(answer).map((candidate) => bestOption(candidate, texts)).find(Boolean) ?? null;
 }
 

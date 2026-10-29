@@ -11,6 +11,17 @@ import { labelOf } from "./scan";
  */
 
 const COVER_LETTER = /cover ?letter|letter of (interest|motivation)|motivation(al)? letter/i;
+const RESUME = /r[eé]sum[eé]|\bcv\b|curriculum vitae/i;
+// Uploads that are something else, which the resume must never go into.
+const OTHER_DOCUMENT = /transcript|portfolio|writing sample|work sample|photo|picture|headshot|certificat|licen[cs]e|\bid\b|identification|reference|recommendation/i;
+
+/** Which of the student's files belongs in an upload box, judging by its question and section. */
+export function fileFor(field: PageField, files: { resume: FileData | null; coverLetter: FileData | null }) {
+  const words = `${field.label} ${field.section}`;
+  if (COVER_LETTER.test(field.label)) return files.coverLetter;
+  if (RESUME.test(words)) return files.resume;
+  return OTHER_DOCUMENT.test(words) ? null : files.resume;
+}
 
 function pickLabel(answer: string, labels: string[]) {
   return answerChoices(answer).map((candidate) => bestOption(candidate, labels)).find(Boolean) ?? null;
@@ -50,7 +61,7 @@ async function fillOne(field: PageField, answer: Answer, files: { resume: FileDa
       await chooseCustom(el, value, { type: el instanceof HTMLInputElement ? value : undefined });
       return;
     case "file": {
-      const file = COVER_LETTER.test(field.label) ? files.coverLetter : files.resume;
+      const file = fileFor(field, files);
       if (!file) throw new Error("no file");
       attachFile(el as HTMLInputElement, file);
       return;
@@ -68,7 +79,7 @@ export async function fillGeneric(fields: PageField[], answers: Answer[], files:
     const answer = byId.get(field.id);
     const isFile = field.type === "file";
     // Files are attached even without a mapped answer, when the form asks for a resume or cover letter.
-    if (!answer?.values.length && !(isFile && (/resume|cv\b/i.test(field.label) ? files.resume : COVER_LETTER.test(field.label) ? files.coverLetter : null))) continue;
+    if (!answer?.values.length && !(isFile && fileFor(field, files))) continue;
     try {
       await fillOne(field, answer ?? { id: field.id, label: field.label, type: field.type, required: field.required, values: [field.label], source: null, why: null }, files);
       filled.push(field.label);

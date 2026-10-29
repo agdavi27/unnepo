@@ -155,6 +155,8 @@ export function startSpiders() {
     }
     return;
   }
+  // Anything left from an earlier copy of this script goes first, so there's only ever one set.
+  document.querySelectorAll("[data-unnepo-spiders]").forEach((stale) => stale.remove());
   host = document.createElement("div");
   host.setAttribute("data-unnepo-spiders", "");
   host.setAttribute("aria-hidden", "true");

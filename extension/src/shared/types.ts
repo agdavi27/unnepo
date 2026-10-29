@@ -20,6 +20,8 @@ export type Scan = {
   captcha: boolean;
   /** Visible password boxes (sign-in, create account). They aren't in `fields`: the extension fills them itself. */
   passwordBoxes: number;
+  /** The application asks for a CV, so the panel offers to make one. */
+  mentionsCv: boolean;
 };
 
 export type Answer = { id: string; label: string; type: string; required: boolean; values: string[]; source: string | null; why: string | null };
@@ -43,7 +45,7 @@ export type PanelState = {
   connected: boolean;
   me: { user: { name: string; email: string }; credits: number; profileReady: boolean; completeness: number } | null;
   tab: { id: number; url: string; title: string } | null;
-  job: { tabId: number; applicationId: string; title: string; company: string; step: string; report: FillReport | null; submission: "confirmed" | "likely" | null; error: string | null; llmCalls: number; running?: boolean } | null;
+  job: { tabId: number; applicationId: string; title: string; company: string; step: string; report: FillReport | null; submission: "confirmed" | "likely" | null; error: string | null; llmCalls: number; running?: boolean; cv?: boolean } | null;
   autoSubmit: boolean;
   apiBase: string;
 };

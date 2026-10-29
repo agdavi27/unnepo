@@ -79,6 +79,22 @@ export function findAction(knownAccount: boolean, formFields: number): (PageActi
   return null;
 }
 
+/**
+ * The Apply button on a job posting, looked for first whenever Fill starts, even when the page also shows
+ * some fields (a search box, a newsletter, the form further down). A form's own "Apply" submit button
+ * doesn't count: that would send an empty application.
+ */
+export function findApply(): HTMLElement | null {
+  const known = byId("applyManually") ?? byId("adventureButton");
+  if (known) return known;
+  return buttons().find((el) => {
+    if (!APPLY.test(text(el))) return false;
+    const form = el.closest("form");
+    const isSubmit = (el as HTMLButtonElement).type === "submit" || el.matches("input[type=submit]");
+    return !(form && (isSubmit || form.querySelectorAll("input:not([type=hidden]), select, textarea").length >= 3));
+  }) ?? null;
+}
+
 /** Presses the button. Workday puts a clickable overlay over some of its buttons; that's what listens. */
 export function pressAction(el: HTMLElement) {
   el.scrollIntoView({ block: "center" });

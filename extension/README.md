@@ -33,12 +33,17 @@ panel can read it; web pages and content scripts can't ask for it.
 Press **Fill this application** on a job posting or any step of the form. Unnepo keeps going until the
 application is submitted or the student presses **Stop**:
 
-1. On a posting it presses Apply (on Workday, then "Apply Manually").
+1. First, if the page has an Apply button, it presses it (on Workday, then "Apply Manually"). A form's own
+   "Apply" submit button doesn't count.
 2. On an account page it creates the account the first time on that site, and signs in after that
    (`chrome.storage.local` remembers which sites have one). If the site says the account exists, it signs in.
 3. On each new form page it gets every answer from Unnepo (`/api/extension/map`: the student's own data
    first, then cached AI answers, then at most one AI call), attaches the resume and cover letter, fills
-   it, and types the job-site password into password boxes.
+   it, and types the job-site password into password boxes. Upload boxes get the resume from the student's
+   account (the cover letter goes only where a cover letter is asked for; transcripts and the like get
+   nothing). On Greenhouse, questions its API leaves out (the U.S. demographic questions) are read from the
+   page, with dropdowns opened once to see their choices. When the page mentions a CV, the panel shows a
+   **Generate CV** button (not connected yet).
 4. It presses Next / Save and Continue. If a required field is still empty, a CAPTCHA is up, or the site
    wants an email verified, it waits and carries on by itself once that's done.
 5. On the last page it presses Submit, unless "Let me press Submit myself" is on (the default).

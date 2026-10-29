@@ -54,6 +54,7 @@ function jobView(state: PanelState) {
             ? `<button class="stop" id="stop">Stop</button>`
             : `<button class="primary" id="fill" ${me.profileReady ? "" : "disabled"}>${report ? "Fill again" : "Fill this application"}</button>`}
           ${job?.applicationId && !job.submission && !job.running ? `<button id="applied">I applied</button>` : ""}
+          ${job?.cv ? `<button id="generate-cv">Generate CV</button>` : ""}
           ${job?.submission ? `<button id="not-applied">I didn't apply</button>` : ""}
         </div>
       </div>`);
@@ -132,6 +133,12 @@ async function render() {
     void render();
   });
   document.getElementById("fill")?.addEventListener("click", () => void ask({ type: "fill", tabId: state.tab!.id }));
+  // Not connected to anything yet: CV generation is on its way.
+  document.getElementById("generate-cv")?.addEventListener("click", (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    button.disabled = true;
+    button.textContent = "CV generation is coming soon";
+  });
   document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
   document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));

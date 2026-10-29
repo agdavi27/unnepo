@@ -141,6 +141,18 @@ describe("extension API", () => {
     expect(scannedBy.f2.values).toEqual(["Colby College"]);
     expect(scannedBy.f3.source).toBe("ai");
 
+    // Demographic dropdowns the page script opened to read: the student's choice, or the form's own decline. No AI.
+    const before = model.calls;
+    const demographics = await (await call("POST", "map", token, {
+      applicationId: portal.application.id,
+      fields: [
+        { id: "d1", label: "How would you describe your sexual orientation? (mark all that apply)", type: "combobox", options: ["Heterosexual", "Gay", "Bisexual", "I don't wish to answer"] },
+        { id: "d2", label: "Do you identify as transgender?", type: "combobox", options: ["Yes", "No", "I don't wish to answer"] },
+      ],
+    })).json();
+    expect(model.calls).toBe(before);
+    expect(demographics.answers.map((item: { values: string[] }) => item.values[0])).toEqual(["I don't wish to answer", "I don't wish to answer"]);
+
     // The same question on another form comes from the cache: no second AI call.
     const other = await (await call("POST", "jobs", token, { url: "https://careers.initech.example/jobs/9", title: "Analyst", company: "Initech" })).json();
     const cached = await (await call("POST", "map", token, { applicationId: other.application.id, fields: [{ ...why, id: "q9" }] })).json();

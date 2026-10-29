@@ -1,6 +1,6 @@
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
-import { findAction, pageNotes, pressAction, SUBMIT } from "./actions";
-import { sleep, typeInto } from "./dom";
+import { findAction, findApply, pageNotes, pressAction, SUBMIT } from "./actions";
+import { press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { emptyRequired, isEmpty, labelOf, scanFields, scanPage } from "./scan";
@@ -28,6 +28,23 @@ function fillPasswords(password: string | null) {
     .filter((box) => !box.disabled && !box.readOnly && !box.value && box.getBoundingClientRect().height > 0);
   boxes.forEach((box) => typeInto(box, password));
   return boxes.map((box, index) => (index === 0 ? "Password" : /confirm|verify|re-?enter|again/i.test(`${labelOf(box)} ${box.name} ${box.id} ${box.getAttribute("aria-label") ?? ""} ${box.getAttribute("data-automation-id") ?? ""}`) ? "Confirm password" : `Password ${index + 1}`));
+}
+
+/** Dropdowns that only show their choices when opened: open each once, read the choices, close it. */
+async function withOptions(fields: PageField[]) {
+  for (const field of fields) {
+    if (field.type !== "combobox" || field.options.length) continue;
+    const el = document.querySelector<HTMLElement>(`[data-unnepo-id="${field.id}"]`);
+    if (!el) continue;
+    const control = (el.closest("[class*='select__control'], [class*='-control']") as HTMLElement | null) ?? el;
+    press(control);
+    const options = await waitFor(() => (visibleOptions().length ? visibleOptions() : null), 1500);
+    field.options = (options ?? []).map((option) => (option.textContent ?? "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 100);
+    (el instanceof HTMLInputElement ? el : control).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    el.blur();
+    await sleep(80);
+  }
+  return fields;
 }
 
 let planned: PageField[] = [];
@@ -116,7 +133,27 @@ if (!window.__unnepo) {
       // What still needs the student, and which button would move the application along.
       const fields = scanFields();
       const action = findAction(Boolean(message.knownAccount), fields.length);
-      reply({ needsYou: emptyRequired(fields).map((field) => field.label), action: action ? { kind: action.kind, label: action.label } : null, captcha: scanPage().captcha, ...pageNotes() });
+      const apply = findApply();
+      reply({ needsYou: emptyRequired(fields).map((field) => field.label), action: action ? { kind: action.kind, label: action.label } : null, apply: apply ? (apply.textContent ?? "").trim() || "Apply" : null, captcha: scanPage().captcha, ...pageNotes() });
+      return false;
+    }
+    if (message?.type === "leftovers") {
+      // Fields Greenhouse's API doesn't list (its newer demographic questions): empty and not one of its ids.
+      const known = new Set<string>(message.ids ?? []);
+      const fields = scanFields().filter((field) => {
+        const el = document.querySelector<HTMLElement>(`[data-unnepo-id="${field.id}"]`);
+        if (!el || field.type === "file") return false;
+        const control = el.matches("input, select, textarea, button") ? el : (el.querySelector("input") as HTMLElement | null) ?? el;
+        const ids = [control.id, (control as HTMLInputElement).name, el.id].filter(Boolean);
+        return !ids.some((id) => known.has(id) || [...known].some((k) => id.startsWith(`${k}-`) || id.startsWith(`${k}_`))) && isEmpty(control);
+      });
+      void withOptions(fields).then((withChoices) => reply({ fields: withChoices }));
+      return true;
+    }
+    if (message?.type === "press" && message.first) {
+      const apply = findApply();
+      if (apply) pressAction(apply);
+      reply({ pressed: Boolean(apply), label: apply?.textContent?.trim() });
       return false;
     }
     if (message?.type === "press") {

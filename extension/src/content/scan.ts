@@ -256,5 +256,6 @@ export function scanPage(): Scan {
     embeddedForm: frame?.src ?? null,
     captcha,
     passwordBoxes: Array.from(document.querySelectorAll<HTMLInputElement>("input[type=password]")).filter(visible).length,
+    mentionsCv: /\bCV\b|curriculum vitae/.test(document.body.innerText || ""),
   };
 }

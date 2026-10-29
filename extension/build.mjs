@@ -12,22 +12,12 @@ const api = process.env.UNNEPO_API || "https://unneponew.vercel.app";
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-await build({
-  entryPoints: {
-    background: path.join(here, "src/background.ts"),
-    "content/connect": path.join(here, "src/content/connect.ts"),
-    "content/fill": path.join(here, "src/content/fill.ts"),
-    "sidepanel/panel": path.join(here, "src/sidepanel/panel.ts"),
-  },
-  outdir: out,
-  bundle: true,
-  format: "esm",
-  target: "chrome116",
-  minify: false,
-  alias: { "@": root },
-  define: { __UNNEPO_API__: JSON.stringify(api) },
-  logLevel: "warning",
-});
+const shared = { outdir: out, bundle: true, target: "chrome116", minify: false, alias: { "@": root }, define: { __UNNEPO_API__: JSON.stringify(api) }, logLevel: "warning" };
+// The worker and panel are modules.
+await build({ ...shared, format: "esm", entryPoints: { background: path.join(here, "src/background.ts"), "sidepanel/panel": path.join(here, "src/sidepanel/panel.ts") } });
+// Page scripts are plain scripts that get injected again and again. Each copy is wrapped in its own scope;
+// without that, every re-injection reset the first copy's state (and left frozen spiders behind).
+await build({ ...shared, format: "iife", entryPoints: { "content/connect": path.join(here, "src/content/connect.ts"), "content/fill": path.join(here, "src/content/fill.ts") } });
 cpSync(path.join(here, "manifest.json"), path.join(out, "manifest.json"));
 cpSync(path.join(here, "icons"), path.join(out, "icons"), { recursive: true });
 cpSync(path.join(here, "src/sidepanel/panel.html"), path.join(out, "sidepanel/panel.html"));

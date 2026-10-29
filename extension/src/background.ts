@@ -98,7 +98,7 @@ function sameApplication(before: string | undefined, after: string) {
 
 const signature = (scan: Scan) => `${scan.url}|${scan.passwordBoxes}|${scan.fields.map((field) => field.label).join("|")}`;
 const hasForm = (scan: Scan) => scan.useServerSchema || scan.fields.length > 0 || scan.passwordBoxes > 0;
-type Status = { needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; verifyEmail: boolean; confirmed: boolean };
+type Status = { apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; verifyEmail: boolean; confirmed: boolean };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -143,13 +143,25 @@ async function run(tabId: number) {
   const runId = ++runCounter;
   runs.set(tabId, runId);
   const earlier = (await jobs())[tabId];
-  await saveJob(tabId, { running: true, step: "Reading the page…", report: null, submission: null, error: null, clickedAt: null, llmCalls: 0 });
+  await saveJob(tabId, { running: true, step: "Reading the page…", report: null, submission: null, error: null, clickedAt: null, llmCalls: 0, cv: false });
   const filledAll: string[] = [];
   let applicationId = "";
   let posting: { url: string; title: string; company: string } | null = null;
   let filledKey = "";
   let pressedKey = "";
   let presses = 0;
+  let triedApply = false;
+  /** After a press: waits for a new page, new fields, or new buttons (Workday's "how to apply" choice). */
+  const waitForChange = async (key: string, buttonsBefore: string, known: boolean, timeout = 12_000) => {
+    const until = Date.now() + timeout;
+    while (Date.now() < until && stillRunning(tabId, runId)) {
+      await wait(300);
+      const after = await look(tabId);
+      if (!after) continue;
+      const now = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
+      if (signature(after) !== key || (now && `${now.action?.kind}|${now.action?.label}|${now.apply}` !== buttonsBefore)) return;
+    }
+  };
   let pressedAt = 0;
   let resume: FileData | null | undefined;
   let llmCalls = 0;
@@ -190,6 +202,17 @@ async function run(tabId: number) {
       const status = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
       if (!status) { await wait(400); continue; }
       if (!stillRunning(tabId, runId)) break;
+      // First thing on every run: if there's an Apply button, press it.
+      if (!triedApply) {
+        triedApply = true;
+        if (status.apply) {
+          await step("Opening the application…");
+          const pressed = await send<{ pressed: boolean }>(tabId, { type: "press", first: true }).catch(() => ({ pressed: false }));
+          // Some Apply buttons only scroll to the form below, so this doesn't wait long.
+          if (pressed.pressed) await waitForChange(signature(scan), `${status.action?.kind}|${status.action?.label}|${status.apply}`, known, 4000);
+          continue;
+        }
+      }
       if (status.accountExists && !known) { await rememberAccount(host); continue; }
       if (status.captcha) { await step("A CAPTCHA is on the page. Solve it and Unnepo carries on. Unnepo never solves CAPTCHAs."); await wait(1200); continue; }
       if (status.verifyEmail) { await step("The site sent you an email to verify your account. Open the link, come back to this tab, and Unnepo carries on."); await wait(1500); continue; }
@@ -209,15 +232,28 @@ async function run(tabId: number) {
         llmCalls += map.llmCalls;
         const wantsCoverLetter = scan.useServerSchema ? map.answers.some((answer) => answer.id === "cover_letter") : scan.fields.some((field) => field.type === "file" && /cover ?letter/i.test(field.label));
         const wantsResume = scan.useServerSchema ? map.answers.some((answer) => answer.id === "resume") : scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
+        if (scan.mentionsCv) await saveJob(tabId, { cv: true });
         if (wantsResume && resume === undefined) resume = await resumeFile();
         const letter = wantsCoverLetter && applicationId ? await api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null) : null;
         if (!stillRunning(tabId, runId)) break;
         await step("Filling the form…", { llmCalls });
         const plan: FillPlan = { ats: scan.ats, useServerSchema: scan.useServerSchema, answers: map.answers, resume: wantsResume ? resume ?? null : null, coverLetter: letter ? { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } : null, autoSubmit: false, password: await jobSitePassword() };
-        const report = await send<FillReport>(tabId, { type: "fill", plan }).catch(() => null);
+        let report = await send<FillReport>(tabId, { type: "fill", plan }).catch(() => null);
+        // Greenhouse's API leaves some questions out (the U.S. demographic questions): fill those from the page.
+        if (report && scan.useServerSchema && applicationId) {
+          const extra = await send<{ fields: Scan["fields"] }>(tabId, { type: "leftovers", ids: map.answers.map((answer) => answer.id) }).catch(() => ({ fields: [] }));
+          if (extra.fields.length) {
+            const more = await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: extra.fields }).catch(() => null);
+            if (more?.answers.length) {
+              llmCalls += more.llmCalls;
+              const second = await send<FillReport>(tabId, { type: "fill", plan: { ...plan, useServerSchema: false, answers: more.answers, resume: null, coverLetter: null } }).catch(() => null);
+              if (second) report = { ...second, filled: [...report.filled, ...second.filled], failed: [...report.failed, ...second.failed] };
+            }
+          }
+        }
         if (report) {
           filledAll.push(...report.filled);
-          await saveJob(tabId, { report: { ...report, filled: [...filledAll] } });
+          await saveJob(tabId, { report: { ...report, filled: [...filledAll] }, llmCalls });
         }
         filledKey = key;
         continue;
@@ -259,15 +295,7 @@ async function run(tabId: number) {
       await step(ACTION_STEP[action.kind]);
       const pressed = await send<{ pressed: boolean }>(tabId, { type: "press", kind: action.kind, knownAccount: known }).catch(() => ({ pressed: false }));
       if (!pressed.pressed) { await wait(300); continue; }
-      // Wait for the page to change: a new page, new fields, or a new button (Workday's "how to apply" choice).
-      const until = Date.now() + 12_000;
-      while (Date.now() < until && stillRunning(tabId, runId)) {
-        await wait(300);
-        const after = await look(tabId);
-        if (!after) continue;
-        const now = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
-        if (signature(after) !== key || (now && `${now.action?.kind}|${now.action?.label}` !== `${action.kind}|${action.label}`)) break;
-      }
+      await waitForChange(key, `${action.kind}|${action.label}|${status.apply}`, known);
       if (action.kind === "create_account") {
         const notes = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
         // Made, or it already existed: either way, sign in next time.
