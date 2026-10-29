@@ -10,6 +10,8 @@ import { applicationProfiles, applications, applicationContacts } from "@/lib/ap
 import { coreTitle } from "@/lib/apply/contacts";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { acceptFixes } from "@/lib/apply/fixer";
+import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
+import { supportedBy } from "@/lib/apply/questions";
 import { applyState, saveApplicationProfile, checkSubmission, createApplication, markApplied, runContactDiscovery, setDeferForTests, startAutofill, updateAnswers } from "@/lib/apply/service";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -156,7 +158,9 @@ describe("answers", () => {
     expect(by.resume).toMatchObject({ answer: "Pat Doe Resume.pdf", source: "resume_file" });
     expect(by.grad.answer).toBe("2027");
     expect(by.visa).toMatchObject({ answer: null, sensitive: true });
-    expect(by.gender).toMatchObject({ answer: null, sensitive: true });
+    // Voluntary self-identification declines when the form offers that; nothing else about it is guessed.
+    expect(by.gender).toMatchObject({ answer: "Decline", source: "default" });
+    expect(planAnswers([q("g2", "Gender", "select", ["Male", "Female"], false)], context)[0]).toMatchObject({ answer: null, sensitive: true });
     expect(by.hear).toMatchObject({ answer: "Company website", source: "default" });
     expect(missingAnswers(planned).map((item) => item.key)).toEqual(["visa"]);
 
@@ -207,6 +211,46 @@ describe("answers", () => {
     ], { facts: "First name: Pat", sources: resume, consent: false });
     expect(kept.map((item) => [item.index, item.value])).toEqual([[0, "I don't wish to answer"], [3, "Data Analyst Intern"]]);
     expect(acceptFixes(fields, [{ index: 5, value: "Yes", source: "default" }], { facts: "", sources: "", consent: true }).map((item) => item.index)).toEqual([5]);
+  });
+
+  it("reads the resume into schools and jobs, keeping only what the resume says", () => {
+    const text = "Pat Doe | Waterville, ME 04901 | 207-555-0100\nColby College, Waterville, ME — B.A. Economics, Expected May 2027, GPA 3.7\nData Analyst Intern, Maine Credit Union — May 2024 – August 2024\n- Built loan dashboards in Tableau\nResearch Assistant, Colby College — Sept 2023 – Present";
+    const parsed = keepStated({
+      contact: { phone: "207-555-0100", city: "Waterville", state: "ME", postalCode: "04901", email: "pat@gmail.com" },
+      education: [{ school: "Colby College", degree: "B.A.", field: "Economics", gpa: "3.7", start: "", end: "Expected May 2027" }, { school: "Harvard University", degree: "M.S." }],
+      experience: [
+        { title: "Data Analyst Intern", company: "Maine Credit Union", start: "May 2024", end: "August 2024", summary: "Built loan dashboards in Tableau" },
+        { title: "Research Assistant", company: "Colby College", start: "Sept 2023", end: "Present" },
+        { title: "Software Engineer", company: "Google", start: "2022" },
+      ],
+      skills: ["Tableau", "Rust"],
+    }, text, "h");
+    expect(parsed.contact).toMatchObject({ phone: "207-555-0100", city: "Waterville", state: "ME", postalCode: "04901", email: "" });
+    expect(parsed.education.map((item) => item.school)).toEqual(["Colby College"]);
+    expect(parsed.experience.map((item) => [item.title, item.current])).toEqual([["Data Analyst Intern", false], ["Research Assistant", true]]);
+    expect(parsed.skills).toEqual(["Tableau"]);
+
+    const field = (label: string, section: string, options: string[] = [], format: string | null = null) => resumeFieldAnswer(parsed, { label, section, kind: options.length ? "select" : "text", options, format });
+    expect(field("Job Title", "Work Experience 1")).toBe("Data Analyst Intern");
+    expect(field("Company", "Work Experience 2")).toBe("Colby College");
+    expect(field("From", "Work Experience 1", [], "MM/YYYY")).toBe("05/2024");
+    expect(field("To", "Work Experience 2", [], "MM/YYYY")).toBeNull();
+    expect(field("I currently work here", "Work Experience 2")).toBe("Yes");
+    expect(field("School or University", "Education")).toBe("Colby College");
+    expect(field("Degree", "Education", ["High School", "Bachelor's Degree", "Master's Degree"])).toBe("Bachelor's Degree");
+    expect(field("Field of Study", "Education")).toBe("Economics");
+    expect(field("Graduation Date", "Education", [], "MM/YYYY")).toBe("05/2027");
+    expect(field("Job Title", "Work Experience 3")).toBeNull();
+    expect(formatDate("Sept 2023", "MM/DD/YYYY")).toBe("09/01/2023");
+    expect(formatDate("2024", "MM/YYYY")).toBeNull();
+    expect(degreeAnswer("Bachelor of Science", ["Associate", "Bachelors", "Masters"])).toBe("Bachelors");
+  });
+
+  it("accepts a quote that differs only in punctuation, never one that isn't there", () => {
+    const resume = "Led the Colby Data Club — built a dashboard used by 40 students.";
+    expect(supportedBy("Led the Colby Data Club, built a dashboard used by 40 students", resume)).toBe(true);
+    expect(supportedBy("interned at Google", resume)).toBe(false);
+    expect(supportedBy("Led a team of 400 engineers at Colby", resume)).toBe(false);
   });
 
   it("doesn't hold up autofill for a cover letter, which autofill writes", () => {

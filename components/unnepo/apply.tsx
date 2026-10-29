@@ -46,6 +46,8 @@ const SOURCE_LABEL: Record<string, string> = {
   saved: "Your saved answer",
   student: "Your answer",
   ai: "AI, from your resume",
+  resume: "From your resume",
+  default: "Standard answer, change if needed",
 };
 
 async function call<T>(path: string, method: string, body?: unknown): Promise<T> {
@@ -493,7 +495,7 @@ function ProfileDetails({ profile, resume, onSaved }: { profile: PublicProfile; 
               </div>
             ))}
           </div>
-          <p className="text-xs text-faint">Phone, LinkedIn, and GitHub are pulled from your resume when it lists them. Unnepo never makes up details.</p>
+          <p className="text-xs text-faint">Anything you leave blank is filled from your resume (phone, address, links), and your schools and jobs fill education and work history on every form. Anything you type in the live view is saved for next time. Unnepo never makes up details.</p>
           <div className="space-y-3 rounded-xl border border-line p-4">
             <div>
               <p className="text-sm font-semibold">Eligibility questions</p>

@@ -7,12 +7,14 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
   [/^(legal )?last name\b|^surname|^family name/i, "lastName"],
+  [/^preferred (first )?name\b|^nickname/i, "firstName"],
   [/^(full |legal )?name\b(?!.*(company|school|employer|reference|university))/i, "fullName"],
+  [/currently (a )?(student|enrolled)|are you (a )?(current|currently enrolled) (student|undergraduate)|currently attending/i, "currentStudent"],
   [/\be-?mail\b/i, "email"],
   [/^(address line 1|street address|address 1|address|street)$/i, "addressLine1"],
   [/^(state|province|state\/province|state or province|region)$/i, "state"],
@@ -90,8 +92,12 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
     case "phoneExtension": return null;
     // Unnepo opened the company's own posting, so its careers site is where the student found it.
     case "hearAbout": return { answer: "Company website", source: "default" };
+    case "currentStudent": return Number(context.graduationYear) >= new Date().getFullYear() ? { answer: "Yes", source: "profile" } : null;
   }
 }
+
+export const DEMOGRAPHIC = /\b(gender|sex|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|disabilit|sexual orientation|transgender|lgbt)/i;
+export const DECLINE = /(decline|prefer not|don['’]?t wish|do not wish|not to (say|answer|disclose|self-identify)|choose not|rather not|i don['’]?t want to answer)/i;
 
 /** Eligibility questions answered from what the student set once in their details. Nothing here is guessed. */
 const ELIGIBILITY: Array<[RegExp, keyof NonNullable<ApplicationProfile["eligibility"]>]> = [
@@ -144,6 +150,11 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
       if (answer) return { ...question, answer, source: "student", evidence: null };
     }
     const { field, sensitive } = classifyQuestion(question.label);
+    // Voluntary self-identification: decline, when the form offers that. The student can change it.
+    if (DEMOGRAPHIC.test(question.label) && question.options.length) {
+      const decline = question.options.find((option) => DECLINE.test(option));
+      if (decline) return { ...question, answer: decline, source: "default", evidence: null };
+    }
     if (sensitive || question.sensitive) return { ...question, sensitive: true, answer: null, source: null, evidence: null };
     const fileMatches = (field === "resume" || field === "coverLetter") === (question.kind === "file");
     if (field && fileMatches && question.label.length <= 70 && question.kind !== "checkbox" && question.kind !== "multiselect") {
@@ -167,11 +178,31 @@ export function squash(text: string) {
   return text.toLowerCase().replace(/[\s ]+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
 }
 
+function plain(text: string) {
+  return squash(text).replace(/[–—]/g, "-").replace(/[^a-z0-9%$+#./@ -]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Whether quoted evidence really comes from the student's text. Exact quotes pass; so do quotes that
+ * differ only in punctuation, spacing, or a stray word, which models often produce.
+ */
+export function supportedBy(evidence: string, text: string) {
+  const quote = plain(evidence);
+  const source = plain(text);
+  if (!quote) return false;
+  // Short values ("ME", "BA") must stand as a whole word.
+  if (quote.length < 3) return ` ${source} `.includes(` ${quote} `);
+  if (source.includes(quote)) return true;
+  const words = quote.split(" ").filter((word) => word.length > 1);
+  if (words.length < 4) return false;
+  const have = new Set(source.split(" "));
+  return words.filter((word) => have.has(word)).length / words.length >= 0.85;
+}
+
 /** An AI answer is kept only if its quoted evidence appears in the student's own profile or resume. */
 export function acceptAiAnswer(question: ApplicationQuestion, answer: string, evidence: string, sources: string) {
   if (question.sensitive || classifyQuestion(question.label).sensitive) return null;
-  const quote = squash(evidence);
-  if (quote.length < 4 || !squash(sources).includes(quote)) return null;
+  if (evidence.trim().length < 4 || !supportedBy(evidence, sources)) return null;
   if (question.kind === "select") return matchOption(answer, question.options);
   if (question.kind === "file" || question.kind === "unknown") return null;
   return answer.trim().slice(0, question.kind === "textarea" ? 2000 : 300) || null;

@@ -3,9 +3,10 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Browser } from "playwright-core";
-import { detectConfirmation, fillApplicationForm, passwordAllowedOn, runApplicationFlow, submitAndConfirm } from "@/lib/apply/browser";
+import { detectConfirmation, fillApplicationForm, passwordAllowedOn, readFormAnswers, runApplicationFlow, submitAndConfirm } from "@/lib/apply/browser";
 import { acceptFixes } from "@/lib/apply/fixer";
 import { planAnswers } from "@/lib/apply/questions";
+import { keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 
 /** Runs the real form filler in a local Chrome against local test forms. Skipped where Chrome isn't installed. */
@@ -306,6 +307,54 @@ describe.skipIf(!hasChrome)("working out fields a form leaves empty (local Chrom
   afterAll(async () => {
     await browser?.close();
   });
+
+  it("fills work history and education straight from the resume, without asking the AI", async () => {
+    const page = await browser.newPage();
+    await page.setContent(STUCK_FORM);
+    const resume = "Colby College — B.A. Economics, Expected May 2027. Data Analyst Intern, Maine Credit Union, May 2024 - August 2024.";
+    const parsed = keepStated({ education: [{ school: "Colby College", degree: "B.A.", field: "Economics", end: "Expected May 2027" }], experience: [{ title: "Data Analyst Intern", company: "Maine Credit Union", start: "May 2024", end: "August 2024" }] }, resume, "h");
+    const profile: ApplicationProfile = { firstName: "Pat", lastName: "Doe", email: "pat@colby.edu", phone: "207-555-0100", linkedin: "", website: "", github: "", city: "Waterville", state: "Maine", saved: {}, resumeProfile: parsed };
+    const context = { profile, school: "Colby College", majors: ["Economics"], graduationYear: "2027", resumeFileName: null };
+    const asked: string[] = [];
+    await runApplicationFlow(page, {
+      url: "https://jobs.acme.com/apply", navigate: false, questions: [], resume: null, credentials: null, allowSignup: false,
+      answerFor: (label, kind, options, where) => {
+        const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], context);
+        if (planned.source === "saved" || planned.source === "student") return planned.answer;
+        return resumeFieldAnswer(parsed, { label, section: where?.section, kind, options, format: where?.format }) ?? (planned.source !== "resume_file" ? planned.answer : null);
+      },
+      fixFields: async (fields) => {
+        asked.push(...fields.map((field) => field.label));
+        return [];
+      },
+    });
+    expect(await page.inputValue("[name='experience[0][title]']")).toBe("Data Analyst Intern");
+    expect(await page.inputValue("[name='experience[0][company]']")).toBe("Maine Credit Union");
+    expect(await page.inputValue("[name='experience[0][from]']")).toBe("05/2024");
+    expect(await page.inputValue("[name='education[0][school]']")).toBe("Colby College");
+    expect(await page.inputValue("[name='education[0][degree]']")).toBe("Bachelor's Degree");
+    expect(asked).not.toEqual(expect.arrayContaining(["Job title"]));
+    expect(asked.join(" ")).not.toMatch(/Job title|Company|School|Degree|Start date/);
+    await page.close();
+  }, 30_000);
+
+  it("reads back what the student entered in the live view, by question", async () => {
+    const page = await browser.newPage();
+    await page.setContent(STUCK_FORM);
+    await page.selectOption("#hear", "Referral");
+    await page.check("[name='application_questionnaire[REC_US_Disqualification][d]'][value='0']");
+    await page.fill("[name='experience[0][title]']", "Analyst");
+    await page.fill("#ln", "Doe");
+    const answers = await readFormAnswers(page);
+    expect(answers.map((item) => [item.label, item.value])).toEqual(expect.arrayContaining([
+      ["How did you hear about us?", "Referral"],
+      ["Have you ever been employed by Acme?", "No"],
+      ["Last Name", "Doe"],
+    ]));
+    // Numbered work history entries belong to one resume line, not to every application.
+    expect(answers.map((item) => item.label)).not.toContain("Job title");
+    await page.close();
+  }, 30_000);
 
   it("reads real question text, uses the student's answers, fills from the resume with quotes, and leaves the rest to the student", async () => {
     const page = await browser.newPage();

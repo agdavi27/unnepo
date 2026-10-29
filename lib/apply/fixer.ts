@@ -2,7 +2,7 @@ import { serverConfig } from "@/lib/config";
 import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import type { EmptyField } from "@/lib/apply/browser";
 import { bestOption } from "@/lib/apply/options";
-import { answerChoices, classifyQuestion, squash } from "@/lib/apply/questions";
+import { answerChoices, classifyQuestion, supportedBy } from "@/lib/apply/questions";
 
 /**
  * The fix-up pass: when required fields are still empty after the normal fill, one model call decides
@@ -37,8 +37,6 @@ type Proposal = { index?: unknown; value?: unknown; source?: unknown; evidence?:
 
 /** Keeps only answers the rules allow, matched to the field's options. Exported for tests. */
 export function acceptFixes(fields: EmptyField[], proposals: Proposal[], context: FixContext) {
-  const facts = squash(context.facts);
-  const sources = squash(context.sources);
   const out: Array<{ index: number; value: string; why: string }> = [];
   for (const proposal of proposals) {
     const index = Number(proposal.index);
@@ -62,10 +60,10 @@ export function acceptFixes(fields: EmptyField[], proposals: Proposal[], context
       else if (context.consent && PRIVACY.test(field.label) && !CERTIFY.test(field.label)) why = "You allowed Unnepo to accept privacy notices and candidate terms.";
       else continue;
     } else if (source === "profile" || source === "student_answer") {
-      if (evidence.length < 3 || !facts.includes(squash(evidence))) continue;
+      if (evidence.length < 3 || !supportedBy(evidence, context.facts)) continue;
       why = source === "profile" ? "From your application details." : `From your answer: "${evidence.slice(0, 120)}"`;
     } else if (source === "resume") {
-      if (sensitive || DEMOGRAPHIC.test(label) || evidence.length < 4 || !sources.includes(squash(evidence))) continue;
+      if (sensitive || DEMOGRAPHIC.test(label) || evidence.length < 4 || !supportedBy(evidence, context.sources)) continue;
       why = `From your resume: "${evidence.slice(0, 160)}"`;
     } else continue;
     out.push({ index, value, why });

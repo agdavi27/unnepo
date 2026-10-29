@@ -379,6 +379,49 @@ async function emptyRequired(page: Page): Promise<EmptyField[]> {
   });
 }
 
+/**
+ * What the student has entered on the form, by question: read before Unnepo continues or submits, so an
+ * answer typed once in the live view is saved and used on every later application. Skips passwords,
+ * files, numbered work/education entries, and long job-specific essays.
+ */
+export async function readFormAnswers(page: Page): Promise<Array<{ label: string; section: string; value: string }>> {
+  await helpers(page);
+  return page.evaluate(() => {
+    const u = (window as unknown as { __unnepo: PageHelpers }).__unnepo;
+    const out: Array<{ label: string; section: string; value: string }> = [];
+    const seen = new Set<string>();
+    const push = (el: Element, value: string) => {
+      const label = u.questionText(el);
+      const section = u.section(el);
+      const clean = value.replace(/\s+/g, " ").trim();
+      if (!label || !clean || clean.length > 400 || seen.has(label) || /^(select one|select|choose|please select)$/i.test(clean)) return;
+      if (/\[\d+\]/.test(el.getAttribute("name") || "") || /\b(experience|employment|education|work history)\b.*\d/i.test(section)) return;
+      seen.add(label);
+      out.push({ label: label.slice(0, 200), section, value: clean });
+    };
+    for (const el of Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select"))) {
+      const type = (el.getAttribute("type") || "text").toLowerCase();
+      if (["hidden", "password", "file", "submit", "button", "search", "image", "reset"].includes(type) || el.getAttribute("data-automation-id") === "beecatcher" || el.getAttribute("aria-hidden") === "true") continue;
+      if (type === "radio") {
+        if ((el as HTMLInputElement).checked) {
+          const option = ((el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent) || el.closest("label")?.textContent || (el as HTMLInputElement).value || "").trim();
+          push(el, option);
+        }
+        continue;
+      }
+      if (type === "checkbox") continue;
+      if (el.tagName === "SELECT") push(el, (el as HTMLSelectElement).selectedOptions[0]?.textContent || "");
+      else push(el, (el as HTMLInputElement).value || "");
+    }
+    for (const button of Array.from(document.querySelectorAll<HTMLElement>("button[aria-haspopup='listbox']"))) push(button, button.innerText || "");
+    for (const item of Array.from(document.querySelectorAll<HTMLElement>("[data-automation-id='selectedItem']"))) {
+      const field = item.closest("[data-automation-id^='formField']")?.querySelector("input");
+      if (field) push(field, item.innerText || "");
+    }
+    return out;
+  });
+}
+
 /** The site's own error messages on the page. */
 async function siteErrors(page: Page) {
   const texts = await page.locator("[data-automation-id='errorMessage'], [role='alert']:visible, .error:visible, [class*='error' i]:visible:not(input):not(select)").allInnerTexts().catch(() => []);
@@ -436,7 +479,7 @@ export type FlowOptions = {
   /** True once the student pressed Stop. Checked between fields and pages. */
   shouldStop?: () => Promise<boolean>;
   /** Answers for fields the job board didn't publish ahead of time, matched by label. Null leaves the field for the student. */
-  answerFor: (label: string, kind: ApplicationQuestion["kind"], options: string[]) => string | null;
+  answerFor: (label: string, kind: ApplicationQuestion["kind"], options: string[], where?: { section?: string; format?: string | null }) => string | null;
   /**
    * Last resort for required fields still empty after everything else: decides an answer for each from
    * the student's details, saved answers, and resume. Returns answers by index, with why, for the student to check.
@@ -445,7 +488,7 @@ export type FlowOptions = {
   /** A cover letter written for this job from the resume, as text and as a PDF. Asked for only when the form wants one. */
   coverLetter?: () => Promise<{ text: string; file: ResumeFile } | null>;
   /** Answers, by label, for questions nothing on file covers, written only from the student's resume and profile. */
-  aiAnswers?: (questions: Array<{ label: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => Promise<Record<string, string>>;
+  aiAnswers?: (questions: Array<{ label: string; section: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => Promise<Record<string, string>>;
 };
 
 export type FlowResult = Omit<FillReport, "liveViewUrl" | "screenshotAt"> & { stoppedAt: NonNullable<FillReport["stoppedAt"]>; host: string };
@@ -628,14 +671,14 @@ function radioAnswer(group: RadioGroup, answerFor: FlowOptions["answerFor"]) {
   return answer ? group.options.find((option) => option.label.toLowerCase() === answer.toLowerCase()) ?? null : null;
 }
 
-type ScannedField = { selector: string; label: string; section: string; kind: ApplicationQuestion["kind"]; options: string[]; listbox: boolean; required: boolean };
+type ScannedField = { selector: string; label: string; section: string; format: string | null; kind: ApplicationQuestion["kind"]; options: string[]; listbox: boolean; required: boolean };
 
 /** Visible empty fields on the page, with their labels, for questions the job board didn't publish. */
 async function scanFields(page: Page): Promise<ScannedField[]> {
   await helpers(page);
   return page.evaluate(() => {
     const u = (window as unknown as { __unnepo: PageHelpers }).__unnepo;
-    const out: Array<{ selector: string; label: string; section: string; kind: "text" | "textarea" | "select" | "file" | "checkbox"; options: string[]; listbox: boolean; required: boolean }> = [];
+    const out: Array<{ selector: string; label: string; section: string; format: string | null; kind: "text" | "textarea" | "select" | "file" | "checkbox"; options: string[]; listbox: boolean; required: boolean }> = [];
     const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select, button[aria-haspopup='listbox']"));
     fields.forEach((field, index) => {
       const type = (field.getAttribute("type") || "text").toLowerCase();
@@ -661,7 +704,8 @@ async function scanFields(page: Page): Promise<ScannedField[]> {
       const required = field.hasAttribute("required") || field.getAttribute("aria-required") === "true" || /\*/.test(container?.querySelector("label")?.textContent || "");
       const kind = checkbox ? "checkbox" : field.tagName === "SELECT" || listbox ? "select" : field.tagName === "TEXTAREA" ? "textarea" : type === "file" ? "file" : "text";
       const options = checkbox ? ["Yes"] : field.tagName === "SELECT" ? Array.from((field as HTMLSelectElement).options).map((option) => option.text.trim()).filter((text) => text && !/^(select|choose|--)/i.test(text)) : [];
-      out.push({ selector: `[data-unnepo-field="${index}"]`, label: label.slice(0, 200), section: u.section(field), kind, options, listbox, required });
+      const placeholder = field.getAttribute("placeholder") || "";
+      out.push({ selector: `[data-unnepo-field="${index}"]`, label: label.slice(0, 200), section: u.section(field), format: /[my]{2}|dd/i.test(placeholder) ? placeholder : field.getAttribute("type") === "date" ? "YYYY-MM-DD" : null, kind, options, listbox, required });
     });
     return out;
   });
@@ -733,7 +777,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     if (!options.allowSignup || !PRIVACY_ACK.test(label) || !ACK_WORDS.test(label) || NOT_CONSENT.test(label) || /\b(certify|attest|true and (complete|accurate)|background|non-?compete|arbitration)\b/i.test(label)) return null;
     return choices.length ? choices.find((choice) => /^(yes|i agree|agree|i accept|accept|i acknowledge|acknowledged?)\b/i.test(choice)) ?? null : "Yes";
   };
-  const answerOf = (label: string, kind: ApplicationQuestion["kind"], choices: string[]) => options.answerFor(label, kind, choices) ?? aiKnown.get(label) ?? aiKnown.get(label.slice(0, 160)) ?? (kind === "checkbox" || kind === "select" ? privacyAck(label, kind === "checkbox" ? [] : choices) : null);
+  const answerOf = (label: string, kind: ApplicationQuestion["kind"], choices: string[], where?: { section?: string; format?: string | null }) => options.answerFor(label, kind, choices, where) ?? aiKnown.get(label) ?? aiKnown.get(label.slice(0, 160)) ?? (kind === "checkbox" || kind === "select" ? privacyAck(label, kind === "checkbox" ? [] : choices) : null);
   const host = () => {
     try {
       return new URL(page.url()).hostname;
@@ -845,9 +889,9 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
     // Everything else on the page, matched by label to what Unnepo knows for sure.
     const pageText = await bodyText(page);
     /** Questions on this page nothing on file answers yet, for one resume-based AI pass. */
-    const unknown = new Map<string, { kind: ApplicationQuestion["kind"]; options: string[] }>();
-    const note = (label: string, kind: ApplicationQuestion["kind"], choices: string[]) => {
-      if (kind !== "file" && !askedAi.has(label)) unknown.set(label, { kind, options: choices });
+    const unknown = new Map<string, { section: string; kind: ApplicationQuestion["kind"]; options: string[] }>();
+    const note = (label: string, kind: ApplicationQuestion["kind"], choices: string[], section = "") => {
+      if (kind !== "file" && !askedAi.has(label)) unknown.set(label, { section, kind, options: choices });
     };
     // Sites like Workday redraw the form after each choice, so the page is scanned again after every field.
     const fillFields = async (only: Set<string> | null) => {
@@ -858,8 +902,8 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
         if (!field) break;
         handled.add(field.label);
         if (field.listbox) {
-          const result = await decideListbox(page, page.locator(field.selector).first(), (choices) => answerOf(field.label, "select", choices)).catch(() => null);
-          if (result && !result.answer) note(field.label, "select", result.options);
+          const result = await decideListbox(page, page.locator(field.selector).first(), (choices) => answerOf(field.label, "select", choices, field)).catch(() => null);
+          if (result && !result.answer) note(field.label, "select", result.options, field.section);
           if (result?.picked) {
             filled.add(field.label);
             failed.delete(field.label);
@@ -875,7 +919,7 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
         }
         const fieldOptions = field.options;
         let answer: string | null = null;
-        if (COVER_LETTER.test(field.label) && (field.kind === "file" || field.kind === "textarea") && !answerOf(field.label, field.kind, fieldOptions)) {
+        if (COVER_LETTER.test(field.label) && (field.kind === "file" || field.kind === "textarea") && !answerOf(field.label, field.kind, fieldOptions, field)) {
           letterResult(field.label, await putLetter(page.locator(field.selector).first(), field.kind), field.required, field.kind);
           continue;
         }
@@ -884,8 +928,8 @@ export async function runApplicationFlow(page: Page, options: FlowOptions): Prom
           const wantsResume = /resume|cv|curriculum/i.test(field.label) || /\b(resume|cv)\b/i.test(pageText);
           answer = wantsResume && options.resume && !resumeUploaded && !pageText.includes(options.resume.name) ? options.resume.name : null;
         } else {
-          answer = answerOf(field.label, field.kind, fieldOptions);
-          if (!answer) note(field.label, field.kind, fieldOptions);
+          answer = answerOf(field.label, field.kind, fieldOptions, field);
+          if (!answer) note(field.label, field.kind, fieldOptions, field.section);
         }
         if (!answer) {
           if (field.required && field.kind !== "file") {

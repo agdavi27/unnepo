@@ -4,13 +4,14 @@ import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { splitProfileList } from "@/lib/profile/lists";
 import { readStoredResume } from "@/lib/services/resume";
-import { AutofillStopped, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
+import { AutofillStopped, readFormAnswers, browserReady, createBrowserSession, detectConfirmation, liveViewUrl, releaseBrowserSession, runApplicationFlow, submitAndConfirm, withSessionPage, type FlowResult, type ResumeFile } from "@/lib/apply/browser";
 import { decryptSecret, encryptSecret } from "@/lib/security";
 import { coverLetterPdf, writeCoverLetter } from "@/lib/apply/cover-letter";
 import { decideFixes } from "@/lib/apply/fixer";
+import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
 import { extractJob } from "@/lib/apply/extract";
-import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
+import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState } from "@/lib/apply/types";
 
@@ -29,19 +30,24 @@ async function student(userId: string) {
   const resumeText = resume?.text ?? "";
   const fromResume = contactFromResume(resumeText);
   const [firstName = "", ...rest] = user.name.trim().split(/\s+/);
+  // What the student typed wins; anything blank comes from their resume.
+  const parsed = stored?.resumeProfile && stored.resumeProfile.sourceHash === resumeHash(resumeText) ? stored.resumeProfile : null;
+  const fromParsed = parsed?.contact;
+  const pick = (typed: string | undefined, ...fallbacks: Array<string | undefined>) => typed?.trim() || fallbacks.find((value) => value?.trim())?.trim() || "";
   const profile: ApplicationProfile = {
-    firstName: stored?.firstName ?? firstName,
-    lastName: stored?.lastName ?? rest.join(" "),
-    email: stored?.email ?? user.email,
-    phone: stored?.phone ?? fromResume.phone,
-    linkedin: stored?.linkedin ?? fromResume.linkedin,
-    website: stored?.website ?? "",
-    github: stored?.github ?? fromResume.github,
-    city: stored?.city ?? "",
-    addressLine1: stored?.addressLine1 ?? "",
-    state: stored?.state ?? "",
-    postalCode: stored?.postalCode ?? "",
-    country: stored?.country ?? "",
+    firstName: pick(stored?.firstName, firstName),
+    lastName: pick(stored?.lastName, rest.join(" ")),
+    email: pick(stored?.email, user.email),
+    phone: pick(stored?.phone, fromResume.phone, fromParsed?.phone),
+    linkedin: pick(stored?.linkedin, fromResume.linkedin, fromParsed?.linkedin),
+    website: pick(stored?.website, fromParsed?.website),
+    github: pick(stored?.github, fromResume.github, fromParsed?.github),
+    city: pick(stored?.city, fromParsed?.city),
+    addressLine1: pick(stored?.addressLine1, fromParsed?.addressLine1),
+    state: pick(stored?.state, fromParsed?.state),
+    postalCode: pick(stored?.postalCode, fromParsed?.postalCode),
+    country: pick(stored?.country, fromParsed?.country, /^\d{5}(-\d{4})?$/.test(fromParsed?.postalCode ?? "") ? "United States" : ""),
+    resumeProfile: parsed,
     saved: stored?.saved ?? {},
     eligibility: stored?.eligibility ?? {},
     jobSitePasswordEncrypted: stored?.jobSitePasswordEncrypted ?? null,
@@ -104,6 +110,78 @@ async function aiAnswers(userId: string, questions: ApplicationQuestion[], sourc
   }
 }
 
+/** When each student's resume was last sent to be read, so polling doesn't start it twice. */
+const resumeReads = new Map<string, number>();
+
+/** Reads the resume into schools, jobs, and contact details once, and again only when the resume changes. */
+async function ensureResumeProfile(userId: string) {
+  const [resume, stored] = await Promise.all([repo.getLatestResume(userId), applicationProfiles.get(userId)]);
+  const text = resume?.text ?? "";
+  if (!text.trim() || stored?.resumeProfile?.sourceHash === resumeHash(text)) return;
+  const parsed = await readResumeProfile(userId, text);
+  if (!parsed) return;
+  const base = stored ?? (await student(userId)).profile;
+  await applicationProfiles.put(userId, { ...base, resumeProfile: parsed });
+}
+
+/** The answer for a form question: the student's own answers first, then their resume's schools and jobs, then their details. */
+function answerWith(info: Awaited<ReturnType<typeof student>>, company: string) {
+  return (label: string, kind: ApplicationQuestion["kind"], options: string[], where?: { section?: string; format?: string | null }) => {
+    const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], info.context);
+    if (planned.answer && (planned.source === "saved" || planned.source === "student")) return planned.answer;
+    const fromResume = resumeFieldAnswer(info.profile.resumeProfile, { label, section: where?.section, kind, options, format: where?.format });
+    if (fromResume) return fromResume;
+    if (planned.answer && planned.source && planned.source !== "resume_file") return planned.answer;
+    // "Have you worked for Acme before?" The resume lists every job, so it answers this.
+    if (company && new RegExp(`(previously|ever|before|formerly|in the past).*(work|employ)|(work|employ).*(previously|ever|before|in the past)|former employee`, "i").test(label) && !/\b(intern|contractor|relative|family)\b/i.test(label)) {
+      const jobs = info.profile.resumeProfile?.experience ?? [];
+      if (!jobs.length) return null;
+      const worked = jobs.some((job) => job.company && (job.company.toLowerCase().includes(company.toLowerCase()) || company.toLowerCase().includes(job.company.toLowerCase())));
+      const answer = worked ? "Yes" : "No";
+      return options.length ? options.find((option) => option.toLowerCase().startsWith(answer.toLowerCase())) ?? null : answer;
+    }
+    return null;
+  };
+}
+
+/** Saves what the student entered in the live view, so the same question fills itself next time. */
+async function learnAnswers(userId: string, info: Awaited<ReturnType<typeof student>>, entries: Array<{ label: string; section: string; value: string }>) {
+  const saved = { ...info.profile.saved };
+  const next: ApplicationProfile = { ...info.profile };
+  let learned = 0;
+  for (const entry of entries) {
+    const { field } = classifyQuestion(entry.label);
+    if (field === "resume" || field === "coverLetter" || field === "phoneExtension" || /cover ?letter|password/i.test(entry.label)) continue;
+    // A plain contact field fills the student's details if they were blank.
+    if (field && (["firstName", "lastName", "phone", "city", "addressLine1", "state", "postalCode", "country", "linkedin", "website", "github"] as const).includes(field as never)) {
+      const key = field as "firstName";
+      if (!String(info.profile[key] ?? "").trim()) {
+        next[key] = entry.value;
+        learned += 1;
+      }
+      continue;
+    }
+    const eligible = eligibilityAnswer(entry.label, { ...info.profile, eligibility: { workAuthorized: "x", needsSponsorship: "x", over18: "x" } });
+    if (eligible && /^(yes|no)\b/i.test(entry.value)) {
+      const key = /sponsor/i.test(entry.label) ? "needsSponsorship" : /18|age/i.test(entry.label) ? "over18" : "workAuthorized";
+      if (!info.profile.eligibility?.[key]) {
+        next.eligibility = { ...(next.eligibility ?? {}), [key]: /^yes/i.test(entry.value) ? "Yes" : "No" };
+        learned += 1;
+      }
+      continue;
+    }
+    const key = normalizeLabel(entry.label);
+    if (saved[key]?.answer === entry.value) continue;
+    saved[key] = { label: entry.label, answer: entry.value, updatedAt: nowIso() };
+    learned += 1;
+  }
+  if (!learned) return 0;
+  next.saved = saved;
+  await applicationProfiles.put(userId, next);
+  Object.assign(info.profile, next);
+  return learned;
+}
+
 function summary(app: JobApplication) {
   const missing = missingAnswers(app.questions);
   return { ...app, description: app.description.slice(0, 4000), missing: missing.map((question) => question.key) };
@@ -111,6 +189,11 @@ function summary(app: JobApplication) {
 
 export async function applyState(userId: string) {
   const [apps, info] = await Promise.all([applications.list(userId), student(userId)]);
+  // A new resume is read in the background, so blank details fill from it without waiting for an application.
+  if (info.resumeText.trim() && !info.profile.resumeProfile && Date.now() - (resumeReads.get(userId) ?? 0) > 120_000) {
+    resumeReads.set(userId, Date.now());
+    defer(() => ensureResumeProfile(userId).catch(() => undefined));
+  }
   const contacts = await applicationContacts.list(userId, apps.map((app) => app.id));
   return {
     applications: apps.map((app) => ({ ...summary(app), contacts: contacts.filter((contact) => contact.applicationId === app.id) })),
@@ -125,12 +208,18 @@ export async function applyState(userId: string) {
 export async function createApplication(userId: string, raw: unknown) {
   const url = String((raw as { url?: unknown } | null)?.url ?? "").trim().slice(0, 2000);
   if (!url) throw new ServiceError("Paste a job posting link.", "job_url", 400);
+  if (!(await repo.getProfileDocument(userId))?.ready) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
+  const [job] = await Promise.all([extractJob(url), ensureResumeProfile(userId)]);
   const info = await student(userId);
-  if (!info.document?.ready) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
-  const job = await extractJob(url);
   const existing = await applications.findByKey(userId, job.jobKey);
   if (existing) return { application: summary(existing), duplicate: true, message: `You already added ${existing.title} at ${existing.company}.` };
   let questions = planAnswers(job.questions, info.context);
+  // Education and work history questions come straight from the resume's entries.
+  questions = questions.map((question) => {
+    if (question.answer || question.sensitive || question.kind === "file") return question;
+    const answer = resumeFieldAnswer(info.profile.resumeProfile, { label: question.label, kind: question.kind, options: question.options });
+    return answer ? { ...question, answer, source: "resume", evidence: null } : question;
+  });
   questions = await aiAnswers(userId, questions, [info.profileText, info.resumeText].join("\n\n"));
   const { app, created } = await applications.insert({
     userId,
@@ -262,20 +351,19 @@ const STOP_MESSAGE: Record<FlowResult["stoppedAt"], (report: FlowResult, email: 
 
 /** Runs the page-by-page fill in a session and records where it stopped. Never submits. */
 async function runFlow(userId: string, app: JobApplication, sessionId: string, navigate: boolean) {
+  await ensureResumeProfile(userId);
   const info = await student(userId);
   const resume = await resumeFile(userId);
   const password = info.profile.jobSitePasswordEncrypted ? decryptSecret(info.profile.jobSitePasswordEncrypted) : "";
   const credentials = password && info.profile.email ? { email: info.profile.email, password } : null;
-  const answerFor = (label: string, kind: ApplicationQuestion["kind"], options: string[]) => {
-    const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], info.context);
-    return planned.answer && planned.source && planned.source !== "resume_file" ? planned.answer : null;
-  };
+  const answerFor = answerWith(info, app.company);
   // New questions on the live form are answered from the resume and profile, with the same evidence rule as before.
   const sources = [info.profileText, info.resumeText].join("\n\n");
-  const resumeAnswers = async (items: Array<{ label: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => {
-    const asked = items.map((item, index) => ({ key: `q${index}`, label: item.label, kind: item.kind, required: false, options: item.options, sensitive: classifyQuestion(item.label).sensitive, answer: null, source: null, evidence: null }));
+  const resumeAnswers = async (items: Array<{ label: string; section: string; kind: ApplicationQuestion["kind"]; options: string[] }>) => {
+    // The section ("Work Experience 2") tells the model which part of the resume a question is about.
+    const asked = items.map((item, index) => ({ key: `q${index}`, label: item.section ? `${item.section}: ${item.label}` : item.label, kind: item.kind, required: false, options: item.options, sensitive: classifyQuestion(item.label).sensitive, answer: null, source: null, evidence: null }));
     const answered = await aiAnswers(userId, asked, sources);
-    return Object.fromEntries(answered.filter((question) => question.source === "ai" && question.answer).map((question) => [question.label, question.answer!]));
+    return Object.fromEntries(answered.flatMap((question, index) => (question.source === "ai" && question.answer ? [[items[index].label, question.answer]] : [])));
   };
   // A cover letter is written only when the form asks for one, and reused if this job already has one.
   const coverLetter = async () => {
@@ -306,10 +394,13 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
   const live = await liveViewUrl(sessionId);
   await applications.update(userId, app.id, { browserSessionId: sessionId, fillReport: { ...(app.fillReport ?? { filled: [], failed: [] }), liveViewUrl: live, screenshotAt: nowIso() } });
   let report: FlowResult;
+  let learned = 0;
   try {
-    report = await withSessionPage(sessionId, (page) =>
-      runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, aiAnswers: resumeAnswers, coverLetter, fixFields, shouldStop }),
-    );
+    report = await withSessionPage(sessionId, async (page) => {
+      // Picking up after the student worked in the live view: keep what they entered for next time.
+      if (!navigate) learned = await learnAnswers(userId, info, await readFormAnswers(page).catch(() => []));
+      return runApplicationFlow(page, { url: app.applicationUrl!, navigate, questions: app.questions, resume, credentials, allowSignup: Boolean(info.profile.accountConsentAt), answerFor, aiAnswers: resumeAnswers, coverLetter, fixFields, shouldStop });
+    });
   } catch (error) {
     // Stopped by the student: stopAutofill already saved where things stand.
     if (!(error instanceof AutofillStopped) && !(await shouldStop().catch(() => false))) throw error;
@@ -330,7 +421,7 @@ async function runFlow(userId: string, app: JobApplication, sessionId: string, n
     status: "review",
     browserSessionId: sessionId,
     fillReport: { ...report, coverLetter: report.coverLetter ?? app.fillReport?.coverLetter, liveViewUrl: live, screenshotAt: nowIso() },
-    statusMessage: STOP_MESSAGE[report.stoppedAt](report, info.profile.email),
+    statusMessage: `${learned ? `Saved ${learned} answer${learned === 1 ? "" : "s"} you entered, for future applications. ` : ""}${STOP_MESSAGE[report.stoppedAt](report, info.profile.email)}`,
   });
   return { application: summary(updated!) };
 }
@@ -433,7 +524,11 @@ export async function approveAndSubmit(userId: string, raw: unknown) {
   const claimed = await applications.transition(userId, app.id, ["review"], { status: "submitting", statusMessage: "Submitting…" });
   if (!claimed) throw new ServiceError("This application isn't waiting for approval.", "state", 409);
   try {
-    const confirmation = await withSessionPage(app.browserSessionId, (page) => submitAndConfirm(page));
+    const info = await student(userId);
+    const confirmation = await withSessionPage(app.browserSessionId, async (page) => {
+      await learnAnswers(userId, info, await readFormAnswers(page).catch(() => [])).catch(() => 0);
+      return submitAndConfirm(page);
+    });
     return { application: summary((await recordSubmitResult(userId, app, confirmation))!) };
   } catch (error) {
     await applications.update(userId, app.id, { status: "unconfirmed", statusMessage: error instanceof ServiceError ? error.message : "Couldn't confirm the submission. Check the live view." });

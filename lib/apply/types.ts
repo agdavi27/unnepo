@@ -1,3 +1,5 @@
+import type { ResumeProfile } from "@/lib/apply/resume-profile";
+
 export type Ats = "greenhouse" | "lever" | "ashby" | "workday" | "other";
 
 export type ApplicationStatus =
@@ -141,6 +143,8 @@ export type ApplicationProfile = {
   country?: string;
   /** Answers the student saved from earlier forms, keyed by a normalized question label. */
   saved: Record<string, { label: string; answer: string; updatedAt: string }>;
+  /** The resume read into contact details, schools, and jobs; refreshed when the resume changes. */
+  resumeProfile?: ResumeProfile | null;
   /** Eligibility answers the student gave once, used on every form that asks: "Yes", "No", or unset. */
   eligibility?: { workAuthorized?: string; needsSponsorship?: string; over18?: string };
   /** The student's one job-site password, encrypted. Never sent to the browser page. */
