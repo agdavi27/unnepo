@@ -381,6 +381,7 @@ describe("standard answers", () => {
     expect(policyAnswer("Message to the recruiter", "textarea", [], p())).toBe(RECRUITER_NOTE);
     expect(policyAnswer("Is there anything else you'd like us to know?", "textarea", [], p())).toBe(RECRUITER_NOTE);
     expect(policyAnswer("Additional information", "textarea", [], p())).toBe(RECRUITER_NOTE);
+    expect(policyAnswer("Let the company know about your interest", "textarea", [], p())).toBe(RECRUITER_NOTE);
     expect(policyAnswer("Cover letter", "textarea", [], p())).toBeNull();
   });
 

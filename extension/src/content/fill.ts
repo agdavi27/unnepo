@@ -3,7 +3,7 @@ import { findAction, findApply, pageNotes, pressAction, SUBMIT } from "./actions
 import { press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
-import { emptyRequired, isEmpty, labelOf, scanFields, scanPage } from "./scan";
+import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, scanFields, scanPage } from "./scan";
 import { startSpiders, stopSpiders } from "./spiders";
 
 /**
@@ -24,7 +24,7 @@ declare global {
  */
 function fillPasswords(password: string | null) {
   if (!password) return [];
-  const boxes = Array.from(document.querySelectorAll<HTMLInputElement>("input[type=password]"))
+  const boxes = deepAll<HTMLInputElement>("input[type=password]")
     .filter((box) => !box.disabled && !box.readOnly && !box.value && box.getBoundingClientRect().height > 0);
   boxes.forEach((box) => typeInto(box, password));
   return boxes.map((box, index) => (index === 0 ? "Password" : /confirm|verify|re-?enter|again/i.test(`${labelOf(box)} ${box.name} ${box.id} ${box.getAttribute("aria-label") ?? ""} ${box.getAttribute("data-automation-id") ?? ""}`) ? "Confirm password" : `Password ${index + 1}`));
@@ -34,7 +34,7 @@ function fillPasswords(password: string | null) {
 async function withOptions(fields: PageField[]) {
   for (const field of fields) {
     if (field.type !== "combobox" || field.options.length) continue;
-    const el = document.querySelector<HTMLElement>(`[data-unnepo-id="${field.id}"]`);
+    const el = findMarked(field.id);
     if (!el) continue;
     const control = (el.closest("[class*='select__control'], [class*='-control']") as HTMLElement | null) ?? el;
     press(control);
@@ -74,12 +74,12 @@ async function fill(plan: FillPlan): Promise<FillReport> {
 function typedAnswers() {
   const fields = planned.length ? planned : scanFields();
   return fields.flatMap((field) => {
-    const el = document.querySelector<HTMLElement>(`[data-unnepo-id="${field.id}"]`);
+    const el = findMarked(field.id);
     if (!el || field.type === "file") return [];
     const control = el.matches("input, select, textarea, button") ? el : (el.querySelector("input") as HTMLElement | null) ?? el;
     if (isEmpty(control)) return [];
     const value = control instanceof HTMLSelectElement ? control.selectedOptions[0]?.textContent?.trim() ?? ""
-      : control instanceof HTMLInputElement && (control.type === "radio" || control.type === "checkbox") ? (document.querySelector<HTMLInputElement>(`input[name="${CSS.escape(control.name)}"]:checked`)?.closest("label")?.textContent ?? "").trim()
+      : control instanceof HTMLInputElement && (control.type === "radio" || control.type === "checkbox") ? (rootOf(control).querySelector<HTMLInputElement>(`input[name="${CSS.escape(control.name)}"]:checked`)?.closest("label")?.textContent ?? "").trim()
         : control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement ? control.value.trim() : (control.textContent ?? "").trim();
     if (!value || value.length > 400 || plannedValues.get(field.label) === value) return [];
     return [{ question: field.label, answer: value, section: field.section }];
@@ -141,7 +141,7 @@ if (!window.__unnepo) {
       // Fields Greenhouse's API doesn't list (its newer demographic questions): empty and not one of its ids.
       const known = new Set<string>(message.ids ?? []);
       const fields = scanFields().filter((field) => {
-        const el = document.querySelector<HTMLElement>(`[data-unnepo-id="${field.id}"]`);
+        const el = findMarked(field.id);
         if (!el || field.type === "file") return false;
         const control = el.matches("input, select, textarea, button") ? el : (el.querySelector("input") as HTMLElement | null) ?? el;
         const ids = [control.id, (control as HTMLInputElement).name, el.id].filter(Boolean);

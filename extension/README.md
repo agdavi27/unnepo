@@ -53,6 +53,17 @@ application is submitted or the student presses **Stop**:
 It never fills bot-trap fields (hidden or labelled for robots), never presses header links like Sign In or
 "Apply with LinkedIn", and never solves CAPTCHAs. Buttons are found in `src/content/actions.ts`.
 
+## Uploads and hard-to-read forms
+
+- Upload boxes are filled before anything else, and the extension waits (up to six seconds) while a site
+  reads the resume itself ("Analyzing resume…" on Lever, Ashby's autofill), so the site can't overwrite
+  answers typed afterwards.
+- A box that doesn't say what it's for gets the resume only if no box asks for the resume by name, and
+  only once; cover letter boxes get the cover letter; transcripts, portfolios and the like get nothing.
+- Forms built from web components (SmartRecruiters) are read through their open shadow roots.
+- Forms in an embedded frame (a company site showing Greenhouse or iCIMS in a frame) are read in that
+  frame. CAPTCHA, ad, video and payment frames are never touched.
+
 ## Files
 
 - `src/background.ts`: token, API client, fill flow, submission detection

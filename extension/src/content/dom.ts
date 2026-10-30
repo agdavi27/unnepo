@@ -1,6 +1,7 @@
 import { bestOption } from "@/lib/apply/options";
 import { answerChoices, DECLINE } from "@/lib/apply/questions";
 import type { FileData } from "../shared/types";
+import { deepAll } from "./scan";
 
 /**
  * Filling fields the way a person would, so React-controlled forms register the values: the native value
@@ -24,8 +25,8 @@ export function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: stri
   el.focus();
   const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, value);
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
+  el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   if (blur) el.dispatchEvent(new FocusEvent("blur", { bubbles: false }));
 }
 
@@ -45,8 +46,8 @@ export function chooseNativeSelect(el: HTMLSelectElement, answer: string) {
   const choice = answerChoices(answer).map((candidate) => bestOption(candidate, labels)).find(Boolean);
   if (!choice) throw new Error(`no option matching "${answer}"`);
   el.value = el.options[labels.indexOf(choice)].value;
-  el.dispatchEvent(new Event("input", { bubbles: true }));
-  el.dispatchEvent(new Event("change", { bubbles: true }));
+  el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
 }
 
 /** Matches an answer to visible option texts; `pick` overrides the matching (degrees, cities). */
@@ -61,7 +62,7 @@ const optionText = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").
 
 /** Any open listbox's options on the page. */
 export function visibleOptions(scope: ParentNode = document) {
-  return Array.from(scope.querySelectorAll<HTMLElement>("[role=option], [data-automation-id='promptOption']")).filter((el) => el.getBoundingClientRect().height > 0);
+  return deepAll<HTMLElement>("[role=option], [data-automation-id='promptOption']", scope).filter((el) => el.getBoundingClientRect().height > 0);
 }
 
 /** A searchable or plain custom dropdown: open it, optionally type to filter, click the matching option. */
@@ -92,8 +93,8 @@ export function attachFile(input: HTMLInputElement, file: FileData) {
   const transfer = new DataTransfer();
   transfer.items.add(new File([bytes], file.name, { type: file.mime }));
   input.files = transfer.files;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(new Event("change", { bubbles: true }));
+  input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
 }
 
 export const YES = /^(yes|true|y|1|i agree|agree|checked)$/i;

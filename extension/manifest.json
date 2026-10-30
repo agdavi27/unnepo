@@ -25,7 +25,8 @@
     "scripting",
     "tabs",
     "activeTab",
-    "webRequest"
+    "webRequest",
+    "webNavigation"
   ],
   "host_permissions": [
     "https://*/*",

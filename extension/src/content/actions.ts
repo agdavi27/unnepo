@@ -1,6 +1,6 @@
 import { CONFIRM_TEXT } from "../shared/types";
 import { press } from "./dom";
-import { openDialog } from "./scan";
+import { deepAll, openDialog } from "./scan";
 
 /**
  * The buttons that move an application along: Apply on a job posting, Create account or Sign in, Next,
@@ -36,7 +36,7 @@ const byId = (id: string) => Array.from(document.querySelectorAll<HTMLElement>(`
 
 /** Buttons and button-like links on the page (or only in the open popup), minus the site header and footer. */
 function buttons() {
-  return Array.from((openDialog() ?? document).querySelectorAll<HTMLElement>("button, input[type=submit], input[type=button], a, [role=button]"))
+  return deepAll<HTMLElement>("button, input[type=submit], input[type=button], a, [role=button]", openDialog() ?? document)
     .filter(usable)
     .filter((el) => !el.closest("header, footer, nav, [data-automation-id='utilityButtonBar'], [role=banner], [role=navigation]"));
 }
@@ -45,7 +45,7 @@ const find = (pattern: RegExp) => buttons().find((el) => pattern.test(text(el)))
 
 /** What to press next on this page, if anything. `knownAccount`: the student already has an account on this site. */
 export function findAction(knownAccount: boolean, formFields: number): (PageAction & { el: HTMLElement }) | null {
-  const passwords = Array.from(document.querySelectorAll<HTMLInputElement>("input[type=password]")).filter(usable).length;
+  const passwords = deepAll<HTMLInputElement>("input[type=password]").filter(usable).length;
   const make = (kind: ActionKind, el: HTMLElement | null) => (el ? { kind, label: text(el) || kind, el } : null);
 
   // Workday's account page: create an account the first time, sign in after that.

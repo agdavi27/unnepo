@@ -124,7 +124,12 @@ async function state(): Promise<PanelState> {
   return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase };
 }
 
-const send = <T>(tabId: number, message: unknown) => chrome.tabs.sendMessage(tabId, message) as Promise<T>;
+/** The frame the application form is in, per tab: 0 for the page itself, or an embedded form's frame. */
+const formFrame = new Map<number, number>();
+const send = <T>(tabId: number, message: unknown, frameId = formFrame.get(tabId) ?? 0) => chrome.tabs.sendMessage(tabId, message, { frameId }) as Promise<T>;
+
+// Frames Unnepo never reads or touches: CAPTCHAs (never solved, never poked), ads, video, and payments.
+const SKIP_FRAME = /recaptcha|hcaptcha|captcha|turnstile|challenges\.cloudflare|arkoselabs|funcaptcha|doubleclick|googlesyndication|googletagmanager|youtube\.com|vimeo\.com|js\.stripe\.com|facebook\.com|linkedin\.com\/(embed|px)/i;
 
 /** Two pages of the same application: same site, and the same job in the path (Workday keeps it in every step). */
 function sameApplication(before: string | undefined, after: string) {
@@ -161,10 +166,27 @@ async function rememberAccount(host: string) {
 }
 
 /** Puts the page script on the page (again, after a page load) and reads it; null while the page is loading. */
+/**
+ * Puts the page script in the page and in its embedded frames (company sites that show the Greenhouse
+ * or iCIMS form in a frame), reads each, and works in the one with the form. Null while the page loads.
+ */
 async function look(tabId: number): Promise<Scan | null> {
   try {
-    await chrome.scripting.executeScript({ target: { tabId }, files: ["content/fill.js"] });
-    return await send<Scan>(tabId, { type: "scan" });
+    const frames = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) ?? [{ frameId: 0, url: "" }];
+    const frameIds = frames.filter((frame) => frame.frameId === 0 || (/^https:\/\//.test(frame.url) && !SKIP_FRAME.test(frame.url))).map((frame) => frame.frameId);
+    await chrome.scripting.executeScript({ target: { tabId, frameIds }, files: ["content/fill.js"] }).catch(() => undefined);
+    const scans = await chrome.scripting.executeScript({
+      target: { tabId, frameIds },
+      func: () => (window as unknown as { __unnepo?: { scan: () => unknown } }).__unnepo?.scan() ?? null,
+    });
+    const found = scans.filter((result) => result.result).map((result) => ({ frameId: result.frameId, scan: result.result as Scan }));
+    const weight = (scan: Scan) => (scan.useServerSchema ? 1000 : 0) + scan.fields.length + scan.passwordBoxes;
+    // The page itself, unless a frame plainly holds more of the form.
+    const top = found.find((item) => item.frameId === 0);
+    const best = found.reduce<(typeof found)[number] | undefined>((pick, item) => (!pick || weight(item.scan) > weight(pick.scan) ? item : pick), top);
+    if (!best) return null;
+    formFrame.set(tabId, best.frameId);
+    return best.scan;
   } catch {
     return null;
   }
@@ -218,7 +240,7 @@ async function run(tabId: number) {
   const spiders = (on: boolean) => {
     if (on === spidersOut) return;
     spidersOut = on;
-    void send(tabId, { type: "spiders", on }).catch(() => undefined);
+    void send(tabId, { type: "spiders", on }, 0).catch(() => undefined);
   };
   const step = async (text: string, extra: Partial<Job> = {}) => {
     if (text === lastStep && !Object.keys(extra).length) return;
@@ -228,7 +250,8 @@ async function run(tabId: number) {
   try {
     const first = await look(tabId);
     if (!first) throw new Error("Couldn't read this page. Reload it, then press Fill.");
-    if (first.embeddedForm && !first.fields.length) throw new Error(`This page shows the form inside another site. Open the form directly, then press Fill: ${first.embeddedForm}`);
+    // A frame the extension can't read (rare now that frames are read too): send the student to the form itself.
+    if (first.embeddedForm && !first.fields.length && !first.passwordBoxes) throw new Error(`This page shows the form inside another site. Open the form directly, then press Fill: ${first.embeddedForm}`);
     spiders(true);
     const firstHost = new URL(first.url).hostname;
     // Pressing Fill again partway through keeps the same job instead of opening a new one per page.
@@ -241,7 +264,7 @@ async function run(tabId: number) {
       const scan = await look(tabId);
       if (!scan) { await wait(400); continue; }
       // A new page load starts without spiders; send them back out if they were out.
-      if (scan.url !== lastUrl && spidersOut) void send(tabId, { type: "spiders", on: true }).catch(() => undefined);
+      if (scan.url !== lastUrl && spidersOut) void send(tabId, { type: "spiders", on: true }, 0).catch(() => undefined);
       lastUrl = scan.url;
       const host = new URL(scan.url).hostname;
       const known = Boolean((await knownAccounts())[host]);
@@ -362,7 +385,7 @@ async function run(tabId: number) {
   } finally {
     if (stillRunning(tabId, runId)) runs.delete(tabId);
     await saveJob(tabId, { running: false }).catch(() => undefined);
-    void send(tabId, { type: "spiders", on: false }).catch(() => undefined);
+    void send(tabId, { type: "spiders", on: false }, 0).catch(() => undefined);
   }
 }
 
@@ -491,6 +514,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
 chrome.runtime.onInstalled.addListener(() => void jobSitePassword());
 chrome.tabs.onRemoved.addListener((tabId) => {
   runs.delete(tabId);
+  formFrame.delete(tabId);
   void saveJob(tabId, null);
 });
 // A restarted worker has no runs going, so nothing should say it's running.

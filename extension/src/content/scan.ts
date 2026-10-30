@@ -12,8 +12,27 @@ const machine = (text: string) => !/\s/.test(text) && /[[\]_]/.test(text);
 const FORMAT_ONLY = /^(mm\/yyyy|mm\/dd\/yyyy|dd\/mm\/yyyy|yyyy|mm|month|year|select|search|choose|type to search|start typing)$/i;
 const CONTROLS = "input:not([type=hidden]), select, textarea, button[aria-haspopup='listbox']";
 
-function byIds(ids: string) {
-  return ids.split(/\s+/).map((id) => document.getElementById(id)?.textContent ?? "").join(" ");
+/**
+ * Some forms are built from web components (SmartRecruiters): their fields live in shadow roots that a
+ * plain querySelectorAll never sees. These look inside every open one.
+ */
+export function deepAll<T extends Element = HTMLElement>(selector: string, root: ParentNode = document): T[] {
+  const found = Array.from(root.querySelectorAll<T>(selector));
+  for (const el of Array.from(root.querySelectorAll("*"))) if (el.shadowRoot) found.push(...deepAll<T>(selector, el.shadowRoot));
+  return found;
+}
+
+/** The document or shadow root an element lives in, where its <label for> and radio siblings are. */
+export const rootOf = (el: Element) => el.getRootNode() as Document | ShadowRoot;
+
+/** The parent, stepping out of a shadow root to the component that holds it. */
+export const parentOf = (el: Element): Element | null => el.parentElement ?? ((el.getRootNode() as ShadowRoot).host ?? null);
+
+/** A field the scanner marked, wherever it is. */
+export const findMarked = (id: string) => deepAll<HTMLElement>(`[data-unnepo-id="${id}"]`)[0] ?? null;
+
+function byIds(ids: string, root: Document | ShadowRoot = document) {
+  return ids.split(/\s+/).map((id) => root.getElementById(id)?.textContent ?? "").join(" ");
 }
 
 function optionTexts(node: Element) {
@@ -31,15 +50,15 @@ function ownText(node: HTMLElement) {
 
 /** The visible label of one radio button or checkbox: its option, not the question. */
 export function labelOf(input: HTMLInputElement) {
-  const byFor = input.id ? document.querySelector(`label[for="${CSS.escape(input.id)}"]`) : null;
+  const byFor = input.id ? rootOf(input).querySelector(`label[for="${CSS.escape(input.id)}"]`) : null;
   return clean(byFor?.textContent || input.closest("label")?.textContent || input.getAttribute("aria-label") || input.value);
 }
 
 function groupQuestion(el: HTMLInputElement) {
   const group = el.closest("[role=radiogroup], fieldset, [role=group]");
-  const named = group && (clean(group.querySelector("legend")?.textContent) || (group.getAttribute("aria-labelledby") ? clean(byIds(group.getAttribute("aria-labelledby")!)) : "") || clean(group.getAttribute("aria-label")));
+  const named = group && (clean(group.querySelector("legend")?.textContent) || (group.getAttribute("aria-labelledby") ? clean(byIds(group.getAttribute("aria-labelledby")!, rootOf(el))) : "") || clean(group.getAttribute("aria-label")));
   if (named) return named.slice(0, 300);
-  const members = el.name ? Array.from(document.querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)) : [el];
+  const members = el.name ? Array.from(rootOf(el).querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)) : [el];
   let node = el.parentElement;
   for (let depth = 0; node && node !== document.body && depth < 8; depth += 1, node = node.parentElement) {
     if (!members.every((member) => node!.contains(member))) continue;
@@ -59,18 +78,18 @@ export function questionText(el: HTMLElement): string {
   }
   const labelledBy = el.getAttribute("aria-labelledby");
   const direct = [
-    el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent : "",
-    labelledBy ? byIds(labelledBy) : "",
+    el.id ? rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent : "",
+    labelledBy ? byIds(labelledBy, rootOf(el)) : "",
     el.closest("[data-automation-id^='formField']")?.querySelector("label")?.textContent,
     type === "checkbox" ? "" : el.closest("label")?.textContent,
     el.getAttribute("aria-label"),
     el.closest("fieldset")?.querySelector("legend")?.textContent,
   ].map(clean).find((text) => text && text.length > 1 && !machine(text));
   if (direct && !FORMAT_ONLY.test(direct)) return direct.slice(0, 300);
-  let node = el.parentElement;
-  for (let depth = 0; node && node !== document.body && depth < 6; depth += 1, node = node.parentElement) {
+  let node = parentOf(el);
+  for (let depth = 0; node && node !== document.body && depth < 6; depth += 1, node = parentOf(node)) {
     if (node.querySelectorAll(CONTROLS).length > 6) break;
-    const text = ownText(node);
+    const text = ownText(node as HTMLElement);
     if (text.length >= 3 && !FORMAT_ONLY.test(text)) return (direct ? `${text} (${direct})` : text).slice(0, 300);
   }
   if (type === "checkbox") {
@@ -86,7 +105,7 @@ const HEADING = "h1, h2, h3, h4, h5, [role=heading], [data-automation-id*='Heade
 /** The heading a control sits under ("Work Experience 2", "Education"). */
 export function sectionOf(el: Element) {
   let node: Element | null = el;
-  for (let depth = 0; node && node !== document.body && depth < 12; depth += 1, node = node.parentElement) {
+  for (let depth = 0; node && node !== document.body && depth < 12; depth += 1, node = parentOf(node)) {
     let sibling = node.previousElementSibling;
     for (let hops = 0; sibling && hops < 25; hops += 1, sibling = sibling.previousElementSibling) {
       const found = sibling.matches(HEADING) ? sibling : Array.from(sibling.querySelectorAll(HEADING)).pop();
@@ -118,7 +137,7 @@ export function isEmpty(el: HTMLElement): boolean {
       if (group && group.querySelectorAll("input[type=checkbox]").length > 1) return !group.querySelector("input[type=checkbox]:checked");
       return !(el as HTMLInputElement).checked;
     }
-    if (type === "radio") return !document.querySelector(`input[type=radio][name="${CSS.escape((el as HTMLInputElement).name)}"]:checked`);
+    if (type === "radio") return !rootOf(el).querySelector(`input[type=radio][name="${CSS.escape((el as HTMLInputElement).name)}"]:checked`);
     if (type === "file") return !(el as HTMLInputElement).files?.length && !/\.(pdf|docx?|txt|rtf)\b/i.test(el.closest("div")?.parentElement?.textContent ?? "");
     return !el.value.trim();
   }
@@ -143,7 +162,7 @@ function mark(el: Element) {
  * wrongly mark parts of the popup itself hidden too.
  */
 export function openDialog(): HTMLElement | null {
-  return Array.from(document.querySelectorAll<HTMLElement>("[role=dialog], [role=alertdialog], [aria-modal='true'], dialog[open]"))
+  return deepAll<HTMLElement>("[role=dialog], [role=alertdialog], [aria-modal='true'], dialog[open]")
     .filter((dialog) => visible(dialog) && dialog.getBoundingClientRect().height > 40)
     .filter((dialog) => Array.from(dialog.querySelectorAll<HTMLElement>("input:not([type=hidden]), select, textarea")).some((el) => visible(el) && el.getBoundingClientRect().width >= 4))
     .pop() ?? null;
@@ -154,7 +173,7 @@ export function scanFields(): PageField[] {
   const out: PageField[] = [];
   const seenGroups = new Set<string>();
   const dialog = openDialog();
-  const controls = Array.from((dialog ?? document).querySelectorAll<HTMLElement>("input, select, textarea, button[aria-haspopup='listbox']"));
+  const controls = deepAll<HTMLElement>("input, select, textarea, button[aria-haspopup='listbox']", dialog ?? document);
   for (const el of controls) {
     const type = (el.getAttribute("type") ?? (el.tagName === "TEXTAREA" ? "textarea" : el.tagName === "SELECT" ? "select" : "text")).toLowerCase();
     if (["hidden", "submit", "button", "password", "image", "reset", "search"].includes(type) && el.getAttribute("data-automation-id") !== "searchBox") continue;
@@ -164,7 +183,7 @@ export function scanFields(): PageField[] {
     // Bot traps: a box a person can't see (a pixel or two) or one whose label says to leave it empty. Never filled.
     if (type !== "file" && type !== "radio" && type !== "checkbox" && (el.getBoundingClientRect().width < 4 || el.getBoundingClientRect().height < 4)) continue;
     if (/robots? only|if you(?:'|’)?re (a )?human|leave (this|it) (field )?(blank|empty)|do not (fill|enter)/i.test(questionText(el as HTMLElement))) continue;
-    const required = el.hasAttribute("required") || el.getAttribute("aria-required") === "true" || Boolean(el.closest("[aria-required='true']")) || /[*✱]/.test(el.closest("label")?.textContent ?? (el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent ?? "" : ""));
+    const required = el.hasAttribute("required") || el.getAttribute("aria-required") === "true" || Boolean(el.closest("[aria-required='true']")) || /[*✱]/.test(el.closest("label")?.textContent ?? (el.id ? rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent ?? "" : ""));
     let fieldType: FieldType;
     let options: string[] = [];
     let target: HTMLElement = el;
@@ -173,7 +192,7 @@ export function scanFields(): PageField[] {
       if (!name || seenGroups.has(`r:${name}`)) continue;
       seenGroups.add(`r:${name}`);
       fieldType = "radio";
-      options = Array.from(document.querySelectorAll<HTMLInputElement>(`input[type=radio][name="${CSS.escape(name)}"]`)).map(labelOf).filter(Boolean);
+      options = Array.from(rootOf(el).querySelectorAll<HTMLInputElement>(`input[type=radio][name="${CSS.escape(name)}"]`)).map(labelOf).filter(Boolean);
     } else if (type === "checkbox") {
       const group = el.closest("fieldset, [role=group]");
       const boxes = group ? Array.from(group.querySelectorAll<HTMLInputElement>("input[type=checkbox]")) : [];
@@ -219,7 +238,7 @@ export function scanFields(): PageField[] {
 export function emptyRequired(fields = scanFields()) {
   return fields.filter((field) => {
     if (!field.required) return false;
-    const el = document.querySelector<HTMLElement>(`[data-unnepo-id="${field.id}"]`);
+    const el = findMarked(field.id);
     if (!el) return false;
     const control = el.matches("input, select, textarea, button") ? el : (el.querySelector("input") as HTMLElement | null) ?? el;
     return isEmpty(control);
@@ -255,7 +274,7 @@ export function scanPage(): Scan {
     fields: scanFields(),
     embeddedForm: frame?.src ?? null,
     captcha,
-    passwordBoxes: Array.from(document.querySelectorAll<HTMLInputElement>("input[type=password]")).filter(visible).length,
+    passwordBoxes: deepAll<HTMLInputElement>("input[type=password]").filter(visible).length,
     mentionsCv: /\bCV\b|curriculum vitae/.test(document.body.innerText || ""),
   };
 }
