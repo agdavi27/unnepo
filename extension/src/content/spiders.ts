@@ -50,7 +50,7 @@ function exitPoint(spider: Spider): Point {
   return options.sort((a, b) => Math.hypot(a[0] - spider.x, a[1] - spider.y) - Math.hypot(b[0] - spider.x, b[1] - spider.y))[0];
 }
 
-function make(root: ShadowRoot, index: number, count: number, now: number): Spider {
+function make(root: ShadowRoot, index: number, count: number, now: number, drop: boolean): Spider {
   const size = Math.round(rand(40, 58));
   const el = document.createElement("div");
   el.className = "spider";
@@ -70,6 +70,14 @@ function make(root: ShadowRoot, index: number, count: number, now: number): Spid
     start: now + index * rand(90, 180), dropTo: rand(innerHeight * 0.18, innerHeight * 0.55), target: [0, 0], speed: rand(70, 120),
     restUntil: 0, frame: 0, lastStep: 0,
   };
+  if (!drop) {
+    // The same spiders carrying on after the page changed: already down and crawling, no new batch dropping in.
+    thread.remove();
+    spider.y = rand(size, innerHeight - size);
+    spider.angle = rand(0, 360);
+    spider.phase = "rest";
+    spider.restUntil = now + rand(0, 600);
+  }
   return spider;
 }
 
@@ -143,8 +151,11 @@ function stop() {
   last = 0;
 }
 
-/** Spiders drop in. Calling again while they're out (the next page of a form) just keeps them around. */
-export function startSpiders() {
+/**
+ * Spiders drop in, once per run (`drop`). Calling again while they're out just keeps them around; after a
+ * new page load the same number come back already crawling, never a fresh batch dropping from the top.
+ */
+export function startSpiders(drop = true) {
   clearTimeout(exitTimer);
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   if (host) {
@@ -156,7 +167,9 @@ export function startSpiders() {
     return;
   }
   // Anything left from an earlier copy of this script goes first, so there's only ever one set.
-  document.querySelectorAll("[data-unnepo-spiders]").forEach((stale) => stale.remove());
+  const stale = document.querySelectorAll("[data-unnepo-spiders]");
+  if (stale.length) drop = false;
+  stale.forEach((el) => el.remove());
   host = document.createElement("div");
   host.setAttribute("data-unnepo-spiders", "");
   host.setAttribute("aria-hidden", "true");
@@ -172,7 +185,7 @@ export function startSpiders() {
   document.documentElement.appendChild(host);
   const count = innerWidth < 700 ? 3 : 5;
   const now = performance.now();
-  spiders = Array.from({ length: count }, (_, index) => make(root, index, count, now));
+  spiders = Array.from({ length: count }, (_, index) => make(root, index, count, now, drop));
   for (const spider of spiders) draw(spider);
   raf = requestAnimationFrame(tick);
 }

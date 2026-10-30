@@ -259,6 +259,34 @@ function detectAts(host: string): Scan["ats"] {
   return "other";
 }
 
+const JOB_LINK = /\/(job-search|jobs|stu\/jobs)\/\d+/;
+
+/**
+ * Handshake shows the job you clicked beside the search results (/job-search/<id>), so the page's own
+ * heading and title aren't that job. This reads the details pane: from its Apply button (or the job's
+ * heading) up to the largest box that still isn't the results list, then its title, employer and text.
+ */
+export function handshakeJob(where: { hostname: string; pathname: string } = window.location): { title: string; company: string; description: string } | null {
+  if (!/(^|\.)joinhandshake\.com$/.test(where.hostname) || !JOB_LINK.test(where.pathname)) return null;
+  const apply = Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button]"))
+    .find((el) => visible(el) && /^(apply|apply now|apply externally|quick apply|easy apply)$/i.test(clean(el.textContent)));
+  const start = apply ?? Array.from(document.querySelectorAll<HTMLElement>("h1, h2")).find(visible);
+  if (!start) return null;
+  // The results list links to many jobs; the details pane links to at most one (its own).
+  const jobLinks = (el: Element) => Array.from(el.querySelectorAll<HTMLAnchorElement>("a[href]")).filter((a) => JOB_LINK.test(a.pathname)).length;
+  let pane: HTMLElement = start;
+  while (pane.parentElement && pane.parentElement !== document.body && jobLinks(pane.parentElement) <= 1) pane = pane.parentElement;
+  // The job's name is the pane's top heading: an h1 if it has one, else an h2, else an h3.
+  const heading = ["h1", "h2", "h3"].map((tag) => Array.from(pane.querySelectorAll<HTMLElement>(tag)).find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150)).find(Boolean);
+  const title = clean(heading?.textContent);
+  // The employer is a link to its Handshake page, or failing that the logo's alt text.
+  const employer = Array.from(pane.querySelectorAll<HTMLAnchorElement>("a[href*='/e/'], a[href*='/employers/']")).map((a) => clean(a.textContent)).find((text) => text.length >= 2 && text.length <= 120);
+  const logo = Array.from(pane.querySelectorAll<HTMLImageElement>("img[alt]")).map((img) => clean(img.alt.replace(/\s*logo$/i, ""))).find((text) => text.length >= 2 && text.length <= 120 && text !== title);
+  const description = (pane.innerText || "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
+  if (!title) return null;
+  return { title: title.slice(0, 200), company: (employer || logo || "").slice(0, 200), description };
+}
+
 /** What the page is: the job system, title and company, and the form's fields. */
 export function scanPage(): Scan {
   const host = window.location.hostname;
@@ -267,14 +295,16 @@ export function scanPage(): Scan {
   const heading = clean(document.querySelector("h1")?.textContent);
   // Greenhouse titles read "Job Application for Product Analyst at Acme".
   const greenhouseTitle = document.title.match(/^Job Application for (.+) at (.+)$/);
-  const title = (greenhouseTitle?.[1] || heading || meta("og:title") || document.title).slice(0, 200);
-  const company = (greenhouseTitle?.[2] || meta("og:site_name") || host.replace(/^(www|jobs|careers|boards|apply)\./, "").split(".")[0]).slice(0, 200);
+  const handshake = handshakeJob();
+  const title = (handshake?.title || greenhouseTitle?.[1] || heading || meta("og:title") || document.title).slice(0, 200);
+  const company = (handshake?.company || greenhouseTitle?.[2] || meta("og:site_name") || host.replace(/^(www|jobs|careers|boards|apply)\./, "").split(".")[0]).slice(0, 200);
   const frame = document.querySelector<HTMLIFrameElement>("iframe#grnhse_iframe, iframe[src*='greenhouse.io/embed'], iframe[src*='jobs.lever.co'], iframe[src*='ashbyhq.com']");
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);
   return {
     url: window.location.href,
     title,
     company,
+    ...(handshake?.description ? { description: handshake.description } : {}),
     ats,
     useServerSchema: ats === "greenhouse" && Boolean(document.getElementById("first_name")),
     fields: scanFields(),

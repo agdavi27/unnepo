@@ -4,6 +4,7 @@ import { press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, scanFields, scanPage } from "./scan";
+import { fieldControl, markNeeds } from "./needs";
 import { startSpiders, stopSpiders } from "./spiders";
 
 /**
@@ -49,12 +50,8 @@ async function withOptions(fields: PageField[]) {
 
 /** Scrolls to a question the student still has to answer, puts the cursor in it, and flashes a ring around it. */
 function showField(label: string) {
-  const fields = scanFields();
-  const wanted = label.trim().toLowerCase();
-  const field = fields.find((item) => item.label.toLowerCase() === wanted) ?? fields.find((item) => item.label.toLowerCase().startsWith(wanted));
-  const el = field ? findMarked(field.id) : null;
-  if (!el) return false;
-  const control = el.matches("input, select, textarea, button") ? el : (el.querySelector<HTMLElement>("input, select, textarea, button") ?? el);
+  const control = fieldControl(label);
+  if (!control) return false;
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   control.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
   const before = { outline: control.style.outline, outlineOffset: control.style.outlineOffset, boxShadow: control.style.boxShadow };
@@ -168,7 +165,7 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       return false;
     }
     if (message?.type === "spiders") {
-      if (message.on) startSpiders();
+      if (message.on) startSpiders(Boolean(message.drop));
       else stopSpiders();
       reply({ ok: true });
       return false;
@@ -194,6 +191,10 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       void withOptions(fields).then((withChoices) => reply({ fields: withChoices }));
       return true;
     }
+    if (message?.type === "mark-needs") {
+      reply({ marked: markNeeds(Array.isArray(message.labels) ? message.labels.map(String) : []) });
+      return false;
+    }
     if (message?.type === "focus-field") {
       reply({ ok: showField(String(message.label ?? "")) });
       return false;
@@ -217,7 +218,8 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       return false;
     }
     if (message?.type === "fill") {
-      startSpiders();
+      // No spiders from here: the background worker sends them out once, on the page itself, so a form in a
+      // frame doesn't get a second set of its own.
       fill(message.plan as FillPlan).then(reply, (error) => reply({ filled: [], failed: [{ label: "Form", reason: error instanceof Error ? error.message : "couldn't fill" }], needsYou: [], captcha: false, submitted: false, ms: 0 } satisfies FillReport));
       return true;
     }

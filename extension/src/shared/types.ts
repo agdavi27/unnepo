@@ -9,6 +9,8 @@ export type Scan = {
   url: string;
   title: string;
   company: string;
+  /** The posting's text, when the page shows it and Unnepo can't read it on its own (Handshake, signed in). */
+  description?: string;
   /** "greenhouse" when this is Greenhouse's own hosted form; otherwise a best guess or "other". */
   ats: "greenhouse" | "lever" | "ashby" | "workday" | "other";
   /** Greenhouse forms are read from Greenhouse's API on the server, so the page fields aren't needed. */

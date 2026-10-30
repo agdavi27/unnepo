@@ -70,12 +70,12 @@ function keyFor(url: string) {
 }
 
 /** A job the extension is on. Unnepo reads it when it can; otherwise it keeps what the page showed. */
-async function minimalApplication(userId: string, input: { url: string; title: string; company: string }) {
+async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string }) {
   let ats: JobApplication["ats"] = "other";
   try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
   const { app } = await applications.insert({
     userId, jobKey: keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: input.company.slice(0, 200), companyDomain: null,
-    department: null, location: null, description: "", requirements: [], applicationUrl: input.url, postedRecruiter: null, status: "extracted",
+    department: null, location: null, description: input.description ?? "", requirements: [], applicationUrl: input.url, postedRecruiter: null, status: "extracted",
     statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
     contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
   });
@@ -85,19 +85,24 @@ async function minimalApplication(userId: string, input: { url: string; title: s
 
 /** Opens (or reuses) the application for the job the extension is on. A new job spends credits as usual. */
 export async function extensionJob(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { url?: unknown; title?: unknown; company?: unknown };
+  const body = (raw ?? {}) as { url?: unknown; title?: unknown; company?: unknown; description?: unknown };
   const url = String(body.url ?? "").trim().slice(0, 2000);
   if (!/^https:\/\//i.test(url)) throw new ServiceError("Open a job application page first.", "job_url", 400);
+  // The posting's text as the page shows it (Handshake, which Unnepo can't read on its own).
+  const pageDescription = typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
   const existing = await applications.findByKey(userId, keyFor(url));
-  if (existing) return { application: summary(existing), created: false };
+  if (existing) {
+    if (pageDescription && !existing.description) return { application: summary((await applications.update(userId, existing.id, { description: pageDescription }))!), created: false };
+    return { application: summary(existing), created: false };
+  }
   // The fast way: open the job from what the page shows, so filling starts right away, and read the posting
   // (description, requirements, recruiter) in the background for the cover letter and the people search.
   const pageTitle = String(body.title ?? "").trim();
   const pageCompany = String(body.company ?? "").trim();
   if (pageTitle && pageCompany) {
     if (!(await profileReady(userId))) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
-    const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany });
-    runLater(() => enrichFromPosting(userId, app.id, url));
+    const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany, description: pageDescription });
+    if (!pageDescription) runLater(() => enrichFromPosting(userId, app.id, url));
     return { application: summary(app), created: true };
   }
   try {
@@ -109,7 +114,7 @@ export async function extensionJob(userId: string, raw: unknown) {
     const company = String(body.company ?? "").trim();
     if (error instanceof ServiceError && (error.code === "credits" || error.code === "profile" || error.code === "job_url")) throw error;
     if (!title || !company) throw error;
-    return { application: summary(await minimalApplication(userId, { url, title, company })), created: true };
+    return { application: summary(await minimalApplication(userId, { url, title, company, description: pageDescription })), created: true };
   }
 }
 

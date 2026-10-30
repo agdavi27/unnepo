@@ -278,6 +278,24 @@ describe("CV generator", () => {
 });
 
 describe("cover letters from the panel", () => {
+  it("writes about the Handshake job the student clicked, from the text the page shows", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    const description = "Retail Manager at Northwind. You will lead a team of 12, plan weekly schedules, and run inventory counts.";
+    const first = await (await call("POST", "jobs", token, { url: "https://app.joinhandshake.com/job-search/11814327?page=1&per_page=25", title: "Retail Manager", company: "Northwind", description })).json();
+    expect(first).toMatchObject({ created: true, application: { title: "Retail Manager", company: "Northwind" } });
+    // Clicking another job in the same search is a different job.
+    const other = await (await call("POST", "jobs", token, { url: "https://app.joinhandshake.com/job-search/22222222?page=1&per_page=25", title: "Data Intern", company: "Globex", description: "Data Intern at Globex." })).json();
+    expect(other.application.id).not.toBe(first.application.id);
+
+    model.replies.push("Dear Hiring Team,\n\nI would love to lead the Northwind team.\n\nSincerely,\nPat Doe");
+    await call("POST", "cover-letter", token, { applicationId: first.application.id, length: "short" });
+    expect(model.lastPrompt).toContain("Retail Manager");
+    expect(model.lastPrompt).toContain("plan weekly schedules");
+    expect(model.lastPrompt).not.toContain("Data Intern");
+  });
+
   it("writes to the student's length, tone and mention, revises on request, and reuses it otherwise", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";

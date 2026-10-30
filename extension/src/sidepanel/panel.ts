@@ -128,6 +128,8 @@ function pageCard(state: PanelState) {
     job?.applicationId && !job.submission && !job.running ? `<button type="button" class="link" id="applied">I applied</button>` : "",
     job?.submission ? `<button type="button" class="link" id="not-applied">I didn't apply</button>` : "",
   ].filter(Boolean);
+  // What Unnepo couldn't fill that isn't already listed as needing the student. Each one goes to the question.
+  const couldnt = (report?.failed ?? []).filter((item) => !report!.needsYou.includes(item.label));
   // The cover letter writer shows on any job page: a posting, an application, or a job Unnepo is working on.
   const letterOffered = onWeb && Boolean(job?.applicationId || page?.fields || page?.posting);
   return `
@@ -141,8 +143,9 @@ function pageCard(state: PanelState) {
         ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
       ` : `<p class="note">Open a job application in this tab.</p>`}
       ${fill}
-      ${report?.needsYou.length ? `<p class="note warn">Still needs you:</p><ul class="needs">${report.needsYou.map((label) => `<li><button type="button" class="needs-link" data-label="${escape(label)}" title="Go to this question on the page">${escape(label)}<span aria-hidden="true">↗</span></button></li>`).join("")}</ul>${fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}` : ""}
-      ${report?.failed.length ? `<p class="note">Couldn't fill: ${report.failed.map((item) => escape(item.label)).join("; ")}</p>` : ""}
+      ${report?.needsYou.length ? `<p class="note warn">Still needs you <span class="small">(outlined in orange on the page)</span>:</p><ul class="needs">${report.needsYou.map((label) => needsLink(label)).join("")}</ul>` : ""}
+      ${couldnt.length ? `<p class="note">Couldn't fill:</p><ul class="needs">${couldnt.map((item) => needsLink(item.label, item.reason)).join("")}</ul>` : ""}
+      ${(report?.needsYou.length || couldnt.length) && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
       ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
       ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
       ${letterOffered ? letterBlock() : ""}
@@ -158,6 +161,8 @@ type Letter = { text: string; fileName: string; pdfBase64: string };
 let letter: Letter | null = null;
 let letterStep: "closed" | "asking" | "writing" | "written" | "revising" = "closed";
 let letterNote = "";
+/** The tab and job the letter is for. */
+let letterFor = "";
 const letterChoices = { length: "standard", tone: "professional", mention: "", edit: "" };
 
 const SPARK = `<svg class="spark" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" opacity=".7"/></svg>`;
@@ -263,6 +268,10 @@ function wireLetter(tabId: number) {
   });
   document.getElementById("letter-open")?.addEventListener("click", () => void chrome.tabs.create({ url: letterBlobUrl() }));
 }
+
+/** A question in the panel's lists: clicking it scrolls the page to it. */
+const needsLink = (label: string, why = "") =>
+  `<li><button type="button" class="needs-link" data-label="${escape(label)}" title="${escape(why || "Go to this question on the page")}">${escape(label)}<span aria-hidden="true">↗</span></button></li>`;
 
 /** Why the last "Still needs you" click couldn't find its question, kept across re-renders. */
 let fieldNote = "";
@@ -422,6 +431,14 @@ document.getElementById("disconnect")!.addEventListener("click", async () => {
 
 async function render() {
   const state = await ask<PanelState>({ type: "state" });
+  // A letter belongs to one job: opening another job (another tab, or another one in Handshake's search) closes it.
+  // Keyed by the job's name, not the address, so the steps of one application keep it.
+  const jobName = (state.job?.title || state.page?.title || "").toLowerCase();
+  const letterJob = state.tab && jobName ? `${state.tab.id}|${jobName}` : letterFor;
+  if (letterJob !== letterFor) {
+    if (letterFor && letterStep !== "writing" && letterStep !== "revising") { letter = null; letterStep = "closed"; letterNote = ""; letterChoices.mention = ""; letterChoices.edit = ""; }
+    letterFor = letterJob;
+  }
   account.textContent = state.connected ? state.me!.user.email : "";
   const said = lines(state);
   speech(said.lines, said.alert);

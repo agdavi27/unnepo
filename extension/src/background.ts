@@ -119,7 +119,9 @@ async function state(): Promise<PanelState> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   let me: PanelState["me"] = null;
   if (token) me = await api<NonNullable<PanelState["me"]>>("GET", "me").catch(() => null);
-  const job = tab?.id !== undefined ? (await jobs())[tab.id] ?? null : null;
+  const saved = tab?.id !== undefined ? (await jobs())[tab.id] ?? null : null;
+  // A job from earlier on this tab stops showing once the student opens a different job on the same site.
+  const job = saved && !saved.running && !saved.submission && saved.url && tab?.url && sameHost(saved.url, tab.url) && !sameApplication(saved.url, tab.url) ? null : saved;
   // While Unnepo is working on the tab, the job itself says what's there.
   const page = me && tab?.id !== undefined && !job?.running ? await peek(tab.id, tab.url ?? "").catch(() => null) : null;
   return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase };
@@ -132,7 +134,10 @@ const send = <T>(tabId: number, message: unknown, frameId = formFrame.get(tabId)
 // Frames Unnepo never reads or touches: CAPTCHAs (never solved, never poked), ads, video, and payments.
 const SKIP_FRAME = /recaptcha|hcaptcha|captcha|turnstile|challenges\.cloudflare|arkoselabs|funcaptcha|doubleclick|googlesyndication|googletagmanager|youtube\.com|vimeo\.com|js\.stripe\.com|facebook\.com|linkedin\.com\/(embed|px)/i;
 
-/** Two pages of the same application: same site, and the same job in the path (Workday keeps it in every step). */
+/**
+ * Two pages of the same application: same site, and the same job in the path (Workday keeps it in every
+ * step; Lever and Ashby add /apply or /application). /job-search/111 and /job-search/222 are two jobs.
+ */
 function sameApplication(before: string | undefined, after: string) {
   if (!before) return false;
   try {
@@ -141,10 +146,14 @@ function sameApplication(before: string | undefined, after: string) {
     const [x, y] = [a.pathname.split("/").filter(Boolean), b.pathname.split("/").filter(Boolean)];
     let shared = 0;
     while (shared < x.length && x[shared] === y[shared]) shared += 1;
-    return a.pathname === b.pathname || shared >= 3;
+    return a.pathname === b.pathname || shared >= 3 || (shared >= 2 && shared === Math.min(x.length, y.length));
   } catch {
     return false;
   }
+}
+
+function sameHost(a: string, b: string) {
+  try { return new URL(a).hostname === new URL(b).hostname; } catch { return false; }
 }
 
 const signature = (scan: Scan) => `${scan.url}|${scan.passwordBoxes}|${scan.fields.map((field) => field.label).join("|")}`;
@@ -243,7 +252,7 @@ async function run(tabId: number) {
   await saveJob(tabId, { running: true, step: "Reading the page…", report: null, submission: null, error: null, clickedAt: null, llmCalls: 0, cv: false });
   const filledAll: string[] = [];
   let applicationId = "";
-  let posting: { url: string; title: string; company: string } | null = null;
+  let posting: { url: string; title: string; company: string; description?: string } | null = null;
   let filledKey = "";
   let pressedKey = "";
   let presses = 0;
@@ -272,11 +281,14 @@ async function run(tabId: number) {
   let lastStep = "";
   // Spiders crawl the whole time Unnepo is running, until it's submitted, something goes wrong, or Stop.
   let spidersOut = false;
+  let spidersDropped = false;
   let lastUrl = "";
   const spiders = (on: boolean) => {
     if (on === spidersOut) return;
     spidersOut = on;
-    void send(tabId, { type: "spiders", on }, 0).catch(() => undefined);
+    // Only the first time drops them in; after that the same batch just keeps crawling.
+    void send(tabId, { type: "spiders", on, drop: on && !spidersDropped }, 0).catch(() => undefined);
+    if (on) spidersDropped = true;
   };
   const step = async (text: string, extra: Partial<Job> = {}) => {
     if (text === lastStep && !Object.keys(extra).length) return;
@@ -293,14 +305,14 @@ async function run(tabId: number) {
     // Pressing Fill again partway through keeps the same job instead of opening a new one per page.
     if (earlier?.applicationId && !earlier.submission && sameApplication(earlier.url, first.url)) applicationId = earlier.applicationId;
     // The posting itself (title, company, its link) is what the tracker shows, not the form's later steps.
-    if (!hasForm(first) || first.fields.length < 3) posting = { url: first.url, title: first.title, company: first.company };
+    if (!hasForm(first) || first.fields.length < 3) posting = { url: first.url, title: first.title, company: first.company, description: first.description };
 
     while (stillRunning(tabId, runId)) {
       if ((await jobs())[tabId]?.submission) break;
       const scan = await look(tabId);
       if (!scan) { await wait(400); continue; }
       // A new page load starts without spiders; send them back out if they were out.
-      if (scan.url !== lastUrl && spidersOut) void send(tabId, { type: "spiders", on: true }, 0).catch(() => undefined);
+      if (scan.url !== lastUrl && spidersOut) void send(tabId, { type: "spiders", on: true, drop: false }, 0).catch(() => undefined);
       lastUrl = scan.url;
       const site = accountKey(scan.url);
       const known = Boolean((await knownAccounts())[site]);
@@ -337,7 +349,7 @@ async function run(tabId: number) {
       if (hasForm(scan) && key !== filledKey) {
         if (!applicationId && (scan.fields.length || scan.useServerSchema)) {
           await step("Opening the job in Unnepo…");
-          const where = posting ?? { url: scan.url, title: scan.title, company: scan.company };
+          const where = posting ?? { url: scan.url, title: scan.title, company: scan.company, description: scan.description };
           const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", where);
           applicationId = job.application.id;
           await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: where.url, host: firstHost });
@@ -408,6 +420,11 @@ async function run(tabId: number) {
         filledKey = key;
         continue;
       }
+
+      // Every question still unanswered on this page (required, flagged by the site, or one Unnepo couldn't
+      // fill) gets marked on the page, with a button that jumps to each. Answered ones drop off by themselves.
+      const unanswered = [...status.flagged, ...status.needsYou, ...((await jobs())[tabId]?.report?.failed ?? []).map((item) => item.label)];
+      void send(tabId, { type: "mark-needs", labels: unanswered }).catch(() => undefined);
 
       // The site says something's wrong ("Error: Invalid Data", "Please check all information"): never press
       // Next or Submit over it. List what it flagged and wait; once the student changes something, try once more.
@@ -582,12 +599,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         const tabId = Number(message.tabId);
         try {
-          let applicationId = (await jobs())[tabId]?.applicationId;
+          const scan = await look(tabId);
+          const earlier = (await jobs())[tabId];
+          // The job the student has open now: after clicking another job (Handshake's search), that one.
+          let applicationId = earlier?.applicationId && (!scan || earlier.running || sameApplication(earlier.url, scan.url)) ? earlier.applicationId : undefined;
           if (!applicationId) {
-            const scan = await look(tabId);
             if (!scan) throw new Error("Open the job posting or its application in this tab first.");
-            const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", { url: scan.url, title: scan.title, company: scan.company });
+            const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", { url: scan.url, title: scan.title, company: scan.company, description: scan.description });
             applicationId = job.application.id;
+            // A different job than the one saved for this tab: start its record fresh.
+            if (earlier) await saveJob(tabId, null);
             await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: scan.url, host: new URL(scan.url).hostname });
           }
           // The student's quick answers (length, tone, what to mention) or their edit request ride along.
