@@ -8,7 +8,7 @@ import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/re
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
 import { extractJob } from "@/lib/apply/extract";
-import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, missingAnswers, normalizeLabel, planAnswers, type AnswerContext } from "@/lib/apply/questions";
+import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { profileReady } from "@/lib/profile/service";
 import { EEO_OPTIONS, DECLINE } from "@/lib/profile/student";
@@ -152,6 +152,10 @@ export function answerWith(info: Awaited<ReturnType<typeof student>>, company: s
     const fromResume = resumeFieldAnswer(info.profile.resumeProfile, { label, section: where?.section, kind, options, format: where?.format });
     if (fromResume) return fromResume;
     if (planned.answer && planned.source && planned.source !== "resume_file") return planned.answer;
+    const tools = toolExperienceAnswer(label, kind, options, info.resumeText);
+    if (tools) return tools;
+    const headline = headlineAnswer(label, info.context, info.profile.resumeProfile?.experience?.[0]);
+    if (headline) return headline;
     // "Have you worked for Acme before?" The resume lists every job, so it answers this.
     if (company && new RegExp(`(previously|ever|before|formerly|in the past).*(work|employ)|(work|employ).*(previously|ever|before|in the past)|former employee`, "i").test(label) && !/\b(intern|contractor|relative|family)\b/i.test(label)) {
       const jobs = info.profile.resumeProfile?.experience ?? [];

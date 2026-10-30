@@ -138,7 +138,8 @@ export function isEmpty(el: HTMLElement): boolean {
       return !(el as HTMLInputElement).checked;
     }
     if (type === "radio") return !rootOf(el).querySelector(`input[type=radio][name="${CSS.escape((el as HTMLInputElement).name)}"]:checked`);
-    if (type === "file") return !(el as HTMLInputElement).files?.length && !/\.(pdf|docx?|txt|rtf)\b/i.test(el.closest("div")?.parentElement?.textContent ?? "");
+    // A file name shown beside the box ("Drew Davis Resume.pdf"), not a list of types ("Accepted: .pdf, .docx").
+    if (type === "file") return !(el as HTMLInputElement).files?.length && !/[\w)\]-]\.(pdf|docx?|txt|rtf)\b/i.test(el.closest("div")?.parentElement?.textContent ?? "");
     return !el.value.trim();
   }
   return false;

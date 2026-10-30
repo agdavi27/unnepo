@@ -72,7 +72,7 @@ export function findAction(knownAccount: boolean, formFields: number): (PageActi
   if (submit) return make("submit", submit);
 
   // A job posting, not the form yet: Workday asks how to apply, and "Apply Manually" is the predictable one.
-  if (formFields < 3) {
+  if (formFields < 3 && !inApplication()) {
     const apply = byId("applyManually") ?? byId("adventureButton") ?? find(APPLY);
     if (apply) return make("apply", apply);
   }
@@ -85,6 +85,9 @@ export function findAction(knownAccount: boolean, formFields: number): (PageActi
  * doesn't count: that would send an empty application.
  */
 export function findApply(): HTMLElement | null {
+  // Already inside an application (a Workday step, or a page with a form and a Next button): pressing
+  // "Apply" here would start over, back at the resume step.
+  if (inApplication()) return null;
   const known = byId("applyManually") ?? byId("adventureButton");
   if (known) return known;
   return buttons().find((el) => {
@@ -93,6 +96,13 @@ export function findApply(): HTMLElement | null {
     const isSubmit = (el as HTMLButtonElement).type === "submit" || el.matches("input[type=submit]");
     return !(form && (isSubmit || form.querySelectorAll("input:not([type=hidden]), select, textarea").length >= 3));
   }) ?? null;
+}
+
+/** Whether the page is a step of an application already, not the job posting. */
+export function inApplication() {
+  if (/\/apply(\/|$|\?)/.test(location.pathname + location.search) && !byId("applyManually")) return true;
+  if (byId("bottom-navigation-next-button") || byId("pageFooterNextButton") || byId("progressBar")) return true;
+  return false;
 }
 
 /** Presses the button. Workday puts a clickable overlay over some of its buttons; that's what listens. */

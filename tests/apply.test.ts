@@ -5,7 +5,7 @@ import { saveStructuredProfile } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { assertPublicUrl, setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
-import { acceptAiAnswer, classifyQuestion, missingAnswers, planAnswers, policyAnswer, RECRUITER_NOTE } from "@/lib/apply/questions";
+import { acceptAiAnswer, classifyQuestion, headlineAnswer, missingAnswers, planAnswers, policyAnswer, RECRUITER_NOTE, toolExperienceAnswer } from "@/lib/apply/questions";
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
 import { coreTitle } from "@/lib/apply/contacts";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
@@ -398,6 +398,29 @@ describe("standard answers", () => {
     expect(policyAnswer("I certify that the information provided is true and complete", "checkbox", ["Yes"], p())).toBe("Yes");
     expect(policyAnswer("Do you accept the terms and conditions?", "select", ["Yes", "No"], p(null))).toBeNull();
     expect(policyAnswer("I agree to the arbitration agreement", "checkbox", ["Yes"], p())).toBeNull();
+  });
+});
+
+describe("Workday questions students hit", () => {
+  it("says yes to light travel, leaves heavy travel to the student", () => {
+    const p = { ...profile, accountConsentAt: "default" };
+    expect(policyAnswer("Are you able to travel, up to 10%", "select", ["Yes", "No"], p)).toBe("Yes");
+    expect(policyAnswer("Are you willing to travel?", "select", ["Yes", "No"], p)).toBe("Yes");
+    expect(policyAnswer("This role requires travel up to 75%. Are you able to travel?", "select", ["Yes", "No"], p)).toBeNull();
+  });
+
+  it("answers tool experience from the resume, yes only when the resume names a tool", () => {
+    const question = "Do you have hands-on administration experience with online booking tools such as Concur or Atriis?";
+    expect(toolExperienceAnswer(question, "select", ["Yes", "No"], "Managed travel bookings in SAP Concur for a 40-person team.")).toBe("Yes");
+    expect(toolExperienceAnswer(question, "select", ["Yes", "No"], "Led the Colby Data Club; built dashboards in Tableau.")).toBe("No");
+    expect(toolExperienceAnswer("Why do you want this job?", "textarea", [], "Concur")).toBeNull();
+  });
+
+  it("writes a headline from the profile", () => {
+    const year = String(new Date().getFullYear() + 1);
+    expect(headlineAnswer("Headline", { ...context, graduationYear: year })).toBe("Economics student at Colby College");
+    expect(headlineAnswer("Headline", { ...context, graduationYear: "2019" }, { title: "Data Analyst", company: "Acme" })).toBe("Data Analyst at Acme");
+    expect(headlineAnswer("Summary", context)).toBeNull();
   });
 });
 

@@ -161,6 +161,8 @@ const MESSAGE = /message (to|for) (the )?(recruiter|hiring (team|manager)|employ
 const TEXTS = /\b(texts?|sms|text messages?)\b/i;
 const MARKETING = /\b(marketing|promotional|promotions?|newsletters?|offers|advertis)/i;
 const TERMS = /\b(acknowledge?|acknowledgement|i agree|agree to|i accept|accept (the|these|our)|terms (and|&) conditions|terms of (use|service)|privacy (policy|notice|statement)|i have read|read and (understand|understood|agree)|i understand|consent to (the )?(processing|collection|use|storage)|certify that (the |all |my )?(information|answers|statements)|true,? (correct|complete|accurate) and)\b/i;
+// "Are you able to travel, up to 10%?" Yes up to half the time; more than that is the student's call.
+const TRAVEL = /\b(able|willing|available|open) to travel\b|\btravel(ing)? (up to|requirements?|is required|required)\b|\brequires? (some |occasional |frequent )?travel\b/i;
 // Signing these away is the student's call, not a standard answer.
 const NOT_STANDARD_TERMS = /arbitrat|non-?compete|non-?solicit|background (check|screen)|drug (test|screen)|credit (check|report)|waive/i;
 
@@ -188,7 +190,38 @@ export function policyAnswer(label: string, kind: ApplicationQuestion["kind"], o
   if (MESSAGE.test(text) && (kind === "textarea" || kind === "text") && !/cover letter/i.test(text)) return RECRUITER_NOTE;
   if (TEXTS.test(text) && /\b(consent|agree|opt[- ]?in|receive|receiving|sign up|subscribe)\b/i.test(text)) return yesNo(!MARKETING.test(text), options);
   if (TERMS.test(text) && !NOT_STANDARD_TERMS.test(text) && profile.accountConsentAt) return yesNo(true, options);
+  if (TRAVEL.test(text) && kind !== "textarea") {
+    const percent = text.match(/(\d{1,3})\s?%/);
+    return !percent || Number(percent[1]) <= 50 ? yesNo(true, options) : null;
+  }
   return null;
+}
+
+const EXPERIENCE_QUESTION = /\b(do you have|have you (ever )?(used|worked with|had|administered)|are you (familiar|experienced|proficient))\b/i;
+const NAMED_TOOLS = /\b(?:such as|like|including|e\.g\.,?|for example)\s+([^?.;]+)/i;
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * "Do you have hands-on experience with online booking tools such as Concur or Atriis?" Yes when the
+ * resume names one of the tools, No when it doesn't. Only yes/no questions that name the tools.
+ */
+export function toolExperienceAnswer(label: string, kind: ApplicationQuestion["kind"], options: string[], resumeText: string) {
+  if (kind === "textarea" || kind === "file" || !EXPERIENCE_QUESTION.test(label) || !resumeText.trim()) return null;
+  const named = label.match(NAMED_TOOLS)?.[1];
+  if (!named) return null;
+  const tools = named.split(/,|\bor\b|\band\b|\//i).map((tool) => tool.trim().replace(/^(the|an?)\s+/i, "")).filter((tool) => tool.length >= 2 && tool.length <= 40);
+  if (!tools.length) return null;
+  const found = tools.some((tool) => new RegExp(`\\b${escapeRegex(tool)}\\b`, "i").test(resumeText));
+  return yesNo(found, options);
+}
+
+/** "Headline": what the student is now, from their profile. A student: "Economics student at Colby College". */
+export function headlineAnswer(label: string, context: AnswerContext, latestJob?: { title?: string; company?: string } | null) {
+  if (!/^(professional |your |profile )?headline$/i.test(label.trim())) return null;
+  const studying = Number(context.graduationYear) >= new Date().getFullYear();
+  if (studying && context.school) return `${context.majors[0] ? `${context.majors[0]} student` : "Student"} at ${context.school}`;
+  if (latestJob?.title) return latestJob.company ? `${latestJob.title} at ${latestJob.company}` : latestJob.title;
+  return context.school ? `${context.majors[0] ? `${context.majors[0]} graduate` : "Graduate"} of ${context.school}` : null;
 }
 
 /**

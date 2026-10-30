@@ -2,7 +2,7 @@ import { bestOption } from "@/lib/apply/options";
 import { answerChoices } from "@/lib/apply/questions";
 import type { Answer, FileData, PageField } from "../shared/types";
 import { attachFile, chooseCustom, chooseNativeSelect, press, sleep, typeInto, YES } from "./dom";
-import { findMarked, labelOf, rootOf } from "./scan";
+import { findMarked, isEmpty, labelOf, rootOf } from "./scan";
 
 /**
  * Any other form (Lever, Ashby, company career sites): filled by the data-unnepo-id the scanner set on
@@ -23,6 +23,17 @@ export function fileFor(field: PageField, files: { resume: FileData | null; cove
   return OTHER_DOCUMENT.test(words) ? null : files.resume;
 }
 
+// Upload boxes already filled on this page. A site that reads the resume (Workday) redraws the page after
+// an upload; uploading again would start that over, again and again.
+const uploadedHere = new Set<string>();
+
+/** Whether this box already has a file: the page shows one, or Unnepo already uploaded into it here. */
+function alreadyUploaded(field: PageField) {
+  if (uploadedHere.has(`${location.pathname}|${field.label}`)) return true;
+  const el = findMarked(field.id);
+  return Boolean(el && !isEmpty(el));
+}
+
 /**
  * Upload boxes that get a file on this form. A box that doesn't say what it's for ("Choose a file")
  * gets the resume only when no box asks for the resume by name, and then only the first such box,
@@ -33,6 +44,7 @@ function uploadPlan(fields: PageField[], files: { resume: FileData | null; cover
   const named = boxes.some((field) => RESUME.test(`${field.label} ${field.section}`));
   let generic = 0;
   return new Set(boxes.filter((field) => {
+    if (alreadyUploaded(field)) return false;
     const file = fileFor(field, files);
     if (!file) return false;
     if (file !== files.resume || RESUME.test(`${field.label} ${field.section}`)) return true;
@@ -119,7 +131,10 @@ export async function fillGeneric(fields: PageField[], answers: Answer[], files:
     try {
       await fillOne(field, answer ?? { id: field.id, label: field.label, type: field.type, required: field.required, values: [field.label], source: null, why: null }, files);
       filled.push(field.label);
-      if (field.type === "file") uploaded = true;
+      if (field.type === "file") {
+        uploaded = true;
+        uploadedHere.add(`${location.pathname}|${field.label}`);
+      }
     } catch (error) {
       failed.push({ label: field.label, reason: error instanceof Error ? error.message : "couldn't fill" });
     }
