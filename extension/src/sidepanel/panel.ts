@@ -140,12 +140,22 @@ function pageCard(state: PanelState) {
         ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
       ` : `<p class="note">Open a job application in this tab.</p>`}
       ${fill}
-      ${report?.needsYou.length ? `<p class="note warn">Still needs you:</p><ul class="needs">${report.needsYou.map((label) => `<li>${escape(label)}</li>`).join("")}</ul>` : ""}
+      ${report?.needsYou.length ? `<p class="note warn">Still needs you:</p><ul class="needs">${report.needsYou.map((label) => `<li><button type="button" class="needs-link" data-label="${escape(label)}" title="Go to this question on the page">${escape(label)}<span aria-hidden="true">↗</span></button></li>`).join("")}</ul>${fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}` : ""}
       ${report?.failed.length ? `<p class="note">Couldn't fill: ${report.failed.map((item) => escape(item.label)).join("; ")}</p>` : ""}
       ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
       ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
       <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}>Let me press Submit myself.</label>
     </section>`;
+}
+
+/** Why the last "Still needs you" click couldn't find its question, kept across re-renders. */
+let fieldNote = "";
+
+/** Scrolls the job page to a question the student still has to answer, and highlights it. */
+async function goToField(tabId: number, label: string) {
+  const result = await ask<{ ok: boolean }>({ type: "focus-field", tabId, label }).catch(() => ({ ok: false }));
+  fieldNote = result.ok ? "" : `Couldn't find "${label}" on this page. It may be on another step of the form.`;
+  void render();
 }
 
 /** What happened with the last See / Replace, kept across re-renders. */
@@ -160,7 +170,7 @@ function resumeRow(state: PanelState) {
     <div class="secret resume-row">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--muted)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>
       ${resume?.file
-        ? `<button type="button" class="secret-text resume-name resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}>${name}</button>`
+        ? `<button type="button" class="resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}><span class="resume-link-name">${name}</span><span aria-hidden="true">↗</span></button>`
         : `<span class="secret-text resume-name" title="${name}">${name}</span>`}
       ${resume?.file ? `<button type="button" class="inline" id="see-resume" ${resumeBusy ? "disabled" : ""}>See</button>` : ""}
       <button type="button" class="inline" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Replace" : "Upload"}</button>
@@ -321,6 +331,7 @@ async function render() {
   });
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
+  app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
   document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));

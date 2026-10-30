@@ -527,6 +527,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Upload failed." });
         }
+      // "Still needs you" in the panel: show that question on the page.
+      case "focus-field":
+        if (sender.tab) return reply({ ok: false });
+        return reply(await send<{ ok: boolean }>(Number(message.tabId), { type: "focus-field", label: String(message.label ?? "") }).catch(() => ({ ok: false })));
       // The spider on job pages: open the side panel for that tab. Chrome allows it right after a click.
       case "open-panel":
         if (tabId === undefined) return reply({ ok: false });

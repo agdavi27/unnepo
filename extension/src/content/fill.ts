@@ -47,6 +47,25 @@ async function withOptions(fields: PageField[]) {
   return fields;
 }
 
+/** Scrolls to a question the student still has to answer, puts the cursor in it, and flashes a ring around it. */
+function showField(label: string) {
+  const fields = scanFields();
+  const wanted = label.trim().toLowerCase();
+  const field = fields.find((item) => item.label.toLowerCase() === wanted) ?? fields.find((item) => item.label.toLowerCase().startsWith(wanted));
+  const el = field ? findMarked(field.id) : null;
+  if (!el) return false;
+  const control = el.matches("input, select, textarea, button") ? el : (el.querySelector<HTMLElement>("input, select, textarea, button") ?? el);
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  control.scrollIntoView({ block: "center", behavior: reduce ? "auto" : "smooth" });
+  const before = { outline: control.style.outline, outlineOffset: control.style.outlineOffset, boxShadow: control.style.boxShadow };
+  control.style.outline = "3px solid #3D8BFF";
+  control.style.outlineOffset = "3px";
+  control.style.boxShadow = "0 0 0 8px rgba(61, 139, 255, .25)";
+  setTimeout(() => control.focus({ preventScroll: true }), reduce ? 0 : 350);
+  setTimeout(() => Object.assign(control.style, before), 2600);
+  return true;
+}
+
 let planned: PageField[] = [];
 let plannedValues = new Map<string, string>();
 
@@ -174,6 +193,10 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       });
       void withOptions(fields).then((withChoices) => reply({ fields: withChoices }));
       return true;
+    }
+    if (message?.type === "focus-field") {
+      reply({ ok: showField(String(message.label ?? "")) });
+      return false;
     }
     if (message?.type === "press" && message.first) {
       const apply = findApply();
