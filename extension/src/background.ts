@@ -528,6 +528,25 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Upload failed." });
         }
+      // The panel's cover letter: for the job on this tab. The job is opened in Unnepo first if it isn't yet.
+      case "generate-letter": {
+        if (sender.tab) return reply({ ok: false });
+        const tabId = Number(message.tabId);
+        try {
+          let applicationId = (await jobs())[tabId]?.applicationId;
+          if (!applicationId) {
+            const scan = await look(tabId);
+            if (!scan) throw new Error("Open the job posting or its application in this tab first.");
+            const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", { url: scan.url, title: scan.title, company: scan.company });
+            applicationId = job.application.id;
+            await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: scan.url, host: new URL(scan.url).hostname });
+          }
+          const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId });
+          return reply({ ok: true, doc: letter });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't write the cover letter." });
+        }
+      }
       // The panel's CV generator: a CV for the job on this tab (or a general one), paid for with credits.
       case "generate-cv": {
         if (sender.tab) return reply({ ok: false });

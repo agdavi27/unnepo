@@ -128,3 +128,5 @@ a.px { display: flex; align-items: center; justify-content: center; text-decorat
 .cv-button .spark { color: var(--accent); flex: none; }
 .cv-left { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted-3); white-space: nowrap; }
 .cv-text { width: 100%; min-height: 180px; resize: vertical; border-radius: 10px; border: 1px solid var(--control); background: #111114; color: var(--fg); padding: 10px; font: 12px/1.5 var(--mono); }
+.writers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.writers .cv-button { padding: 0 12px; }
