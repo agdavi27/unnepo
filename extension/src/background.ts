@@ -524,6 +524,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Upload failed." });
         }
+      // The spider on job pages: open the side panel for that tab. Chrome allows it right after a click.
+      case "open-panel":
+        if (tabId === undefined) return reply({ ok: false });
+        try {
+          await chrome.sidePanel.open({ tabId });
+          return reply({ ok: true });
+        } catch {
+          return reply({ ok: false });
+        }
       case "set-auto-submit":
         await chrome.storage.local.set({ autoSubmit: Boolean(message.value) });
         return reply({ ok: true });

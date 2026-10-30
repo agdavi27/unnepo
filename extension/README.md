@@ -53,6 +53,14 @@ application is submitted or the student presses **Stop**:
 It never fills bot-trap fields (hidden or labelled for robots), never presses header links like Sign In or
 "Apply with LinkedIn", and never solves CAPTCHAs. Buttons are found in `src/content/actions.ts`.
 
+## The spider on job pages
+
+On job systems (Workday, Greenhouse, Lever, Ashby, iCIMS, SmartRecruiters and others) and on pages whose
+address mentions applying, careers, or jobs, a small spider drops down on the right once the page looks
+like a job posting or an application. Clicking it opens the side panel; its × hides it on that site for
+the browser session. It never shows on LinkedIn or on Unnepo itself, and it reads nothing but whether
+the page looks like a job page (`src/content/launcher.ts`).
+
 ## Uploads and hard-to-read forms
 
 - Upload boxes are filled before anything else, and the extension waits (up to six seconds) while a site
@@ -71,6 +79,7 @@ It never fills bot-trap fields (hidden or labelled for robots), never presses he
 - `src/content/greenhouse.ts`: Greenhouse's hosted form, by field id (React selects, uploads, checkbox groups)
 - `src/content/generic.ts`: every other form (Lever, Ashby, company sites)
 - `src/content/fill.ts`: the injected entry point
+- `src/content/launcher.ts`: the spider button that drops in on job pages and opens the panel
 - `src/content/actions.ts`: finds and presses Apply, Create account, Sign in, Next, and Submit
 - `src/content/spiders.ts`: the pixel spiders that drop in and crawl the page during a fill (skipped with reduced motion)
 - `src/content/connect.ts`: receives the token on the connect page

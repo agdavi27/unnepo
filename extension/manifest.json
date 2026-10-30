@@ -42,6 +42,60 @@
         "content/connect.js"
       ],
       "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*.myworkdayjobs.com/*",
+        "https://*.myworkdaysite.com/*",
+        "https://*.greenhouse.io/*",
+        "https://jobs.lever.co/*",
+        "https://jobs.ashbyhq.com/*",
+        "https://apply.workable.com/*",
+        "https://jobs.smartrecruiters.com/*",
+        "https://*.icims.com/*",
+        "https://*.jobvite.com/*",
+        "https://*.bamboohr.com/*",
+        "https://*.paycomonline.net/*",
+        "https://*.paylocity.com/*",
+        "https://*.ultipro.com/*",
+        "https://*.taleo.net/*",
+        "https://*.successfactors.com/*",
+        "https://*.breezy.hr/*",
+        "https://*.recruitee.com/*",
+        "https://*.teamtailor.com/*",
+        "https://ats.rippling.com/*",
+        "https://*.applytojob.com/*",
+        "https://*.dayforcehcm.com/*"
+      ],
+      "js": [
+        "content/launcher.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://*/*"
+      ],
+      "include_globs": [
+        "*apply*",
+        "*application*",
+        "*career*",
+        "*/job/*",
+        "*/jobs*",
+        "*recruit*",
+        "*hiring*",
+        "*/position*",
+        "*opening*",
+        "*vacanc*"
+      ],
+      "exclude_matches": [
+        "https://*.linkedin.com/*",
+        "https://unneponew.vercel.app/*"
+      ],
+      "js": [
+        "content/launcher.js"
+      ],
+      "run_at": "document_idle"
     }
   ],
   "icons": {
