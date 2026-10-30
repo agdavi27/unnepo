@@ -233,7 +233,7 @@ async function renderPassword() {
     ${passwordMode === "editing" ? `
       <input class="field" type="text" id="new-password" autocomplete="off" spellcheck="false" placeholder="Your new password" aria-label="New password">
       <ul class="rules" id="rules">${rules("")}</ul>
-      <p class="small">Accounts you already made keep their old password.</p>
+      <p class="small">Accounts Unnepo already made keep working with the password they were made with.</p>
       <div class="links"><button type="button" class="solid" id="save-password" disabled>Save password</button><button type="button" class="link" id="cancel-password">Cancel</button></div>
     ` : `
       <div class="secret">
@@ -255,7 +255,7 @@ async function renderPassword() {
   document.getElementById("change-password")?.addEventListener("click", () => redraw("editing"));
   document.getElementById("cancel-password")?.addEventListener("click", () => redraw("hidden"));
   document.getElementById("regenerate-password")?.addEventListener("click", async () => {
-    if (!confirm("Make a new password? Accounts you already made keep the old one, so keep a copy if you'll sign in to them again.")) return;
+    if (!confirm("Make a new password? Accounts Unnepo already made keep working: it remembers the password each one was made with. Accounts you made yourself aren't changed.")) return;
     await ask({ type: "new-password" });
     redraw("shown", "New password made.");
   });

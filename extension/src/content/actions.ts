@@ -109,6 +109,8 @@ export function pageNotes() {
   const body = (document.body.innerText || "").replace(/\s+/g, " ");
   return {
     accountExists: /(already|previously) (been )?(registered|exists?|in use|taken)|account (already )?exists|email address is already|already have an account/i.test(alerts),
+    // "You may have entered the wrong email address or password or your account might be locked."
+    signInFailed: /wrong (email|e-mail|username|password)|(email|username|password)( address)? (or password )?(is |was )?(incorrect|invalid|not recogni[sz]ed)|incorrect (email|e-mail|username|password)|invalid (email|username|password|credentials|login)|account (might be|may be|is|has been) locked|couldn(?:'|’)?t sign you in|sign[- ]?in (failed|unsuccessful)|unable to sign in|login failed/i.test(`${alerts} ${deepAll<HTMLInputElement>("input[type=password]").length ? body : ""}`),
     verifyEmail: /verify your (email|account)|verification (email|link|code)|check your (email|inbox)|confirm your email/i.test(body) && !document.querySelector("input:not([type=hidden])"),
     confirmed: CONFIRM_TEXT.test(body),
   };

@@ -97,7 +97,7 @@ async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
   const scan = await look(tabId);
   if (!scan) return null;
   const host = new URL(scan.url).hostname;
-  const known = Boolean((await knownAccounts())[host]);
+  const known = Boolean((await knownAccounts())[accountKey(scan.url)]);
   const status = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
   const accountPage = scan.passwordBoxes > 0 || scan.ats === "workday";
   const page: PanelState["page"] = {
@@ -148,7 +148,7 @@ function sameApplication(before: string | undefined, after: string) {
 
 const signature = (scan: Scan) => `${scan.url}|${scan.passwordBoxes}|${scan.fields.map((field) => field.label).join("|")}`;
 const hasForm = (scan: Scan) => scan.useServerSchema || scan.fields.length > 0 || scan.passwordBoxes > 0;
-type Status = { apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; verifyEmail: boolean; confirmed: boolean };
+type Status = { apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; signInFailed: boolean; verifyEmail: boolean; confirmed: boolean };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -158,11 +158,37 @@ let runCounter = 0;
 const stillRunning = (tabId: number, run: number) => runs.get(tabId) === run;
 
 /** Job sites where the student already has an account Unnepo made or used, so it signs in instead. */
-async function knownAccounts(): Promise<Record<string, true>> {
-  return ((await chrome.storage.local.get("accounts")).accounts as Record<string, true> | undefined) ?? {};
+/**
+ * Job-site accounts, by site. Accounts Unnepo made keep the password they were made with, so making a new
+ * job-site password later doesn't lock the student out of them. `true` is an account that already
+ * existed (the student made it, password unknown).
+ */
+type Account = true | { password: string; at: number };
+async function knownAccounts(): Promise<Record<string, Account>> {
+  return ((await chrome.storage.local.get("accounts")).accounts as Record<string, Account> | undefined) ?? {};
 }
-async function rememberAccount(host: string) {
-  await chrome.storage.local.set({ accounts: { ...(await knownAccounts()), [host]: true } });
+async function rememberAccount(key: string, password?: string) {
+  const all = await knownAccounts();
+  // Never replace a known password with "unknown".
+  if (!password && typeof all[key] === "object") return;
+  await chrome.storage.local.set({ accounts: { ...all, [key]: password ? { password, at: Date.now() } : true } });
+}
+/** The password for this site: the one its account was made with, else the current job-site password. */
+async function passwordFor(key: string) {
+  const account = (await knownAccounts())[key];
+  return typeof account === "object" ? account.password : jobSitePassword();
+}
+
+/**
+ * Which account a page belongs to. Workday accounts belong to the company, and some Workday addresses
+ * are shared by many companies (wd1.myworkdaysite.com/recruiting/<company>), so the company's part of
+ * the path counts too; any other site is its host.
+ */
+function accountKey(url: string) {
+  const parsed = new URL(url);
+  if (!/myworkday(jobs|site)\.com$/.test(parsed.hostname)) return parsed.hostname;
+  const parts = parsed.pathname.split("/").filter((part) => part && !/^[a-z]{2}-[A-Z]{2}$/.test(part) && part !== "recruiting");
+  return `${parsed.hostname}/${parts[0] ?? ""}`;
 }
 
 /** Puts the page script on the page (again, after a page load) and reads it; null while the page is loading. */
@@ -217,6 +243,8 @@ async function run(tabId: number) {
   let filledKey = "";
   let pressedKey = "";
   let presses = 0;
+  // Sites where signing in failed on this run: never pressed again.
+  const signInFailedAt = new Set<string>();
   let triedApply = false;
   /** After a press: waits for a new page, new fields, or new buttons (Workday's "how to apply" choice). */
   const waitForChange = async (key: string, buttonsBefore: string, known: boolean, timeout = 12_000) => {
@@ -266,8 +294,8 @@ async function run(tabId: number) {
       // A new page load starts without spiders; send them back out if they were out.
       if (scan.url !== lastUrl && spidersOut) void send(tabId, { type: "spiders", on: true }, 0).catch(() => undefined);
       lastUrl = scan.url;
-      const host = new URL(scan.url).hostname;
-      const known = Boolean((await knownAccounts())[host]);
+      const site = accountKey(scan.url);
+      const known = Boolean((await knownAccounts())[site]);
       const status = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
       if (!status) { await wait(400); continue; }
       if (!stillRunning(tabId, runId)) break;
@@ -282,7 +310,17 @@ async function run(tabId: number) {
           continue;
         }
       }
-      if (status.accountExists && !known) { await rememberAccount(host); continue; }
+      if (status.accountExists && !known) { await rememberAccount(site); continue; }
+      // A failed sign-in is never retried: a few wrong passwords in a row is how job sites lock accounts.
+      if (status.signInFailed) {
+        signInFailedAt.add(site);
+        const account = (await knownAccounts())[site];
+        await step(typeof account === "object"
+          ? `The site didn't accept the password Unnepo made this account with. Use "Forgot your password?" on the site, set it to your Unnepo job-site password (Show, then Copy, below), and press Fill again.`
+          : `This site already has an account for your email, with a password Unnepo doesn't know. Use "Forgot your password?" on the site, set it to your Unnepo job-site password (Show, then Copy, below), and press Fill again.`);
+        await wait(1500);
+        continue;
+      }
       if (status.captcha) { await step("A CAPTCHA is on the page. Solve it and Unnepo carries on. Unnepo never solves CAPTCHAs."); await wait(1200); continue; }
       if (status.verifyEmail) { await step("The site sent you an email to verify your account. Open the link, come back to this tab, and Unnepo carries on."); await wait(1500); continue; }
 
@@ -311,7 +349,7 @@ async function run(tabId: number) {
         const letter = wantsCoverLetter && applicationId ? await api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null) : null;
         if (!stillRunning(tabId, runId)) break;
         await step("Filling the form…", { llmCalls });
-        const plan: FillPlan = { ats: scan.ats, useServerSchema: scan.useServerSchema, answers: map.answers, resume: wantsResume ? resume ?? null : null, coverLetter: letter ? { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } : null, autoSubmit: false, password: await jobSitePassword() };
+        const plan: FillPlan = { ats: scan.ats, useServerSchema: scan.useServerSchema, answers: map.answers, resume: wantsResume ? resume ?? null : null, coverLetter: letter ? { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } : null, autoSubmit: false, password: await passwordFor(accountKey(scan.url)) };
         let report = await send<FillReport>(tabId, { type: "fill", plan }).catch(() => null);
         // Greenhouse's API leaves some questions out (the U.S. demographic questions): fill those from the page.
         if (report && scan.useServerSchema && applicationId) {
@@ -357,8 +395,19 @@ async function run(tabId: number) {
         await wait(1000);
         continue;
       }
+      // Signing in again after the site said no would only lock the account.
+      if (action.kind === "sign_in" && signInFailedAt.has(site)) {
+        await wait(1500);
+        continue;
+      }
       // Pressing the same button over and over on a page that won't move helps no one.
       const pressKey = `${key}|${action.kind}|${action.label}`;
+      // Sign in and Create account are pressed once per page: retrying them is what locks accounts.
+      if (pressKey === pressedKey && (action.kind === "sign_in" || action.kind === "create_account")) {
+        await step(`Pressed "${action.label}", but the page didn't move. Check the page; Unnepo carries on when it changes.`);
+        await wait(1500);
+        continue;
+      }
       // After two tries it waits, then tries again now and then (the student may have fixed something).
       if (pressKey === pressedKey && presses >= 2 && Date.now() - pressedAt < 8000) {
         await step(`Pressed "${action.label}", but the page didn't move. Something on the page may need you; Unnepo carries on when it changes.`);
@@ -374,8 +423,9 @@ async function run(tabId: number) {
       await waitForChange(key, `${action.kind}|${action.label}|${status.apply}`, known);
       if (action.kind === "create_account") {
         const notes = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
-        // Made, or it already existed: either way, sign in next time.
-        if (!notes?.action || notes.action.kind !== "create_account" || notes.accountExists) await rememberAccount(host);
+        // Made (keep the password it was made with), or it already existed (password unknown).
+        if (notes?.accountExists) await rememberAccount(site);
+        else if (!notes?.action || notes.action.kind !== "create_account") await rememberAccount(site, await passwordFor(site));
       }
     }
     if ((await jobs())[tabId]?.submission) return;
