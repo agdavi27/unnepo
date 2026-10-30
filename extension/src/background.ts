@@ -599,6 +599,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         const tabId = Number(message.tabId);
         try {
+          // No job on the page: the student pasted the job description in the panel.
+          if (typeof message.description === "string") {
+            const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { description: message.description, ...(message.options ?? {}) });
+            return reply({ ok: true, doc: letter });
+          }
           const scan = await look(tabId);
           const earlier = (await jobs())[tabId];
           // The job the student has open now: after clicking another job (Handshake's search), that one.
@@ -618,6 +623,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't write the cover letter." });
         }
       }
+      // The panel's "My jobs".
+      case "list-jobs":
+        if (sender.tab) return reply({ ok: false });
+        try {
+          return reply({ ok: true, ...(await api<{ jobs: unknown[]; total: number }>("GET", "jobs")) });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't load your jobs." });
+        }
       // The panel's CV generator: a CV for the job on this tab (or a general one), paid for with credits.
       case "generate-cv": {
         if (sender.tab) return reply({ ok: false });

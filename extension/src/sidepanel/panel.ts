@@ -11,6 +11,12 @@ const app = document.getElementById("app")!;
 const account = document.getElementById("account")!;
 const passwordSection = document.getElementById("password")!;
 const footer = document.getElementById("footer")!;
+const menu = document.getElementById("menu")!;
+const speechSection = document.getElementById("speech")!;
+
+/** Which view the bottom menu has open. Apply is the job on this tab. */
+type View = "home" | "jobs" | "profile" | "settings";
+let view: View = "home";
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
@@ -75,13 +81,12 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
   if (job?.error) return { lines: [job.error], alert: true };
   if (job?.step && (job.running || job.submission || job.report)) return { lines: [job.step] };
   if (!me!.profileReady) return { lines: ["Finish your profile on Unnepo first, so I have something to fill with."] };
-  if (!state.tab || !/^https:\/\//.test(state.tab.url)) return { lines: ["Open a job posting or an application in this tab.", "Then press Fill and I'll crawl it for you."] };
-  if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Press Apply on LinkedIn to go to the company's own application, then press Fill there."] };
-  if (!page || (!page.fields && !page.posting)) return { lines: ["I don't see an application on this page yet.", "Open the job posting or its application, then press Fill."] };
-  const found = `Found a job on ${page.site}.${page.title ? ` ${short(page.title)}.` : ""}`;
-  if (page.posting) return { lines: [found, "Press Fill. I'll press Apply and crawl the whole thing for you."] };
+  if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Press Apply on LinkedIn to go to the company's own application, then press Autofill there."] };
+  if (!jobFound(state) || !page) return { lines: ["I don't see a job on this page.", "Open a job posting, or paste a job description below and I'll write you a cover letter."] };
+  const found = `${page.company || page.site} job found.${page.title ? ` ${short(page.title)}.` : ""}`;
+  if (page.posting) return { lines: [found, "Press Autofill. I'll press Apply and crawl the whole thing for you."] };
   const extra = page.account === "new" ? ", and one new account to make" : page.account === "sign_in" ? ", and I'll sign you in" : "";
-  return { lines: [found, `${page.fields} ${page.fields === 1 ? "field" : "fields"}${extra}.`, "Press Fill and I'll crawl it for you."] };
+  return { lines: [found, `${page.fields} ${page.fields === 1 ? "field" : "fields"}${extra}.`, "Press Autofill and I'll crawl it for you."] };
 }
 
 function connectView(state: PanelState) {
@@ -105,14 +110,22 @@ function onLinkedIn(state: PanelState) {
   try { return Boolean(state.tab && NEVER_READ.test(new URL(state.tab.url).hostname)); } catch { return false; }
 }
 
-function pageCard(state: PanelState) {
-  const { job, page, tab, me } = state;
+/** A job is on the tab: a posting, an application form, or one Unnepo is working on. */
+function jobFound(state: PanelState) {
+  const { job, page, tab } = state;
   const onWeb = Boolean(tab && /^https:\/\//.test(tab.url)) && !onLinkedIn(state);
+  return onWeb && Boolean(job?.applicationId || job?.running || job?.report || page?.fields || page?.posting);
+}
+
+/** The home view. With a job on the tab: "<Company> job found" and the Fill button. Without one: paste a job description for a cover letter. */
+function pageCard(state: PanelState) {
+  if (!jobFound(state)) return pasteCard(state);
+  const { job, page, tab, me } = state;
   const report = job?.report;
   let host = "";
   try { host = tab ? new URL(tab.url).hostname.replace(/^www\./, "") : ""; } catch { host = ""; }
   const site = page?.site || host;
-  const title = job?.title || page?.title || (onWeb ? tab!.title : "");
+  const title = job?.title || page?.title || tab!.title;
   const company = job?.company || page?.company || "";
   const chips: string[] = [];
   if (report?.filled.length) chips.push(`${report.filled.length} filled`);
@@ -123,33 +136,49 @@ function pageCard(state: PanelState) {
   if (job?.submission) chips.push(job.submission === "confirmed" ? "Submitted" : "Looks submitted");
   const fill = job?.running
     ? `<button type="button" class="px stop" id="stop">STOP</button>`
-    : `<button type="button" class="px" id="fill" ${me!.profileReady && onWeb ? "" : "disabled"}>${report ? "FILL AGAIN" : "FILL THIS APPLICATION"}</button>`;
+    : `<button type="button" class="px" id="fill" ${me!.profileReady ? "" : "disabled"}>${report ? "FILL AGAIN" : "AUTOFILL"}</button>`;
   const links = [
     job?.applicationId && !job.submission && !job.running ? `<button type="button" class="link" id="applied">I applied</button>` : "",
     job?.submission ? `<button type="button" class="link" id="not-applied">I didn't apply</button>` : "",
   ].filter(Boolean);
   // What Unnepo couldn't fill that isn't already listed as needing the student. Each one goes to the question.
   const couldnt = (report?.failed ?? []).filter((item) => !report!.needsYou.includes(item.label));
-  // The cover letter writer shows on any job page: a posting, an application, or a job Unnepo is working on.
-  const letterOffered = onWeb && Boolean(job?.applicationId || page?.fields || page?.posting);
   return `
     <section class="page" aria-label="This page">
-      <span class="eyebrow">On this page${site ? ` · ${escape(site)}` : ""}</span>
-      ${onWeb ? `
-        <div class="job">
-          <span class="job-title">${escape(title || "This page")}</span>
-          ${company ? `<span class="job-company">${escape(company)}</span>` : ""}
-        </div>
-        ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
-      ` : `<p class="note">Open a job application in this tab.</p>`}
+      <span class="eyebrow">Job found${site ? ` · ${escape(site)}` : ""}</span>
+      <div class="job">
+        <span class="job-title">${escape(company || site || "This")} job found</span>
+        ${title ? `<span class="job-company">${escape(title)}</span>` : ""}
+      </div>
+      ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
       ${fill}
       ${report?.needsYou.length ? `<p class="note warn">Still needs you <span class="small">(outlined in orange on the page)</span>:</p><ul class="needs">${report.needsYou.map((label) => needsLink(label)).join("")}</ul>` : ""}
       ${couldnt.length ? `<p class="note">Couldn't fill:</p><ul class="needs">${couldnt.map((item) => needsLink(item.label, item.reason)).join("")}</ul>` : ""}
       ${(report?.needsYou.length || couldnt.length) && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
       ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
       ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
-      ${letterOffered ? letterBlock() : ""}
-      <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}>Let me press Submit myself.</label>
+      ${letterBlock()}
+    </section>`;
+}
+
+/** No job on the tab: paste a job description and get a cover letter for it. */
+let pasteText = "";
+
+function pasteCard(state: PanelState) {
+  const busy = letterStep === "writing" || letterStep === "revising";
+  const linkedIn = onLinkedIn(state);
+  return `
+    <section class="page" aria-label="Cover letter">
+      <span class="eyebrow">No job found on this page</span>
+      <p class="note">${linkedIn ? "Unnepo doesn't read LinkedIn. Press Apply there to go to the company's own application, or paste the job description here." : "Open a job posting and Unnepo finds it. Or paste a job description here for a cover letter."}</p>
+      <div class="letter-form">
+        <label class="question"><span class="q-label">Job description</span>
+          <textarea class="field letter-input paste" id="paste-desc" rows="7" maxlength="8000" placeholder="Paste the whole job posting: the role, the company, what they're looking for…">${escape(pasteText)}</textarea>
+        </label>
+        <button type="button" class="cv-button" id="paste-write" ${busy || pasteText.trim().length < 80 ? "disabled" : ""}>${SPARK}<span>${letterStep === "writing" ? "Writing…" : "Write cover letter"}</span></button>
+      </div>
+      ${letter ? writtenLetter(busy, false) : ""}
+      ${letterNote ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}
     </section>`;
 }
 
@@ -192,10 +221,16 @@ function letterBlock() {
         <button type="button" class="link" id="letter-cancel">Cancel</button>
       </div>
     </div>` : "";
-  const written = letter && letterStep !== "asking" ? `
+  const written = letter && letterStep !== "asking" ? writtenLetter(busy, true) : "";
+  return `<div class="cv">${questions}${written}${letterNote ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}</div>`;
+}
+
+/** The letter, with Copy and PDF, and a box for edits. */
+function writtenLetter(busy: boolean, forJob: boolean) {
+  return `
     <div class="letter-form" id="letter-form">
       <span class="eyebrow">Your cover letter</span>
-      <textarea class="cv-text" readonly aria-label="Your cover letter">${escape(letter.text)}</textarea>
+      <textarea class="cv-text" readonly aria-label="Your cover letter">${escape(letter!.text)}</textarea>
       <div class="links">
         <button type="button" class="link" id="letter-copy">Copy</button>
         <button type="button" class="link" id="letter-download">Download PDF</button>
@@ -206,11 +241,10 @@ function letterBlock() {
       </label>
       <div class="links">
         <button type="button" class="solid" id="letter-revise" ${busy || !letterChoices.edit.trim() ? "disabled" : ""}>${letterStep === "revising" ? "Rewriting…" : "Make these edits"}</button>
-        <button type="button" class="link" id="letter-restart" ${busy ? "disabled" : ""}>Start over</button>
+        ${forJob ? `<button type="button" class="link" id="letter-restart" ${busy ? "disabled" : ""}>Start over</button>` : ""}
       </div>
-      <p class="small">Written from your profile and resume. It's also what Unnepo attaches when this application asks for a cover letter.</p>
-    </div>` : "";
-  return `<div class="cv">${questions}${written}${letterNote ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}</div>`;
+      <p class="small">Written from your profile and resume.${forJob ? " It's also what Unnepo attaches when this application asks for a cover letter." : ""}</p>
+    </div>`;
 }
 
 const letterBlobUrl = () => {
@@ -218,15 +252,15 @@ const letterBlobUrl = () => {
   return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
 };
 
-async function writeLetter(tabId: number, revise: boolean) {
+async function writeLetter(tabId: number, revise: boolean, fromPaste = false) {
   letterStep = revise ? "revising" : "writing";
   letterNote = "";
   void render();
   const options = revise
     ? { previous: letter?.text ?? "", edit: letterChoices.edit }
-    : { length: letterChoices.length, tone: letterChoices.tone, mention: letterChoices.mention };
+    : fromPaste ? {} : { length: letterChoices.length, tone: letterChoices.tone, mention: letterChoices.mention };
   type Result = { ok: boolean; doc?: Letter; error?: string };
-  const result = await ask<Result>({ type: "generate-letter", tabId, options }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  const result = await ask<Result>({ type: "generate-letter", tabId, options, ...(fromPaste ? { description: pasteText } : {}) }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
   if (result.ok && result.doc) {
     letter = result.doc;
     letterStep = "written";
@@ -235,6 +269,8 @@ async function writeLetter(tabId: number, revise: boolean) {
     letterStep = letter ? "written" : "asking";
     letterNote = result.error ?? "Couldn't write the cover letter.";
   }
+  // The panel doesn't redraw while a box has the cursor, so let go of it to show the letter.
+  if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
   void render();
 }
 
@@ -256,7 +292,15 @@ function wireLetter(tabId: number) {
     if (revise && letterStep === "written") revise.disabled = !edits.value.trim();
   });
   document.getElementById("letter-write")?.addEventListener("click", () => void writeLetter(tabId, false));
-  revise?.addEventListener("click", () => void writeLetter(tabId, true));
+  const fromPaste = Boolean(document.getElementById("paste-desc"));
+  revise?.addEventListener("click", () => void writeLetter(tabId, true, fromPaste));
+  const paste = document.getElementById("paste-desc") as HTMLTextAreaElement | null;
+  const pasteWrite = document.getElementById("paste-write") as HTMLButtonElement | null;
+  paste?.addEventListener("input", () => {
+    pasteText = paste.value;
+    if (pasteWrite) pasteWrite.disabled = pasteText.trim().length < 80 || letterStep === "writing" || letterStep === "revising";
+  });
+  pasteWrite?.addEventListener("click", () => void writeLetter(tabId, false, true));
   document.getElementById("letter-copy")?.addEventListener("click", () => {
     void navigator.clipboard.writeText(letter!.text).then(() => { letterNote = "Copied."; void render(); }, () => { letterNote = "Couldn't copy. Select the text and copy it."; void render(); });
   });
@@ -415,6 +459,57 @@ async function renderPassword() {
   });
 }
 
+/** "My jobs": the newest jobs in Unnepo, each opening its posting, and a link to the full tracker. */
+type JobRow = { id: string; title: string; company: string; status: string; url: string; submittedAt: string | null; createdAt: string };
+let jobsList: { rows: JobRow[]; total: number; error: string; loadedAt: number } | null = null;
+let jobsLoading = false;
+
+const STATUS: Record<string, string> = {
+  extracted: "Saved", filling: "Filling", review: "To review", submitting: "Submitting", submitted: "Applied",
+  unconfirmed: "Check email", applied_manual: "Applied", failed: "Didn't go through",
+};
+
+async function loadJobs() {
+  if (jobsLoading) return;
+  jobsLoading = true;
+  const result = await ask<{ ok: boolean; jobs?: JobRow[]; total?: number; error?: string }>({ type: "list-jobs" }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }) as const);
+  jobsLoading = false;
+  jobsList = { rows: result.ok ? result.jobs ?? [] : [], total: result.ok ? result.total ?? 0 : 0, error: result.ok ? "" : result.error ?? "Couldn't load your jobs.", loadedAt: Date.now() };
+  void render();
+}
+
+function jobsView(state: PanelState) {
+  if (!jobsList || Date.now() - jobsList.loadedAt > 30_000) void loadJobs();
+  const rows = jobsList?.rows ?? [];
+  const body = !jobsList
+    ? `<p class="note">Loading your jobs…</p>`
+    : jobsList.error
+      ? `<p class="note error">${escape(jobsList.error)}</p>`
+      : !rows.length
+        ? `<p class="note">No jobs yet. Open a job posting and press Autofill, and it shows up here.</p>`
+        : `<ul class="jobs-list">${rows.map((row) => `
+            <li><button type="button" class="job-row" data-url="${escape(row.url)}" title="Open this job">
+              <span class="job-row-text"><span class="job-row-title">${escape(row.title || "Job")}</span><span class="job-row-company">${escape(row.company)}</span></span>
+              <span class="status${row.status === "submitted" || row.status === "applied_manual" ? " done" : ""}">${escape(STATUS[row.status] ?? row.status)}</span>
+            </button></li>`).join("")}</ul>`;
+  return `
+    <section class="view" aria-label="My jobs">
+      <div class="row"><span class="heading">My jobs</span>${jobsList && !jobsList.error ? `<span class="mono">${jobsList.total} IN ALL</span>` : ""}</div>
+      ${body}
+      <a class="outline" href="${escape(state.apiBase)}/home" target="_blank" rel="noreferrer">Open my tracker on Unnepo</a>
+    </section>`;
+}
+
+/** Settings: submitting, then the job-site password and sign out (drawn outside this card). */
+function settingsView(state: PanelState) {
+  return `
+    <section class="view" aria-label="Settings">
+      <span class="heading">Settings</span>
+      <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}>Let me press Submit myself.</label>
+      <p class="small">On: Unnepo fills every page and stops at Submit for you to check. Off: it submits for you.</p>
+    </section>`;
+}
+
 // The file picker lives outside the redrawn part of the panel, so a refresh can't lose the chosen file.
 const resumeInput = document.getElementById("resume-input") as HTMLInputElement;
 resumeInput.addEventListener("change", () => {
@@ -442,15 +537,26 @@ async function render() {
   account.textContent = state.connected ? state.me!.user.email : "";
   const said = lines(state);
   speech(said.lines, said.alert);
+  if (!state.connected) view = "home";
+  menu.hidden = !state.connected;
+  menu.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
+    if (button.dataset.view === view) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+  speechSection.hidden = view !== "home";
   const wasHidden = passwordSection.hidden;
-  passwordSection.hidden = !state.connected;
-  footer.hidden = !state.connected;
+  passwordSection.hidden = !state.connected || view !== "settings";
+  footer.hidden = !state.connected || view !== "settings";
   if (state.connected && wasHidden) void renderPassword();
   // Don't wipe a code being typed when something else changes.
   if (!state.connected && document.getElementById("code") === document.activeElement) return;
   // Don't wipe what's being typed in the cover letter questions or edits box when the page changes.
-  if (document.activeElement?.closest("#letter-form") && document.activeElement.matches("textarea")) return;
-  app.innerHTML = state.connected ? pageCard(state) + profileCard(state) : connectView(state);
+  if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea")) return;
+  const views: Record<View, () => string> = { home: () => pageCard(state), jobs: () => jobsView(state), profile: () => profileCard(state), settings: () => settingsView(state) };
+  app.innerHTML = state.connected ? views[view]() : connectView(state);
+  app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
+    if (/^https:\/\//.test(button.dataset.url ?? "")) void chrome.tabs.create({ url: button.dataset.url! });
+  }));
   document.getElementById("use-code")?.addEventListener("click", async () => {
     const code = (document.getElementById("code") as HTMLInputElement).value.trim();
     if (code.startsWith("unx_")) await ask({ type: "connect", token: code });
@@ -467,6 +573,13 @@ async function render() {
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
 }
+
+menu.querySelectorAll<HTMLButtonElement>("button").forEach((button) => button.addEventListener("click", () => {
+  view = (button.dataset.view as View) ?? "home";
+  if (view === "jobs") jobsList = null;
+  window.scrollTo(0, 0);
+  void render();
+}));
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "state-changed") void render();

@@ -278,6 +278,26 @@ describe("CV generator", () => {
 });
 
 describe("cover letters from the panel", () => {
+  it("writes from a pasted job description when there's no job on the page, and lists the student's jobs", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    expect((await call("POST", "cover-letter", token, { description: "Too short." })).status).toBe(400);
+
+    const description = "Marketing Associate at Initech. You will plan social campaigns, write weekly newsletters, and report results to the marketing lead.";
+    model.replies.push("Dear Hiring Team,\n\nI am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students. I would bring that to Initech's marketing team.\n\nSincerely,\nPat Doe");
+    const letter = await (await call("POST", "cover-letter", token, { description })).json();
+    expect(letter.text).toContain("Initech");
+    expect(model.lastPrompt).toContain("write weekly newsletters");
+    expect(model.lastPrompt).toContain("as the job description below names them");
+    // Nothing is added to the tracker for a pasted description.
+    expect((await (await call("GET", "jobs", token)).json()).total).toBe(0);
+
+    await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/77", title: "Data Intern", company: "Globex" });
+    const list = await (await call("GET", "jobs", token)).json();
+    expect(list).toMatchObject({ total: 1, jobs: [{ title: "Data Intern", company: "Globex", status: "extracted" }] });
+  });
+
   it("writes about the Handshake job the student clicked, from the text the page shows", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";

@@ -118,6 +118,18 @@ export async function extensionJob(userId: string, raw: unknown) {
   }
 }
 
+/** The student's jobs for the panel's "My jobs": the newest first, with just what the list shows. */
+export async function extensionJobs(userId: string) {
+  const apps = await applications.list(userId);
+  return {
+    jobs: apps.slice(0, 30).map((app) => ({
+      id: app.id, title: app.title, company: app.company, status: app.status, url: app.applicationUrl || app.jobUrl,
+      submittedAt: app.submittedAt, createdAt: app.createdAt,
+    })),
+    total: apps.length,
+  };
+}
+
 /** Fills in a quickly-opened job from its posting. Best effort: a posting Unnepo can't read keeps the page's details. */
 async function enrichFromPosting(userId: string, applicationId: string, url: string) {
   try {
@@ -255,8 +267,11 @@ export async function extensionLearn(userId: string, raw: unknown) {
 
 /** A cover letter for this job, as text and as a PDF to upload. Written once per job. */
 export async function extensionCoverLetter(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown };
-  const app = await requireApp(userId, body.applicationId);
+  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown };
+  // No job on the page: the student pasted the job description instead. Nothing is opened in the tracker.
+  const pasted = !body.applicationId && typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
+  if (!body.applicationId && pasted.length < 80) throw new ServiceError("Paste the whole job description (at least a few sentences).", "description", 400);
+  const app = pasted ? null : await requireApp(userId, body.applicationId);
   const info = await student(userId);
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
   const pick = <T extends string>(value: unknown, allowed: readonly T[]) => (allowed.includes(value as T) ? (value as T) : undefined);
@@ -270,10 +285,11 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   if (style.edit !== undefined && !style.edit.trim()) throw new ServiceError("Say what you'd like changed.", "edit", 400);
   // The student's choices (or edits) always mean a new letter; otherwise the one already written is reused.
   const asked = Boolean(style.length || style.tone || style.mention?.trim() || style.edit?.trim());
-  const text = (!asked && app.fillReport?.coverLetter) || (await writeCoverLetter(userId, app, { name, resumeText: info.resumeText, profile: info.profileText }, style));
+  const job = app ?? { title: "", company: "", department: null, description: pasted, requirements: [] };
+  const text = (!asked && app?.fillReport?.coverLetter) || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText }, style));
   if (!text) throw new ServiceError("Couldn't write a cover letter. Add your resume and profile first.", "cover_letter", 409);
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
-  if (text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
+  if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
   return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64") };
 }

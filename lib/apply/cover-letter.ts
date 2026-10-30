@@ -47,7 +47,7 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
   const config = serverConfig();
   const prompt = [
     `Student: ${student.name}`,
-    `Role: ${app.title} at ${app.company}${app.department ? ` (${app.department})` : ""}`,
+    app.title && app.company ? `Role: ${app.title} at ${app.company}${app.department ? ` (${app.department})` : ""}` : "Role and company: as the job description below names them. If it doesn't name the company, don't make one up; write around it.",
     app.requirements.length ? `Requirements from the posting:\n${app.requirements.slice(0, 12).map((item) => `- ${item}`).join("\n")}` : "",
     `Job description:\n${app.description.slice(0, 3500)}`,
     student.resumeText ? `Resume:\n${student.resumeText.slice(0, 6000)}` : "",
