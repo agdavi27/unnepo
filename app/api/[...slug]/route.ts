@@ -13,6 +13,7 @@ import { generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighli
 
 import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
 import { generateCv } from "@/lib/apply/cv";
+import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { extensionCoverLetter, extensionJob, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission } from "@/lib/extension/service";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setOutcome, updateAnswers, updateOutreach } from "@/lib/apply/service";
@@ -33,6 +34,13 @@ async function handle(request: Request, slug: string[]) {
     } catch (error) {
       return withExtensionCors(request, await errorResponse(error));
     }
+  }
+
+  // The home page's "does my school cover Unnepo?" check, before any account exists. Nothing is stored.
+  if (root === "schools" && action === "check" && request.method === "POST") {
+    if (!rateLimit(`school-check:${request.headers.get("x-forwarded-for") || "local"}`, 30, 60 * 60 * 1000)) throw new ServiceError("Too many checks. Try again in a bit.", "rate_limited", 429);
+    const body = (await request.json().catch(() => ({}))) as { email?: unknown };
+    return json(checkSchool(String(body.email ?? "").slice(0, 200)));
   }
 
   if (root === "health" && request.method === "GET") {

@@ -13,6 +13,7 @@ import { acceptFixes } from "@/lib/apply/fast/fields";
 import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import { supportedBy } from "@/lib/apply/questions";
 import { bestOption } from "@/lib/apply/options";
+import { checkSchool } from "@/lib/school-plans";
 import { applyState, saveApplicationProfile, createApplication, markApplied, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
@@ -581,5 +582,18 @@ describe("people after applying", () => {
   it("shortens job titles for team searches", () => {
     expect(coreTitle("Account Executive - Commercial, Spotify Technology")).toBe("Account Executive");
     expect(coreTitle("Senior Software Engineer II (Payments)")).toBe("Software Engineer");
+  });
+});
+
+describe("school plan check on the home page", () => {
+  it("says whether a school covers Unnepo, from the school plans setting", () => {
+    const before = process.env.UNNEPO_SCHOOL_PLANS;
+    process.env.UNNEPO_SCHOOL_PLANS = "bates.edu=Bates College, colby.edu=Colby College";
+    expect(checkSchool("jo@bates.edu")).toEqual({ status: "covered", school: "Bates College" });
+    expect(checkSchool("jo@cs.colby.edu")).toEqual({ status: "covered", school: "Colby College" });
+    expect(checkSchool("jo@middlebury.edu")).toEqual({ status: "not_covered", school: "Middlebury" });
+    expect(checkSchool("jo@gmail.com").status).toBe("not_school");
+    expect(checkSchool("not an email").status).toBe("not_school");
+    process.env.UNNEPO_SCHOOL_PLANS = before;
   });
 });

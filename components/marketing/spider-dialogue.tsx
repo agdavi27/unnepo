@@ -131,7 +131,7 @@ function Rects({ list }: { list: Run[] }) {
 function Spider({ talking, mad, onPoke }: { talking: boolean; mad: number; onPoke: () => void }) {
   return (
     <div className="unnepo-bob relative w-[min(400px,82vw)]">
-      <div className="absolute bottom-[calc(100%-18px)] left-[calc(50%-3px)] h-[900px] w-[6px] bg-[#3A3A44]" />
+      <div className="absolute bottom-[calc(100%-18px)] left-[calc(50%-3px)] h-[44px] w-[6px] bg-[#3A3A44]" />
       <button type="button" onClick={onPoke} aria-label="Poke the spider" className="relative block w-full cursor-pointer focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-4 focus-visible:outline-[#3D8BFF]">
         {/* A new key on each poke restarts the shake. */}
         <svg key={mad} viewBox={`0 0 ${W} ${H}`} className={`block w-full ${mad ? "unnepo-shake" : ""}`} shapeRendering="crispEdges" aria-hidden>

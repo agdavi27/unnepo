@@ -9,8 +9,8 @@ const caveat = Caveat({ variable: "--font-caveat", subsets: ["latin"] });
 const pixel = Press_Start_2P({ variable: "--font-pixel", weight: "400", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Unnepo — You pick the jobs. We do the crawling.",
-  description: "A Chrome extension that fills job and internship applications for you, then finds the recruiters behind the role. Free for students.",
+  title: "Unnepo — Less applying. More interviewing.",
+  description: "A Chrome extension that fills job and internship applications for you, then finds the recruiters behind the role. Free to start.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

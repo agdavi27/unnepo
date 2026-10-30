@@ -2,6 +2,10 @@ import Link from "next/link";
 import { APPLICATIONS_PER_CREDIT, ENTERPRISE_PLAN, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 import { ActivityToasts } from "@/components/marketing/activity-toasts";
+import { FounderLink } from "@/components/marketing/founder-note";
+import { GetExtension } from "@/components/marketing/get-extension";
+import { ProductDemo } from "@/components/marketing/product-demo";
+import { Stats } from "@/components/marketing/stats";
 import { Schools } from "@/components/marketing/schools";
 import { SpiderDialogue } from "@/components/marketing/spider-dialogue";
 
@@ -16,29 +20,30 @@ export function Landing() {
         <Logo href="/" className="text-xl font-bold tracking-[-0.6px]" />
         <nav aria-label="Main" className="flex gap-7 text-sm">
           <a href="#pricing" className="py-3 text-[#9A9AA3] hover:text-white">Pricing</a>
+          <FounderLink />
           <Link href="/login" className="py-3 text-[#9A9AA3] hover:text-white">Log in</Link>
         </nav>
       </header>
 
       <main className="relative flex flex-1 flex-col items-center gap-9 px-6 pb-16 pt-2">
-        <h1 className="sr-only">Unnepo: you pick the jobs, we do the crawling</h1>
-        <ActivityToasts />
-        <SpiderDialogue />
+        <div className="relative z-[1] flex max-w-3xl flex-col items-center gap-5 pt-4 text-center">
+          <h1 className="m-0 text-[clamp(42px,7.4vw,84px)] font-bold leading-[0.96] tracking-[-0.045em]">Less applying.<br />More interviewing.</h1>
+          <p className="m-0 max-w-xl text-[clamp(16px,2vw,19px)] leading-relaxed text-[#B4B4BC]">Find jobs, complete applications faster, and connect with people who work there. All in one place.</p>
+        </div>
+        <div className="relative flex w-full flex-col items-center gap-9">
+          <ActivityToasts />
+          <SpiderDialogue />
+        </div>
         <div className="flex flex-col items-center gap-4">
-          <a
-            href={cta}
-            {...(EXTENSION_URL ? { target: "_blank", rel: "noreferrer" } : {})}
-            className="inline-flex min-h-12 items-center border-4 border-bg bg-[#F7F7F8] px-[26px] py-[18px] text-center font-[family-name:var(--font-pixel)] text-sm leading-[1.6] text-bg shadow-[6px_6px_0_#3D8BFF] transition-transform hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[4px_4px_0_#3D8BFF] active:translate-x-1.5 active:translate-y-1.5 active:shadow-none"
-          >
-            Add to Chrome — it&apos;s free for students
-          </a>
+          <GetExtension href={cta} external={Boolean(EXTENSION_URL)} />
           <p className="m-0 max-w-md text-center text-[13px] text-[#8B8B94]">
-            {EXTENSION_URL
-              ? "Works on Greenhouse, Lever, Ashby, Workday and more."
-              : "The Chrome extension is almost ready. Sign up now and your profile will be waiting when it lands."}
+            Free to start. Some schools cover Pro for their students; see if yours does.
           </p>
         </div>
       </main>
+
+      <ProductDemo />
+      <Stats />
 
       <Schools />
 
