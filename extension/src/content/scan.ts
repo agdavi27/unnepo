@@ -177,7 +177,9 @@ export function scanFields(): PageField[] {
   const controls = deepAll<HTMLElement>("input, select, textarea, button[aria-haspopup='listbox']", dialog ?? document);
   for (const el of controls) {
     const type = (el.getAttribute("type") ?? (el.tagName === "TEXTAREA" ? "textarea" : el.tagName === "SELECT" ? "select" : "text")).toLowerCase();
-    if (["hidden", "submit", "button", "password", "image", "reset", "search"].includes(type) && el.getAttribute("data-automation-id") !== "searchBox") continue;
+    // A dropdown built as a button (Workday's "Select One") has type="button" but is a question, not a button.
+    const dropdownButton = el.tagName === "BUTTON" && el.getAttribute("aria-haspopup") === "listbox";
+    if (["hidden", "submit", "button", "password", "image", "reset", "search"].includes(type) && el.getAttribute("data-automation-id") !== "searchBox" && !dropdownButton) continue;
     if (el.getAttribute("aria-hidden") === "true" || /honeypot|bee-?catcher/i.test(`${el.getAttribute("name") ?? ""} ${el.getAttribute("data-automation-id") ?? ""}`)) continue;
     if ((!dialog && el.closest("[aria-hidden='true']")) || el.id.startsWith("g-recaptcha")) continue;
     if (type !== "file" && type !== "radio" && type !== "checkbox" && !visible(el)) continue;

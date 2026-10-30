@@ -108,6 +108,7 @@ async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
     fields: scan.fields.length + scan.passwordBoxes,
     posting: Boolean(status?.apply) && scan.fields.length < 3,
     account: accountPage ? (known ? "sign_in" : "new") : null,
+    mentionsCv: scan.mentionsCv,
   };
   peeks.set(tabId, { url, at: Date.now(), page });
   return page;
@@ -527,6 +528,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Upload failed." });
         }
+      // The panel's CV generator: a CV for the job on this tab (or a general one), paid for with credits.
+      case "generate-cv": {
+        if (sender.tab) return reply({ ok: false });
+        const job = (await jobs())[Number(message.tabId)];
+        try {
+          const cv = await api<{ text: string; fileName: string; pdfBase64: string; usesLeft: number }>("POST", "cv", { applicationId: job?.applicationId || undefined });
+          void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+          return reply({ ok: true, cv });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't write the CV." });
+        }
+      }
       // "Still needs you" in the panel: show that question on the page.
       case "focus-field":
         if (sender.tab) return reply({ ok: false });

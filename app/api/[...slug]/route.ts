@@ -12,6 +12,7 @@ import { integrations } from "@/lib/integrations/flags";
 import { generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
+import { generateCv } from "@/lib/apply/cv";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { extensionCoverLetter, extensionJob, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission } from "@/lib/extension/service";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setOutcome, updateAnswers, updateOutreach } from "@/lib/apply/service";
@@ -335,6 +336,10 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   if (action === "map" && method === "POST") return json(await extensionMap(user.id, await request.json()));
   if (action === "answers" && method === "POST") return json(await extensionLearn(user.id, await request.json()));
   if (action === "cover-letter" && method === "POST") return json(await extensionCoverLetter(user.id, await request.json()));
+  if (action === "cv" && method === "POST") {
+    if (!rateLimit(`extension-cv:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of CVs in an hour. Try again later.", "rate_limited", 429);
+    return json(await generateCv(user.id, await request.json().catch(() => ({}))));
+  }
   if (action === "submissions" && !sub && method === "POST") return json(await extensionSubmission(user.id, await request.json()));
   if (action === "submissions" && sub === "undo" && method === "POST") return json(await extensionUndoSubmission(user.id, await request.json()));
   throw new ServiceError("Not found.", "not_found", 404);

@@ -7,6 +7,7 @@ import { buildMapping, greenhouseSchema, knownAnswers, logTimings } from "@/lib/
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
 import { classifyQuestion, normalizeLabel } from "@/lib/apply/questions";
 import { applicationProfiles, applications } from "@/lib/apply/store";
+import { CVS_PER_CREDIT, cvUsesLeft } from "@/lib/apply/cv";
 import type { JobApplication } from "@/lib/apply/types";
 import { profileState } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
@@ -23,13 +24,15 @@ const DAILY_AI_CALLS = Number(process.env.EXTENSION_DAILY_AI_CALLS || 60);
 const CACHE_LIMIT = 400;
 
 export async function extensionMe(userId: string) {
-  const [user, credits, state, resume] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId)]);
+  const [user, credits, state, resume, stored] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId), applicationProfiles.get(userId)]);
   return {
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: credits?.balance ?? 0,
     profileReady: state.ready,
     completeness: state.profile.completeness,
     // What the panel lists under "Missing": the parts of the profile still to fill in, required ones first.
+    // CVs the student can still generate with the credits they have.
+    cv: { usesLeft: cvUsesLeft(stored?.cvCount ?? 0, credits?.balance ?? 0), perCredit: CVS_PER_CREDIT },
     // The resume the extension attaches. `file` is false when only its text was kept, so it must be uploaded again.
     resume: resume ? { fileName: resume.fileName, uploadedAt: resume.createdAt, file: Boolean(resume.storagePath) && resume.byteSize > 0 } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),

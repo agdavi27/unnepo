@@ -60,6 +60,7 @@ export async function student(userId: string) {
     student: stored?.student,
     aiCache: stored?.aiCache,
     weeklyGoal: stored?.weeklyGoal,
+    cvCount: stored?.cvCount,
   };
   const form = document?.form;
   // The resume-first profile wins; the old onboarding form fills in for students who haven't redone it.

@@ -6,18 +6,29 @@ const OPTION_ALIASES: Record<string, string[]> = {
   "us": ["united states of america", "united states"],
 };
 
-/** The option that matches an answer: exact first, then a clear partial match for longer answers. */
+/** Lowercase, single spaces, no required-markers or trailing punctuation: "Yes.*" and "yes" are the same. */
+const normal = (text: string) => text.replace(/\u00a0/g, " ").replace(/[*✱]/g, "").replace(/\s+/g, " ").trim().replace(/[.:;!,]+$/, "").trim().toLowerCase();
+
+/**
+ * The option that matches an answer: exact first, then a clear partial match. A short answer ("Yes",
+ * "No", "N/A") matches an option that starts with it as a word ("No, I will not require sponsorship"),
+ * never one that merely contains the letters ("Not applicable").
+ */
 export function bestOption(answer: string, options: string[]) {
-  const want = answer.trim().toLowerCase();
+  const want = normal(answer);
   if (!want) return null;
-  const lower = options.map((option) => option.trim().toLowerCase());
+  const lower = options.map(normal);
   const exact = lower.indexOf(want);
   if (exact >= 0) return options[exact];
   for (const alias of OPTION_ALIASES[want] ?? []) {
     const index = lower.findIndex((option) => option === alias || option.startsWith(`${alias} `) || option.startsWith(`${alias}(`));
     if (index >= 0) return options[index];
   }
-  if (want.length < 4) return null;
+  // Starts with the answer as whole words: "yes" fits "yes, i am authorized", not "yesterday".
+  const asWord = new RegExp(`^${want.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z0-9])`);
+  const wordStarts = lower.filter((option) => asWord.test(option));
+  if (wordStarts.length === 1) return options[lower.indexOf(wordStarts[0])];
+  if (wordStarts.length > 1 || want.length < 4) return null;
   const starts = lower.filter((option) => option.startsWith(want));
   if (starts.length === 1) return options[lower.indexOf(starts[0])];
   if (starts.length > 1) return null;

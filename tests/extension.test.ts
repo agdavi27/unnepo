@@ -235,3 +235,42 @@ describe("resume from the extension", () => {
     expect(anonymous.status).toBe(401);
   });
 });
+
+describe("CV generator", () => {
+  it("writes a CV from the student's facts, drops invented numbers, and charges 1 credit per 5", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    const startCredits = (await repo.getAccount(userId))!.balance;
+    const before = await (await call("GET", "me", token)).json();
+    expect(before.cv).toEqual({ usesLeft: startCredits * 5, perCredit: 5 });
+
+    const cv = "EDUCATION\nColby College: B.A., Economics (May 2027)\n\nEXPERIENCE\nPresident, Colby Data Club\n• Built dashboards for 40 students\n• Grew membership by 300%\n\nSKILLS\nSQL, Tableau";
+    for (let index = 0; index < 6; index += 1) model.replies.push(cv);
+    const first = await (await call("POST", "cv", token, {})).json();
+    expect(first.text).toContain("EDUCATION");
+    expect(first.text).toContain("dashboards for 40 students");
+    // "300%" isn't in the profile or resume, so that line is gone.
+    expect(first.text).not.toContain("300%");
+    expect(Buffer.from(first.pdfBase64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
+    expect((await repo.getAccount(userId))!.balance).toBe(startCredits - 1);
+    expect(first.usesLeft).toBe(4 + (startCredits - 1) * 5);
+
+    // The next four come out of the same credit; the sixth spends another.
+    for (let index = 0; index < 4; index += 1) await call("POST", "cv", token, {});
+    expect((await repo.getAccount(userId))!.balance).toBe(startCredits - 1);
+    await call("POST", "cv", token, {});
+    expect((await repo.getAccount(userId))!.balance).toBe(startCredits - 2);
+  });
+
+  it("stops before writing when there are no credits left", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    await repo.setAccountForTests(userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
+    const { token } = await issueExtensionToken(userId);
+    const calls = model.calls;
+    const response = await call("POST", "cv", token, {});
+    expect(response.status).toBe(402);
+    expect(model.calls).toBe(calls);
+  });
+});

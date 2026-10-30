@@ -67,7 +67,14 @@ export function visibleOptions(scope: ParentNode = document) {
 
 /** A searchable or plain custom dropdown: open it, optionally type to filter, click the matching option. */
 export async function chooseCustom(trigger: HTMLElement, answer: string, options: { type?: string; list?: () => HTMLElement[]; pick?: (texts: string[]) => string | null } = {}) {
-  const list = options.list ?? (() => visibleOptions());
+  // Options already showing (another dropdown left open) aren't this dropdown's: only new ones count.
+  const before = new Set(visibleOptions());
+  const list = options.list ?? (() => {
+    const owned = ownedList(trigger);
+    const shown = owned ? visibleOptions(owned) : visibleOptions();
+    const fresh = shown.filter((el) => !before.has(el));
+    return fresh.length ? fresh : shown;
+  });
   trigger.scrollIntoView({ block: "center" });
   const control = (trigger.closest("[class*='select__control'], [class*='-control']") as HTMLElement | null) ?? trigger;
   press(control);
@@ -81,11 +88,43 @@ export async function chooseCustom(trigger: HTMLElement, answer: string, options
   const texts = items.map(optionText);
   const choice = matchOption(answer, texts, options.pick);
   if (!choice) {
-    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    close(trigger);
     throw new Error(`no option matching "${answer}"`);
   }
   press(items[texts.indexOf(choice)]);
-  await sleep(120);
+  await sleep(250);
+  // Some lists open a second list under the choice (Workday's "How did you hear about us?" > "Job Board").
+  const nested = visibleOptions().filter((el) => !items.includes(el) && !before.has(el));
+  if (nested.length) {
+    const nestedTexts = nested.map(optionText);
+    const second = matchOption(answer, nestedTexts, options.pick) ?? nestedTexts.find((text) => /^other\b/i.test(text)) ?? (nested.length === 1 ? nestedTexts[0] : null);
+    if (!second) {
+      close(trigger);
+      throw new Error(`"${choice}" opened more choices, and none fits "${answer}"`);
+    }
+    press(nested[nestedTexts.indexOf(second)]);
+    await sleep(250);
+  }
+  // A list left open would mix its options into the next dropdown's.
+  if (items.some((el) => el.isConnected && el.getBoundingClientRect().height > 0) && !multiSelect(trigger)) close(trigger);
+}
+
+/** The list a dropdown says it controls (aria-controls / aria-owns), when it says. */
+function ownedList(trigger: HTMLElement) {
+  const ids = `${trigger.getAttribute("aria-controls") ?? ""} ${trigger.getAttribute("aria-owns") ?? ""}`.trim().split(/\s+/).filter(Boolean);
+  for (const id of ids) {
+    const el = (trigger.getRootNode() as Document | ShadowRoot).getElementById(id) ?? document.getElementById(id);
+    if (el) return el;
+  }
+  return null;
+}
+
+/** Multi-select lists stay open on purpose after a pick. */
+const multiSelect = (trigger: HTMLElement) => trigger.getAttribute("aria-multiselectable") === "true" || Boolean(trigger.closest("[aria-multiselectable='true'], [class*='multi']"));
+
+/** Closes a dropdown's list with Escape on the dropdown itself (never the page, which could close a popup form). */
+function close(trigger: HTMLElement) {
+  trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 }
 
 export function attachFile(input: HTMLInputElement, file: FileData) {

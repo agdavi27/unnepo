@@ -12,6 +12,7 @@ import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { acceptFixes } from "@/lib/apply/fast/fields";
 import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import { supportedBy } from "@/lib/apply/questions";
+import { bestOption } from "@/lib/apply/options";
 import { applyState, saveApplicationProfile, createApplication, markApplied, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
@@ -369,6 +370,16 @@ describe("applications", () => {
   });
 });
 
+describe("matching answers to dropdown options", () => {
+  it("lets Yes and No pick longer options, as whole words only", () => {
+    expect(bestOption("Yes", ["Yes, I am authorized to work in the US.", "No, I am not authorized"])).toBe("Yes, I am authorized to work in the US.");
+    expect(bestOption("No", ["Yes, I will require sponsorship", "No, I will not require sponsorship"])).toBe("No, I will not require sponsorship");
+    expect(bestOption("Yes", ["Yes.*", "No.*"])).toBe("Yes.*");
+    expect(bestOption("No", ["Not applicable", "None"])).toBeNull();
+    expect(bestOption("Yes", ["Yes - full time", "Yes - part time"])).toBeNull();
+  });
+});
+
 describe("standard answers", () => {
   const p = (accountConsentAt: string | null = "default") => ({ ...profile, accountConsentAt });
   it("says no relatives or contacts at the company", () => {
@@ -414,6 +425,17 @@ describe("Workday questions students hit", () => {
     expect(toolExperienceAnswer(question, "select", ["Yes", "No"], "Managed travel bookings in SAP Concur for a 40-person team.")).toBe("Yes");
     expect(toolExperienceAnswer(question, "select", ["Yes", "No"], "Led the Colby Data Club; built dashboards in Tableau.")).toBe("No");
     expect(toolExperienceAnswer("Why do you want this job?", "textarea", [], "Concur")).toBeNull();
+  });
+
+  it("answers notice period, attestations, and commuting", () => {
+    const p = { ...profile, accountConsentAt: "default" };
+    expect(policyAnswer("What is your current notice period?", "text", [], p)).toBe("2 weeks");
+    expect(policyAnswer("What is your current notice period?", "select", ["Immediately", "2 weeks", "1 month"], p)).toBe("2 weeks");
+    expect(policyAnswer("I attest that my application documents and all further information about myself which I have submitted to IONOS, Inc is true and complete.", "checkbox", ["Yes"], p)).toBe("Yes");
+    const commute = "Are you able to commute multiple times a week into a Philadelphia or New York City office?";
+    expect(policyAnswer(commute, "select", ["Yes", "No"], p)).toBe("Yes");
+    const remoteOnly = { ...p, student: { standardAnswers: { inPerson: false } } } as unknown as ApplicationProfile;
+    expect(policyAnswer(commute, "select", ["Yes", "No"], remoteOnly)).toBe("No");
   });
 
   it("writes a headline from the profile", () => {

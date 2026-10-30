@@ -160,9 +160,13 @@ const RELATIVES = /\b(relatives?|family members?|related to|spouse|domestic part
 const MESSAGE = /message (to|for) (the )?(recruiter|hiring (team|manager)|employer|us)|anything else (you(?:'|’)?d like|you would like|to (share|add|tell)|we should know)|additional (information|comments?|notes?|details)|^(message|comments?|notes?)$|note to (the )?(recruiter|hiring)|^(your )?message( to us)?$|let (the company|the employer|us) know about your interest/i;
 const TEXTS = /\b(texts?|sms|text messages?)\b/i;
 const MARKETING = /\b(marketing|promotional|promotions?|newsletters?|offers|advertis)/i;
-const TERMS = /\b(acknowledge?|acknowledgement|i agree|agree to|i accept|accept (the|these|our)|terms (and|&) conditions|terms of (use|service)|privacy (policy|notice|statement)|i have read|read and (understand|understood|agree)|i understand|consent to (the )?(processing|collection|use|storage)|certify that (the |all |my )?(information|answers|statements)|true,? (correct|complete|accurate) and)\b/i;
+const TERMS = /\b(attest|(is|are) true,? (correct |accurate )?and (complete|correct|accurate)|acknowledge?|acknowledgement|i agree|agree to|i accept|accept (the|these|our)|terms (and|&) conditions|terms of (use|service)|privacy (policy|notice|statement)|i have read|read and (understand|understood|agree)|i understand|consent to (the )?(processing|collection|use|storage)|certify that (the |all |my )?(information|answers|statements)|true,? (correct|complete|accurate) and)\b/i;
 // "Are you able to travel, up to 10%?" Yes up to half the time; more than that is the student's call.
 const TRAVEL = /\b(able|willing|available|open) to travel\b|\btravel(ing)? (up to|requirements?|is required|required)\b|\brequires? (some |occasional |frequent )?travel\b/i;
+// "Are you able to commute multiple times a week into a Philadelphia or New York City office?"
+const COMMUTE = /\b(commute|commuting)\b|\b(come|report|go) (in)?to (the|an|our) office\b|\bin[- ]office\b.*\b(days?|times?) (a|per) week\b|\bwork (on[- ]?site|in[- ]office|from (the|our) office)\b/i;
+// "What is your current notice period?" Two weeks is the standard answer.
+const NOTICE = /\bnotice period\b|how much notice|\bnotice (do you|would you) (need|have to give)/i;
 // Signing these away is the student's call, not a standard answer.
 const NOT_STANDARD_TERMS = /arbitrat|non-?compete|non-?solicit|background (check|screen)|drug (test|screen)|credit (check|report)|waive/i;
 
@@ -190,6 +194,12 @@ export function policyAnswer(label: string, kind: ApplicationQuestion["kind"], o
   if (MESSAGE.test(text) && (kind === "textarea" || kind === "text") && !/cover letter/i.test(text)) return RECRUITER_NOTE;
   if (TEXTS.test(text) && /\b(consent|agree|opt[- ]?in|receive|receiving|sign up|subscribe)\b/i.test(text)) return yesNo(!MARKETING.test(text), options);
   if (TERMS.test(text) && !NOT_STANDARD_TERMS.test(text) && profile.accountConsentAt) return yesNo(true, options);
+  if (NOTICE.test(text) && kind !== "file") {
+    if (!options.length) return "2 weeks";
+    return options.find((option) => /\b(2|two) weeks?\b/i.test(option)) ?? options.find((option) => /immediate|none|no notice|\b0\b/i.test(option)) ?? null;
+  }
+  // Commuting into an office: yes, unless the student said they don't want to work in person.
+  if (COMMUTE.test(text) && kind !== "textarea") return yesNo(profile.student?.standardAnswers?.inPerson !== false, options);
   if (TRAVEL.test(text) && kind !== "textarea") {
     const percent = text.match(/(\d{1,3})\s?%/);
     return !percent || Number(percent[1]) <= 50 ? yesNo(true, options) : null;

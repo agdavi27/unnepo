@@ -127,8 +127,9 @@ function pageCard(state: PanelState) {
   const links = [
     job?.applicationId && !job.submission && !job.running ? `<button type="button" class="link" id="applied">I applied</button>` : "",
     job?.submission ? `<button type="button" class="link" id="not-applied">I didn't apply</button>` : "",
-    job?.cv ? `<button type="button" class="link" id="generate-cv">Generate CV</button>` : "",
   ].filter(Boolean);
+  // The CV generator shows when the application asks for a CV.
+  const cvOffered = Boolean(job?.cv || page?.mentionsCv) && onWeb;
   return `
     <section class="page" aria-label="This page">
       <span class="eyebrow">On this page${site ? ` · ${escape(site)}` : ""}</span>
@@ -144,8 +145,67 @@ function pageCard(state: PanelState) {
       ${report?.failed.length ? `<p class="note">Couldn't fill: ${report.failed.map((item) => escape(item.label)).join("; ")}</p>` : ""}
       ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
       ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
+      ${cvOffered ? cvBlock(state) : ""}
       <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}>Let me press Submit myself.</label>
     </section>`;
+}
+
+/** The last CV written in this panel, and what happened with the last request. */
+let cv: { text: string; fileName: string; pdfBase64: string } | null = null;
+let cvBusy = false;
+let cvNote = "";
+
+const SPARK = `<svg class="spark" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" opacity=".7"/></svg>`;
+
+/** The CV generator: an AI-spark button with the uses left, then the CV to copy, download, or open. */
+function cvBlock(state: PanelState) {
+  const left = state.me?.cv?.usesLeft ?? 0;
+  return `
+    <div class="cv">
+      <button type="button" class="cv-button" id="generate-cv" ${cvBusy || left < 1 ? "disabled" : ""}>
+        ${SPARK}<span>${cvBusy ? "Writing your CV…" : cv ? "Write another CV" : "Generate CV for this job"}</span>
+        <span class="cv-left">${left} ${left === 1 ? "use" : "uses"} left</span>
+      </button>
+      ${left < 1 && !cvBusy ? `<p class="small">Out of CV uses. 1 credit covers ${state.me?.cv?.perCredit ?? 5} CVs; get more credits on Unnepo.</p>` : ""}
+      ${cvNote ? `<p class="small" role="status">${escape(cvNote)}</p>` : ""}
+      ${cv ? `
+        <textarea class="cv-text" id="cv-text" readonly aria-label="Your CV">${escape(cv.text)}</textarea>
+        <div class="links">
+          <button type="button" class="link" id="cv-copy">Copy</button>
+          <button type="button" class="link" id="cv-download">Download PDF</button>
+          <button type="button" class="link" id="cv-open">Open PDF</button>
+        </div>
+        <p class="small">Written from your profile and resume. Read it over before you send it.</p>` : ""}
+    </div>`;
+}
+
+const cvBlobUrl = () => {
+  const bytes = Uint8Array.from(atob(cv!.pdfBase64), (char) => char.charCodeAt(0));
+  return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
+};
+
+async function generateCv(tabId: number) {
+  cvBusy = true;
+  cvNote = "";
+  void render();
+  const result = await ask<{ ok: boolean; cv?: typeof cv; error?: string }>({ type: "generate-cv", tabId }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." } as { ok: boolean; cv?: typeof cv; error?: string }));
+  cvBusy = false;
+  if (result.ok && result.cv) cv = result.cv;
+  else cvNote = result.error ?? "Couldn't write the CV.";
+  void render();
+}
+
+function wireCv() {
+  document.getElementById("cv-copy")?.addEventListener("click", () => {
+    void navigator.clipboard.writeText(cv!.text).then(() => { cvNote = "Copied."; void render(); }, () => { cvNote = "Couldn't copy. Select the text and copy it."; void render(); });
+  });
+  document.getElementById("cv-download")?.addEventListener("click", () => {
+    const link = document.createElement("a");
+    link.href = cvBlobUrl();
+    link.download = cv!.fileName;
+    link.click();
+  });
+  document.getElementById("cv-open")?.addEventListener("click", () => void chrome.tabs.create({ url: cvBlobUrl() }));
 }
 
 /** Why the last "Still needs you" click couldn't find its question, kept across re-renders. */
@@ -323,12 +383,8 @@ async function render() {
   });
   document.getElementById("fill")?.addEventListener("click", () => void ask({ type: "fill", tabId: state.tab!.id }));
   document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
-  // Not connected to anything yet: CV generation is on its way.
-  document.getElementById("generate-cv")?.addEventListener("click", (event) => {
-    const button = event.currentTarget as HTMLButtonElement;
-    button.disabled = true;
-    button.textContent = "CV generation is coming soon";
-  });
+  document.getElementById("generate-cv")?.addEventListener("click", () => void generateCv(state.tab!.id));
+  wireCv();
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));

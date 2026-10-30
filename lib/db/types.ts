@@ -143,6 +143,7 @@ export type LedgerEntryType =
   | "unlock_debit"
   | "search_debit"
   | "application_debit"
+  | "cv_debit"
   | "refund_clawback"
   | "demo_grant"
   | "adjustment";

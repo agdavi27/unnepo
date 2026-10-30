@@ -162,6 +162,8 @@ export type ApplicationProfile = {
   resumeProfile?: ResumeProfile | null;
   /** Applications per week the student is aiming for. */
   weeklyGoal?: number;
+  /** CVs Unnepo has written for the student; 1 credit covers CVS_PER_CREDIT of them. */
+  cvCount?: number;
   /** Answers the AI wrote for questions, by question and options, so the same question costs nothing next time. */
   aiCache?: Record<string, { values: string[]; why: string; at: string }>;
   /** The resume-first profile from onboarding. The flat fields above are kept in step with it for autofill. */

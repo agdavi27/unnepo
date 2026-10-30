@@ -119,3 +119,12 @@ a.px { display: flex; align-items: center; justify-content: center; text-decorat
 .resume-link { all: unset; flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; cursor: pointer; font: 500 13px Geist, sans-serif; color: var(--accent); }
 .resume-link-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-decoration: underline; text-underline-offset: 4px; }
 .resume-link:hover { color: #6AA8FF; }
+
+/* CV generator */
+.cv { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.cv-button { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px; border-radius: 11px; border: 1px solid #2B3B5C; background: linear-gradient(180deg, rgba(61,139,255,.16), rgba(61,139,255,.06)); color: var(--fg); font: 500 14px Geist, sans-serif; cursor: pointer; text-align: left; }
+.cv-button:hover:not(:disabled) { border-color: var(--accent); }
+.cv-button:disabled { opacity: .55; cursor: default; }
+.cv-button .spark { color: var(--accent); flex: none; }
+.cv-left { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted-3); white-space: nowrap; }
+.cv-text { width: 100%; min-height: 180px; resize: vertical; border-radius: 10px; border: 1px solid var(--control); background: #111114; color: var(--fg); padding: 10px; font: 12px/1.5 var(--mono); }
