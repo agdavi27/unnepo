@@ -1,15 +1,15 @@
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { createApplication, answerWith, ensureCharged, learnAnswers, requireApp, runContext, startContacts, student, summary } from "@/lib/apply/service";
-import { jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
+import { createApplication, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, startContacts, student, summary } from "@/lib/apply/service";
+import { extractJob, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { buildMapping, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
 import { classifyQuestion, normalizeLabel } from "@/lib/apply/questions";
 import { applicationProfiles, applications } from "@/lib/apply/store";
 import { CVS_PER_CREDIT, cvUsesLeft } from "@/lib/apply/cv";
 import type { JobApplication } from "@/lib/apply/types";
-import { profileState } from "@/lib/profile/service";
+import { profileReady, profileState } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
 
 /**
@@ -71,8 +71,10 @@ function keyFor(url: string) {
 
 /** A job the extension is on. Unnepo reads it when it can; otherwise it keeps what the page showed. */
 async function minimalApplication(userId: string, input: { url: string; title: string; company: string }) {
+  let ats: JobApplication["ats"] = "other";
+  try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
   const { app } = await applications.insert({
-    userId, jobKey: keyFor(input.url), jobUrl: input.url, ats: "other", title: input.title.slice(0, 200), company: input.company.slice(0, 200), companyDomain: null,
+    userId, jobKey: keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: input.company.slice(0, 200), companyDomain: null,
     department: null, location: null, description: "", requirements: [], applicationUrl: input.url, postedRecruiter: null, status: "extracted",
     statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
     contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
@@ -88,6 +90,16 @@ export async function extensionJob(userId: string, raw: unknown) {
   if (!/^https:\/\//i.test(url)) throw new ServiceError("Open a job application page first.", "job_url", 400);
   const existing = await applications.findByKey(userId, keyFor(url));
   if (existing) return { application: summary(existing), created: false };
+  // The fast way: open the job from what the page shows, so filling starts right away, and read the posting
+  // (description, requirements, recruiter) in the background for the cover letter and the people search.
+  const pageTitle = String(body.title ?? "").trim();
+  const pageCompany = String(body.company ?? "").trim();
+  if (pageTitle && pageCompany) {
+    if (!(await profileReady(userId))) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
+    const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany });
+    runLater(() => enrichFromPosting(userId, app.id, url));
+    return { application: summary(app), created: true };
+  }
   try {
     const result = await createApplication(userId, { url });
     return { application: result.application, created: !result.duplicate };
@@ -98,6 +110,20 @@ export async function extensionJob(userId: string, raw: unknown) {
     if (error instanceof ServiceError && (error.code === "credits" || error.code === "profile" || error.code === "job_url")) throw error;
     if (!title || !company) throw error;
     return { application: summary(await minimalApplication(userId, { url, title, company })), created: true };
+  }
+}
+
+/** Fills in a quickly-opened job from its posting. Best effort: a posting Unnepo can't read keeps the page's details. */
+async function enrichFromPosting(userId: string, applicationId: string, url: string) {
+  try {
+    const job = await extractJob(url);
+    await applications.update(userId, applicationId, {
+      ats: job.ats, department: job.department, location: job.location, description: job.description,
+      requirements: job.requirements, applicationUrl: job.applicationUrl, postedRecruiter: job.postedRecruiter,
+      ...(job.title ? { title: job.title } : {}), ...(job.company ? { company: job.company } : {}),
+    });
+  } catch {
+    // Signed-in portals and unknown job systems: the title and company from the page stay.
   }
 }
 
@@ -142,9 +168,12 @@ async function aiCallsToday(userId: string) {
  * most one AI call for what's left.
  */
 export async function extensionMap(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; fields?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; fields?: unknown; ai?: unknown };
   const app = await requireApp(userId, body.applicationId);
   const fields = Array.isArray(body.fields) ? (body.fields as PageField[]) : [];
+  // ai: false answers only from the student's data and saved answers, with no model call, so the extension can
+  // start filling at once; it asks again for what's left.
+  const skipAi = body.ai === false;
   const started = Date.now();
   let schemaMs = 0;
   let schema: FormSchema;
@@ -171,7 +200,7 @@ export async function extensionMap(userId: string, raw: unknown) {
     fromCache.add(field.id);
     return { value: hit.values.join("\n"), source: "ai" };
   };
-  const ai = (await aiCallsToday(userId)) < DAILY_AI_CALLS;
+  const ai = !skipAi && (await aiCallsToday(userId)) < DAILY_AI_CALLS;
   const mapped = await buildMapping({
     userId, ai, schema, known: knownOrCached, facts: context.facts, sources: context.sources,
     consent: Boolean(info.profile.accountConsentAt), resumeFileName: info.context.resumeFileName,

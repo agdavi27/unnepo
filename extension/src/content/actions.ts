@@ -1,6 +1,6 @@
 import { CONFIRM_TEXT } from "../shared/types";
 import { press } from "./dom";
-import { deepAll, openDialog } from "./scan";
+import { deepAll, findMarked, openDialog, parentOf, questionText, scanFields } from "./scan";
 
 /**
  * The buttons that move an application along: Apply on a job posting, Create account or Sign in, Next,
@@ -112,6 +112,61 @@ export function pressAction(el: HTMLElement) {
   press(overlay && usable(overlay) ? overlay : el);
 }
 
+// "Error: Invalid Data", "Please check all information before trying again", "This field is required".
+const ERROR_WORDS = /\b(error|errors|invalid|incorrect|please (check|correct|fix|review|complete|enter|fill|select|provide|try)|(is|are) required|required (field|information)|must (be|contain|enter|select|have)|not all (fields|required|questions)|(field|fields|information) (is|are)? ?(missing|incomplete)|couldn(?:'|’)?t (be )?(saved|submitted|processed)|try again)\b/i;
+// Hints every form shows, which aren't errors.
+const NOT_ERROR = /indicates (a )?required|required fields? (are|is) marked|^\*?\s*required\s*$|^\*$|fields marked with/i;
+const ERROR_PLACES = "[role=alert], [role=alertdialog], [aria-live=assertive], [aria-live=polite], [data-automation-id*='error' i], [class*='error' i], [class*='invalid' i], [class*='alert' i], [class*='toast' i], [class*='notification' i]";
+
+const shownNow = (el: Element) => {
+  const rect = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+};
+
+/** Error messages the page is showing right now, at most three. */
+function formErrors() {
+  const seen = new Set<string>();
+  for (const el of deepAll<HTMLElement>(ERROR_PLACES)) {
+    if (el.closest("[data-unnepo-spiders], [data-unnepo-launcher]") || !shownNow(el)) continue;
+    const words = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+    if (words.length < 3 || words.length > 300 || !ERROR_WORDS.test(words) || NOT_ERROR.test(words)) continue;
+    // Keep the most specific message: skip a wrapper whose text holds one already found.
+    if ([...seen].some((known) => words.includes(known) || known.includes(words))) continue;
+    seen.add(words);
+    if (seen.size >= 3) break;
+  }
+  return [...seen];
+}
+
+/** Questions the page flags as wrong: marked aria-invalid, or with an error message right next to them. */
+function flaggedFields() {
+  const labels = new Set<string>();
+  for (const el of deepAll<HTMLElement>("[aria-invalid='true']")) if (shownNow(el)) labels.add(questionText(el));
+  for (const message of deepAll<HTMLElement>(ERROR_PLACES)) {
+    if (!shownNow(message) || !ERROR_WORDS.test(message.textContent ?? "")) continue;
+    // The smallest container around the message that holds a single question.
+    let node: Element | null = message;
+    for (let depth = 0; node && depth < 4; depth += 1, node = parentOf(node)) {
+      const controls = Array.from(node.querySelectorAll<HTMLElement>("input:not([type=hidden]), select, textarea, button[aria-haspopup='listbox']"));
+      if (controls.length === 1) { labels.add(questionText(controls[0])); break; }
+      if (controls.length > 1) break;
+    }
+  }
+  return [...labels].filter(Boolean).slice(0, 8);
+}
+
+/** A fingerprint of what's typed and chosen on the page, so Unnepo can tell when the student has changed something. */
+export function valuesKey() {
+  return scanFields().map((field) => {
+    const el = findMarked(field.id);
+    const control = el && (el.matches("input, select, textarea, button") ? el : el.querySelector("input, select, textarea, button"));
+    if (!control) return "";
+    if (control instanceof HTMLInputElement && (control.type === "checkbox" || control.type === "radio")) return String(control.checked);
+    return "value" in control ? String((control as HTMLInputElement).value) : (control.textContent ?? "").trim();
+  }).join("|");
+}
+
 /** What the page says that changes what to do: the account exists, an email to verify, or it went through. */
 export function pageNotes() {
   const alerts = Array.from(document.querySelectorAll<HTMLElement>("[role=alert], [aria-live=assertive], [data-automation-id*='error' i], [class*='error' i]"))
@@ -123,5 +178,8 @@ export function pageNotes() {
     signInFailed: /wrong (email|e-mail|username|password)|(email|username|password)( address)? (or password )?(is |was )?(incorrect|invalid|not recogni[sz]ed)|incorrect (email|e-mail|username|password)|invalid (email|username|password|credentials|login)|account (might be|may be|is|has been) locked|couldn(?:'|’)?t sign you in|sign[- ]?in (failed|unsuccessful)|unable to sign in|login failed/i.test(`${alerts} ${deepAll<HTMLInputElement>("input[type=password]").length ? body : ""}`),
     verifyEmail: /verify your (email|account)|verification (email|link|code)|check your (email|inbox)|confirm your email/i.test(body) && !document.querySelector("input:not([type=hidden])"),
     confirmed: CONFIRM_TEXT.test(body),
+    formErrors: formErrors(),
+    flagged: flaggedFields(),
+    valuesKey: valuesKey(),
   };
 }

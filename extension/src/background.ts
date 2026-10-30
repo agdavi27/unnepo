@@ -149,7 +149,7 @@ function sameApplication(before: string | undefined, after: string) {
 
 const signature = (scan: Scan) => `${scan.url}|${scan.passwordBoxes}|${scan.fields.map((field) => field.label).join("|")}`;
 const hasForm = (scan: Scan) => scan.useServerSchema || scan.fields.length > 0 || scan.passwordBoxes > 0;
-type Status = { apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; signInFailed: boolean; verifyEmail: boolean; confirmed: boolean };
+type Status = { apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; signInFailed: boolean; verifyEmail: boolean; confirmed: boolean; formErrors: string[]; flagged: string[]; valuesKey: string };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -247,6 +247,8 @@ async function run(tabId: number) {
   let filledKey = "";
   let pressedKey = "";
   let presses = 0;
+  // What the page's answers were when the site showed an error; Unnepo waits until they change.
+  let errorValues: string | null = null;
   // Sites where signing in failed on this run: never pressed again.
   const signInFailedAt = new Set<string>();
   let triedApply = false;
@@ -264,6 +266,8 @@ async function run(tabId: number) {
   let pressedAt = 0;
   let resume: FileData | null | undefined;
   let resumeError: string | null = null;
+  // Fetched at the start, alongside everything else, so the upload box never waits for it.
+  const resumePromise = resumeFile();
   let llmCalls = 0;
   let lastStep = "";
   // Spiders crawl the whole time Unnepo is running, until it's submitted, something goes wrong, or Stop.
@@ -338,35 +342,63 @@ async function run(tabId: number) {
           applicationId = job.application.id;
           await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: where.url, host: firstHost });
         }
-        await step("Preparing your answers…");
-        const map = !applicationId || (!scan.useServerSchema && !scan.fields.length) ? { answers: [], llmCalls: 0 } : await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : scan.fields });
-        llmCalls += map.llmCalls;
-        const wantsCoverLetter = scan.useServerSchema ? map.answers.some((answer) => answer.id === "cover_letter") : scan.fields.some((field) => field.type === "file" && /cover ?letter/i.test(field.label));
+        const formFields = !scan.useServerSchema && !scan.fields.length ? null : (scan.useServerSchema ? [] : scan.fields);
+        let wantsCoverLetter = scan.fields.some((field) => field.type === "file" && /cover ?letter/i.test(`${field.label} ${field.section}`));
         // Any upload box that isn't for a cover letter gets the resume, whatever the server's answers say.
         const wantsResume = scan.useServerSchema || scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
         if (scan.mentionsCv) await saveJob(tabId, { cv: true });
+        const password = await passwordFor(accountKey(scan.url));
+        const fillWith = (answers: Answer[], files: { resume?: FileData | null; coverLetter?: FileData | null } = {}, schema = scan.useServerSchema) =>
+          send<FillReport>(tabId, { type: "fill", plan: { ats: scan.ats, useServerSchema: schema, answers, resume: files.resume ?? null, coverLetter: files.coverLetter ?? null, autoSubmit: false, password } satisfies FillPlan }).catch(() => null);
+        const merge = (into: FillReport | null, next: FillReport | null) => (!into ? next : !next ? into : { ...next, filled: [...into.filled, ...next.filled], failed: [...into.failed, ...next.failed] });
+
+        // 1. Everything Unnepo already knows, with no AI call, so typing starts right away.
+        await step("Filling the form…");
+        const known = applicationId && formFields ? await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: formFields, ai: false }).catch(() => ({ answers: [] as Answer[], llmCalls: 0 })) : { answers: [] as Answer[], llmCalls: 0 };
+        // Greenhouse's own list of fields names the cover letter box ("cover_letter"); its label just says "Attach".
+        if (scan.useServerSchema && known.answers.some((answer) => answer.id === "cover_letter")) wantsCoverLetter = true;
         if (wantsResume && resume === undefined) {
-          const got = await resumeFile();
+          const got = await resumePromise;
           resume = got.file;
           resumeError = got.error;
         }
-        const letter = wantsCoverLetter && applicationId ? await api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null) : null;
         if (!stillRunning(tabId, runId)) break;
-        await step("Filling the form…", { llmCalls });
-        const plan: FillPlan = { ats: scan.ats, useServerSchema: scan.useServerSchema, answers: map.answers, resume: wantsResume ? resume ?? null : null, coverLetter: letter ? { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } : null, autoSubmit: false, password: await passwordFor(accountKey(scan.url)) };
-        let report = await send<FillReport>(tabId, { type: "fill", plan }).catch(() => null);
+        let report = await fillWith(known.answers, { resume: wantsResume ? resume ?? null : null });
+
+        // 2. One AI call for the questions that are left, filled as soon as it answers.
+        const answered = new Set(known.answers.filter((answer) => answer.values.length).map((answer) => answer.id));
+        const left = scan.useServerSchema ? null : scan.fields.filter((field) => field.type !== "file" && !answered.has(field.id));
+        if (applicationId && formFields && (scan.useServerSchema || left!.length) && stillRunning(tabId, runId)) {
+          await step("Answering the rest…");
+          const more = await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : left }).catch(() => null);
+          llmCalls += more?.llmCalls ?? 0;
+          const fresh = (more?.answers ?? []).filter((answer) => answer.values.length && !answered.has(answer.id) && answer.type !== "file");
+          if (fresh.length) report = merge(report, await fillWith(fresh));
+        }
+
         // Greenhouse's API leaves some questions out (the U.S. demographic questions): fill those from the page.
         if (report && scan.useServerSchema && applicationId) {
-          const extra = await send<{ fields: Scan["fields"] }>(tabId, { type: "leftovers", ids: map.answers.map((answer) => answer.id) }).catch(() => ({ fields: [] }));
+          const extra = await send<{ fields: Scan["fields"] }>(tabId, { type: "leftovers", ids: known.answers.map((answer) => answer.id) }).catch(() => ({ fields: [] }));
           if (extra.fields.length) {
-            const more = await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: extra.fields }).catch(() => null);
-            if (more?.answers.length) {
-              llmCalls += more.llmCalls;
-              const second = await send<FillReport>(tabId, { type: "fill", plan: { ...plan, useServerSchema: false, answers: more.answers, resume: null, coverLetter: null } }).catch(() => null);
-              if (second) report = { ...second, filled: [...report.filled, ...second.filled], failed: [...report.failed, ...second.failed] };
+            const leftovers = await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: extra.fields }).catch(() => null);
+            if (leftovers?.answers.length) {
+              llmCalls += leftovers.llmCalls;
+              report = merge(report, await fillWith(leftovers.answers, {}, false));
             }
           }
         }
+
+        // 3. The cover letter last: it's the slowest part, so nothing else waits for it.
+        if (wantsCoverLetter && applicationId && stillRunning(tabId, runId)) {
+          await step("Writing your cover letter…");
+          const letter = await api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null);
+          if (letter) {
+            const file = { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 };
+            const letterAnswer: Answer[] = scan.useServerSchema ? [{ id: "cover_letter", label: "Cover letter", type: "file", required: false, values: [file.name], source: "ai", why: null }] : [];
+            report = merge(report, await fillWith(letterAnswer, { coverLetter: file }));
+          }
+        }
+        await saveJob(tabId, { llmCalls });
         // Say why the resume box is empty instead of leaving it a mystery.
         if (report && wantsResume && !resume && resumeError) report = { ...report, failed: [...report.failed, { label: "Resume", reason: resumeError }] };
         if (report) {
@@ -375,6 +407,21 @@ async function run(tabId: number) {
         }
         filledKey = key;
         continue;
+      }
+
+      // The site says something's wrong ("Error: Invalid Data", "Please check all information"): never press
+      // Next or Submit over it. List what it flagged and wait; once the student changes something, try once more.
+      if (status.formErrors.length || status.flagged.length) {
+        if (errorValues === null) errorValues = status.valuesKey;
+        if (status.valuesKey === errorValues) {
+          const job = (await jobs())[tabId];
+          const needs = [...new Set([...status.flagged, ...status.needsYou])];
+          if (job?.report) await saveJob(tabId, { report: { ...job.report, needsYou: needs } });
+          const said = status.formErrors[0] ? `The site says: "${status.formErrors[0].slice(0, 140)}". ` : "The site flagged some answers. ";
+          await step(`${said}${needs.length ? `Check ${needs.slice(0, 3).join(", ")}${needs.length > 3 ? ` and ${needs.length - 3} more` : ""}. ` : ""}Unnepo won't go on until you've fixed it.`);
+          await wait(1200);
+          continue;
+        }
       }
 
       // Something only the student can answer: wait for it, then keep going.
@@ -418,6 +465,8 @@ async function run(tabId: number) {
         await wait(1200);
         continue;
       }
+      // A fresh press: if the site shows an error after it, that's measured from here.
+      errorValues = null;
       presses = pressKey === pressedKey ? presses + 1 : 1;
       pressedKey = pressKey;
       pressedAt = Date.now();

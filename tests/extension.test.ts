@@ -11,6 +11,7 @@ import { GET, OPTIONS, POST } from "@/app/api/[...slug]/route";
 import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
+import { nationalNumber } from "@/extension/src/content/generic";
 
 const model = vi.hoisted(() => ({ replies: [] as string[], calls: 0, lastPrompt: "" }));
 vi.mock("@anthropic-ai/sdk", () => ({
@@ -304,5 +305,14 @@ describe("cover letters from the panel", () => {
     expect(reused.text).toContain("Revised.");
     expect(model.calls).toBe(calls);
     expect((await call("POST", "cover-letter", token, { applicationId: job.application.id, previous: first.text, edit: "  " })).status).toBe(400);
+  });
+});
+
+describe("phone numbers next to a country code dropdown", () => {
+  it("drops the country code from the number", () => {
+    expect(nationalNumber("+1 (207) 555-0100")).toBe("2075550100");
+    expect(nationalNumber("1-207-555-0100")).toBe("2075550100");
+    expect(nationalNumber("207.555.0100")).toBe("2075550100");
+    expect(nationalNumber("+44 20 7946 0958")).toBe("2079460958");
   });
 });

@@ -56,10 +56,36 @@ function pickLabel(answer: string, labels: string[]) {
   return answerChoices(answer).map((candidate) => bestOption(candidate, labels)).find(Boolean) ?? null;
 }
 
+const COUNTRY_CODE = /country (phone )?code|phone (country )?code|dialing code|^country code$|calling code/i;
+const PHONE_NUMBER = /\b(phone|mobile|cell)\b/i;
+
+/**
+ * The phone number without its country code ("+1 (207) 555-0100" becomes "2075550100"), for forms that ask
+ * for the code in its own dropdown. Workday rejects the number with the code in it ("Invalid Data").
+ */
+export function nationalNumber(value: string) {
+  const trimmed = value.trim();
+  let digits = trimmed.replace(/\D/g, "");
+  if (trimmed.startsWith("+")) {
+    // +1 for the US and Canada; other codes are 2 or 3 digits before a space, dash, or bracket.
+    const code = trimmed.match(/^\+(\d{1,3})[\s.\-(]/)?.[1] ?? (digits.startsWith("1") && digits.length === 11 ? "1" : "");
+    if (code) digits = digits.slice(code.length);
+  } else if (digits.length === 11 && digits.startsWith("1")) {
+    digits = digits.slice(1);
+  }
+  return digits;
+}
+
+let separateCountryCode = false;
+
 async function fillOne(field: PageField, answer: Answer, files: { resume: FileData | null; coverLetter: FileData | null }) {
   const el = findMarked(field.id);
   if (!el) throw new Error("not on the page");
-  const value = answer.values[0] ?? "";
+  let value = answer.values[0] ?? "";
+  // The number box next to a country code dropdown gets just the number.
+  if (separateCountryCode && (field.type === "tel" || PHONE_NUMBER.test(field.label)) && !COUNTRY_CODE.test(field.label) && !/type|extension|\bext\b/i.test(field.label) && field.type !== "select" && field.type !== "combobox") {
+    value = nationalNumber(value) || value;
+  }
   switch (field.type) {
     case "radio": {
       const name = (el as HTMLInputElement).name;
@@ -118,6 +144,7 @@ export async function fillGeneric(fields: PageField[], answers: Answer[], files:
   // typed before it finished.
   const ordered = [...fields.filter((field) => field.type === "file"), ...fields.filter((field) => field.type !== "file")];
   const uploads = uploadPlan(fields, files);
+  separateCountryCode = fields.some((field) => COUNTRY_CODE.test(field.label));
   let uploaded = false;
   for (const field of ordered) {
     if (uploaded && field.type !== "file") {

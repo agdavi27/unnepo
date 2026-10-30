@@ -17,6 +17,9 @@ import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachS
 /** Background work runs after the response is sent. Tests run it inline. */
 let defer: (task: () => Promise<void>) => void = (task) => after(task);
 
+/** Runs work after the response is sent (inline in tests). */
+export const runLater = (task: () => Promise<void>) => defer(task);
+
 export function setDeferForTests(run: ((task: () => Promise<void>) => void) | null) {
   defer = run ?? ((task) => after(task));
 }
