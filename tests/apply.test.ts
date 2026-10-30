@@ -585,6 +585,17 @@ describe("people after applying", () => {
   });
 });
 
+describe("questions from the latest round", () => {
+  it("answers opt-into texting, phone country code, and current employer", () => {
+    const p = { ...profile, accountConsentAt: "default" };
+    expect(policyAnswer("Opt into Text Messaging?", "select", ["Yes", "No"], p)).toBe("Yes");
+    expect(classifyQuestion("Phone Country Code").field).toBe("phoneCountry");
+    expect(classifyQuestion("Country").field).toBe("country");
+    const [planned] = planAnswers([q("code", "Phone Country Code", "select", ["Canada (+1)", "United States of America (+1)"])], context);
+    expect(planned.answer).toBe("United States of America (+1)");
+  });
+});
+
 describe("school plan check on the home page", () => {
   it("says whether a school covers Unnepo, from the school plans setting", () => {
     const before = process.env.UNNEPO_SCHOOL_PLANS;

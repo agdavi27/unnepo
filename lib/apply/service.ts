@@ -153,6 +153,12 @@ export function answerWith(info: Awaited<ReturnType<typeof student>>, company: s
     const fromResume = resumeFieldAnswer(info.profile.resumeProfile, { label, section: where?.section, kind, options, format: where?.format });
     if (fromResume) return fromResume;
     if (planned.answer && planned.source && planned.source !== "resume_file") return planned.answer;
+    // "Current/Most Recent Employer Name", "Most recent job title": the latest job on the resume.
+    const latest = info.profile.resumeProfile?.experience?.[0] ?? info.profile.student?.experience?.[0];
+    if (latest && kind !== "file" && kind !== "textarea" && !options.length && /\b(current|most recent|present|latest)\b/i.test(label)) {
+      if (/\b(employer|company|organi[sz]ation)\b/i.test(label) && latest.company) return latest.company;
+      if (/\b(job |position )?title\b|\bposition\b/i.test(label) && latest.title) return latest.title;
+    }
     const tools = toolExperienceAnswer(label, kind, options, info.resumeText);
     if (tools) return tools;
     const headline = headlineAnswer(label, info.context, info.profile.resumeProfile?.experience?.[0]);

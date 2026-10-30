@@ -41,7 +41,7 @@ export function GetExtension({ href, external }: { href: string; external: boole
   }
 
   const go = { href, ...(external ? { target: "_blank", rel: "noreferrer" } : {}) };
-  const pixelButton = "inline-flex min-h-12 items-center justify-center border-4 border-bg bg-[#F7F7F8] px-[26px] py-[18px] text-center font-[family-name:var(--font-pixel)] text-sm leading-[1.6] text-bg shadow-[6px_6px_0_#3D8BFF] transition-transform hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[4px_4px_0_#3D8BFF] active:translate-x-1.5 active:translate-y-1.5 active:shadow-none";
+  const pixelButton = "inline-flex min-h-16 items-center justify-center border-4 border-bg bg-[#F7F7F8] px-9 py-6 text-center font-[family-name:var(--font-pixel)] text-[15px] leading-[1.6] text-bg shadow-[8px_8px_0_#3D8BFF] transition-transform hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[6px_6px_0_#3D8BFF] active:translate-x-2 active:translate-y-2 active:shadow-none sm:text-base";
 
   return (
     <>

@@ -221,6 +221,7 @@ export function AppHome() {
                 {item.label}
               </button>
             ))}
+            <a href="/demo" className="shrink-0 border-b-2 border-transparent pb-3 text-muted hover:text-white">See how it works</a>
             <div className="ml-auto pb-2">{resumeButton("flex sm:hidden")}</div>
           </nav>
         ) : (

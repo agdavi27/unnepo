@@ -7,7 +7,7 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "phoneCountry";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
@@ -19,7 +19,9 @@ const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(address line 1|street address|address 1|address|street)$/i, "addressLine1"],
   [/^(state|province|state\/province|state or province|region)$/i, "state"],
   [/^(postal code|zip|zip code|zip\/postal code|postcode)$/i, "postalCode"],
-  [/^(country|country\/territory|country\/region|country phone code|phone country code)$/i, "country"],
+  // "Phone Country Code" is a dropdown of countries with dialing codes ("United States of America (+1)").
+  [/^(phone )?country (phone )?(dialing )?code$|^phone country( code)?$|^country code$|^(phone|dialing) code$/i, "phoneCountry"],
+  [/^(country|country\/territory|country\/region)$/i, "country"],
   // Workday asks what kind of phone the number is before the number itself.
   [/\b(phone|device) (device )?type\b|type of (phone|device)|phone number type/i, "phoneType"],
   [/\b(phone )?extension\b|^ext\.?$/i, "phoneExtension"],
@@ -82,6 +84,8 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
     case "state": return pick(p.state ?? "");
     case "postalCode": return pick(p.postalCode ?? "");
     case "country": return pick(p.country ?? "");
+    // Most students apply with a US number; their own country wins when they've set one.
+    case "phoneCountry": return pick(p.country ?? "") ?? { answer: "United States", source: "default" };
     case "school": return pick(context.school);
     case "major": return pick(context.majors[0] ?? "");
     case "graduationYear": return pick(context.graduationYear);
@@ -192,7 +196,7 @@ export function policyAnswer(label: string, kind: ApplicationQuestion["kind"], o
   const text = label.trim();
   if (RELATIVES.test(text) && kind !== "file") return kind === "textarea" ? "No" : yesNo(false, options);
   if (MESSAGE.test(text) && (kind === "textarea" || kind === "text") && !/cover letter/i.test(text)) return RECRUITER_NOTE;
-  if (TEXTS.test(text) && /\b(consent|agree|opt[- ]?in|receive|receiving|sign up|subscribe)\b/i.test(text)) return yesNo(!MARKETING.test(text), options);
+  if (TEXTS.test(text) && /\b(consent|agree|opt[- ]?in(to)?|receive|receiving|sign up|subscribe)\b/i.test(text)) return yesNo(!MARKETING.test(text), options);
   if (TERMS.test(text) && !NOT_STANDARD_TERMS.test(text) && profile.accountConsentAt) return yesNo(true, options);
   if (NOTICE.test(text) && kind !== "file") {
     if (!options.length) return "2 weeks";

@@ -178,7 +178,10 @@ export function scanFields(): PageField[] {
   for (const el of controls) {
     const type = (el.getAttribute("type") ?? (el.tagName === "TEXTAREA" ? "textarea" : el.tagName === "SELECT" ? "select" : "text")).toLowerCase();
     // A dropdown built as a button (Workday's "Select One") has type="button" but is a question, not a button.
-    const dropdownButton = el.tagName === "BUTTON" && el.getAttribute("aria-haspopup") === "listbox";
+    // Not page controls that happen to open a list: Workday's "See my progress", language and menu buttons.
+    const dropdownButton = el.tagName === "BUTTON" && el.getAttribute("aria-haspopup") === "listbox"
+      && !el.closest("nav, header, footer, [role=navigation], [role=banner], [data-automation-id*='progress' i], [data-automation-id*='utility' i]")
+      && !/\b(progress|menu|language|account|settings|filter|sort by)\b/i.test(el.textContent ?? "");
     if (["hidden", "submit", "button", "password", "image", "reset", "search"].includes(type) && el.getAttribute("data-automation-id") !== "searchBox" && !dropdownButton) continue;
     if (el.getAttribute("aria-hidden") === "true" || /honeypot|bee-?catcher/i.test(`${el.getAttribute("name") ?? ""} ${el.getAttribute("data-automation-id") ?? ""}`)) continue;
     if ((!dialog && el.closest("[aria-hidden='true']")) || el.id.startsWith("g-recaptcha")) continue;
