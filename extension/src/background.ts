@@ -541,7 +541,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             applicationId = job.application.id;
             await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: scan.url, host: new URL(scan.url).hostname });
           }
-          const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId });
+          // The student's quick answers (length, tone, what to mention) or their edit request ride along.
+          const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId, ...(message.options ?? {}) });
           return reply({ ok: true, doc: letter });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't write the cover letter." });

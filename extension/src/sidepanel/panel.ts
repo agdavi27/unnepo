@@ -128,8 +128,8 @@ function pageCard(state: PanelState) {
     job?.applicationId && !job.submission && !job.running ? `<button type="button" class="link" id="applied">I applied</button>` : "",
     job?.submission ? `<button type="button" class="link" id="not-applied">I didn't apply</button>` : "",
   ].filter(Boolean);
-  // The writers show on any job page: a posting, an application, or a job Unnepo is working on.
-  const writersOffered = onWeb && Boolean(job?.applicationId || page?.fields || page?.posting);
+  // The cover letter writer shows on any job page: a posting, an application, or a job Unnepo is working on.
+  const letterOffered = onWeb && Boolean(job?.applicationId || page?.fields || page?.posting);
   return `
     <section class="page" aria-label="This page">
       <span class="eyebrow">On this page${site ? ` · ${escape(site)}` : ""}</span>
@@ -145,81 +145,123 @@ function pageCard(state: PanelState) {
       ${report?.failed.length ? `<p class="note">Couldn't fill: ${report.failed.map((item) => escape(item.label)).join("; ")}</p>` : ""}
       ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
       ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
-      ${writersOffered ? writersBlock(state) : ""}
+      ${letterOffered ? letterBlock() : ""}
       <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}>Let me press Submit myself.</label>
     </section>`;
 }
 
-/** The last cover letter or CV written in this panel, and what happened with the last request. */
-type Doc = { kind: "letter" | "cv"; text: string; fileName: string; pdfBase64: string };
-let doc: Doc | null = null;
-let docBusy: Doc["kind"] | null = null;
-let docNote = "";
+/**
+ * The cover letter writer: "Write cover letter" asks a few quick questions (length, tone, anything to
+ * mention), writes it, then offers a box for edits. Kept across re-renders of the panel.
+ */
+type Letter = { text: string; fileName: string; pdfBase64: string };
+let letter: Letter | null = null;
+let letterStep: "closed" | "asking" | "writing" | "written" | "revising" = "closed";
+let letterNote = "";
+const letterChoices = { length: "standard", tone: "professional", mention: "", edit: "" };
 
 const SPARK = `<svg class="spark" width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9z"/><path d="M19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" opacity=".7"/></svg>`;
 
-/**
- * The AI writers: a cover letter (free, part of the application) and a CV (uses credits, with the uses
- * left on the button). The result shows below with Copy, Download PDF, and Open PDF.
- */
-function writersBlock(state: PanelState) {
-  const left = state.me?.cv?.usesLeft ?? 0;
-  return `
-    <div class="cv">
-      <div class="writers">
-        <button type="button" class="cv-button" id="generate-letter" ${docBusy ? "disabled" : ""}>
-          ${SPARK}<span>${docBusy === "letter" ? "Writing…" : "Cover letter"}</span>
-        </button>
-        <button type="button" class="cv-button" id="generate-cv" ${docBusy || left < 1 ? "disabled" : ""}>
-          ${SPARK}<span>${docBusy === "cv" ? "Writing…" : "CV"}</span>
-          <span class="cv-left">${left} left</span>
-        </button>
+const choice = (name: "length" | "tone", value: string, label: string) =>
+  `<button type="button" class="choice${letterChoices[name] === value ? " on" : ""}" data-choice="${name}" data-value="${value}" aria-pressed="${letterChoices[name] === value}">${label}</button>`;
+
+function letterBlock() {
+  const busy = letterStep === "writing" || letterStep === "revising";
+  if (letterStep === "closed") {
+    return `<div class="cv"><button type="button" class="cv-button" id="letter-start">${SPARK}<span>Write cover letter</span></button></div>`;
+  }
+  const questions = letterStep === "asking" || (letterStep === "writing" && !letter) ? `
+    <div class="letter-form" id="letter-form">
+      <span class="eyebrow">Your cover letter</span>
+      <div class="question"><span class="q-label">How long?</span>
+        <div class="choices">${choice("length", "short", "Short")}${choice("length", "standard", "Standard")}${choice("length", "detailed", "Detailed")}</div>
       </div>
-      ${left < 1 && !docBusy ? `<p class="small">Out of CV uses. 1 credit covers ${state.me?.cv?.perCredit ?? 5} CVs; get more credits on Unnepo.</p>` : ""}
-      ${docNote ? `<p class="small" role="status">${escape(docNote)}</p>` : ""}
-      ${doc ? `
-        <span class="eyebrow">${doc.kind === "cv" ? "Your CV" : "Your cover letter"}</span>
-        <textarea class="cv-text" id="cv-text" readonly aria-label="${doc.kind === "cv" ? "Your CV" : "Your cover letter"}">${escape(doc.text)}</textarea>
-        <div class="links">
-          <button type="button" class="link" id="cv-copy">Copy</button>
-          <button type="button" class="link" id="cv-download">Download PDF</button>
-          <button type="button" class="link" id="cv-open">Open PDF</button>
-        </div>
-        <p class="small">Written from your profile and resume. Read it over before you send it.</p>` : ""}
-    </div>`;
+      <div class="question"><span class="q-label">What tone?</span>
+        <div class="choices">${choice("tone", "professional", "Professional")}${choice("tone", "warm", "Warm")}${choice("tone", "confident", "Confident")}${choice("tone", "enthusiastic", "Enthusiastic")}</div>
+      </div>
+      <label class="question"><span class="q-label">Anything to mention? <span class="small">Optional</span></span>
+        <textarea class="field letter-input" id="letter-mention" rows="2" maxlength="400" placeholder="A project, why this company, a skill to lead with…">${escape(letterChoices.mention)}</textarea>
+      </label>
+      <div class="links">
+        <button type="button" class="solid" id="letter-write" ${busy ? "disabled" : ""}>${busy ? "Writing…" : "Write it"}</button>
+        <button type="button" class="link" id="letter-cancel">Cancel</button>
+      </div>
+    </div>` : "";
+  const written = letter && letterStep !== "asking" ? `
+    <div class="letter-form" id="letter-form">
+      <span class="eyebrow">Your cover letter</span>
+      <textarea class="cv-text" readonly aria-label="Your cover letter">${escape(letter.text)}</textarea>
+      <div class="links">
+        <button type="button" class="link" id="letter-copy">Copy</button>
+        <button type="button" class="link" id="letter-download">Download PDF</button>
+        <button type="button" class="link" id="letter-open">Open PDF</button>
+      </div>
+      <label class="question"><span class="q-label">Any edits you'd like to make?</span>
+        <textarea class="field letter-input" id="letter-edit" rows="2" maxlength="600" placeholder="Shorter, mention my internship, sound more excited…">${escape(letterChoices.edit)}</textarea>
+      </label>
+      <div class="links">
+        <button type="button" class="solid" id="letter-revise" ${busy || !letterChoices.edit.trim() ? "disabled" : ""}>${letterStep === "revising" ? "Rewriting…" : "Make these edits"}</button>
+        <button type="button" class="link" id="letter-restart" ${busy ? "disabled" : ""}>Start over</button>
+      </div>
+      <p class="small">Written from your profile and resume. It's also what Unnepo attaches when this application asks for a cover letter.</p>
+    </div>` : "";
+  return `<div class="cv">${questions}${written}${letterNote ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}</div>`;
 }
 
-const docBlobUrl = () => {
-  const bytes = Uint8Array.from(atob(doc!.pdfBase64), (char) => char.charCodeAt(0));
+const letterBlobUrl = () => {
+  const bytes = Uint8Array.from(atob(letter!.pdfBase64), (char) => char.charCodeAt(0));
   return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
 };
 
-async function write(kind: Doc["kind"], tabId: number) {
-  docBusy = kind;
-  docNote = "";
+async function writeLetter(tabId: number, revise: boolean) {
+  letterStep = revise ? "revising" : "writing";
+  letterNote = "";
   void render();
-  type Result = { ok: boolean; cv?: Omit<Doc, "kind">; doc?: Omit<Doc, "kind">; error?: string };
-  const result = await ask<Result>({ type: kind === "cv" ? "generate-cv" : "generate-letter", tabId }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
-  docBusy = null;
-  const written = result.cv ?? result.doc;
-  if (result.ok && written) doc = { kind, ...written };
-  else docNote = result.error ?? `Couldn't write the ${kind === "cv" ? "CV" : "cover letter"}.`;
+  const options = revise
+    ? { previous: letter?.text ?? "", edit: letterChoices.edit }
+    : { length: letterChoices.length, tone: letterChoices.tone, mention: letterChoices.mention };
+  type Result = { ok: boolean; doc?: Letter; error?: string };
+  const result = await ask<Result>({ type: "generate-letter", tabId, options }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  if (result.ok && result.doc) {
+    letter = result.doc;
+    letterStep = "written";
+    if (revise) letterChoices.edit = "";
+  } else {
+    letterStep = letter ? "written" : "asking";
+    letterNote = result.error ?? "Couldn't write the cover letter.";
+  }
   void render();
 }
 
-function wireWriters(tabId: number) {
-  document.getElementById("generate-letter")?.addEventListener("click", () => void write("letter", tabId));
-  document.getElementById("generate-cv")?.addEventListener("click", () => void write("cv", tabId));
-  document.getElementById("cv-copy")?.addEventListener("click", () => {
-    void navigator.clipboard.writeText(doc!.text).then(() => { docNote = "Copied."; void render(); }, () => { docNote = "Couldn't copy. Select the text and copy it."; void render(); });
+function wireLetter(tabId: number) {
+  const go = (step: typeof letterStep) => { letterStep = step; letterNote = ""; void render(); };
+  document.getElementById("letter-start")?.addEventListener("click", () => go("asking"));
+  document.getElementById("letter-cancel")?.addEventListener("click", () => go(letter ? "written" : "closed"));
+  document.getElementById("letter-restart")?.addEventListener("click", () => go("asking"));
+  app.querySelectorAll<HTMLButtonElement>(".choice").forEach((button) => button.addEventListener("click", () => {
+    letterChoices[button.dataset.choice as "length" | "tone"] = button.dataset.value ?? "";
+    void render();
+  }));
+  const mention = document.getElementById("letter-mention") as HTMLTextAreaElement | null;
+  mention?.addEventListener("input", () => { letterChoices.mention = mention.value; });
+  const edits = document.getElementById("letter-edit") as HTMLTextAreaElement | null;
+  const revise = document.getElementById("letter-revise") as HTMLButtonElement | null;
+  edits?.addEventListener("input", () => {
+    letterChoices.edit = edits.value;
+    if (revise && letterStep === "written") revise.disabled = !edits.value.trim();
   });
-  document.getElementById("cv-download")?.addEventListener("click", () => {
+  document.getElementById("letter-write")?.addEventListener("click", () => void writeLetter(tabId, false));
+  revise?.addEventListener("click", () => void writeLetter(tabId, true));
+  document.getElementById("letter-copy")?.addEventListener("click", () => {
+    void navigator.clipboard.writeText(letter!.text).then(() => { letterNote = "Copied."; void render(); }, () => { letterNote = "Couldn't copy. Select the text and copy it."; void render(); });
+  });
+  document.getElementById("letter-download")?.addEventListener("click", () => {
     const link = document.createElement("a");
-    link.href = docBlobUrl();
-    link.download = doc!.fileName;
+    link.href = letterBlobUrl();
+    link.download = letter!.fileName;
     link.click();
   });
-  document.getElementById("cv-open")?.addEventListener("click", () => void chrome.tabs.create({ url: docBlobUrl() }));
+  document.getElementById("letter-open")?.addEventListener("click", () => void chrome.tabs.create({ url: letterBlobUrl() }));
 }
 
 /** Why the last "Still needs you" click couldn't find its question, kept across re-renders. */
@@ -389,6 +431,8 @@ async function render() {
   if (state.connected && wasHidden) void renderPassword();
   // Don't wipe a code being typed when something else changes.
   if (!state.connected && document.getElementById("code") === document.activeElement) return;
+  // Don't wipe what's being typed in the cover letter questions or edits box when the page changes.
+  if (document.activeElement?.closest("#letter-form") && document.activeElement.matches("textarea")) return;
   app.innerHTML = state.connected ? pageCard(state) + profileCard(state) : connectView(state);
   document.getElementById("use-code")?.addEventListener("click", async () => {
     const code = (document.getElementById("code") as HTMLInputElement).value.trim();
@@ -397,7 +441,7 @@ async function render() {
   });
   document.getElementById("fill")?.addEventListener("click", () => void ask({ type: "fill", tabId: state.tab!.id }));
   document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
-  if (state.tab) wireWriters(state.tab.id);
+  if (state.tab) wireLetter(state.tab.id);
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));

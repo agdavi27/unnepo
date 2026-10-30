@@ -12,12 +12,13 @@ import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 
-const model = vi.hoisted(() => ({ replies: [] as string[], calls: 0 }));
+const model = vi.hoisted(() => ({ replies: [] as string[], calls: 0, lastPrompt: "" }));
 vi.mock("@anthropic-ai/sdk", () => ({
   default: class {
     messages = {
-      create: async () => {
+      create: async (input: { messages: Array<{ content: string }> }) => {
         model.calls += 1;
+        model.lastPrompt = input.messages[0]?.content ?? "";
         return { content: [{ type: "text", text: model.replies.shift() ?? "{}" }], stop_reason: "end_turn", usage: { input_tokens: 10, output_tokens: 10 } };
       },
     };
@@ -272,5 +273,36 @@ describe("CV generator", () => {
     const response = await call("POST", "cv", token, {});
     expect(response.status).toBe(402);
     expect(model.calls).toBe(calls);
+  });
+});
+
+describe("cover letters from the panel", () => {
+  it("writes to the student's length, tone and mention, revises on request, and reuses it otherwise", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/77", title: "Data Intern", company: "Globex" })).json();
+    const letter = (words: string) => `Dear Hiring Team,\n\n${words} I am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students.\n\nI would bring the same care to Globex's data team.\n\nSincerely,\nPat Doe`;
+
+    model.replies.push(letter("First."));
+    const first = await (await call("POST", "cover-letter", token, { applicationId: job.application.id, length: "short", tone: "warm", mention: "I grew up using Globex products" })).json();
+    expect(first.text).toContain("First.");
+    expect(model.lastPrompt).toContain("Under 150 words");
+    expect(model.lastPrompt).toContain("Tone: warm.");
+    expect(model.lastPrompt).toContain("I grew up using Globex products");
+    expect(Buffer.from(first.pdfBase64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
+
+    model.replies.push(letter("Revised."));
+    const revised = await (await call("POST", "cover-letter", token, { applicationId: job.application.id, previous: first.text, edit: "Make the close more confident" })).json();
+    expect(revised.text).toContain("Revised.");
+    expect(model.lastPrompt).toContain("Make the close more confident");
+    expect(model.lastPrompt).toContain("First.");
+
+    // No choices: the latest letter is reused (that's the one autofill attaches), no new AI call.
+    const calls = model.calls;
+    const reused = await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json();
+    expect(reused.text).toContain("Revised.");
+    expect(model.calls).toBe(calls);
+    expect((await call("POST", "cover-letter", token, { applicationId: job.application.id, previous: first.text, edit: "  " })).status).toBe(400);
   });
 });

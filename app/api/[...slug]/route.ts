@@ -335,7 +335,11 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   }
   if (action === "map" && method === "POST") return json(await extensionMap(user.id, await request.json()));
   if (action === "answers" && method === "POST") return json(await extensionLearn(user.id, await request.json()));
-  if (action === "cover-letter" && method === "POST") return json(await extensionCoverLetter(user.id, await request.json()));
+  if (action === "cover-letter" && method === "POST") {
+    // Free, but each one is an AI call: a sensible cap per hour.
+    if (!rateLimit(`extension-letter:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of cover letters in an hour. Try again later.", "rate_limited", 429);
+    return json(await extensionCoverLetter(user.id, await request.json()));
+  }
   if (action === "cv" && method === "POST") {
     if (!rateLimit(`extension-cv:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of CVs in an hour. Try again later.", "rate_limited", 429);
     return json(await generateCv(user.id, await request.json().catch(() => ({}))));

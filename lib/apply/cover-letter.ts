@@ -10,8 +10,37 @@ Return only the letter.`;
 
 export type CoverLetterStudent = { name: string; resumeText: string; profile: string };
 
+/** What the student asked for in the extension's quick questions, or the changes they asked for after reading it. */
+export type CoverLetterStyle = {
+  length?: "short" | "standard" | "detailed";
+  tone?: "professional" | "warm" | "confident" | "enthusiastic";
+  /** Something the student wants mentioned, in their own words. */
+  mention?: string;
+  /** The letter they're revising, and what they want changed. */
+  previous?: string;
+  edit?: string;
+};
+
+const LENGTHS: Record<NonNullable<CoverLetterStyle["length"]>, string> = {
+  short: "Under 150 words: two short paragraphs plus the close.",
+  standard: "About 200 to 250 words.",
+  detailed: "About 300 to 350 words, still fitting on one page.",
+};
+
+/** The student's choices as instructions for the model. Their own words count as facts they gave. */
+function styleNotes(style: CoverLetterStyle) {
+  const notes: string[] = [];
+  if (style.length) notes.push(`Length for this letter (this replaces the usual length): ${LENGTHS[style.length]}`);
+  if (style.tone) notes.push(`Tone: ${style.tone}.`);
+  if (style.mention?.trim()) notes.push(`The student asked you to mention this, in their own words (it counts as something they told you): "${style.mention.trim()}"`);
+  if (style.previous?.trim() && style.edit?.trim()) {
+    notes.push(`This is a revision. The current letter:\n${style.previous.trim()}\n\nThe student wants these changes: "${style.edit.trim()}"\nKeep what they didn't ask to change. Return the whole revised letter.`);
+  }
+  return notes.join("\n");
+}
+
 /** One model call writes the letter from the student's resume and the posting. Null when AI isn't set up or there's no resume. */
-export async function writeCoverLetter(userId: string, app: Pick<JobApplication, "title" | "company" | "department" | "description" | "requirements">, student: CoverLetterStudent) {
+export async function writeCoverLetter(userId: string, app: Pick<JobApplication, "title" | "company" | "department" | "description" | "requirements">, student: CoverLetterStudent, style: CoverLetterStyle = {}) {
   if (!student.resumeText.trim() && !student.profile.trim()) return null;
   const apiKey = await readAnthropicKey();
   if (!apiKey) return null;
@@ -23,6 +52,7 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
     `Job description:\n${app.description.slice(0, 3500)}`,
     student.resumeText ? `Resume:\n${student.resumeText.slice(0, 6000)}` : "",
     student.profile ? `Profile:\n${student.profile.slice(0, 3000)}` : "",
+    styleNotes(style),
   ].filter(Boolean).join("\n\n");
   const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
   const started = Date.now();

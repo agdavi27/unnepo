@@ -1,6 +1,6 @@
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
-import { coverLetterPdf, writeCoverLetter } from "@/lib/apply/cover-letter";
+import { coverLetterPdf, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
 import { createApplication, answerWith, ensureCharged, learnAnswers, requireApp, runContext, startContacts, student, summary } from "@/lib/apply/service";
 import { jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { buildMapping, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
@@ -221,12 +221,25 @@ export async function extensionLearn(userId: string, raw: unknown) {
 
 /** A cover letter for this job, as text and as a PDF to upload. Written once per job. */
 export async function extensionCoverLetter(userId: string, raw: unknown) {
-  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
+  const body = (raw ?? {}) as { applicationId?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown };
+  const app = await requireApp(userId, body.applicationId);
   const info = await student(userId);
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
-  const text = app.fillReport?.coverLetter || (await writeCoverLetter(userId, app, { name, resumeText: info.resumeText, profile: info.profileText }));
+  const pick = <T extends string>(value: unknown, allowed: readonly T[]) => (allowed.includes(value as T) ? (value as T) : undefined);
+  const style: CoverLetterStyle = {
+    length: pick(body.length, ["short", "standard", "detailed"] as const),
+    tone: pick(body.tone, ["professional", "warm", "confident", "enthusiastic"] as const),
+    mention: typeof body.mention === "string" ? body.mention.slice(0, 400) : undefined,
+    edit: typeof body.edit === "string" ? body.edit.slice(0, 600) : undefined,
+    previous: typeof body.previous === "string" ? body.previous.slice(0, 6000) : undefined,
+  };
+  if (style.edit !== undefined && !style.edit.trim()) throw new ServiceError("Say what you'd like changed.", "edit", 400);
+  // The student's choices (or edits) always mean a new letter; otherwise the one already written is reused.
+  const asked = Boolean(style.length || style.tone || style.mention?.trim() || style.edit?.trim());
+  const text = (!asked && app.fillReport?.coverLetter) || (await writeCoverLetter(userId, app, { name, resumeText: info.resumeText, profile: info.profileText }, style));
   if (!text) throw new ServiceError("Couldn't write a cover letter. Add your resume and profile first.", "cover_letter", 409);
-  if (!app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
+  // The newest letter is the one autofill attaches when the form asks for a cover letter.
+  if (text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
   return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64") };
 }

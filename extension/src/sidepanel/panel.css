@@ -130,3 +130,13 @@ a.px { display: flex; align-items: center; justify-content: center; text-decorat
 .cv-text { width: 100%; min-height: 180px; resize: vertical; border-radius: 10px; border: 1px solid var(--control); background: #111114; color: var(--fg); padding: 10px; font: 12px/1.5 var(--mono); }
 .writers { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .writers .cv-button { padding: 0 12px; }
+
+/* Cover letter questions */
+.letter-form { display: flex; flex-direction: column; gap: 12px; padding-top: 4px; }
+.question { display: flex; flex-direction: column; gap: 6px; }
+.q-label { font-size: 13px; font-weight: 500; color: var(--fg); }
+.choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.choice { height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--control); background: transparent; color: var(--muted-3); font: 500 12px Geist, sans-serif; cursor: pointer; }
+.choice:hover { color: var(--fg); }
+.choice.on { background: var(--fg); color: #000; border-color: var(--fg); }
+.letter-input { height: auto; min-height: 56px; padding: 10px 12px; resize: vertical; font: 13px/1.45 Geist, sans-serif; }
