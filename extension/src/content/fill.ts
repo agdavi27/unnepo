@@ -14,7 +14,7 @@ import { startSpiders, stopSpiders } from "./spiders";
 
 declare global {
   interface Window {
-    __unnepo?: { scan: typeof scanPage; fill: typeof fill };
+    __unnepo?: { scan: typeof scanPage; fill: typeof fill; alive: () => boolean };
   }
 }
 
@@ -86,12 +86,35 @@ function typedAnswers() {
   });
 }
 
+/**
+ * Whether this copy of the script still belongs to a running extension. After the extension is reloaded
+ * or updated, scripts already in the page are cut off and every chrome.runtime call throws.
+ */
+function alive() {
+  try {
+    return Boolean(chrome.runtime?.id);
+  } catch {
+    return false;
+  }
+}
+
+/** Tells the extension something, quietly doing nothing once this copy is cut off. */
+function tell(message: unknown) {
+  if (!alive()) return;
+  try {
+    void chrome.runtime.sendMessage(message).catch(() => undefined);
+  } catch {
+    // The extension was reloaded between the check and the call.
+  }
+}
+
 let announcedAt = 0;
 function announceSubmit() {
   // Pressing Submit for the student also fires the click watcher; one announcement is enough.
   if (Date.now() - announcedAt < 3000) return;
   announcedAt = Date.now();
-  void chrome.runtime.sendMessage({ type: "submit-clicked", answers: typedAnswers(), url: location.href });
+  if (!alive()) return;
+  tell({ type: "submit-clicked", answers: typedAnswers(), url: location.href });
   // The page's own words count as "likely" if the network didn't already confirm it.
   const until = Date.now() + 20_000;
   const timer = setInterval(() => {
@@ -100,7 +123,7 @@ function announceSubmit() {
     if (match) {
       clearInterval(timer);
       const start = Math.max(0, (match.index ?? 0) - 40);
-      void chrome.runtime.sendMessage({ type: "submitted-page", text: text.slice(start, start + 200), url: location.href });
+      tell({ type: "submitted-page", text: text.slice(start, start + 200), url: location.href });
     } else if (Date.now() > until) clearInterval(timer);
   }, 700);
 }
@@ -115,8 +138,10 @@ function watchSubmit() {
   }, true);
 }
 
-if (!window.__unnepo) {
-  window.__unnepo = { scan: scanPage, fill };
+// One live copy per page. A copy left from before the extension was reloaded is cut off, so a new copy
+// takes over instead of leaving the page unreachable until it's refreshed.
+if (!window.__unnepo || !window.__unnepo.alive()) {
+  window.__unnepo = { scan: scanPage, fill, alive };
   watchSubmit();
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type === "scan") {

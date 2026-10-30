@@ -1,6 +1,6 @@
 import { heroSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
-import type { PanelState } from "../shared/types";
+import { NEVER_READ, type PanelState } from "../shared/types";
 
 /**
  * The side panel ("Spider guide" design): the spider talks you through what's on the tab and what
@@ -76,6 +76,7 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
   if (job?.step && (job.running || job.submission || job.report)) return { lines: [job.step] };
   if (!me!.profileReady) return { lines: ["Finish your profile on Unnepo first, so I have something to fill with."] };
   if (!state.tab || !/^https:\/\//.test(state.tab.url)) return { lines: ["Open a job posting or an application in this tab.", "Then press Fill and I'll crawl it for you."] };
+  if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Press Apply on LinkedIn to go to the company's own application, then press Fill there."] };
   if (!page || (!page.fields && !page.posting)) return { lines: ["I don't see an application on this page yet.", "Open the job posting or its application, then press Fill."] };
   const found = `Found a job on ${page.site}.${page.title ? ` ${short(page.title)}.` : ""}`;
   if (page.posting) return { lines: [found, "Press Fill. I'll press Apply and crawl the whole thing for you."] };
@@ -100,9 +101,13 @@ function connectView(state: PanelState) {
     </section>`;
 }
 
+function onLinkedIn(state: PanelState) {
+  try { return Boolean(state.tab && NEVER_READ.test(new URL(state.tab.url).hostname)); } catch { return false; }
+}
+
 function pageCard(state: PanelState) {
   const { job, page, tab, me } = state;
-  const onWeb = Boolean(tab && /^https:\/\//.test(tab.url));
+  const onWeb = Boolean(tab && /^https:\/\//.test(tab.url)) && !onLinkedIn(state);
   const report = job?.report;
   let host = "";
   try { host = tab ? new URL(tab.url).hostname.replace(/^www\./, "") : ""; } catch { host = ""; }
@@ -154,7 +159,9 @@ function resumeRow(state: PanelState) {
   return `
     <div class="secret resume-row">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--muted)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>
-      <span class="secret-text resume-name" title="${name}">${name}</span>
+      ${resume?.file
+        ? `<button type="button" class="secret-text resume-name resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}>${name}</button>`
+        : `<span class="secret-text resume-name" title="${name}">${name}</span>`}
       ${resume?.file ? `<button type="button" class="inline" id="see-resume" ${resumeBusy ? "disabled" : ""}>See</button>` : ""}
       <button type="button" class="inline" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Replace" : "Upload"}</button>
     </div>
@@ -313,6 +320,7 @@ async function render() {
     button.textContent = "CV generation is coming soon";
   });
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
+  document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
   document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));

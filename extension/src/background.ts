@@ -1,5 +1,5 @@
 import { generatePassword, unmetRules } from "./shared/password";
-import type { Answer, FileData, FillPlan, FillReport, PanelState, Scan } from "./shared/types";
+import { NEVER_READ, type Answer, type FileData, type FillPlan, type FillReport, type PanelState, type Scan } from "./shared/types";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -198,8 +198,11 @@ function accountKey(url: string) {
  */
 async function look(tabId: number): Promise<Scan | null> {
   try {
+    // LinkedIn is never read, not even to preview it in the panel.
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.url || NEVER_READ.test(new URL(tab.url).hostname)) return null;
     const frames = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) ?? [{ frameId: 0, url: "" }];
-    const frameIds = frames.filter((frame) => frame.frameId === 0 || (/^https:\/\//.test(frame.url) && !SKIP_FRAME.test(frame.url))).map((frame) => frame.frameId);
+    const frameIds = frames.filter((frame) => frame.frameId === 0 || (/^https:\/\//.test(frame.url) && !SKIP_FRAME.test(frame.url) && !NEVER_READ.test(new URL(frame.url).hostname))).map((frame) => frame.frameId);
     await chrome.scripting.executeScript({ target: { tabId, frameIds }, files: ["content/fill.js"] }).catch(() => undefined);
     const scans = await chrome.scripting.executeScript({
       target: { tabId, frameIds },
@@ -536,9 +539,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "set-auto-submit":
         await chrome.storage.local.set({ autoSubmit: Boolean(message.value) });
         return reply({ ok: true });
-      case "fill":
+      case "fill": {
+        const tab = await chrome.tabs.get(Number(message.tabId)).catch(() => null);
+        if (tab?.url && NEVER_READ.test(new URL(tab.url).hostname)) {
+          await saveJob(Number(message.tabId), { error: "Unnepo doesn't fill LinkedIn. Open the job's own application (Apply on the company's site), then press Fill.", step: "Stopped." });
+          return reply({ ok: false });
+        }
         if (!runs.has(Number(message.tabId))) void run(Number(message.tabId));
         return reply({ ok: true });
+      }
       case "stop":
         runs.delete(Number(message.tabId));
         await saveJob(Number(message.tabId), { running: false, step: "Stopped. Press Fill to start again." });

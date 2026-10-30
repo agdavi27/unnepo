@@ -6,5 +6,9 @@ window.addEventListener("message", (event) => {
   if (event.source !== window || event.origin !== window.location.origin) return;
   const data = event.data as { type?: unknown; token?: unknown } | null;
   if (data?.type !== "unnepo:extension-token" || typeof data.token !== "string" || !data.token.startsWith("unx_")) return;
-  void chrome.runtime.sendMessage({ type: "connect", token: data.token, origin: window.location.origin });
+  try {
+    void chrome.runtime.sendMessage({ type: "connect", token: data.token, origin: window.location.origin }).catch(() => undefined);
+  } catch {
+    // The extension was reloaded since this page opened. The page still shows the code to paste in the panel.
+  }
 });

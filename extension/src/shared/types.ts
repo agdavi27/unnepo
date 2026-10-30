@@ -41,6 +41,9 @@ export type FillReport = {
   ms: number;
 };
 
+/** Sites Unnepo never reads or fills, whatever is open in the panel: LinkedIn. */
+export const NEVER_READ = /(^|\.)linkedin\.com$/i;
+
 export type PanelState = {
   connected: boolean;
   me: { user: { name: string; email: string }; credits: number; profileReady: boolean; completeness: number; missing?: string[]; resume?: { fileName: string; uploadedAt: string; file: boolean } | null } | null;

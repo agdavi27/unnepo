@@ -49,14 +49,24 @@ function show() {
       <button class="close" type="button" aria-label="Hide the Unnepo spider on this site">×</button>
     </div>`;
   const tip = root.querySelector<HTMLElement>(".tip")!;
+  const say = (words: string) => {
+    tip.textContent = words;
+    tip.classList.add("say");
+    setTimeout(() => { tip.classList.remove("say"); tip.textContent = "Fill with Unnepo"; }, 4000);
+  };
   root.querySelector(".spider")!.addEventListener("click", () => {
-    chrome.runtime.sendMessage({ type: "open-panel" }).then((result: { ok?: boolean } | undefined) => {
-      if (result?.ok) return;
-      // Chrome only opens the panel from the toolbar sometimes; say where it is.
-      tip.textContent = "Click the Unnepo icon in your toolbar";
-      tip.classList.add("say");
-      setTimeout(() => { tip.classList.remove("say"); tip.textContent = "Fill with Unnepo"; }, 4000);
-    }, () => undefined);
+    let reachable = false;
+    try { reachable = Boolean(chrome.runtime?.id); } catch { reachable = false; }
+    // The extension was reloaded since this page opened: this copy can't reach it any more.
+    if (!reachable) return say("Unnepo was updated. Refresh this page");
+    try {
+      chrome.runtime.sendMessage({ type: "open-panel" }).then((result: { ok?: boolean } | undefined) => {
+        // Chrome only opens the panel from the toolbar sometimes; say where it is.
+        if (!result?.ok) say("Click the Unnepo icon in your toolbar");
+      }, () => say("Refresh this page to use Unnepo"));
+    } catch {
+      say("Refresh this page to use Unnepo");
+    }
   });
   root.querySelector(".close")!.addEventListener("click", () => {
     try { sessionStorage.setItem(DISMISSED, "1"); } catch { /* storage off: it just hides for now */ }
