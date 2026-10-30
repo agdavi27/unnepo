@@ -29,6 +29,8 @@ export async function extensionMe(userId: string) {
     credits: credits?.balance ?? 0,
     profileReady: state.ready,
     completeness: state.profile.completeness,
+    // What the panel lists under "Missing": the parts of the profile still to fill in, required ones first.
+    missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
   };
 }
 

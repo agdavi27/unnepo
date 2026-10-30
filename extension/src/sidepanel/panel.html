@@ -7,12 +7,32 @@
   <link rel="stylesheet" href="panel.css">
 </head>
 <body>
-  <header>
+  <header class="top">
     <span class="logo">unnepo<span class="dot">.</span></span>
-    <span id="account" class="mono"></span>
+    <span id="account" class="mono email"></span>
   </header>
-  <main id="app" aria-live="polite"></main>
-  <section id="password" class="settings" hidden></section>
+
+  <section id="speech" class="speech" aria-label="Unnepo says">
+    <div class="spider bob" id="spider"><div class="thread"></div></div>
+    <div class="bubble-wrap">
+      <span class="nametag">UNNEPO</span>
+      <button type="button" class="bubble" id="bubble" aria-label="Next line">
+        <span id="typed" aria-hidden="true"></span>
+        <span id="said" class="sr-only" aria-live="polite"></span>
+        <span id="more" class="more blink" aria-hidden="true" hidden></span>
+      </button>
+    </div>
+  </section>
+
+  <main id="app"></main>
+
+  <section id="password" class="password" aria-label="Job-site password" hidden></section>
+
+  <footer id="footer" class="foot" hidden>
+    <button type="button" id="disconnect" class="quiet">Sign out</button>
+    <span id="version" class="mono"></span>
+  </footer>
+
   <script type="module" src="panel.js"></script>
 </body>
 </html>

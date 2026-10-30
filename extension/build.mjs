@@ -20,6 +20,7 @@ await build({ ...shared, format: "esm", entryPoints: { background: path.join(her
 await build({ ...shared, format: "iife", entryPoints: { "content/connect": path.join(here, "src/content/connect.ts"), "content/fill": path.join(here, "src/content/fill.ts") } });
 cpSync(path.join(here, "manifest.json"), path.join(out, "manifest.json"));
 cpSync(path.join(here, "icons"), path.join(out, "icons"), { recursive: true });
+cpSync(path.join(here, "fonts"), path.join(out, "fonts"), { recursive: true });
 cpSync(path.join(here, "src/sidepanel/panel.html"), path.join(out, "sidepanel/panel.html"));
 cpSync(path.join(here, "src/sidepanel/panel.css"), path.join(out, "sidepanel/panel.css"));
 console.log(`Built the extension into ${path.relative(root, out)} (server: ${api})`);

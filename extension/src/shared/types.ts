@@ -43,7 +43,9 @@ export type FillReport = {
 
 export type PanelState = {
   connected: boolean;
-  me: { user: { name: string; email: string }; credits: number; profileReady: boolean; completeness: number } | null;
+  me: { user: { name: string; email: string }; credits: number; profileReady: boolean; completeness: number; missing?: string[] } | null;
+  /** What's on the tab before Fill is pressed: the job, how many fields, and whether there's an account to make. */
+  page: { site: string; title: string; company: string; fields: number; posting: boolean; account: "new" | "sign_in" | null } | null;
   tab: { id: number; url: string; title: string } | null;
   job: { tabId: number; applicationId: string; title: string; company: string; step: string; report: FillReport | null; submission: "confirmed" | "likely" | null; error: string | null; llmCalls: number; running?: boolean; cv?: boolean } | null;
   autoSubmit: boolean;

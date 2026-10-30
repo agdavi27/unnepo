@@ -70,13 +70,42 @@ async function resumeFile(): Promise<FileData | null> {
   return { name, mime: response.headers.get("content-type") ?? "application/pdf", base64: btoa(binary) };
 }
 
+const SITE_NAMES: Record<Scan["ats"], string> = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", workday: "Workday", other: "" };
+const peeks = new Map<number, { url: string; at: number; page: PanelState["page"] }>();
+
+/** A quick look at the tab for the panel: the job, its fields, and any account to make. Kept for a few seconds. */
+async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
+  if (!/^https:\/\//.test(url)) return null;
+  const cached = peeks.get(tabId);
+  if (cached && cached.url === url && Date.now() - cached.at < 4000) return cached.page;
+  const scan = await look(tabId);
+  if (!scan) return null;
+  const host = new URL(scan.url).hostname;
+  const known = Boolean((await knownAccounts())[host]);
+  const status = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
+  const accountPage = scan.passwordBoxes > 0 || scan.ats === "workday";
+  const page: PanelState["page"] = {
+    // "jobs.jobylon.com" reads as "Jobylon".
+    site: SITE_NAMES[scan.ats] || ((name) => name.charAt(0).toUpperCase() + name.slice(1))(host.replace(/^(www|jobs|careers|boards|apply|job-boards|hire|recruiting)\./, "").split(".")[0]),
+    title: scan.title,
+    company: scan.company,
+    fields: scan.fields.length + scan.passwordBoxes,
+    posting: Boolean(status?.apply) && scan.fields.length < 3,
+    account: accountPage ? (known ? "sign_in" : "new") : null,
+  };
+  peeks.set(tabId, { url, at: Date.now(), page });
+  return page;
+}
+
 async function state(): Promise<PanelState> {
   const { token, apiBase, autoSubmit } = await settings();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   let me: PanelState["me"] = null;
   if (token) me = await api<NonNullable<PanelState["me"]>>("GET", "me").catch(() => null);
   const job = tab?.id !== undefined ? (await jobs())[tab.id] ?? null : null;
-  return { connected: Boolean(token && me), me, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase };
+  // While Unnepo is working on the tab, the job itself says what's there.
+  const page = me && tab?.id !== undefined && !job?.running ? await peek(tab.id, tab.url ?? "").catch(() => null) : null;
+  return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase };
 }
 
 const send = <T>(tabId: number, message: unknown) => chrome.tabs.sendMessage(tabId, message) as Promise<T>;
@@ -403,7 +432,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         return reply({ ok: true });
       }
       case "submit-clicked":
-        if (tabId === undefined) return reply({ ok: false });
+        // The page script also runs on tabs the panel only looked at; only an application Unnepo opened counts.
+        if (tabId === undefined || !(await jobs())[tabId]?.applicationId) return reply({ ok: false });
         await saveJob(tabId, { clickedAt: Date.now() });
         if (Array.isArray(message.answers) && message.answers.length) await api("POST", "answers", { answers: message.answers }).catch(() => undefined);
         return reply({ ok: true });

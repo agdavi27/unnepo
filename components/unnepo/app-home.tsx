@@ -40,6 +40,13 @@ export function AppHome() {
   const [resumeVersion, setResumeVersion] = useState(0);
   const [view, setView] = useState<View>("applied");
   const [editing, setEditing] = useState(false);
+  // The extension's "Edit my info" opens /home?edit=profile.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("edit") !== "profile") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
+    setEditing(true);
+    window.history.replaceState(null, "", "/home");
+  }, []);
   const [highlightsLoading, setHighlightsLoading] = useState(false);
   const [letter, setLetter] = useState<{ job: Job | null; jobs: Job[] } | null>(null);
 

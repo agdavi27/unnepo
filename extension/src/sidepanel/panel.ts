@@ -1,73 +1,173 @@
+import { heroSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import type { PanelState } from "../shared/types";
 
-/** The side panel: connect, fill the job on this tab, see what still needs you, and mark it applied. */
+/**
+ * The side panel ("Spider guide" design): the spider talks you through what's on the tab and what
+ * Unnepo is doing, the card below fills the application, then your profile and job-site password.
+ */
 
 const app = document.getElementById("app")!;
 const account = document.getElementById("account")!;
 const passwordSection = document.getElementById("password")!;
+const footer = document.getElementById("footer")!;
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
+const short = (text: string, max = 60) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
+
+/** The spider's speech: types a line out while his mouth moves; a click finishes it or goes to the next. */
+const speech = (() => {
+  const spider = document.getElementById("spider")!;
+  const bubble = document.getElementById("bubble")!;
+  const typed = document.getElementById("typed")!;
+  const said = document.getElementById("said")!;
+  const more = document.getElementById("more")!;
+  spider.insertAdjacentHTML("beforeend", heroSpiderSvg());
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let lines = [""];
+  let key = "";
+  let line = 0;
+  let shown = 0;
+  let hold = 0;
+
+  const draw = () => {
+    const text = lines[line] ?? "";
+    const typing = shown < text.length;
+    typed.textContent = text.slice(0, shown);
+    said.textContent = text;
+    more.hidden = typing;
+    spider.classList.toggle("talking", typing && text.charAt(shown) !== " " && Math.floor(shown / 2) % 2 === 0);
+  };
+  const next = () => {
+    line = (line + 1) % lines.length;
+    shown = reduce ? lines[line].length : 0;
+    hold = 0;
+    draw();
+  };
+  bubble.addEventListener("click", () => {
+    if (shown < (lines[line] ?? "").length) { shown = lines[line].length; hold = 0; draw(); }
+    else if (lines.length > 1) next();
+  });
+  setInterval(() => {
+    const text = lines[line] ?? "";
+    if (shown < text.length) { shown += 1; draw(); }
+    else if (lines.length > 1 && ++hold > 70) next();
+  }, 45);
+
+  return (next: string[], alert = false) => {
+    const nextKey = `${alert}|${next.join("\n")}`;
+    if (nextKey === key) return;
+    key = nextKey;
+    lines = next.length ? next : [""];
+    line = 0;
+    shown = reduce ? lines[0].length : 0;
+    hold = 0;
+    bubble.classList.toggle("alert", alert);
+    draw();
+  };
+})();
+
+/** What the spider says, from what's on the tab and what Unnepo is doing. */
+function lines(state: PanelState): { lines: string[]; alert?: boolean } {
+  if (!state.connected) return { lines: ["Hi! I'm the Unnepo spider.", "Connect your Unnepo account and I'll fill job applications for you.", "Your job-site passwords never leave this computer."] };
+  const { job, page, me } = state;
+  if (job?.error) return { lines: [job.error], alert: true };
+  if (job?.step && (job.running || job.submission || job.report)) return { lines: [job.step] };
+  if (!me!.profileReady) return { lines: ["Finish your profile on Unnepo first, so I have something to fill with."] };
+  if (!state.tab || !/^https:\/\//.test(state.tab.url)) return { lines: ["Open a job posting or an application in this tab.", "Then press Fill and I'll crawl it for you."] };
+  if (!page || (!page.fields && !page.posting)) return { lines: ["I don't see an application on this page yet.", "Open the job posting or its application, then press Fill."] };
+  const found = `Found a job on ${page.site}.${page.title ? ` ${short(page.title)}.` : ""}`;
+  if (page.posting) return { lines: [found, "Press Fill. I'll press Apply and crawl the whole thing for you."] };
+  const extra = page.account === "new" ? ", and one new account to make" : page.account === "sign_in" ? ", and I'll sign you in" : "";
+  return { lines: [found, `${page.fields} ${page.fields === 1 ? "field" : "fields"}${extra}.`, "Press Fill and I'll crawl it for you."] };
+}
 
 function connectView(state: PanelState) {
   return `
-    <h1>Connect your account</h1>
-    <p>Unnepo fills applications from your Unnepo profile. Connect once and the extension stays signed in.</p>
-    <a class="button primary" href="${escape(state.apiBase)}/extension/connect" target="_blank" rel="noreferrer">Connect on Unnepo</a>
-    <div class="card">
-      <p class="sub">Or paste the code from the Connect page:</p>
-      <input type="text" id="code" placeholder="unx_…" autocomplete="off" spellcheck="false">
-      <button id="use-code">Use code</button>
-    </div>
-    <p class="sub">Your job-site passwords stay on this computer and never go to Unnepo.</p>`;
+    <section class="page" aria-label="Connect">
+      <span class="eyebrow">Get started</span>
+      <div class="job">
+        <span class="job-title">Connect your Unnepo account</span>
+        <span class="job-company">Unnepo fills applications from your profile. Connect once and the extension stays signed in.</span>
+      </div>
+      <a class="px" href="${escape(state.apiBase)}/extension/connect" target="_blank" rel="noreferrer">CONNECT ON UNNEPO</a>
+      <p class="note">Or paste the code from the Connect page:</p>
+      <div class="connect-code">
+        <input class="field" type="text" id="code" placeholder="unx_…" autocomplete="off" spellcheck="false" aria-label="Connect code">
+        <button type="button" class="solid" id="use-code">Use code</button>
+      </div>
+    </section>`;
 }
 
-function jobView(state: PanelState) {
-  const me = state.me!;
-  const tab = state.tab;
-  const job = state.job;
-  const onWeb = tab && /^https:\/\//.test(tab.url);
+function pageCard(state: PanelState) {
+  const { job, page, tab, me } = state;
+  const onWeb = Boolean(tab && /^https:\/\//.test(tab.url));
   const report = job?.report;
-  const parts: string[] = [];
-  parts.push(`
-    <div class="card">
-      <div class="row"><span class="title">Your profile</span><span class="mono">${me.completeness}% ready</span></div>
-      <div class="bar"><div style="width:${me.completeness}%"></div></div>
-      ${me.profileReady ? "" : `<p class="warn">Finish your profile on Unnepo first so there's something to fill with.</p>`}
-      <p class="sub">${me.credits} credit${me.credits === 1 ? "" : "s"} left</p>
-    </div>`);
-  if (!onWeb) {
-    parts.push(`<p>Open a job application in this tab, then come back here and press Fill.</p>`);
-  } else {
-    parts.push(`
-      <div class="card">
-        <span class="title">${escape(job?.title || tab!.title || "This page")}</span>
-        ${job?.company ? `<span class="sub">${escape(job.company)}</span>` : ""}
-        ${job?.step ? `<p>${job.running ? `<span class="live" aria-hidden="true"></span>` : ""}${escape(job.step)}</p>` : `<p class="sub">Works from the job posting: Unnepo presses Apply, makes your account or signs in, fills every page, and keeps going until you press Stop.</p>`}
-        ${job?.error ? `<p class="error">${escape(job.error)}</p>` : ""}
-        ${report?.needsYou.length ? `<p class="warn">Still needs you:</p><ul>${report.needsYou.map((label) => `<li>${escape(label)}</li>`).join("")}</ul>` : ""}
-        ${report?.failed.length ? `<p class="sub">Couldn't fill: ${report.failed.map((item) => escape(item.label)).join("; ")}</p>` : ""}
-        ${job?.submission ? `<p class="ok">${job.submission === "confirmed" ? "Submission confirmed by the site." : "Looks submitted."} Saved to your tracker.</p>` : ""}
-        <div class="actions">
-          ${job?.running
-            ? `<button class="stop" id="stop">Stop</button>`
-            : `<button class="primary" id="fill" ${me.profileReady ? "" : "disabled"}>${report ? "Fill again" : "Fill this application"}</button>`}
-          ${job?.applicationId && !job.submission && !job.running ? `<button id="applied">I applied</button>` : ""}
-          ${job?.cv ? `<button id="generate-cv">Generate CV</button>` : ""}
-          ${job?.submission ? `<button id="not-applied">I didn't apply</button>` : ""}
+  let host = "";
+  try { host = tab ? new URL(tab.url).hostname.replace(/^www\./, "") : ""; } catch { host = ""; }
+  const site = page?.site || host;
+  const title = job?.title || page?.title || (onWeb ? tab!.title : "");
+  const company = job?.company || page?.company || "";
+  const chips: string[] = [];
+  if (report?.filled.length) chips.push(`${report.filled.length} filled`);
+  else if (page?.posting) chips.push("Job posting");
+  else if (page?.fields) chips.push(`${page.fields} ${page.fields === 1 ? "field" : "fields"}`);
+  if (page?.account === "new") chips.push("New account");
+  if (page?.account === "sign_in") chips.push("Sign in");
+  if (job?.submission) chips.push(job.submission === "confirmed" ? "Submitted" : "Looks submitted");
+  const fill = job?.running
+    ? `<button type="button" class="px stop" id="stop">STOP</button>`
+    : `<button type="button" class="px" id="fill" ${me!.profileReady && onWeb ? "" : "disabled"}>${report ? "FILL AGAIN" : "FILL THIS APPLICATION"}</button>`;
+  const links = [
+    job?.applicationId && !job.submission && !job.running ? `<button type="button" class="link" id="applied">I applied</button>` : "",
+    job?.submission ? `<button type="button" class="link" id="not-applied">I didn't apply</button>` : "",
+    job?.cv ? `<button type="button" class="link" id="generate-cv">Generate CV</button>` : "",
+  ].filter(Boolean);
+  return `
+    <section class="page" aria-label="This page">
+      <span class="eyebrow">On this page${site ? ` · ${escape(site)}` : ""}</span>
+      ${onWeb ? `
+        <div class="job">
+          <span class="job-title">${escape(title || "This page")}</span>
+          ${company ? `<span class="job-company">${escape(company)}</span>` : ""}
         </div>
-      </div>`);
-  }
-  parts.push(`
-    <label class="toggle"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}> <span>Let me press Submit myself. Turn this off and Unnepo presses Submit too, once every field is filled.</span></label>
-    <button id="disconnect">Sign out of the extension</button>`);
-  return parts.join("");
+        ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
+      ` : `<p class="note">Open a job application in this tab.</p>`}
+      ${fill}
+      ${report?.needsYou.length ? `<p class="note warn">Still needs you:</p><ul class="needs">${report.needsYou.map((label) => `<li>${escape(label)}</li>`).join("")}</ul>` : ""}
+      ${report?.failed.length ? `<p class="note">Couldn't fill: ${report.failed.map((item) => escape(item.label)).join("; ")}</p>` : ""}
+      ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
+      ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
+      <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}>Let me press Submit myself.</label>
+    </section>`;
+}
+
+function profileCard(state: PanelState) {
+  const me = state.me!;
+  const on = Math.round(me.completeness / 5);
+  const missing = me.missing ?? [];
+  return `
+    <section class="profile" aria-label="Your profile">
+      <div class="row">
+        <span class="heading">Your profile</span>
+        <span class="mono">${me.completeness}% READY · ${me.credits} ${me.credits === 1 ? "CREDIT" : "CREDITS"}</span>
+      </div>
+      <div class="blocks" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}">
+        ${Array.from({ length: 20 }, (_, index) => `<span class="${index < on ? "on" : ""}"></span>`).join("")}
+      </div>
+      <a class="outline" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
+        Edit my info
+      </a>
+      ${me.profileReady ? "" : `<span class="small" style="color: var(--warn)">Finish your profile so there's something to fill with.</span>`}
+      ${missing.length ? `<span class="small">Missing: ${missing.map(escape).join(", ")}</span>` : ""}
+    </section>`;
 }
 
 /**
- * The job-site password card. It's drawn on its own, not with the rest of the panel, so a password being
- * typed isn't wiped when the panel refreshes.
+ * The job-site password. Drawn on its own, not with the rest of the panel, so a password being typed
+ * isn't wiped when the panel refreshes.
  */
 let passwordMode: "hidden" | "shown" | "editing" = "hidden";
 let passwordNote = "";
@@ -77,23 +177,25 @@ async function renderPassword() {
   if (!password) return;
   const rules = (value: string) => PASSWORD_RULES.map((rule) => `<li class="${rule.test(value) ? "met" : ""}">${escape(rule.label)}</li>`).join("");
   passwordSection.innerHTML = `
-    <h2>Job-site password</h2>
-    <p class="sub">Unnepo types this when a job site asks you to create an account or sign in. It stays on this computer and never goes to Unnepo.</p>
+    <span class="eyebrow">Job-site password</span>
+    <p class="note" style="color: var(--muted)">Used to make accounts and sign in. Stays on this computer, never goes to Unnepo.</p>
     ${passwordMode === "editing" ? `
-      <input type="text" id="new-password" autocomplete="off" spellcheck="false" placeholder="Your new password">
+      <input class="field" type="text" id="new-password" autocomplete="off" spellcheck="false" placeholder="Your new password" aria-label="New password">
       <ul class="rules" id="rules">${rules("")}</ul>
-      <p class="sub">Accounts you already made keep their old password.</p>
-      <div class="actions small"><button class="primary" id="save-password" disabled>Save password</button><button id="cancel-password">Cancel</button></div>
+      <p class="small">Accounts you already made keep their old password.</p>
+      <div class="links"><button type="button" class="solid" id="save-password" disabled>Save password</button><button type="button" class="link" id="cancel-password">Cancel</button></div>
     ` : `
-      <div class="secret">${passwordMode === "shown" ? escape(password) : "•".repeat(Math.min(password.length, 16))}</div>
-      <div class="actions small">
-        <button id="toggle-password">${passwordMode === "shown" ? "Hide" : "Show"}</button>
-        <button id="copy-password">Copy</button>
-        <button id="change-password">Change</button>
-        <button id="regenerate-password">Make a new one</button>
+      <div class="secret">
+        <span class="secret-text">${passwordMode === "shown" ? escape(password) : "•".repeat(Math.min(password.length, 16))}</span>
+        <button type="button" class="inline" id="toggle-password">${passwordMode === "shown" ? "Hide" : "Show"}</button>
+        <button type="button" class="inline" id="copy-password">Copy</button>
+      </div>
+      <div class="links">
+        <button type="button" class="link" id="change-password">Change</button>
+        <button type="button" class="link" id="regenerate-password">Make a new one</button>
       </div>
     `}
-    ${passwordNote ? `<p class="sub">${escape(passwordNote)}</p>` : ""}`;
+    ${passwordNote ? `<p class="small" role="status">${escape(passwordNote)}</p>` : ""}`;
   const redraw = (mode: typeof passwordMode, note = "") => { passwordMode = mode; passwordNote = note; void renderPassword(); };
   document.getElementById("toggle-password")?.addEventListener("click", () => redraw(passwordMode === "shown" ? "hidden" : "shown"));
   document.getElementById("copy-password")?.addEventListener("click", async () => {
@@ -120,33 +222,40 @@ async function renderPassword() {
   });
 }
 
+document.getElementById("version")!.textContent = `V${chrome.runtime.getManifest().version}`;
+document.getElementById("disconnect")!.addEventListener("click", async () => {
+  await ask({ type: "disconnect" });
+  void render();
+});
+
 async function render() {
   const state = await ask<PanelState>({ type: "state" });
   account.textContent = state.connected ? state.me!.user.email : "";
+  const said = lines(state);
+  speech(said.lines, said.alert);
   const wasHidden = passwordSection.hidden;
   passwordSection.hidden = !state.connected;
+  footer.hidden = !state.connected;
   if (state.connected && wasHidden) void renderPassword();
-  app.innerHTML = state.connected ? jobView(state) : connectView(state);
+  // Don't wipe a code being typed when something else changes.
+  if (!state.connected && document.getElementById("code") === document.activeElement) return;
+  app.innerHTML = state.connected ? pageCard(state) + profileCard(state) : connectView(state);
   document.getElementById("use-code")?.addEventListener("click", async () => {
     const code = (document.getElementById("code") as HTMLInputElement).value.trim();
     if (code.startsWith("unx_")) await ask({ type: "connect", token: code });
     void render();
   });
   document.getElementById("fill")?.addEventListener("click", () => void ask({ type: "fill", tabId: state.tab!.id }));
+  document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
   // Not connected to anything yet: CV generation is on its way.
   document.getElementById("generate-cv")?.addEventListener("click", (event) => {
     const button = event.currentTarget as HTMLButtonElement;
     button.disabled = true;
     button.textContent = "CV generation is coming soon";
   });
-  document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
   document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
-  document.getElementById("disconnect")?.addEventListener("click", async () => {
-    await ask({ type: "disconnect" });
-    void render();
-  });
 }
 
 chrome.runtime.onMessage.addListener((message) => {
