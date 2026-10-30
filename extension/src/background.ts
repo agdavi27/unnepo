@@ -59,15 +59,31 @@ async function api<T>(method: "GET" | "POST" | "DELETE", path: string, body?: un
   return payload as T;
 }
 
-async function resumeFile(): Promise<FileData | null> {
+/** The student's resume file from Unnepo. Says why when it can't (no resume, or the file is gone). */
+async function resumeFile(): Promise<{ file: FileData | null; error: string | null }> {
   const { token, apiBase } = await settings();
-  const response = await fetch(`${apiBase}/api/extension/resume`, { headers: { Authorization: `Bearer ${token}` } });
-  if (!response.ok) return null;
+  const response = await fetch(`${apiBase}/api/extension/resume`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+  if (!response) return { file: null, error: "Couldn't reach Unnepo to get your resume." };
+  if (!response.ok) {
+    const message = ((await response.json().catch(() => ({}))) as { error?: string }).error;
+    return { file: null, error: message || `Unnepo couldn't send your resume (${response.status}).` };
+  }
   const name = response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] ?? "Resume.pdf";
   const bytes = new Uint8Array(await response.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  return { name, mime: response.headers.get("content-type") ?? "application/pdf", base64: btoa(binary) };
+  return { file: { name, mime: response.headers.get("content-type") ?? "application/pdf", base64: btoa(binary) }, error: null };
+}
+
+/** Uploads a new resume to Unnepo from the panel. Unnepo reads it into the profile, like the website does. */
+async function uploadResume(name: string, mime: string, base64: string) {
+  const { token, apiBase } = await settings();
+  const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+  const form = new FormData();
+  form.append("file", new File([bytes], name, { type: mime }));
+  const response = await fetch(`${apiBase}/api/extension/resume`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) throw new Error(payload.error || `Upload failed (${response.status}).`);
 }
 
 const SITE_NAMES: Record<Scan["ats"], string> = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", workday: "Workday", other: "" };
@@ -193,6 +209,7 @@ async function run(tabId: number) {
   };
   let pressedAt = 0;
   let resume: FileData | null | undefined;
+  let resumeError: string | null = null;
   let llmCalls = 0;
   let lastStep = "";
   // Spiders crawl the whole time Unnepo is running, until it's submitted, something goes wrong, or Stop.
@@ -260,9 +277,14 @@ async function run(tabId: number) {
         const map = !applicationId || (!scan.useServerSchema && !scan.fields.length) ? { answers: [], llmCalls: 0 } : await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : scan.fields });
         llmCalls += map.llmCalls;
         const wantsCoverLetter = scan.useServerSchema ? map.answers.some((answer) => answer.id === "cover_letter") : scan.fields.some((field) => field.type === "file" && /cover ?letter/i.test(field.label));
-        const wantsResume = scan.useServerSchema ? map.answers.some((answer) => answer.id === "resume") : scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
+        // Any upload box that isn't for a cover letter gets the resume, whatever the server's answers say.
+        const wantsResume = scan.useServerSchema || scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
         if (scan.mentionsCv) await saveJob(tabId, { cv: true });
-        if (wantsResume && resume === undefined) resume = await resumeFile();
+        if (wantsResume && resume === undefined) {
+          const got = await resumeFile();
+          resume = got.file;
+          resumeError = got.error;
+        }
         const letter = wantsCoverLetter && applicationId ? await api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null) : null;
         if (!stillRunning(tabId, runId)) break;
         await step("Filling the form…", { llmCalls });
@@ -280,6 +302,8 @@ async function run(tabId: number) {
             }
           }
         }
+        // Say why the resume box is empty instead of leaving it a mystery.
+        if (report && wantsResume && !resume && resumeError) report = { ...report, failed: [...report.failed, { label: "Resume", reason: resumeError }] };
         if (report) {
           filledAll.push(...report.filled);
           await saveJob(tabId, { report: { ...report, filled: [...filledAll] }, llmCalls });
@@ -412,6 +436,21 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await chrome.storage.local.set({ jobSitePassword: password });
         return reply({ ok: true, password });
       }
+      // The panel's resume row: see it, or upload a new one.
+      case "get-resume": {
+        if (sender.tab) return reply({ ok: false });
+        const got = await resumeFile();
+        return reply({ ok: Boolean(got.file), file: got.file, error: got.error });
+      }
+      case "upload-resume":
+        if (sender.tab) return reply({ ok: false });
+        try {
+          await uploadResume(String(message.name), String(message.mime), String(message.base64));
+          void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+          return reply({ ok: true });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Upload failed." });
+        }
       case "set-auto-submit":
         await chrome.storage.local.set({ autoSubmit: Boolean(message.value) });
         return reply({ ok: true });

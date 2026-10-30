@@ -9,6 +9,7 @@ import { saveStudentProfile } from "@/lib/profile/service";
 import { login, signUp, userFromSessionToken, verifyEmail } from "@/lib/services/auth";
 import { GET, OPTIONS, POST } from "@/app/api/[...slug]/route";
 import { useTempDb } from "./helpers";
+import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 
 const model = vi.hoisted(() => ({ replies: [] as string[], calls: 0 }));
@@ -200,5 +201,37 @@ describe("job-site password", () => {
     expect(unmetRules("abc")).toEqual(["A numeric character", "An uppercase character", "A special character", "A minimum of 8 characters"]);
     expect(unmetRules("Summer2026!")).toEqual([]);
     expect(unmetRules("        ")).toContain("A special character");
+  });
+});
+
+describe("resume from the extension", () => {
+  it("uploads a new resume, shows it in the panel's info, and serves the file back", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const before = await (await call("GET", "me", token)).json();
+    expect(before.resume).toBeNull();
+    // No resume yet: the download says so instead of failing silently.
+    const missing = await call("GET", "resume", token);
+    expect(missing.status).toBe(404);
+    expect((await missing.json()).error).toMatch(/upload a resume/i);
+
+    const bytes = await coverLetterPdf("Pat Doe. Colby College, B.A. Economics, May 2027. Led the Colby Data Club.", { name: "Pat Doe", contact: [] });
+    const form = new FormData();
+    form.append("file", new File([Buffer.from(bytes)], "Pat Doe Resume.pdf", { type: "application/pdf" }));
+    const upload = await POST(new Request("https://unneponew.vercel.app/api/extension/resume", { method: "POST", headers: { Authorization: `Bearer ${token}`, Origin: "chrome-extension://abcdefghijklmnop" }, body: form }), { params: Promise.resolve({ slug: ["extension", "resume"] }) });
+    expect(upload.status).toBe(200);
+
+    const after = await (await call("GET", "me", token)).json();
+    expect(after.resume).toMatchObject({ fileName: "Pat Doe Resume.pdf", file: true });
+    // The stored file is the whole file (the PDF reader used to leave it empty).
+    expect((await readStoredResume((await repo.getLatestResume(userId))!.storagePath))?.byteLength).toBe(bytes.byteLength);
+    const file = await call("GET", "resume", token);
+    expect(file.status).toBe(200);
+    expect(file.headers.get("content-disposition")).toContain("Pat Doe Resume.pdf");
+    expect(new Uint8Array(await file.arrayBuffer()).byteLength).toBe(bytes.byteLength);
+
+    // Without the extension's token, nothing.
+    const anonymous = await POST(new Request("https://unneponew.vercel.app/api/extension/resume", { method: "POST", body: new FormData() }), { params: Promise.resolve({ slug: ["extension", "resume"] }) });
+    expect(anonymous.status).toBe(401);
   });
 });

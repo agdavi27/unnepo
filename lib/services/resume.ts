@@ -16,13 +16,16 @@ export async function storeResume(userId: string, fileName: string, mime: string
   if (bytes.byteLength > MAX_BYTES) throw new ServiceError("Resumes need to be 10 MB or smaller.", "file_size");
   const hash = sha256Buffer(bytes);
   const cached = await repo.getResumeByHash(userId, hash);
-  if (cached) {
+  // An earlier upload of the same file whose bytes were lost (saved empty) is stored again, not reused.
+  if (cached && cached.byteSize > 0 && (await readStoredResume(cached.storagePath))?.byteLength) {
     const facts = await repo.getFacts(userId);
     return { resume: cached, facts, cached: true };
   }
   let text = "";
   try {
-    text = await extractResumeText(fileName, bytes);
+    // The PDF reader takes over the buffer it's given (leaving it empty), so it gets a copy. Before this,
+    // resumes were saved as 0-byte files and the extension had nothing to attach.
+    text = await extractResumeText(fileName, bytes.slice());
   } catch (error) {
     console.error(error);
     throw new ServiceError("Could not read that file. Use a text-based PDF or DOCX, not a photo of a resume.", "parse");
@@ -59,6 +62,9 @@ export async function storeResume(userId: string, fileName: string, mime: string
 }
 
 export async function saveResumeBytes(dir: string, relativePath: string, bytes: Uint8Array, mime: string) {
+  // On Vercel the local disk is temporary and differs between requests, so a file written there can be
+  // gone when the extension asks for it. The storage bucket comes first whenever it's set up.
+  if (process.env.VERCEL && (await putResumeObject(relativePath, bytes, mime))) return `supabase:${relativePath}`;
   const storagePath = path.join(dir, "resumes", relativePath);
   try {
     mkdirSync(path.dirname(storagePath), { recursive: true });

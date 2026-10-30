@@ -23,13 +23,15 @@ const DAILY_AI_CALLS = Number(process.env.EXTENSION_DAILY_AI_CALLS || 60);
 const CACHE_LIMIT = 400;
 
 export async function extensionMe(userId: string) {
-  const [user, credits, state] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId)]);
+  const [user, credits, state, resume] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId)]);
   return {
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: credits?.balance ?? 0,
     profileReady: state.ready,
     completeness: state.profile.completeness,
     // What the panel lists under "Missing": the parts of the profile still to fill in, required ones first.
+    // The resume the extension attaches. `file` is false when only its text was kept, so it must be uploaded again.
+    resume: resume ? { fileName: resume.fileName, uploadedAt: resume.createdAt, file: Boolean(resume.storagePath) && resume.byteSize > 0 } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
   };
 }
@@ -50,7 +52,8 @@ export async function extensionProfile(userId: string) {
 export async function extensionResume(userId: string) {
   const resume = await repo.getLatestResume(userId);
   const bytes = resume?.storagePath ? await readStoredResume(resume.storagePath) : null;
-  if (!resume || !bytes) throw new ServiceError("Upload a resume in Unnepo first.", "no_resume", 404);
+  if (!resume) throw new ServiceError("Upload a resume in Unnepo first.", "no_resume", 404);
+  if (!bytes?.byteLength) throw new ServiceError("Unnepo has your resume's text but not the file. Upload it again.", "no_resume_file", 404);
   return { bytes, fileName: resume.fileName, mime: resume.mime || "application/pdf" };
 }
 

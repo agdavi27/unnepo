@@ -86,6 +86,10 @@ export async function fillGreenhouse(answers: Answer[], files: { resume: FileDat
   await greenhouseReady();
   const filled: string[] = [];
   const failed: Array<{ label: string; reason: string }> = [];
+  // The resume goes in even when the server didn't list it (a profile without its file name, say).
+  if (files.resume && byId("resume") && !answers.some((answer) => answer.id === "resume")) {
+    answers = [...answers, { id: "resume", label: "Resume/CV", type: "file", required: true, values: [files.resume.name], source: "resume_file", why: null }];
+  }
   for (const answer of answers) {
     if (!answer.values.length) continue;
     if (!byId(answer.id)) continue; // fields the form may add (education, phone country) only when present

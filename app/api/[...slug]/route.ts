@@ -314,6 +314,16 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   }
   if (action === "me" && method === "GET") return json(await extensionMe(user.id));
   if (action === "profile" && method === "GET") return json(await extensionProfile(user.id));
+  if (action === "resume" && method === "POST") {
+    if (!rateLimit(`extension-resume:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of uploads in an hour. Try again later.", "rate_limited", 429);
+    const form = await request.formData();
+    const file = form.get("file");
+    if (!(file instanceof File)) throw new ServiceError("Choose a resume file.", "file");
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (!bytes.byteLength) throw new ServiceError("That file was empty. Choose the resume again.", "file");
+    const state = await uploadProfileResume(user.id, { name: file.name, type: file.type, bytes });
+    return json({ ok: true, completeness: state.profile.completeness });
+  }
   if (action === "resume" && method === "GET") {
     const file = await extensionResume(user.id);
     return new Response(Buffer.from(file.bytes), { headers: { "Content-Type": file.mime, "Content-Disposition": `attachment; filename="${file.fileName.replace(/"/g, "")}"`, "Cache-Control": "private, no-store" } });

@@ -105,3 +105,8 @@ a.px { display: flex; align-items: center; justify-content: center; text-decorat
 .bob { animation: bob 2.8s steps(3) infinite; }
 .blink { animation: blink .9s steps(1) infinite; }
 @media (prefers-reduced-motion: reduce) { .bob, .blink, .px { animation: none; transition: none; } }
+
+/* Resume row (same box as the password) */
+.resume-row { gap: 8px; }
+.resume-name { font-family: Geist, sans-serif; letter-spacing: 0; font-size: 13px; }
+.inline:disabled { opacity: .5; cursor: default; }

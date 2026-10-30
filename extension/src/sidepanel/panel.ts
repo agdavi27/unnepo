@@ -143,6 +143,56 @@ function pageCard(state: PanelState) {
     </section>`;
 }
 
+/** What happened with the last See / Replace, kept across re-renders. */
+let resumeNote = "";
+let resumeBusy = false;
+
+function resumeRow(state: PanelState) {
+  const resume = state.me!.resume;
+  const when = resume ? new Date(resume.uploadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+  const name = resume ? escape(resume.fileName) : "No resume yet";
+  return `
+    <div class="secret resume-row">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--muted)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path></svg>
+      <span class="secret-text resume-name" title="${name}">${name}</span>
+      ${resume?.file ? `<button type="button" class="inline" id="see-resume" ${resumeBusy ? "disabled" : ""}>See</button>` : ""}
+      <button type="button" class="inline" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Replace" : "Upload"}</button>
+    </div>
+    <span class="small" role="status">${resumeNote ? escape(resumeNote) : resume && !resume.file ? "Unnepo only has this resume's text, not the file. Upload it again so it can be attached." : resume ? `Uploaded ${when} · attached to every application` : "Upload a PDF or DOCX. It's attached to every application."}</span>`;
+}
+
+async function seeResume() {
+  resumeBusy = true;
+  resumeNote = "Opening…";
+  void render();
+  const result = await ask<{ ok: boolean; file?: { name: string; mime: string; base64: string }; error?: string }>({ type: "get-resume" });
+  resumeBusy = false;
+  if (result.ok && result.file) {
+    const bytes = Uint8Array.from(atob(result.file.base64), (char) => char.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: result.file.mime }));
+    void chrome.tabs.create({ url });
+    resumeNote = "";
+  } else {
+    resumeNote = `${result.error ?? "Couldn't open your resume."} Replace it to fix this.`;
+  }
+  void render();
+}
+
+async function replaceResume(file: File) {
+  if (!/\.(pdf|docx)$/i.test(file.name)) { resumeNote = "Choose a PDF or DOCX file."; return void render(); }
+  if (file.size > 10 * 1024 * 1024) { resumeNote = "Resumes need to be 10 MB or smaller."; return void render(); }
+  resumeBusy = true;
+  resumeNote = "Uploading and reading your resume…";
+  void render();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  const result = await ask<{ ok: boolean; error?: string }>({ type: "upload-resume", name: file.name, mime: file.type || "application/pdf", base64: btoa(binary) });
+  resumeBusy = false;
+  resumeNote = result.ok ? "New resume saved. It goes on every application from now on." : result.error ?? "Upload failed.";
+  void render();
+}
+
 function profileCard(state: PanelState) {
   const me = state.me!;
   const on = Math.round(me.completeness / 5);
@@ -160,6 +210,7 @@ function profileCard(state: PanelState) {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"></path><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"></path></svg>
         Edit my info
       </a>
+      ${resumeRow(state)}
       ${me.profileReady ? "" : `<span class="small" style="color: var(--warn)">Finish your profile so there's something to fill with.</span>`}
       ${missing.length ? `<span class="small">Missing: ${missing.map(escape).join(", ")}</span>` : ""}
     </section>`;
@@ -222,6 +273,14 @@ async function renderPassword() {
   });
 }
 
+// The file picker lives outside the redrawn part of the panel, so a refresh can't lose the chosen file.
+const resumeInput = document.getElementById("resume-input") as HTMLInputElement;
+resumeInput.addEventListener("change", () => {
+  const file = resumeInput.files?.[0];
+  resumeInput.value = "";
+  if (file) void replaceResume(file);
+});
+
 document.getElementById("version")!.textContent = `V${chrome.runtime.getManifest().version}`;
 document.getElementById("disconnect")!.addEventListener("click", async () => {
   await ask({ type: "disconnect" });
@@ -253,6 +312,8 @@ async function render() {
     button.disabled = true;
     button.textContent = "CV generation is coming soon";
   });
+  document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
+  document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
   document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
