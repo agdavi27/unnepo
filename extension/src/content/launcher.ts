@@ -1,10 +1,13 @@
 import { H, spiderRects, W } from "../shared/sprite";
+import { watchEdits } from "./edits";
 
 /**
  * The little spider that drops down on the right of a job page, like a "fill with" button. It runs on
  * job systems and on pages whose address mentions jobs, careers, or applying, and only shows once the
  * page looks like a job posting or an application. Clicking it opens the Unnepo side panel. It sends
- * nothing anywhere and reads nothing but whether the page looks like a job page.
+ * nothing anywhere and reads nothing but whether the page looks like a job page, which questions the
+ * student answered by hand (marked on the page only, so Fill leaves them alone), and whether the page says
+ * the application went through (told to the extension, for the dancing spiders).
  */
 
 const ATS_HOST = /(myworkdayjobs|myworkdaysite|greenhouse|lever\.co|ashbyhq|workable|smartrecruiters|icims|jobvite|bamboohr|paycomonline|paylocity|ultipro|ukg|taleo|successfactors|breezy\.hr|recruitee|teamtailor|rippling|applytojob|dayforcehcm|oraclecloud|eightfold|avature|phenom|gem\.com|dover\.com|wellfound)\./i;
@@ -78,6 +81,47 @@ function show() {
 function dismissed() {
   try { return sessionStorage.getItem(DISMISSED) === "1"; } catch { return false; }
 }
+
+// What a page says once an application went through. Stricter than the filler's check, since this runs on
+// every job page: "Thank you for your interest" also opens many postings.
+const RECEIVED = /(application (has been |was )?(successfully )?(submitted|received)|we(?:'|’| ha)?ve received your application|thank(s| you) for (applying|submitting your application)|successfully (submitted|applied)|your application is (in|complete))/i;
+
+/**
+ * Watches for the page saying the application was received or submitted, however it got there (Unnepo
+ * filling it, or the student doing it all), and tells the extension once, so the spiders come out and dance.
+ */
+function watchForReceived() {
+  let told = false;
+  let pending = 0;
+  const check = () => {
+    pending = 0;
+    if (told || !document.body) return;
+    // A page still showing a form isn't the confirmation, whatever its small print says.
+    const boxes = Array.from(document.querySelectorAll<HTMLElement>("input:not([type=hidden]):not([type=search]), textarea, select")).filter((el) => el.getBoundingClientRect().height > 0);
+    if (boxes.length > 4) return;
+    const text = (document.body.innerText || "").replace(/\s+/g, " ");
+    const match = text.match(RECEIVED);
+    if (!match) return;
+    told = true;
+    observer.disconnect();
+    const start = Math.max(0, (match.index ?? 0) - 40);
+    try {
+      void chrome.runtime.sendMessage({ type: "received-page", text: text.slice(start, start + 200), url: location.href }).catch(() => undefined);
+    } catch {
+      // The extension was reloaded; this copy of the script is cut off.
+    }
+  };
+  const observer = new MutationObserver(() => {
+    if (!pending) pending = window.setTimeout(check, 800);
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  check();
+}
+
+// Notes which questions the student answers by hand, so Fill never types over them.
+watchEdits();
+
+if (window.top === window && !/(^|\.)linkedin\.com$|unneponew\.vercel\.app$|^localhost$/.test(location.hostname)) watchForReceived();
 
 // Job sites build their pages after loading, so it checks a few times over the first half minute.
 if (window.top === window && !/(^|\.)linkedin\.com$|unneponew\.vercel\.app$|^localhost$/.test(location.hostname) && !dismissed()) {

@@ -301,6 +301,19 @@ export function handshakeJob(where: { hostname: string; pathname: string } = win
   return { title: title.slice(0, 200), company: (employer || logo || "").slice(0, 200), description };
 }
 
+// What job sites call themselves, which isn't the company's name.
+const JOB_SITE_NAME = /^(workday|greenhouse|lever|ashby|icims|smartrecruiters|jobvite|taleo|workable|careers?|jobs?|job application)$/i;
+
+/**
+ * Workday pages call themselves "Workday". The company is the tenant: "nvidia.wd5.myworkdayjobs.com", or
+ * "wd1.myworkdaysite.com/recruiting/nvidia/...". Words run together ("searchinfluence") until Unnepo reads the posting.
+ */
+export function workdayCompany(where: { hostname: string; pathname: string } = window.location) {
+  const parts = where.pathname.split("/").filter(Boolean).filter((part) => !/^[a-z]{2}-[A-Z]{2}$/.test(part));
+  const tenant = where.hostname.endsWith(".myworkdayjobs.com") ? where.hostname.split(".")[0] : parts[0] === "recruiting" ? parts[1] ?? "" : "";
+  return tenant.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
+}
+
 /** What the page is: the job system, title and company, and the form's fields. */
 export function scanPage(): Scan {
   const host = window.location.hostname;
@@ -311,7 +324,9 @@ export function scanPage(): Scan {
   const greenhouseTitle = document.title.match(/^Job Application for (.+) at (.+)$/);
   const handshake = handshakeJob();
   const title = (handshake?.title || greenhouseTitle?.[1] || heading || meta("og:title") || document.title).slice(0, 200);
-  const company = (handshake?.company || greenhouseTitle?.[2] || meta("og:site_name") || host.replace(/^(www|jobs|careers|boards|apply)\./, "").split(".")[0]).slice(0, 200);
+  const siteName = meta("og:site_name");
+  const company = (handshake?.company || greenhouseTitle?.[2] || (ats === "workday" ? workdayCompany() : "")
+    || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || host.replace(/^(www|jobs|careers|boards|apply)\./, "").split(".")[0]).slice(0, 200);
   const frame = document.querySelector<HTMLIFrameElement>("iframe#grnhse_iframe, iframe[src*='greenhouse.io/embed'], iframe[src*='jobs.lever.co'], iframe[src*='ashbyhq.com']");
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);
   return {

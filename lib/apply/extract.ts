@@ -151,6 +151,31 @@ function parseWorkday(url: URL): ParsedUrl | null {
   return { ats: "workday", board: `${host}|${tenant}|${site}`, jobId: path.join("/"), url };
 }
 
+// Names that belong to the job site, not the company: what a Workday or Greenhouse page calls itself.
+const JOB_SITE_NAME = /^(workday|myworkday(jobs|site)?|greenhouse|lever|ashby|ashbyhq|icims|smartrecruiters|jobvite|taleo|successfactors|workable|bamboohr|recruitee|teamtailor|rippling|paycom(online)?|paylocity|ultipro|ukg|dayforce(hcm)?|oracle ?cloud|eightfold|avature|phenom|breezy|applytojob|wd\d+|careers?|jobs?|apply|boards?|job application|candidate home|sign in)$/i;
+
+/** Whether a page's name for the company is really the job site's own name ("Workday"). */
+export function isJobSiteName(name: string) {
+  const plainName = name.replace(/\s+/g, " ").trim();
+  return !plainName || JOB_SITE_NAME.test(plainName);
+}
+
+/** The company a job link names: Workday's tenant, or the board's slug on Greenhouse, Lever and Ashby. */
+export function companyFromUrl(raw: string) {
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const parts = url.pathname.split("/").filter(Boolean).filter((part) => !/^[a-z]{2}-[A-Z]{2}$/.test(part));
+    let slug = "";
+    if (host.endsWith(".myworkdayjobs.com")) slug = host.split(".")[0];
+    else if (host.endsWith("myworkdaysite.com") && parts[0] === "recruiting") slug = parts[1] ?? "";
+    else if (/(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com)$/.test(host)) slug = parts[0] === "embed" ? url.searchParams.get("for") ?? "" : parts[0] ?? "";
+    return slug && !isJobSiteName(slug) ? humanize(slug) : "";
+  } catch {
+    return "";
+  }
+}
+
 /** One key per job, so pasting the same posting twice finds the first application. */
 export function jobKeyFor(parsed: ParsedUrl) {
   if (parsed.ats === "workday") {

@@ -26,7 +26,7 @@ export function acceptFixes(fields: EmptyField[], proposals: Proposal[], context
   for (const proposal of proposals) {
     const index = Number(proposal.index);
     const field = fields[index];
-    let value = String(proposal.value ?? "").trim().slice(0, 2000);
+    let value = String(proposal.value ?? "").trim().slice(0, 4000);
     const source = String(proposal.source ?? "");
     const evidence = String(proposal.evidence ?? "").trim();
     if (!field || !value || out.some((item) => item.index === index)) continue;

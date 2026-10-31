@@ -315,7 +315,65 @@ export function acceptAiAnswer(question: ApplicationQuestion, answer: string, ev
   if (evidence.trim().length < 4 || !supportedBy(evidence, sources)) return null;
   if (question.kind === "select") return matchOption(answer, question.options);
   if (question.kind === "file" || question.kind === "unknown") return null;
-  return answer.trim().slice(0, question.kind === "textarea" ? 2000 : 300) || null;
+  return (question.kind === "textarea" ? plainWriting(answer).slice(0, 4000) : answer.trim().slice(0, 300)) || null;
+}
+
+/** How every written answer should sound: like the student typed it, not like a model wrote it. */
+export const WRITING_STYLE = `How written answers sound:
+- Like the student typed it themselves: first person, plain everyday words, specific. A sharp college student, not a cover letter template or a press release.
+- Start with something concrete they did (a job, a class project, a club, a result), then tie it to one specific thing about this company or role from the posting. Name real things; skip general praise.
+- Mix short and longer sentences. Contractions are fine. One idea per sentence.
+- Never use em dashes or en dashes. Use commas or periods.
+- Never use these words or phrases: excited, thrilled, eager, passionate, passion, leverage, align, aligns, dynamic, fast-paced, furthermore, moreover, additionally, in today's, unique opportunity, meaningful impact, honed, foster, delve, testament, invaluable, synergy, cutting-edge, journey, landscape, I believe, I am confident, resonate, deeply, truly, seamless, robust, showcase, spearhead, utilize.
+- Don't restate the question, don't open with "As a ...", and don't end with a summary or a thank-you line. No lists or headings.
+- Length: if the question states one (words or characters), meet it: a bit over a minimum, under a maximum. Otherwise 60 to 110 words.`;
+
+const NUMBER_WORDS: Record<string, number> = { fifty: 50, hundred: 100, "one hundred": 100, "two hundred": 200, "three hundred": 300, "five hundred": 500 };
+
+/** The length a question asks for ("In at least 100 words", "250 characters max", "150-300 words"). */
+export function askedLength(label: string) {
+  const text = label.toLowerCase().replace(/,(\d{3})/g, "$1").replace(/\b(one hundred|two hundred|three hundred|five hundred|fifty|hundred)\b/g, (word) => String(NUMBER_WORDS[word]));
+  const unit = "(words?|characters?|chars?)";
+  const out: { minWords?: number; maxWords?: number; minChars?: number; maxChars?: number } = {};
+  const set = (kind: "min" | "max", count: number, what: string) => {
+    if (/^word/.test(what)) out[kind === "min" ? "minWords" : "maxWords"] = count;
+    else out[kind === "min" ? "minChars" : "maxChars"] = count;
+  };
+  const range = text.match(new RegExp(`(\\d+)\\s*(?:-|–|to)\\s*(\\d+)\\s*${unit}`));
+  if (range) {
+    set("min", Number(range[1]), range[3]);
+    set("max", Number(range[2]), range[3]);
+    return out;
+  }
+  const min = text.match(new RegExp(`(?:at least|minimum(?: of)?|min\\.?|no (?:fewer|less) than|(?<!no )more than)\\s*(\\d+)\\s*${unit}`)) ?? text.match(new RegExp(`(\\d+)\\s*${unit}\\s*(?:minimum|min\\b|or more)`));
+  if (min) set("min", Number(min[1]), min[2]);
+  const max = text.match(new RegExp(`(?:at most|maximum(?: of)?|max\\.?|up to|no more than|under|less than|fewer than|within|limit(?:ed)? to|limit of)\\s*(\\d+)\\s*${unit}`)) ?? text.match(new RegExp(`(\\d+)\\s*${unit}\\s*(?:max(?:imum)?|or (?:less|fewer)|limit)`));
+  if (max) set("max", Number(max[1]), max[2]);
+  return out;
+}
+
+export const wordCount = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+
+/** How far a written answer is from the length its question asks for, in words (characters count as a sixth); 0 fits. */
+export function lengthGap(label: string, answer: string) {
+  const asked = askedLength(label);
+  const words = wordCount(answer);
+  const chars = answer.trim().length;
+  return Math.max(0, (asked.minWords ?? 0) - words) + Math.max(0, words - (asked.maxWords ?? Infinity))
+    + (Math.max(0, (asked.minChars ?? 0) - chars) + Math.max(0, chars - (asked.maxChars ?? Infinity))) / 6;
+}
+
+/** Whether a written answer is the length its question asks for. */
+export const fitsLength = (label: string, answer: string) => lengthGap(label, answer) === 0;
+
+/** Takes out the marks that make writing read as AI-written: dashes between clauses, curly quotes left as is. */
+export function plainWriting(text: string) {
+  return text
+    .replace(/\s*[—–]\s*/g, ", ")
+    .replace(/\s+-{2,}\s+/g, ", ")
+    .replace(/,\s*,/g, ",")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 export const AI_ANSWER_PROMPT = `You help a college student fill out a job application. You get the open form questions and the student's own profile and resume.
@@ -324,6 +382,7 @@ Rules:
 - Never invent experience, dates, numbers, skills, schools, or employers.
 - Never answer questions about gender, race, ethnicity, veteran or disability status, age, citizenship, visa sponsorship, work authorization, salary, or criminal history. Skip them.
 - For questions with options, the answer must be exactly one of the options.
-- For short essay questions, write two to four plain sentences that use only facts from the profile or resume, and quote the main fact you used as evidence.
+- For essay questions, use only facts from the profile or resume plus what the job posting says, and quote the main resume fact you used as evidence.
 - If you can't support an answer, leave that question out.
+${WRITING_STYLE}
 Return only JSON: {"answers":[{"key":"...","answer":"...","evidence":"..."}]}`;

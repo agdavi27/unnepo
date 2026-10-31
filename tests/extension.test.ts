@@ -356,6 +356,21 @@ describe("phone numbers next to a country code dropdown", () => {
   });
 });
 
+describe("company names on job sites", () => {
+  it("names the company from the link when the page only says Workday, and fixes ones saved that way", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const url = "https://searchinfluence.wd1.myworkdayjobs.com/en-US/careers/job/New-Orleans/Analyst_R9/apply";
+    const made = await (await call("POST", "jobs", token, { url, title: "Analyst", company: "Workday" })).json();
+    expect(made.application.company).toBe("Searchinfluence");
+    // One saved before the fix, on a site Unnepo can't read: the link still names the company.
+    await applications.update(userId, made.application.id, { company: "Workday" });
+    const listed = await (await call("GET", "jobs", token)).json();
+    expect(listed.jobs.find((job: { id: string }) => job.id === made.application.id).company).toBe("Searchinfluence");
+    expect((await applications.get(userId, made.application.id))?.company).toBe("Searchinfluence");
+  });
+});
+
 describe("autofill failure records", () => {
   it("keeps what the extension tried on the application and counts the failures for the admin page", async () => {
     const userId = await readyStudent();

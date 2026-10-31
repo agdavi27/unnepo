@@ -218,15 +218,28 @@ export function startSpiders(drop = true) {
 }
 
 const DANCE_MS = 4800;
+// How long a fresh batch takes to drop down its threads, the last one a beat after the first.
+const LAND_MS = 1500;
 let dancing = false;
+let celebrated = false;
 
 /**
- * The application went through: every spider still on the screen jumps up and dances on the spot for a few
- * seconds, then scurries off. Nothing happens when they've already gone.
+ * The application went through: the spiders jump up and dance on the spot for a few seconds, then scurry
+ * off. Ones still on the screen dance where they are; with none out, a batch drops in to dance. Once a page.
  */
 export function celebrateSpiders() {
+  if (celebrated) return;
+  celebrated = true;
   // Spiders already heading off come back to dance too, as long as they're still on the page.
-  if (!host || !spiders.some((spider) => spider.phase !== "gone")) return;
+  if (host && spiders.some((spider) => spider.phase !== "gone")) return dance();
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  startSpiders(true);
+  dancing = true;
+  window.setTimeout(dance, LAND_MS);
+}
+
+function dance() {
+  if (!host) return;
   clearTimeout(exitTimer);
   dancing = true;
   leaving = false;

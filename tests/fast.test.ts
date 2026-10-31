@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { mapAnswers } from "@/lib/apply/fast/mapper";
 import { knownAnswers, mappingFromQuestions, questionsFromMapping } from "@/lib/apply/fast/pipeline";
 import { parseGreenhouse, type GreenhouseJobJson } from "@/lib/apply/fast/schema";
-import { planAnswers } from "@/lib/apply/questions";
+import { askedLength, fitsLength, planAnswers, plainWriting } from "@/lib/apply/questions";
 import { degreeAnswer, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import type { ApplicationProfile } from "@/lib/apply/types";
 
@@ -114,6 +114,38 @@ describe("field mapping", () => {
     expect(value("question_68935296")).toBeUndefined();
     expect(value("question_68935297[]")).toEqual(["US"]);
     expect(value("question_69457836")).toBeUndefined();
+  });
+
+  it("writes essays the length the question asks, from the posting as well as the resume", async () => {
+    const label = "In at least 100 words, tell us why you want to work for Search Influence over other companies now hiring.";
+    const schema = { ...stripe, company: "Search Influence", description: "Search Influence is a digital marketing agency in New Orleans that runs SEO and paid search for clients.", fields: [{ id: "why", label, type: "textarea" as const, required: true, options: [], section: "question" as const, sensitive: false }] };
+    const short = "At Maine Credit Union I built loan dashboards in Tableau used by the lending team — and I liked seeing people use them.";
+    const long = `${"I built loan dashboards in Tableau used by the lending team at Maine Credit Union, and the part I liked most was watching loan officers change what they did because of a chart. ".repeat(4)}Search Influence runs SEO and paid search for clients, so the work is measured and shown to clients every week.`;
+    const prompts: string[] = [];
+    const mapped = await mapAnswers({
+      schema, known: () => null, facts: "", sources: resumeText, consent: false, resumeFileName: null,
+      ask: async (system) => {
+        prompts.push(system);
+        // The quote may come from the posting: "why this company" answers lean on it.
+        if (prompts.length === 1) return JSON.stringify({ answers: [{ id: "why", value: short, source: "resume", evidence: "Search Influence is a digital marketing agency in New Orleans" }] });
+        return JSON.stringify({ answers: [{ id: "why", value: long }] });
+      },
+    });
+    expect(prompts[0]).toContain("Never use em dashes");
+    // Too short for "at least 100 words": rewritten once.
+    expect(mapped.llmCalls).toBe(2);
+    expect(mapped.answers.get("why")?.values[0]).toBe(long);
+    expect(fitsLength(label, long)).toBe(true);
+  });
+
+  it("reads the length a question asks for, and takes out AI-looking dashes", () => {
+    expect(askedLength("In at least 100 words, tell us why")).toEqual({ minWords: 100 });
+    expect(askedLength("Describe a project (250 characters max)")).toEqual({ maxChars: 250 });
+    expect(askedLength("150-300 words: why us?")).toEqual({ minWords: 150, maxWords: 300 });
+    expect(askedLength("Please answer in no more than 200 words")).toEqual({ maxWords: 200 });
+    expect(askedLength("In one hundred words or less")).toEqual({ maxWords: 100 });
+    expect(askedLength("Why do you want this job?")).toEqual({});
+    expect(plainWriting("I built dashboards — the team used them – daily.")).toBe("I built dashboards, the team used them, daily.");
   });
 
   it("round-trips through the review screen, keeping the student's edits", () => {

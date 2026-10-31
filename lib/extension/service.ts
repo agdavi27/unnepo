@@ -1,8 +1,8 @@
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { createApplication, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
-import { extractJob, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
+import { createApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { companyFromUrl, extractJob, isJobSiteName, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { buildMapping, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
 import { classifyQuestion, normalizeLabel } from "@/lib/apply/questions";
@@ -73,8 +73,10 @@ function keyFor(url: string) {
 async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string }) {
   let ats: JobApplication["ats"] = "other";
   try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
+  // A Workday page calls itself "Workday"; the link names the company.
+  const company = isJobSiteName(input.company) ? companyFromUrl(input.url) || input.company : input.company;
   const { app } = await applications.insert({
-    userId, jobKey: keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: input.company.slice(0, 200), companyDomain: null,
+    userId, jobKey: keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: company.slice(0, 200), companyDomain: null,
     department: null, location: null, description: input.description ?? "", requirements: [], applicationUrl: input.url, postedRecruiter: null, status: "extracted",
     statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
     contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
@@ -120,7 +122,7 @@ export async function extensionJob(userId: string, raw: unknown) {
 
 /** The student's jobs for the panel's "My jobs": the newest first, with just what the list shows. */
 export async function extensionJobs(userId: string) {
-  const apps = await applications.list(userId);
+  const apps = await repairCompanies(userId, await applications.list(userId));
   return {
     jobs: apps.slice(0, 30).map((app) => ({
       id: app.id, title: app.title, company: app.company, status: app.status, url: app.applicationUrl || app.jobUrl,
@@ -137,7 +139,7 @@ async function enrichFromPosting(userId: string, applicationId: string, url: str
     await applications.update(userId, applicationId, {
       ats: job.ats, department: job.department, location: job.location, description: job.description,
       requirements: job.requirements, applicationUrl: job.applicationUrl, postedRecruiter: job.postedRecruiter,
-      ...(job.title ? { title: job.title } : {}), ...(job.company ? { company: job.company } : {}),
+      ...(job.title ? { title: job.title } : {}), ...(job.company && !isJobSiteName(job.company) ? { company: job.company } : {}),
     });
   } catch {
     // Signed-in portals and unknown job systems: the title and company from the page stay.

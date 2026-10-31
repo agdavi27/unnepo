@@ -7,7 +7,7 @@ import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
-import { extractJob } from "@/lib/apply/extract";
+import { companyFromUrl, extractJob, isJobSiteName } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { profileReady } from "@/lib/profile/service";
@@ -221,8 +221,32 @@ export function summary(app: JobApplication) {
   return { ...app, description: app.description.slice(0, 4000), missing: missing.map((question) => question.key) };
 }
 
+// Jobs whose company couldn't be found, so a page load doesn't read their posting again.
+const companyTries = new Set<string>();
+
+/**
+ * Jobs saved with the job site's name as the company ("Workday") get the company's name: from the posting
+ * when Unnepo can read it, else from the link. Saved, so it's fixed once.
+ */
+export async function repairCompanies(userId: string, apps: JobApplication[]) {
+  return Promise.all(apps.map(async (app) => {
+    if (!isJobSiteName(app.company) || companyTries.has(app.id)) return app;
+    companyTries.add(app.id);
+    let company = "";
+    try {
+      company = (await extractJob(app.jobUrl)).company;
+    } catch {
+      // A posting that closed or needs signing in: the link still names the company.
+    }
+    if (!company || isJobSiteName(company)) company = companyFromUrl(app.jobUrl) || companyFromUrl(app.applicationUrl ?? "");
+    if (!company) return app;
+    return (await applications.update(userId, app.id, { company: company.slice(0, 200) })) ?? app;
+  }));
+}
+
 export async function applyState(userId: string) {
-  const [apps, info] = await Promise.all([applications.list(userId), student(userId)]);
+  const [saved, info] = await Promise.all([applications.list(userId), student(userId)]);
+  const apps = await repairCompanies(userId, saved);
   // A new resume is read in the background, so blank details fill from it without waiting for an application.
   if (info.resumeText.trim() && !info.profile.resumeProfile && Date.now() - (resumeReads.get(userId) ?? 0) > 120_000) {
     resumeReads.set(userId, Date.now());

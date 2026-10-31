@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { acceptFixes, type EmptyField } from "@/lib/apply/fast/fields";
 import { bestOption } from "@/lib/apply/options";
-import { answerChoices } from "@/lib/apply/questions";
+import { WRITING_STYLE, answerChoices, askedLength, fitsLength, lengthGap, plainWriting, wordCount } from "@/lib/apply/questions";
 import type { FormSchema, SchemaField } from "@/lib/apply/fast/schema";
 
 /**
@@ -20,10 +20,30 @@ Rules:
 - Never invent employers, titles, dates, schools, degrees, GPAs, numbers, skills, or licenses.
 - Work authorization, sponsorship, age, background, criminal history, salary, arbitration, non-competes, and anything the student must certify: only from the student's own answers. Otherwise skip.
 - select: the value must be exactly one of the options. multiselect: an array of options, each exactly as written.
-- Essay questions (type textarea, such as "Why this company?"): three to five plain sentences that connect real experiences from the resume to this posting. Use only resume and profile facts plus what the posting says. Quote the main resume fact you used in "evidence".
+- Essay questions (type textarea, or any question asking why, what, how or to describe or tell, such as "Why do you want to work here?"): always answer them. Connect one or two real experiences from the resume to specific things this posting says about the company and role. Use only resume and profile facts plus the posting. Quote the main resume fact you used in "evidence".
 - Short open questions you can't support from the resume or details (start date, deadlines, preferences): skip.
-- Skip any field you can't support. Skipping is better than guessing.
+- Skip any other field you can't support. Skipping is better than guessing.
+${WRITING_STYLE}
 Return only JSON: {"answers":[{"id":"...","value":"..." or ["..."],"source":"resume","evidence":"..."}]}`;
+
+/** A second try for written answers that missed the length their question asks for. */
+export const LENGTH_PROMPT = `You rewrite a college student's answers on a job application so each one is the length its question asks for. Keep the facts in the draft; add only facts from the resume, profile, or job posting given. Never invent anything.
+${WRITING_STYLE}
+Return only JSON: {"answers":[{"id":"...","value":"..."}]}`;
+
+const Rewrites = z.object({ answers: z.array(z.object({ id: z.string(), value: z.string() })).default([]) });
+
+/** What a question's asked length means for the writer: "at least 100 words (aim for about 115)". */
+function lengthNote(label: string) {
+  const asked = askedLength(label);
+  const parts = [
+    asked.minWords ? `at least ${asked.minWords} words (aim for about ${Math.round(asked.minWords * 1.15) + 5})` : "",
+    asked.maxWords ? `at most ${asked.maxWords} words` : "",
+    asked.minChars ? `at least ${asked.minChars} characters` : "",
+    asked.maxChars ? `at most ${asked.maxChars} characters, spaces included` : "",
+  ].filter(Boolean);
+  return parts.join(", ");
+}
 
 const Reply = z.object({
   answers: z.array(z.object({
@@ -88,7 +108,7 @@ export async function mapAnswers(input: MapperInput) {
   let llmCalls = 0;
   if (pending.length && input.ask) {
     llmCalls = 1;
-    const listed = pending.map((field) => ({ id: field.id, question: field.label, type: field.type, required: field.required, options: field.options.length ? field.options.map((option) => option.label) : undefined }));
+    const listed = pending.map((field) => ({ id: field.id, question: field.label, type: field.type, required: field.required, options: field.options.length ? field.options.map((option) => option.label) : undefined, length: lengthNote(field.label) || undefined }));
     const content = [
       `Job: ${input.schema.title} at ${input.schema.company}\n${input.schema.description.slice(0, 3500)}`,
       `Fields:\n${JSON.stringify(listed)}`,
@@ -100,18 +120,48 @@ export async function mapAnswers(input: MapperInput) {
       const reply = Reply.parse(JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)));
       const byId = new Map(pending.map((field, index) => [field.id, index]));
       const fields = pending.map(asEmptyField);
+      // An essay about this company may quote the posting as well as the resume.
+      const withPosting = `${input.sources}\n${input.schema.description}`;
       for (const proposal of reply.answers) {
         const index = byId.get(proposal.id);
         if (index === undefined || answers.has(proposal.id)) continue;
         const field = pending[index];
+        const written = !field.options.length && (field.type === "textarea" || wordCount(String(proposal.value)) > 25);
         // Each chosen value passes the same source and option checks; a multi-select keeps the ones that pass.
-        const values = (Array.isArray(proposal.value) ? proposal.value : [proposal.value]).slice(0, 30);
-        const kept = values.flatMap((value) => acceptFixes(fields, [{ index, value, source: proposal.source, evidence: proposal.evidence }], { facts: input.facts, sources: input.sources, consent: input.consent }));
+        const values = (Array.isArray(proposal.value) ? proposal.value : [proposal.value]).slice(0, 30).map((value) => written ? plainWriting(value) : value);
+        const kept = values.flatMap((value) => acceptFixes(fields, [{ index, value, source: proposal.source, evidence: proposal.evidence }], { facts: input.facts, sources: written ? withPosting : input.sources, consent: input.consent }));
         if (!kept.length) continue;
         answers.set(field.id, { id: field.id, values: [...new Set(kept.map((item) => item.value))], source: proposal.source === "resume" ? "ai" : proposal.source === "default" ? "default" : "student", why: kept[0].why });
       }
     } catch {
       // A bad reply leaves those fields for the student; nothing is guessed.
+    }
+    // Written answers that came out shorter or longer than their question asks get one rewrite.
+    const off = pending.filter((field) => {
+      const answer = answers.get(field.id);
+      return answer?.source === "ai" && !field.options.length && !fitsLength(field.label, answer.values[0]);
+    });
+    if (off.length) {
+      llmCalls += 1;
+      const drafts = off.map((field) => ({ id: field.id, question: field.label, length: lengthNote(field.label), now: `${wordCount(answers.get(field.id)!.values[0])} words, ${answers.get(field.id)!.values[0].length} characters`, draft: answers.get(field.id)!.values[0] }));
+      try {
+        const text = await input.ask(LENGTH_PROMPT, [
+          `Job: ${input.schema.title} at ${input.schema.company}\n${input.schema.description.slice(0, 3500)}`,
+          `Answers to fix:\n${JSON.stringify(drafts)}`,
+          `Resume and profile:\n${input.sources.slice(0, 12000)}`,
+        ].join("\n\n"));
+        const reply = Rewrites.parse(JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)));
+        for (const rewrite of reply.answers) {
+          const field = off.find((item) => item.id === rewrite.id);
+          const value = plainWriting(rewrite.value).slice(0, 4000);
+          // A rewrite is kept only when it's closer to the asked length than the draft was.
+          if (field && value && lengthGap(field.label, value) < lengthGap(field.label, answers.get(field.id)!.values[0])) {
+            answers.set(field.id, { ...answers.get(field.id)!, values: [value] });
+          }
+        }
+      } catch {
+        // The first draft stays.
+      }
     }
   }
   return { answers, llmCalls, ms: Date.now() - started };

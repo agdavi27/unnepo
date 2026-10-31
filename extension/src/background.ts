@@ -798,6 +798,20 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           await addIssues(String(message.url ?? sender.tab?.url ?? ""), questions.map((question) => ({ kind: "fill" as const, question, what: "You filled this in yourself: Unnepo left it empty or got it wrong." }))).catch(() => undefined);
         }
         return reply({ ok: true });
+      case "received-page": {
+        // The page says the application went through, whoever filled it: the spiders come out and dance.
+        if (tabId === undefined) return reply({ ok: false });
+        await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["content/fill.js"] }).catch(() => undefined);
+        void send(tabId, { type: "spiders", celebrate: true }, 0).catch(() => undefined);
+        // A job Unnepo is tracking in this tab, on this same site, is saved as applied if the network didn't
+        // already confirm it.
+        const job = (await jobs())[tabId];
+        const site = (host: string) => host.split(".").slice(-2).join(".");
+        let here = "";
+        try { here = new URL(String(message.url ?? sender.tab?.url ?? "")).hostname; } catch { /* no page address */ }
+        if (job?.host && here && site(here) === site(job.host)) setTimeout(() => void record(tabId, "likely", String(message.text ?? "")), 6000);
+        return reply({ ok: true });
+      }
       case "submitted-page":
         if (tabId === undefined) return reply({ ok: false });
         // Give the network a moment to confirm first.

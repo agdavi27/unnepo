@@ -4,6 +4,8 @@ import { press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, scanFields, scanPage } from "./scan";
+import { watchEdits } from "./edits";
+import { keptByStudent } from "./kept";
 import { fieldControl, markNeeds } from "./needs";
 import { celebrateSpiders, startSpiders, stopSpiders } from "./spiders";
 
@@ -69,9 +71,14 @@ let plannedValues = new Map<string, string>();
 async function fill(plan: FillPlan): Promise<FillReport> {
   const started = Date.now();
   const files = { resume: plan.resume, coverLetter: plan.coverLetter };
+  if (!plan.useServerSchema) planned = scanFields();
+  const kept = plan.answers.filter((answer) => keptByStudent(answer, plan.useServerSchema));
+  const answers = plan.answers.filter((answer) => !kept.includes(answer));
   const result = plan.useServerSchema
-    ? await fillGreenhouse(plan.answers, files)
-    : await fillGeneric((planned = scanFields()), plan.answers, files, { dropdownFirst: plan.dropdownFirst });
+    ? await fillGreenhouse(answers, files)
+    : await fillGeneric(planned, answers, files, { dropdownFirst: plan.dropdownFirst });
+  // What the student typed stays, and counts as answered.
+  result.filled.push(...kept.map((answer) => answer.label));
   result.filled.push(...fillPasswords(plan.password));
   plannedValues = new Map(plan.answers.map((answer) => [answer.label, answer.values.join(", ")]));
   await sleep(300);
@@ -159,6 +166,7 @@ function watchSubmit() {
 if (!window.__unnepo || !window.__unnepo.alive()) {
   window.__unnepo = { scan: scanPage, fill, alive };
   watchSubmit();
+  watchEdits();
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type === "scan") {
       reply(scanPage());
