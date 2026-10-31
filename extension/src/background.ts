@@ -75,12 +75,15 @@ async function addIssues(url: string, items: Array<Pick<Issue, "kind" | "what" |
   const recent = (item: Pick<Issue, "kind" | "what" | "question">) => list.some((known) => known.kind === item.kind && known.page === where.page && known.question === item.question && known.what === item.what && now - Date.parse(known.at) < SAME_ISSUE_MS);
   const fresh = items.filter((item) => item.kind === "note" || !recent(item)).map((item): Issue => ({
     id: `${now.toString(36)}${Math.random().toString(36).slice(2, 7)}`, at: new Date(now).toISOString(), ...where,
-    kind: item.kind, what: item.what.replace(/\s+/g, " ").trim().slice(0, 1500), ...(item.question ? { question: item.question.slice(0, 200) } : {}),
+    kind: item.kind, what: item.what.replace(/\s+/g, " ").trim().slice(0, ISSUE_CHARS), ...(item.question ? { question: item.question.slice(0, 200) } : {}),
   }));
   if (!fresh.length) return;
   await chrome.storage.local.set({ issues: [...fresh.reverse(), ...list].slice(0, ISSUES_KEPT) });
   void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
 }
+
+// The most an issue says: room for a run's whole trail.
+const ISSUE_CHARS = 2500;
 
 async function jobs(): Promise<Record<string, Job>> {
   return ((await chrome.storage.session.get("jobs")).jobs as Record<string, Job> | undefined) ?? {};
@@ -325,6 +328,17 @@ async function run(tabId: number) {
     trail.push(`${at}s ${line}`);
     if (trail.length > 25) trail.shift();
   };
+  // An issue with the trail after it, dropping its oldest lines to fit: the last ones say what went wrong.
+  const story = (lead: string) => {
+    const lines = [...trail];
+    while (lines.length && `${lead} What happened: ${lines.join("; ")}`.length > ISSUE_CHARS) lines.shift();
+    return lines.length ? `${lead} What happened: ${lines.join("; ")}` : lead;
+  };
+  // The questions on a page, briefly, so the trail shows what each fill touched.
+  const questions = (fields: Scan["fields"]) => {
+    const shown = fields.slice(0, 6).map((field) => `${field.type} "${field.label.replace(/\s+/g, " ").slice(0, 30)}"`).join(", ");
+    return fields.length > 6 ? `${shown} and ${fields.length - 6} more` : shown;
+  };
   const pressed = (what: { label?: string; id?: string; overlay?: boolean } | null | undefined, label: string) => {
     note(`pressed "${(what?.label || label).slice(0, 60)}"${what?.id ? ` [${what.id}]` : ""}${what?.overlay ? " via overlay" : ""}`);
   };
@@ -354,6 +368,13 @@ async function run(tabId: number) {
   const resumePromise = resumeFile();
   let llmCalls = 0;
   let lastStep = "";
+  // Workday reads every resume uploaded to it and redoes the application from its first step, so on Workday
+  // the resume goes in once per run. Sending it again was what took the run back to "Autofill with Resume".
+  let resumeUploaded = false;
+  // A new Workday step is filled only once its questions stop changing: filling it while it was still
+  // loading filled the last step's leftover upload box instead.
+  let settling = "";
+  let settleTries = 0;
   // Spiders crawl the whole time Unnepo is running, until it's submitted, something goes wrong, or Stop.
   let spidersOut = false;
   let spidersDropped = false;
@@ -444,10 +465,17 @@ async function run(tabId: number) {
         note(`didn't fill ${stepText(status.step)} a third time`);
         filledKey = key;
       }
+      if (hasForm(scan) && key !== filledKey && stepKey && !stepFills.has(stepKey) && settleTries < 8 && settling !== `${stepKey}|${key}`) {
+        if (!settling.startsWith(`${stepKey}|`)) settleTries = 0;
+        settling = `${stepKey}|${key}`;
+        settleTries += 1;
+        await wait(900);
+        continue;
+      }
       if (hasForm(scan) && key !== filledKey) {
         if (stepKey) stepFills.set(stepKey, (stepFills.get(stepKey) ?? 0) + 1);
         filledKeys.add(key);
-        note(`filling ${status.step ? stepText(status.step) : "the page"}: ${scan.fields.length} questions`);
+        note(`filling ${status.step ? stepText(status.step) : "the page"}: ${scan.fields.length} questions${scan.fields.length ? ` (${questions(scan.fields)})` : ""}`);
         if (!applicationId && (scan.fields.length || scan.useServerSchema)) {
           await step("Opening the job in Unnepo…");
           const where = posting ?? { url: scan.url, title: scan.title, company: scan.company, description: scan.description };
@@ -458,7 +486,10 @@ async function run(tabId: number) {
         const formFields = !scan.useServerSchema && !scan.fields.length ? null : (scan.useServerSchema ? [] : scan.fields);
         let wantsCoverLetter = scan.fields.some((field) => field.type === "file" && /cover ?letter/i.test(`${field.label} ${field.section}`));
         // Any upload box that isn't for a cover letter gets the resume, whatever the server's answers say.
-        const wantsResume = scan.useServerSchema || scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
+        const resumeBox = scan.useServerSchema || scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
+        const workday = scan.ats === "workday";
+        if (resumeBox && workday && resumeUploaded) note("didn't upload the resume again");
+        const wantsResume = resumeBox && !(workday && resumeUploaded);
         if (scan.mentionsCv) await saveJob(tabId, { cv: true });
         const password = await passwordFor(accountKey(scan.url));
         const pageHost = new URL(scan.url).hostname;
@@ -485,6 +516,11 @@ async function run(tabId: number) {
         }
         if (!stillRunning(tabId, runId)) break;
         let report = await fillWith(known.answers, { resume: wantsResume ? resume ?? null : null });
+        for (const attempt of report?.attempts ?? []) {
+          if (attempt.type !== "file" || !attempt.ok) continue;
+          note(`uploaded a file into "${attempt.label.slice(0, 30)}"`);
+          if (workday) resumeUploaded = true;
+        }
 
         // 2. One AI call for the questions that are left, filled as soon as it answers.
         const answered = new Set(known.answers.filter((answer) => answer.values.length).map((answer) => answer.id));
@@ -639,13 +675,12 @@ async function run(tabId: number) {
     if ((await jobs())[tabId]?.submission) return;
     // Stopped by the student. On a stepped application, what happened goes on the issues list, so a run
     // that went wrong can be traced even when Unnepo didn't notice anything itself.
-    if (furthest) await addIssues(lastUrl, [{ kind: "stopped", what: `You pressed Stop on ${stepText(seenStep)}. What happened: ${trail.join("; ")}`.slice(0, 1500) }]).catch(() => undefined);
+    if (furthest) await addIssues(lastUrl, [{ kind: "stopped", what: story(`You pressed Stop on ${stepText(seenStep)}.`) }]).catch(() => undefined);
     await saveJob(tabId, { step: "Stopped. Press Fill to start again." });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Something went wrong.";
     // On a stepped application, the presses that led here help find the cause.
-    const happened = trail.length ? ` What happened: ${trail.join("; ")}` : "";
-    await addIssues((await chrome.tabs.get(tabId).catch(() => null))?.url ?? lastUrl, [{ kind: "stopped", what: `Stopped: ${message}${happened}`.slice(0, 1500) }]).catch(() => undefined);
+    await addIssues((await chrome.tabs.get(tabId).catch(() => null))?.url ?? lastUrl, [{ kind: "stopped", what: story(`Stopped: ${message}`) }]).catch(() => undefined);
     await saveJob(tabId, { error: message, step: "Stopped." });
   } finally {
     if (stillRunning(tabId, runId)) runs.delete(tabId);
