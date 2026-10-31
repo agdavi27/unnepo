@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { mapAnswers } from "@/lib/apply/fast/mapper";
 import { knownAnswers, mappingFromQuestions, questionsFromMapping } from "@/lib/apply/fast/pipeline";
 import { parseGreenhouse, type GreenhouseJobJson } from "@/lib/apply/fast/schema";
-import { askedLength, fitsLength, planAnswers, plainWriting } from "@/lib/apply/questions";
+import { askedLength, fitsLength, nameCase, planAnswers, plainWriting } from "@/lib/apply/questions";
 import { degreeAnswer, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import type { ApplicationProfile } from "@/lib/apply/types";
 
@@ -155,5 +155,15 @@ describe("field mapping", () => {
     expect(multi).toMatchObject({ kind: "multiselect", answer: "US\nCA" });
     multi.answer = "US";
     expect(mappingFromQuestions(stripe, questions).get("question_68935297[]")?.values).toEqual(["US"]);
+  });
+});
+
+describe("names", () => {
+  it("writes an all-capitals or all-lowercase name the way a person does, and leaves mixed case alone", () => {
+    expect(nameCase("DREW")).toBe("Drew");
+    expect(nameCase("drew davis")).toBe("Drew Davis");
+    expect(nameCase("MARY-JANE O'BRIEN")).toBe("Mary-Jane O'Brien");
+    expect(nameCase("McKenzie")).toBe("McKenzie");
+    expect(nameCase("de la Cruz")).toBe("de la Cruz");
   });
 });

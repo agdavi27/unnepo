@@ -27,7 +27,17 @@ export function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: stri
   Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(el, value);
   el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-  if (blur) el.dispatchEvent(new FocusEvent("blur", { bubbles: false }));
+  if (blur) leave(el);
+}
+
+/**
+ * Leaves a box the way a person does, with the browser's own blur (and focusout, which React listens to).
+ * Workday saves a box's text and checks it only then; a made-up blur event left "The field Email is
+ * required" showing over typed text until the student clicked the box.
+ */
+export function leave(el: HTMLElement) {
+  if (el.matches(":focus")) el.blur();
+  else el.dispatchEvent(new FocusEvent("focusout", { bubbles: true, composed: true }));
 }
 
 /** A full pointer click: what custom dropdowns listen for, not just "click". */
@@ -111,7 +121,7 @@ export async function typeKeys(el: HTMLInputElement | HTMLTextAreaElement, value
     if (value.length <= 40) await sleep(25);
   }
   el.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
-  if (blur) el.dispatchEvent(new FocusEvent("blur", { bubbles: false }));
+  if (blur) leave(el);
 }
 
 const BLANK_CHOICE = /^(select( one)?(\.{1,3}|…)?|choose( one)?(\.{1,3}|…)?|please select|search|--.*|)$/i;

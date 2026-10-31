@@ -1,6 +1,6 @@
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
 import { buttonUnder, findAction, findApply, pageNotes, pressAction, SUBMIT, workdayStep } from "./actions";
-import { press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
+import { leave, press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, scanFields, scanPage } from "./scan";
@@ -65,6 +65,20 @@ function showField(label: string) {
   return true;
 }
 
+/**
+ * Boxes the site still flags though they hold text ("The field Email is required and must have a value"):
+ * Workday checks a box again only when it's clicked into and left, so Unnepo does that, as the student would.
+ */
+async function recheckFlagged() {
+  const boxes = deepAll<HTMLInputElement | HTMLTextAreaElement>("input[aria-invalid='true'], textarea[aria-invalid='true']").filter((box) => box.type !== "file" && box.value.trim());
+  for (const box of boxes) {
+    box.focus();
+    await sleep(40);
+    leave(box);
+    await sleep(40);
+  }
+}
+
 let planned: PageField[] = [];
 let plannedValues = new Map<string, string>();
 
@@ -82,6 +96,7 @@ async function fill(plan: FillPlan): Promise<FillReport> {
   result.filled.push(...fillPasswords(plan.password));
   plannedValues = new Map(plan.answers.map((answer) => [answer.label, answer.values.join(", ")]));
   await sleep(300);
+  await recheckFlagged();
   // Verify: what the page itself marks required and is still empty is the student's turn.
   const missing = emptyRequired().map((field) => field.label);
   if (plan.useServerSchema) {

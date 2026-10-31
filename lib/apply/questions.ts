@@ -67,13 +67,22 @@ export type AnswerContext = {
   resumeFileName: string | null;
 };
 
+/**
+ * A name as a person writes it: "DREW" or "drew davis" becomes "Drew" or "Drew Davis". Names already in
+ * mixed case ("McKenzie", "de la Cruz") are left alone. Workday flags a name with more than two capitals.
+ */
+export function nameCase(value: string) {
+  if (!/[a-z]/i.test(value) || (value !== value.toUpperCase() && value !== value.toLowerCase())) return value;
+  return value.toLowerCase().replace(/(^|[\s'’-])(\p{L})/gu, (_, before: string, letter: string) => before + letter.toUpperCase());
+}
+
 function standardAnswer(field: StandardField, context: AnswerContext): { answer: string; source: string } | null {
   const p = context.profile;
   const pick = (value: string, source = "profile") => (value.trim() ? { answer: value.trim(), source } : null);
   switch (field) {
-    case "firstName": return pick(p.firstName);
-    case "lastName": return pick(p.lastName);
-    case "fullName": return pick([p.firstName, p.lastName].filter(Boolean).join(" "));
+    case "firstName": return pick(nameCase(p.firstName));
+    case "lastName": return pick(nameCase(p.lastName));
+    case "fullName": return pick(nameCase([p.firstName, p.lastName].filter(Boolean).join(" ")));
     case "email": return pick(p.email);
     case "phone": return pick(p.phone);
     case "linkedin": return pick(p.linkedin);

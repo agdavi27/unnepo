@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: Workday boxes</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  .field { margin: 14px 0; }
+  label { display: block; font-weight: 600; }
+  input { font: inherit; padding: 6px 8px; min-width: 260px; }
+  [aria-invalid="true"] { border-color: #c00; }
+  .error { color: #c00; font-size: 13px; }
+</style>
+</head>
+<body>
+<h1>Practice: Workday boxes</h1>
+<p>Each box keeps its own copy of the answer, the way Workday's do. Email saves its text, and checks it, only when
+  the box is left; it starts out flagged, as after an earlier check. First Name was filled from the resume
+  ("DREW") and only takes typing key by key: anything else, it puts its own copy back.</p>
+<div id="form"></div>
+<script>
+  const saved = { "Email": "", "First Name": "DREW", "Last Name": "" };
+  const rules = {
+    // Saved on leaving the box.
+    "Email": { onLeave: true, flagged: true },
+    // Takes only key-by-key typing, and puts its copy back after anything else.
+    "First Name": { keysOnly: true },
+    "Last Name": {},
+  };
+  const form = document.getElementById("form");
+  for (const [label, rule] of Object.entries(rules)) {
+    const id = label.toLowerCase().replace(/\s+/g, "-");
+    form.insertAdjacentHTML("beforeend", `<div class="field"><label for="${id}">${label}*</label><input id="${id}" aria-required="true" value="${saved[label]}"><div class="error" id="${id}-error"></div></div>`);
+    const box = document.getElementById(id);
+    const error = document.getElementById(`${id}-error`);
+    const check = () => {
+      const bad = !saved[label].trim();
+      box.setAttribute("aria-invalid", String(bad));
+      error.textContent = bad ? `Error: The field ${label} is required and must have a value.` : "";
+    };
+    if (rule.flagged) check();
+    let keyed = false;
+    box.addEventListener("keydown", () => { keyed = true; });
+    box.addEventListener("input", () => {
+      if (rule.onLeave) return;
+      if (rule.keysOnly && !keyed) {
+        setTimeout(() => { box.value = saved[label]; }, 100);
+        return;
+      }
+      saved[label] = box.value;
+    });
+    box.addEventListener("focusout", () => {
+      if (rule.onLeave) saved[label] = box.value;
+      check();
+    });
+  }
+  window.pageValues = () => ({ ...saved });
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

@@ -199,9 +199,29 @@ export function readBack(field: PageField, answer: Answer): string | null {
       return shownChoice(el) === "" ? "the box shows no choice" : null;
     case "file":
       return isEmpty(el) ? "the page shows no file" : null;
-    default:
-      return (el as HTMLInputElement).value.trim() ? null : "the box is empty";
+    default: {
+      const shown = (el as HTMLInputElement).value.trim();
+      if (!shown) return "the box is empty";
+      return sameText(field, shown, value);
+    }
   }
+}
+
+const letters = (text: string) => text.replace(/[^\p{L}\p{N}]/gu, "");
+
+/**
+ * Whether a box holds the answer, allowing for the site's own formatting ("(207) 555-0100"), a length limit,
+ * and a place box that adds the state ("Waterville, ME, USA"). Other text means the site put back its own:
+ * Workday puts back what it read from the resume ("DREW") when it didn't take the typing. A name in other
+ * capitals counts too; other boxes may change capitals on purpose (postcodes).
+ */
+function sameText(field: PageField, shown: string, value: string) {
+  const [a, b] = [letters(shown), letters(value)];
+  const [low, want] = [a.toLowerCase(), b.toLowerCase()];
+  if (!want || low.includes(want) || (low.length >= 20 && want.startsWith(low))) {
+    return /name/i.test(field.label) && low === want && a !== b ? `the site shows "${shown.slice(0, 40)}" in other capitals` : null;
+  }
+  return "the site put back other text";
 }
 
 /** A few words of an answer, for the failure record. Only choices are kept; typed answers are personal. */
