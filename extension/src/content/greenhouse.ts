@@ -1,6 +1,6 @@
 import { bestOption, degreeAnswer } from "@/lib/apply/options";
-import type { Answer, FileData } from "../shared/types";
-import { attachFile, chooseCustom, press, typeInto, waitFor } from "./dom";
+import type { Answer, FileData, FillAttempt, FillFailure } from "../shared/types";
+import { attachFile, chooseCustom, FillError, press, typeInto, waitFor } from "./dom";
 import { labelOf } from "./scan";
 
 /**
@@ -22,7 +22,7 @@ export function greenhouseValue(id: string, type: string) {
   return el.value.trim();
 }
 
-async function fillOne(answer: Answer, files: { resume: FileData | null; coverLetter: FileData | null }) {
+async function fillOne(answer: Answer, files: { resume: FileData | null; coverLetter: FileData | null }): Promise<string | void> {
   const value = answer.values[0] ?? "";
   const el = byId(answer.id);
   switch (answer.type) {
@@ -30,18 +30,18 @@ async function fillOne(answer: Answer, files: { resume: FileData | null; coverLe
     case "email":
     case "tel":
     case "textarea":
-      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) throw new Error("not on the page");
+      if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) throw new FillError("not on the page", "not_on_page");
       typeInto(el, value);
       return;
     case "file": {
       const file = answer.id === "cover_letter" ? files.coverLetter : files.resume;
-      if (!(el instanceof HTMLInputElement) || !file) throw new Error(file ? "not on the page" : "no file");
+      if (!(el instanceof HTMLInputElement) || !file) throw file ? new FillError("not on the page", "not_on_page") : new FillError("no file", "no_file");
       attachFile(el, file);
       return;
     }
     case "multiselect": {
       const group = el ?? document.getElementById(`${answer.id}`);
-      if (!group) throw new Error("not on the page");
+      if (!group) throw new FillError("not on the page", "not_on_page");
       for (const box of Array.from(group.querySelectorAll<HTMLInputElement>("input[type=checkbox]"))) {
         const wanted = answer.values.some((chosen) => bestOption(chosen, [labelOf(box)]));
         if (wanted !== box.checked) press(box);
@@ -49,28 +49,24 @@ async function fillOne(answer: Answer, files: { resume: FileData | null; coverLe
       return;
     }
     case "phone_country":
-      if (!(el instanceof HTMLInputElement)) throw new Error("not on the page");
-      await chooseCustom(el, value, { type: value, list: options(answer.id), pick: (texts) => texts.find((text) => text.toLowerCase().startsWith(value.toLowerCase())) ?? bestOption(value, texts) });
-      return;
+      if (!(el instanceof HTMLInputElement)) throw new FillError("not on the page", "not_on_page");
+      return chooseCustom(el, value, { type: value, list: options(answer.id), pick: (texts) => texts.find((text) => text.toLowerCase().startsWith(value.toLowerCase())) ?? bestOption(value, texts) });
     case "location": {
-      if (!(el instanceof HTMLInputElement)) throw new Error("not on the page");
+      if (!(el instanceof HTMLInputElement)) throw new FillError("not on the page", "not_on_page");
       // "Waterville, Maine": type the city, then pick the suggestion that also names the state.
       const [city, state] = value.split(",").map((part) => part.trim());
-      await chooseCustom(el, value, { type: city, list: options(answer.id), pick: (texts) => texts.find((text) => text.toLowerCase().startsWith(city.toLowerCase()) && (!state || text.toLowerCase().includes(state.toLowerCase()))) ?? (texts.length === 1 ? texts[0] : null) });
-      return;
+      return chooseCustom(el, value, { type: city, list: options(answer.id), pick: (texts) => texts.find((text) => text.toLowerCase().startsWith(city.toLowerCase()) && (!state || text.toLowerCase().includes(state.toLowerCase()))) ?? (texts.length === 1 ? texts[0] : null) });
     }
     case "school":
-      if (!(el instanceof HTMLInputElement)) throw new Error("not on the page");
-      await chooseCustom(el, value, { type: value, list: options(answer.id), pick: (texts) => bestOption(value, texts) ?? texts.find((text) => /^other$/i.test(text)) ?? null });
-      return;
+      if (!(el instanceof HTMLInputElement)) throw new FillError("not on the page", "not_on_page");
+      return chooseCustom(el, value, { type: value, list: options(answer.id), pick: (texts) => bestOption(value, texts) ?? texts.find((text) => /^other$/i.test(text)) ?? null });
     case "degree":
-      if (!(el instanceof HTMLInputElement)) throw new Error("not on the page");
-      await chooseCustom(el, value, { list: options(answer.id), pick: (texts) => degreeAnswer(value, texts) });
-      return;
+      if (!(el instanceof HTMLInputElement)) throw new FillError("not on the page", "not_on_page");
+      return chooseCustom(el, value, { list: options(answer.id), pick: (texts) => degreeAnswer(value, texts) });
     default:
       // A dropdown: React select renders every option once it's open, so no typing is needed.
-      if (!(el instanceof HTMLInputElement)) throw new Error("not on the page");
-      await chooseCustom(el, value, { list: options(answer.id) });
+      if (!(el instanceof HTMLInputElement)) throw new FillError("not on the page", "not_on_page");
+      return chooseCustom(el, value, { list: options(answer.id) });
   }
 }
 
@@ -85,7 +81,8 @@ export async function greenhouseReady() {
 export async function fillGreenhouse(answers: Answer[], files: { resume: FileData | null; coverLetter: FileData | null }) {
   await greenhouseReady();
   const filled: string[] = [];
-  const failed: Array<{ label: string; reason: string }> = [];
+  const failed: FillFailure[] = [];
+  const attempts: FillAttempt[] = [];
   // The resume goes in even when the server didn't list it (a profile without its file name, say).
   if (files.resume && byId("resume") && !answers.some((answer) => answer.id === "resume")) {
     answers = [...answers, { id: "resume", label: "Resume/CV", type: "file", required: true, values: [files.resume.name], source: "resume_file", why: null }];
@@ -93,11 +90,15 @@ export async function fillGreenhouse(answers: Answer[], files: { resume: FileDat
   for (const answer of answers) {
     if (!answer.values.length) continue;
     if (!byId(answer.id)) continue; // fields the form may add (education, phone country) only when present
+    const attempt: FillAttempt = { site: location.hostname, label: answer.label.slice(0, 200), type: answer.type, answer: answer.type === "select" || answer.type === "multiselect" ? answer.values.join(", ").slice(0, 60) : "", method: "greenhouse", ok: true };
+    attempts.push(attempt);
     try {
-      await fillOne(answer, files);
+      attempt.method = (await fillOne(answer, files)) ?? "greenhouse";
       filled.push(answer.label);
     } catch (error) {
-      failed.push({ label: answer.label, reason: error instanceof Error ? error.message : "couldn't fill" });
+      const known = error instanceof FillError ? error : null;
+      Object.assign(attempt, { ok: false, problem: known?.problem ?? "error", reason: (error instanceof Error ? error.message : "couldn't fill").slice(0, 200) });
+      failed.push({ label: answer.label, reason: attempt.reason!, id: answer.id });
     }
   }
   // A late re-render can clear a typed box; type those once more.
@@ -106,5 +107,5 @@ export async function fillGreenhouse(answers: Answer[], files: { resume: FileDat
     const el = byId(answer.id);
     if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) typeInto(el, answer.values[0]);
   }
-  return { filled, failed };
+  return { filled, failed, attempts };
 }

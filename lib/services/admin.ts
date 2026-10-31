@@ -1,5 +1,7 @@
 import { serverConfig } from "@/lib/config";
 import { repo } from "@/lib/db/file-store";
+import { applications } from "@/lib/apply/store";
+import type { FillAttempt } from "@/lib/apply/types";
 
 export async function profitability() {
   const db = await repo.snapshot();
@@ -88,5 +90,73 @@ export async function profitability() {
     providers,
     alerts,
     counts: { users: users.length, unlocks: successfulUnlocks, generations: db.generations.length },
+  };
+}
+
+const SITES: Array<[RegExp, string]> = [
+  [/myworkday(jobs|site)?\.com$|workday\.com$/, "Workday"],
+  [/greenhouse\.io$/, "Greenhouse"],
+  [/lever\.co$/, "Lever"],
+  [/ashbyhq\.com$/, "Ashby"],
+  [/icims\.com$/, "iCIMS"],
+  [/smartrecruiters\.com$/, "SmartRecruiters"],
+  [/joinhandshake\.com$/, "Handshake"],
+  [/taleo\.net$/, "Taleo"],
+  [/successfactors\.(com|eu)$/, "SuccessFactors"],
+  [/jobvite\.com$/, "Jobvite"],
+  [/paycomonline\.net$/, "Paycom"],
+];
+
+/** "acme.wd5.myworkdayjobs.com" is "Workday"; a company's own site keeps its name. */
+export function siteName(host: string) {
+  return SITES.find(([pattern]) => pattern.test(host))?.[1] ?? host.replace(/^(www|jobs|careers|apply)\./, "");
+}
+
+export const PROBLEM_NAMES: Record<string, string> = {
+  not_on_page: "field went from the page",
+  list_didnt_open: "list didn't open",
+  no_option: "no option matching",
+  more_choices: "second list, nothing fits",
+  didnt_stick: "answer didn't stick",
+  no_file: "no file for the upload",
+  error: "other error",
+};
+
+/**
+ * Autofill failures from students' recent applications, grouped by site, kind of field, and problem
+ * ("Workday · combobox · list didn't open · 14 times"), most common first, with recent examples.
+ */
+export async function autofillProblems() {
+  const all = (await applications.recentAttempts()).flat();
+  const groups = new Map<string, { site: string; type: string; problem: string; count: number; lastAt: string; examples: Array<{ label: string; answer: string; method: string; reason: string }> }>();
+  const sites = new Map<string, { site: string; tried: number; failed: number }>();
+  const methods = new Map<string, { method: string; ok: number; tried: number }>();
+  for (const attempt of all as FillAttempt[]) {
+    const site = siteName(attempt.site || "unknown");
+    const totals = sites.get(site) ?? { site, tried: 0, failed: 0 };
+    totals.tried += 1;
+    if (!attempt.ok) totals.failed += 1;
+    sites.set(site, totals);
+    // "click, then keyboard" counts for the way that finally worked.
+    const way = (attempt.method || "none").split(", then ").pop()!;
+    const byWay = methods.get(`${attempt.type}|${way}`) ?? { method: `${attempt.type} · ${way}`, ok: 0, tried: 0 };
+    byWay.tried += 1;
+    if (attempt.ok) byWay.ok += 1;
+    methods.set(`${attempt.type}|${way}`, byWay);
+    if (attempt.ok) continue;
+    const problem = attempt.problem ?? "error";
+    const key = `${site}|${attempt.type}|${problem}`;
+    const group = groups.get(key) ?? { site, type: attempt.type, problem: PROBLEM_NAMES[problem] ?? problem, count: 0, lastAt: "", examples: [] };
+    group.count += 1;
+    if ((attempt.at ?? "") > group.lastAt) group.lastAt = attempt.at ?? "";
+    if (group.examples.length < 5) group.examples.push({ label: attempt.label, answer: attempt.answer, method: attempt.method, reason: attempt.reason ?? "" });
+    groups.set(key, group);
+  }
+  return {
+    tried: all.length,
+    failed: all.filter((attempt) => !attempt.ok).length,
+    problems: [...groups.values()].sort((a, b) => b.count - a.count || b.lastAt.localeCompare(a.lastAt)).slice(0, 100),
+    sites: [...sites.values()].sort((a, b) => b.failed - a.failed || b.tried - a.tried).slice(0, 30),
+    methods: [...methods.values()].sort((a, b) => b.tried - a.tried).slice(0, 30),
   };
 }

@@ -1,5 +1,12 @@
 /** Messages and shapes shared by the background worker, the page scripts, and the side panel. */
 
+import type { FillAttempt, FillProblem } from "@/lib/apply/types";
+
+export type { FillAttempt, FillProblem };
+
+/** Ways to choose from a custom dropdown: pointer clicks, or the keyboard (arrows, typing, Enter). */
+export type DropdownMethod = "click" | "keyboard";
+
 export type FieldType = "text" | "email" | "tel" | "textarea" | "file" | "select" | "combobox" | "radio" | "checkbox" | "multiselect" | "date" | "url" | "number";
 
 /** A form field the page script found. `id` is the page script's own reference (a data attribute it set). */
@@ -31,11 +38,17 @@ export type Answer = { id: string; label: string; type: string; required: boolea
 export type FileData = { name: string; mime: string; base64: string };
 
 /** `password` is the student's job-site password, for account and sign-in fields. It never leaves the browser. */
-export type FillPlan = { ats: Scan["ats"]; useServerSchema: boolean; answers: Answer[]; resume: FileData | null; coverLetter: FileData | null; autoSubmit: boolean; password: string | null };
+/** `dropdownFirst`: the way of choosing from dropdowns that worked on this site before, tried first. */
+export type FillPlan = { ats: Scan["ats"]; useServerSchema: boolean; answers: Answer[]; resume: FileData | null; coverLetter: FileData | null; autoSubmit: boolean; password: string | null; dropdownFirst?: DropdownMethod };
+
+/** A question that didn't fill. `options`: the choices a dropdown showed when none matched, for the AI to pick from. */
+export type FillFailure = { label: string; reason: string; id?: string; options?: string[] };
 
 export type FillReport = {
   filled: string[];
-  failed: Array<{ label: string; reason: string }>;
+  failed: FillFailure[];
+  /** Every question tried, with how and whether it stuck. */
+  attempts?: FillAttempt[];
   /** Required fields still empty after filling: the student's turn. */
   needsYou: string[];
   captcha: boolean;

@@ -8,7 +8,7 @@ import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/
 import { classifyQuestion, normalizeLabel } from "@/lib/apply/questions";
 import { applicationProfiles, applications } from "@/lib/apply/store";
 import { CVS_PER_CREDIT, cvUsesLeft } from "@/lib/apply/cv";
-import type { JobApplication } from "@/lib/apply/types";
+import type { FillAttempt, FillProblem, JobApplication } from "@/lib/apply/types";
 import { profileReady, profileState } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
 
@@ -238,7 +238,9 @@ export async function extensionMap(userId: string, raw: unknown) {
 
   const timings = { pipeline: "fast" as const, schemaMs, mappingMs: mapped.ms, llmCalls: mapped.llmCalls, fallback: [] };
   logTimings(app.id, "extension_map", timings);
-  await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), timings } });
+  // Read again: the extension may have saved its fill record while the answers were being worked out.
+  const latest = (await applications.get(userId, app.id)) ?? app;
+  await applications.update(userId, app.id, { fillReport: { ...(latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), timings } });
   return {
     applicationId: app.id,
     ats: schema.ats,
@@ -250,6 +252,35 @@ export async function extensionMap(userId: string, raw: unknown) {
     aiAvailable: ai,
     ms: Date.now() - started,
   };
+}
+
+/** Fill records kept per application, newest last. */
+const ATTEMPTS_PER_APP = 300;
+const PROBLEMS = new Set<FillProblem>(["not_on_page", "list_didnt_open", "no_option", "more_choices", "didnt_stick", "no_file", "error"]);
+
+/**
+ * What the extension did with each question on a page (site, question, kind of field, way, whether it
+ * stuck, and why not), kept in the application's fill report so autofill failures can be counted.
+ */
+export async function extensionAttempts(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; attempts?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  const at = nowIso();
+  const text = (value: unknown, max: number) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+  const attempts = (Array.isArray(body.attempts) ? body.attempts : []).slice(0, 200).flatMap((item): FillAttempt[] => {
+    const entry = (item ?? {}) as Record<string, unknown>;
+    const label = text(entry.label, 200);
+    if (!label) return [];
+    const problem = PROBLEMS.has(entry.problem as FillProblem) ? (entry.problem as FillProblem) : undefined;
+    return [{
+      site: text(entry.site, 120).toLowerCase(), label, type: text(entry.type, 30), answer: text(entry.answer, 60), method: text(entry.method, 40), ok: entry.ok === true,
+      ...(entry.ok === true ? {} : { problem: problem ?? "error", reason: text(entry.reason, 200) }), at,
+    }];
+  });
+  if (!attempts.length) return { saved: 0 };
+  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  await applications.update(userId, app.id, { fillReport: { ...report, attempts: [...(report.attempts ?? []), ...attempts].slice(-ATTEMPTS_PER_APP) } });
+  return { saved: attempts.length };
 }
 
 /** Answers the student typed into a form themselves, saved so the same question fills itself next time. */

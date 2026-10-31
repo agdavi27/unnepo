@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: React form</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  .field { margin: 18px 0; border: 0; padding: 0; }
+  label, legend { display: block; font-weight: 600; margin-bottom: 4px; }
+  fieldset label { display: inline; font-weight: 400; }
+  input:not([type=radio]), .trigger { font: inherit; padding: 8px 10px; border: 1px solid #888; border-radius: 4px; background: #fff; min-width: 280px; text-align: left; }
+  .select__control { display: flex; gap: 6px; align-items: center; border: 1px solid #888; border-radius: 4px; padding: 0 6px; min-width: 300px; }
+  .select__control input { border: 0; min-width: 120px; }
+  .select__menu, .content { position: absolute; z-index: 5; background: #fff; border: 1px solid #444; min-width: 300px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+  .select__option, .item { padding: 6px 10px; cursor: pointer; }
+  .select__option--is-focused, .item[data-highlighted] { background: #dbe8ff; outline: none; }
+</style>
+</head>
+<body>
+<h1>Practice: React form</h1>
+<p>Controlled boxes, a Radix Select, a react-select style search box, and a radio group. <code>await practice({...})</code> in the console fills it.</p>
+<div id="root"></div>
+<script src="react-form.js"></script>
+<script src="harness.js"></script>
+</body>
+</html>

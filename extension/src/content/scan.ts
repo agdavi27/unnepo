@@ -10,7 +10,19 @@ import type { FieldType, PageField, Scan } from "../shared/types";
 const clean = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").replace(/\b(select one|required)\b/gi, "").replace(/[*✱]/g, "").trim();
 const machine = (text: string) => !/\s/.test(text) && /[[\]_]/.test(text);
 const FORMAT_ONLY = /^(mm\/yyyy|mm\/dd\/yyyy|dd\/mm\/yyyy|yyyy|mm|month|year|select|search|choose|type to search|start typing)$/i;
-const CONTROLS = "input:not([type=hidden]), select, textarea, button[aria-haspopup='listbox']";
+const CONTROLS = "input:not([type=hidden]), select, textarea, button[aria-haspopup='listbox'], [role=combobox]:not(input), [aria-haspopup=listbox]:not(input):not(button)";
+
+/**
+ * A dropdown built from a plain element (a div with role="combobox", or one that says it opens a list), or
+ * a button with role="combobox" (Radix): MUI, Headless UI, shadcn, and many company sites. Not when it
+ * only wraps the real input or select.
+ */
+export function boxDropdown(el: Element) {
+  if (el.matches("input, select, textarea")) return false;
+  if (el.matches("button")) return el.getAttribute("role") === "combobox";
+  if (!el.matches("[role=combobox], [aria-haspopup=listbox]")) return false;
+  return !el.querySelector("input:not([type=hidden]), select, textarea, button[aria-haspopup='listbox'], [role=combobox]");
+}
 
 /**
  * Some forms are built from web components (SmartRecruiters): their fields live in shadow roots that a
@@ -121,7 +133,7 @@ const BLANK = /^(select( one)?(\.{1,3}|…)?|choose( one)?(\.{1,3}|…)?|please 
 /** Whether a control (or the group or wrapper it stands for) has no answer yet. */
 export function isEmpty(el: HTMLElement): boolean {
   const type = (el.getAttribute("type") ?? "").toLowerCase();
-  if (el.tagName === "BUTTON") return BLANK.test(clean(el.innerText));
+  if (el.tagName === "BUTTON" || boxDropdown(el)) return BLANK.test(clean(el.innerText));
   if (el instanceof HTMLSelectElement) return !el.value || BLANK.test(clean(el.selectedOptions[0]?.textContent));
   // A React select keeps its choice beside the input, which itself stays empty.
   if (el.getAttribute("role") === "combobox") {
@@ -174,15 +186,17 @@ export function scanFields(): PageField[] {
   const out: PageField[] = [];
   const seenGroups = new Set<string>();
   const dialog = openDialog();
-  const controls = deepAll<HTMLElement>("input, select, textarea, button[aria-haspopup='listbox']", dialog ?? document);
+  const controls = deepAll<HTMLElement>("input, select, textarea, button[aria-haspopup='listbox'], [role=combobox]:not(input), [aria-haspopup=listbox]:not(input):not(button)", dialog ?? document);
   for (const el of controls) {
     const type = (el.getAttribute("type") ?? (el.tagName === "TEXTAREA" ? "textarea" : el.tagName === "SELECT" ? "select" : "text")).toLowerCase();
     // A dropdown built as a button (Workday's "Select One") has type="button" but is a question, not a button.
     // Not page controls that happen to open a list: Workday's "See my progress", language and menu buttons.
-    const dropdownButton = el.tagName === "BUTTON" && el.getAttribute("aria-haspopup") === "listbox"
+    const dropdownButton = ((el.tagName === "BUTTON" && el.getAttribute("aria-haspopup") === "listbox") || boxDropdown(el))
       && !el.closest("nav, header, footer, [role=navigation], [role=banner], [data-automation-id*='progress' i], [data-automation-id*='utility' i]")
       && !/\b(progress|menu|language|account|settings|filter|sort by)\b/i.test(el.textContent ?? "");
     if (["hidden", "submit", "button", "password", "image", "reset", "search"].includes(type) && el.getAttribute("data-automation-id") !== "searchBox" && !dropdownButton) continue;
+    // Plain elements count only as dropdowns: a wrapper around the real control, or a menu, doesn't.
+    if (!el.matches("input, select, textarea, button") && !dropdownButton) continue;
     if (el.getAttribute("aria-hidden") === "true" || /honeypot|bee-?catcher/i.test(`${el.getAttribute("name") ?? ""} ${el.getAttribute("data-automation-id") ?? ""}`)) continue;
     if ((!dialog && el.closest("[aria-hidden='true']")) || el.id.startsWith("g-recaptcha")) continue;
     if (type !== "file" && type !== "radio" && type !== "checkbox" && !visible(el)) continue;
@@ -216,7 +230,7 @@ export function scanFields(): PageField[] {
     } else if (el instanceof HTMLSelectElement) {
       fieldType = "select";
       options = Array.from(el.options).map((option) => clean(option.text)).filter((text) => text && !BLANK.test(text));
-    } else if (el.tagName === "BUTTON" || el.getAttribute("role") === "combobox" || el.getAttribute("data-automation-id") === "searchBox") {
+    } else if (el.tagName === "BUTTON" || boxDropdown(el) || el.getAttribute("role") === "combobox" || el.getAttribute("data-automation-id") === "searchBox") {
       fieldType = "combobox";
     } else if (el.tagName === "TEXTAREA") {
       fieldType = "textarea";

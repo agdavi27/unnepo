@@ -3,7 +3,7 @@ import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVe
 import { persistenceMode, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file-store";
 import { readStoredResume, storeResume } from "@/lib/services/resume";
 import { applyVerifiedStripeEvent } from "@/lib/services/billing";
-import { profitability } from "@/lib/services/admin";
+import { autofillProblems, profitability } from "@/lib/services/admin";
 import { beginOAuth, finishOAuth, oauthReady } from "@/lib/services/oauth";
 import { ServiceError } from "@/lib/errors";
 import { nowIso } from "@/lib/db/file-store";
@@ -15,7 +15,7 @@ import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/pro
 import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
-import { extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission } from "@/lib/extension/service";
+import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission } from "@/lib/extension/service";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setOutcome, updateAnswers, updateOutreach } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
@@ -288,6 +288,10 @@ async function handle(request: Request, slug: string[]) {
     if (!(await isAdminEmail(user))) throw new ServiceError("This page is limited to Unnepo operators.", "forbidden", 403);
     return json(await profitability());
   }
+  if (root === "admin" && action === "autofill" && request.method === "GET") {
+    if (!(await isAdminEmail(user))) throw new ServiceError("This page is limited to Unnepo operators.", "forbidden", 403);
+    return json(await autofillProblems());
+  }
 
   if (root === "account" && action === "export" && request.method === "GET") {
     return json(await repo.exportUser(user.id));
@@ -344,6 +348,7 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   if (action === "jobs" && method === "GET") return json(await extensionJobs(user.id));
   if (action === "map" && method === "POST") return json(await extensionMap(user.id, await request.json()));
   if (action === "answers" && method === "POST") return json(await extensionLearn(user.id, await request.json()));
+  if (action === "attempts" && method === "POST") return json(await extensionAttempts(user.id, await request.json()));
   if (action === "cover-letter" && method === "POST") {
     // Free, but each one is an AI call: a sensible cap per hour.
     if (!rateLimit(`extension-letter:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of cover letters in an hour. Try again later.", "rate_limited", 429);

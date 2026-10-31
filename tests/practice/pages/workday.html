@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: Workday-style form</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  .field { margin: 18px 0; position: relative; }
+  label, .label { display: block; font-weight: 600; margin-bottom: 4px; }
+  button.dd, [role=combobox].dd, input { font: inherit; padding: 8px 10px; border: 1px solid #888; border-radius: 4px; background: #fff; min-width: 280px; text-align: left; }
+  [role=listbox] { position: absolute; z-index: 5; top: 100%; left: 0; width: 320px; max-height: 240px; overflow: auto; border: 1px solid #444; background: #fff; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+  [role=option] { padding: 6px 10px; height: 20px; cursor: pointer; white-space: nowrap; }
+  [role=option][aria-selected=true] { background: #dbe8ff; }
+  [data-automation-id=selectedItem] { display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 10px; background: #e5e5e5; }
+</style>
+</head>
+<body>
+<h1>Practice: Workday-style form</h1>
+<p>Dropdowns built the ways Workday and company career sites build them. <code>await practice({...})</code> in the console fills it.</p>
+
+<h2>My Information</h2>
+<div class="field" data-automation-id="formField-legalName">
+  <label for="first">Legal first name *</label>
+  <!-- Takes only real typing: a value set without key presses is undone a moment later, like a controlled box. -->
+  <input id="first" required aria-required="true">
+</div>
+
+<div class="field" data-automation-id="formField-country">
+  <label id="country-label">Country *</label>
+  <!-- Opens on mousedown or the keyboard; a long list that draws only the rows in view. -->
+  <button type="button" class="dd" id="country" aria-haspopup="listbox" aria-labelledby="country-label" aria-required="true">Select One</button>
+</div>
+
+<div class="field" data-automation-id="formField-degree">
+  <label id="degree-label">Degree *</label>
+  <!-- Ignores clicks made by code: opens only from the keyboard. -->
+  <button type="button" class="dd" id="degree" aria-haspopup="listbox" aria-labelledby="degree-label" aria-required="true">Select One</button>
+</div>
+
+<div class="field">
+  <span class="label" id="state-label">State *</span>
+  <!-- A plain div that only says it's a combobox. -->
+  <div class="dd" id="state" role="combobox" tabindex="0" aria-labelledby="state-label" aria-expanded="false" aria-required="true">Select…</div>
+</div>
+
+<div class="field" data-automation-id="formField-source">
+  <label for="source">How did you hear about us? *</label>
+  <!-- Workday's prompt: categories open more choices; typing (real key presses only) searches every choice. -->
+  <input id="source" data-automation-id="searchBox" placeholder="Search" aria-required="true" autocomplete="off">
+  <div id="source-picked"></div>
+</div>
+
+<script>
+const values = {};
+window.pageValues = () => ({ ...values, "Legal first name": document.getElementById("first").value });
+
+const COUNTRIES = ["Afghanistan (+93)", "Albania (+355)", "Algeria (+213)", "Argentina (+54)", "Australia (+61)", "Austria (+43)", "Bangladesh (+880)", "Belgium (+32)", "Brazil (+55)", "Bulgaria (+359)", "Cambodia (+855)", "Cameroon (+237)", "Canada (+1)", "Chile (+56)", "China (+86)", "Colombia (+57)", "Costa Rica (+506)", "Croatia (+385)", "Cuba (+53)", "Cyprus (+357)", "Czechia (+420)", "Denmark (+45)", "Dominican Republic (+1)", "Ecuador (+593)", "Egypt (+20)", "El Salvador (+503)", "Estonia (+372)", "Ethiopia (+251)", "Finland (+358)", "France (+33)", "Germany (+49)", "Ghana (+233)", "Greece (+30)", "Guatemala (+502)", "Honduras (+504)", "Hong Kong (+852)", "Hungary (+36)", "Iceland (+354)", "India (+91)", "Indonesia (+62)", "Ireland (+353)", "Israel (+972)", "Italy (+39)", "Jamaica (+1)", "Japan (+81)", "Jordan (+962)", "Kenya (+254)", "Latvia (+371)", "Lebanon (+961)", "Lithuania (+370)", "Luxembourg (+352)", "Malaysia (+60)", "Mexico (+52)", "Morocco (+212)", "Nepal (+977)", "Netherlands (+31)", "New Zealand (+64)", "Nigeria (+234)", "Norway (+47)", "Pakistan (+92)", "Panama (+507)", "Peru (+51)", "Philippines (+63)", "Poland (+48)", "Portugal (+351)", "Romania (+40)", "Rwanda (+250)", "Saudi Arabia (+966)", "Senegal (+221)", "Singapore (+65)", "Slovakia (+421)", "Slovenia (+386)", "South Africa (+27)", "South Korea (+82)", "Spain (+34)", "Sri Lanka (+94)", "Sweden (+46)", "Switzerland (+41)", "Taiwan (+886)", "Tanzania (+255)", "Thailand (+66)", "Tunisia (+216)", "Turkey (+90)", "Uganda (+256)", "Ukraine (+380)", "United Arab Emirates (+971)", "United Kingdom (+44)", "United States Minor Outlying Islands (+1)", "United States of America (+1)", "Uruguay (+598)", "Uzbekistan (+998)", "Venezuela (+58)", "Vietnam (+84)", "Zambia (+260)", "Zimbabwe (+263)"];
+
+let openList = null;
+function closeAll() { if (openList) { openList.close(); openList = null; } }
+document.addEventListener("mousedown", (event) => { if (openList && !openList.owns(event.target)) closeAll(); });
+
+/**
+ * A listbox dropdown. `clicks`: opens on mousedown and picks on click. `keys`: opens on ArrowDown, Enter
+ * or Space, arrows move aria-activedescendant, Enter picks. `virtual`: draws only the rows in view.
+ */
+function dropdown(trigger, name, options, { clicks = true, keys = true, virtual = false, blank }) {
+  let list = null;
+  let active = -1;
+  const rowHeight = 32;
+  const show = (text) => { trigger.textContent = text; };
+  const pick = (index) => { values[name] = options[index]; show(options[index]); close(); };
+  function draw() {
+    const start = virtual ? Math.max(0, Math.floor(list.scrollTop / rowHeight) - 2) : 0;
+    const end = virtual ? Math.min(options.length, start + 12) : options.length;
+    list.replaceChildren();
+    const spacer = document.createElement("div");
+    spacer.style.height = `${options.length * rowHeight}px`;
+    spacer.style.position = "relative";
+    if (virtual) list.append(spacer);
+    for (let index = start; index < end; index += 1) {
+      const row = document.createElement("div");
+      row.setAttribute("role", "option");
+      row.setAttribute("data-automation-id", "promptOption");
+      row.id = `${trigger.id}-opt-${index}`;
+      row.textContent = options[index];
+      row.setAttribute("aria-selected", String(index === active));
+      if (virtual) Object.assign(row.style, { position: "absolute", top: `${index * rowHeight}px`, left: 0, right: 0 });
+      if (clicks) row.addEventListener("click", () => pick(index));
+      (virtual ? spacer : list).append(row);
+    }
+    if (active >= 0) trigger.setAttribute("aria-activedescendant", `${trigger.id}-opt-${active}`);
+  }
+  function open() {
+    if (list) return;
+    closeAll();
+    list = document.createElement("div");
+    list.setAttribute("role", "listbox");
+    list.id = `${trigger.id}-list`;
+    trigger.setAttribute("aria-controls", list.id);
+    trigger.setAttribute("aria-expanded", "true");
+    trigger.parentElement.append(list);
+    active = keys ? 0 : -1;
+    draw();
+    if (virtual) list.addEventListener("scroll", draw);
+    openList = { close, owns: (el) => list?.contains(el) || trigger.contains(el) };
+  }
+  function close() {
+    list?.remove();
+    list = null;
+    trigger.setAttribute("aria-expanded", "false");
+    trigger.removeAttribute("aria-activedescendant");
+    if (openList?.close === close) openList = null;
+  }
+  function move(by) {
+    active = Math.min(options.length - 1, Math.max(0, active + by));
+    if (virtual) {
+      const top = active * rowHeight;
+      if (top < list.scrollTop) list.scrollTop = top;
+      if (top + rowHeight > list.scrollTop + list.clientHeight) list.scrollTop = top + rowHeight - list.clientHeight;
+    }
+    draw();
+  }
+  if (clicks) trigger.addEventListener("mousedown", (event) => { event.preventDefault(); list ? close() : open(); });
+  if (keys) trigger.addEventListener("keydown", (event) => {
+    if (!list && ["ArrowDown", "Enter", " "].includes(event.key)) { event.preventDefault(); open(); return; }
+    if (!list) return;
+    if (event.key === "ArrowDown") move(1);
+    else if (event.key === "ArrowUp") move(-1);
+    else if (event.key === "Enter") pick(active);
+    else if (event.key === "Escape") close();
+    else if (event.key.length === 1) {
+      const at = options.findIndex((option) => option.toLowerCase().startsWith(event.key.toLowerCase()));
+      if (at >= 0) move(at - active);
+    }
+  });
+  if (blank) show(blank);
+}
+
+dropdown(document.getElementById("country"), "Country", COUNTRIES, { virtual: true });
+dropdown(document.getElementById("degree"), "Degree", ["Associate's Degree", "Bachelor's Degree", "Master's Degree", "Doctorate"], { clicks: false });
+dropdown(document.getElementById("state"), "State", ["Maine", "Massachusetts", "New Hampshire", "Vermont"], {});
+
+// A box that takes only real typing.
+const first = document.getElementById("first");
+let lastKey = 0;
+let kept = "";
+first.addEventListener("keydown", () => { lastKey = Date.now(); });
+first.addEventListener("input", () => {
+  if (Date.now() - lastKey < 200) { kept = first.value; return; }
+  setTimeout(() => { first.value = kept; }, 40);
+});
+
+// Workday's "How did you hear about us?" prompt.
+const SOURCES = { "Job Board": ["Handshake", "Indeed", "LinkedIn"], "Social Media": ["Instagram", "TikTok"], "Career Fair": ["Campus Career Fair"], "Other": ["Other"] };
+const source = document.getElementById("source");
+let sourceList = null;
+let sourceKey = 0;
+function sourceOptions(texts, onPick) {
+  sourceList?.remove();
+  sourceList = document.createElement("div");
+  sourceList.setAttribute("role", "listbox");
+  for (const text of texts) {
+    const row = document.createElement("div");
+    row.setAttribute("role", "option");
+    row.setAttribute("data-automation-id", "promptOption");
+    row.textContent = text;
+    row.addEventListener("click", () => onPick(text));
+    sourceList.append(row);
+  }
+  source.parentElement.append(sourceList);
+  openList = { close: () => { sourceList?.remove(); sourceList = null; }, owns: (el) => sourceList?.contains(el) || source.contains(el) };
+}
+function chooseSource(text) {
+  values["How did you hear about us?"] = text;
+  document.getElementById("source-picked").innerHTML = `<span data-automation-id="selectedItem">${text}</span>`;
+  source.value = "";
+  sourceList?.remove();
+  sourceList = null;
+}
+const categories = () => sourceOptions(Object.keys(SOURCES), (category) => sourceOptions(SOURCES[category], chooseSource));
+source.addEventListener("click", () => { if (!sourceList) categories(); });
+source.addEventListener("keydown", (event) => { sourceKey = Date.now(); if (event.key === "Escape") { sourceList?.remove(); sourceList = null; } });
+source.addEventListener("input", () => {
+  // Only real typing searches; a value set by code leaves the categories showing.
+  if (Date.now() - sourceKey > 200) return;
+  const typed = source.value.trim().toLowerCase();
+  if (!typed) return categories();
+  sourceOptions(Object.values(SOURCES).flat().filter((text) => text.toLowerCase().includes(typed)), chooseSource);
+});
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

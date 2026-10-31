@@ -1,5 +1,5 @@
 import { generatePassword, unmetRules } from "./shared/password";
-import { NEVER_READ, type Answer, type FileData, type FillPlan, type FillReport, type PanelState, type Scan } from "./shared/types";
+import { NEVER_READ, type Answer, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type PanelState, type Scan } from "./shared/types";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -25,6 +25,25 @@ async function jobSitePassword() {
   const password = generatePassword();
   await chrome.storage.local.set({ jobSitePassword: password });
   return password;
+}
+
+/** The way of choosing from dropdowns that worked on each site, tried first there next time. */
+async function dropdownWay(host: string): Promise<DropdownMethod | undefined> {
+  const stored = (await chrome.storage.local.get("dropdownWays")).dropdownWays as Record<string, DropdownMethod> | undefined;
+  return stored?.[host];
+}
+
+/** Keeps the way that chose the most dropdowns on this page, when one did. */
+async function rememberDropdownWay(host: string, attempts: FillAttempt[]) {
+  const worked = { click: 0, keyboard: 0 };
+  for (const attempt of attempts) if (attempt.ok && attempt.type === "combobox" && (attempt.method === "click" || attempt.method === "keyboard")) worked[attempt.method] += 1;
+  if (!worked.click && !worked.keyboard) return;
+  const best: DropdownMethod = worked.keyboard > worked.click ? "keyboard" : "click";
+  const stored = ((await chrome.storage.local.get("dropdownWays")).dropdownWays as Record<string, DropdownMethod> | undefined) ?? {};
+  if (stored[host] === best) return;
+  // A few hundred sites at most; the oldest go first.
+  const kept = Object.entries({ ...stored, [host]: best }).slice(-300);
+  await chrome.storage.local.set({ dropdownWays: Object.fromEntries(kept) });
 }
 
 async function jobs(): Promise<Record<string, Job>> {
@@ -360,9 +379,17 @@ async function run(tabId: number) {
         const wantsResume = scan.useServerSchema || scan.fields.some((field) => field.type === "file" && !/cover ?letter/i.test(field.label));
         if (scan.mentionsCv) await saveJob(tabId, { cv: true });
         const password = await passwordFor(accountKey(scan.url));
+        const pageHost = new URL(scan.url).hostname;
+        const dropdownFirst = await dropdownWay(pageHost);
         const fillWith = (answers: Answer[], files: { resume?: FileData | null; coverLetter?: FileData | null } = {}, schema = scan.useServerSchema) =>
-          send<FillReport>(tabId, { type: "fill", plan: { ats: scan.ats, useServerSchema: schema, answers, resume: files.resume ?? null, coverLetter: files.coverLetter ?? null, autoSubmit: false, password } satisfies FillPlan }).catch(() => null);
-        const merge = (into: FillReport | null, next: FillReport | null) => (!into ? next : !next ? into : { ...next, filled: [...into.filled, ...next.filled], failed: [...into.failed, ...next.failed] });
+          send<FillReport>(tabId, { type: "fill", plan: { ats: scan.ats, useServerSchema: schema, answers, resume: files.resume ?? null, coverLetter: files.coverLetter ?? null, autoSubmit: false, password, dropdownFirst } satisfies FillPlan }).catch(() => null);
+        // A question filled on a later go is no longer a failure.
+        const merge = (into: FillReport | null, next: FillReport | null) => (!into ? next : !next ? into : {
+          ...next,
+          filled: [...into.filled, ...next.filled],
+          failed: [...into.failed.filter((item) => !next.filled.includes(item.label)), ...next.failed],
+          attempts: [...(into.attempts ?? []), ...(next.attempts ?? [])],
+        });
 
         // 1. Everything Unnepo already knows, with no AI call, so typing starts right away.
         await step("Filling the form…");
@@ -386,6 +413,21 @@ async function run(tabId: number) {
           llmCalls += more?.llmCalls ?? 0;
           const fresh = (more?.answers ?? []).filter((answer) => answer.values.length && !answered.has(answer.id) && answer.type !== "file");
           if (fresh.length) report = merge(report, await fillWith(fresh));
+        }
+
+        // 2b. Dropdowns whose answer fit none of the choices: the AI picks from the choices the page showed.
+        const unmatched = (report?.failed ?? []).filter((item) => item.id && item.options?.length);
+        if (applicationId && !scan.useServerSchema && unmatched.length && stillRunning(tabId, runId)) {
+          const fields = unmatched.flatMap((item) => {
+            const field = scan.fields.find((candidate) => candidate.id === item.id);
+            return field ? [{ ...field, options: item.options! }] : [];
+          });
+          const tried = new Map(unmatched.map((item) => [item.id, item.reason]));
+          const picked = fields.length ? await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields }).catch(() => null) : null;
+          llmCalls += picked?.llmCalls ?? 0;
+          // Only a different answer is worth another go.
+          const again = (picked?.answers ?? []).filter((answer) => answer.values.length && !tried.get(answer.id)?.includes(`"${answer.values[0]}"`));
+          if (again.length) report = merge(report, await fillWith(again));
         }
 
         // Greenhouse's API leaves some questions out (the U.S. demographic questions): fill those from the page.
@@ -416,6 +458,11 @@ async function run(tabId: number) {
         if (report) {
           filledAll.push(...report.filled);
           await saveJob(tabId, { report: { ...report, filled: [...filledAll] }, llmCalls });
+          // The record of every question tried, for fixing what fails; the page's fill never waits on it.
+          if (report.attempts?.length) {
+            void rememberDropdownWay(pageHost, report.attempts).catch(() => undefined);
+            if (applicationId) void api("POST", "attempts", { applicationId, attempts: report.attempts }).catch(() => undefined);
+          }
         }
         filledKey = key;
         continue;

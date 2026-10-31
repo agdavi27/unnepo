@@ -53,6 +53,15 @@ export type JobDetails = {
 /** Where autofill stopped. Only "review" means the form is ready for the student to approve. */
 export type FillStop = "review" | "needs_input" | "email_verification" | "needs_account" | "signin_failed";
 
+/** Why one question didn't fill, in a few fixed kinds so they can be counted across sites. */
+export type FillProblem = "not_on_page" | "list_didnt_open" | "no_option" | "more_choices" | "didnt_stick" | "no_file" | "error";
+
+/**
+ * One question the extension tried to fill: the site, the question, the kind of field, the answer (only
+ * for choices, cut short), the way it filled it, and whether it stuck. Never a password.
+ */
+export type FillAttempt = { site: string; label: string; type: string; answer: string; method: string; ok: boolean; problem?: FillProblem; reason?: string; at?: string };
+
 export type FillReport = {
   filled: string[];
   failed: Array<{ label: string; reason: string }>;
@@ -75,6 +84,8 @@ export type FillReport = {
   fromResume?: string[];
   /** Required questions on the page where autofill stopped that the student can answer in Unnepo. */
   pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
+  /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
+  attempts?: FillAttempt[];
 };
 
 export type ApplicationOutcome = "interviewing" | "offer" | "rejected";

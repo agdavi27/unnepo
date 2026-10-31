@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { PageLoading } from "@/components/product/bits";
 import { dollars } from "@/lib/format";
 
@@ -24,7 +25,7 @@ export function AdminView() {
   return (
     <div className="px-4 py-6 lg:px-6">
       <h1 className="text-4xl font-semibold">Profitability</h1>
-      <p className="mt-2 text-muted">Estimated provider costs are marked. Demo checkouts are excluded from revenue.</p>
+      <p className="mt-2 text-muted">Estimated provider costs are marked. Demo checkouts are excluded from revenue. <Link href="/admin/autofill" className="text-cream underline-offset-2 hover:underline">Autofill problems →</Link></p>
       <div className="mt-5 grid gap-3 md:grid-cols-3">
         <Card title="Revenue" lines={[`Total ${dollars(Number(revenue.totalCents))}`, `MRR ${dollars(Number(revenue.mrrCents))}`, `Paying customers ${revenue.payingCustomers}`, `ARPU ${dollars(Number(revenue.arpuCents))}`, `Refunds ${dollars(Number(revenue.refundCents))}`, `Cancellations ${revenue.cancellations}`]} />
         <Card title="Expenses" lines={[`Contact APIs ${dollars(Number(expenses.contactApiCents))} est.`, `AI APIs ${dollars(Number(expenses.aiApiCents))} est.`, `Email infra ${dollars(Number(expenses.emailInfraCents))} est.`, `Stripe fees ${dollars(Number(expenses.stripeFeeCents))} est.`, `Hosting ${dollars(Number(expenses.hostingCents))} est.`]} />

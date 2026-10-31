@@ -379,6 +379,17 @@ describe("matching answers to dropdown options", () => {
     expect(bestOption("No", ["Not applicable", "None"])).toBeNull();
     expect(bestOption("Yes", ["Yes - full time", "Yes - part time"])).toBeNull();
   });
+
+  it("ignores brackets, dialing codes, and word order, and knows country names", () => {
+    expect(bestOption("United States", ["United States Minor Outlying Islands (+1)", "United States (+1)"])).toBe("United States (+1)");
+    expect(bestOption("United States", ["Canada", "United States of America (+1)"])).toBe("United States of America (+1)");
+    expect(bestOption("United States", ["US Virgin Islands", "USA"])).toBe("USA");
+    expect(bestOption("United States of America", ["United States", "Canada"])).toBe("United States");
+    expect(bestOption("UK", ["United Kingdom", "Ukraine"])).toBe("United Kingdom");
+    expect(bestOption("Bachelor's Degree", ["Degree - Bachelor’s", "Degree - Master's"])).toBe("Degree - Bachelor’s");
+    expect(bestOption("+1 United States", ["United States", "Canada"])).toBe("United States");
+    expect(bestOption("Computer Science", ["Computer Science and Engineering", "Computer Science (BS)", "Computer Science (BA)"])).toBeNull();
+  });
 });
 
 describe("standard answers", () => {

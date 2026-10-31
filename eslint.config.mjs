@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Built practice pages for the extension filler.
+    "tests/practice/dist/**",
   ]),
 ]);
 

@@ -71,7 +71,7 @@ async function fill(plan: FillPlan): Promise<FillReport> {
   const files = { resume: plan.resume, coverLetter: plan.coverLetter };
   const result = plan.useServerSchema
     ? await fillGreenhouse(plan.answers, files)
-    : await fillGeneric((planned = scanFields()), plan.answers, files);
+    : await fillGeneric((planned = scanFields()), plan.answers, files, { dropdownFirst: plan.dropdownFirst });
   result.filled.push(...fillPasswords(plan.password));
   plannedValues = new Map(plan.answers.map((answer) => [answer.label, answer.values.join(", ")]));
   await sleep(300);
@@ -83,7 +83,7 @@ async function fill(plan: FillPlan): Promise<FillReport> {
     }
   }
   // Pressing Submit is the background worker's call (see "press"), so a fill never submits by itself.
-  return { filled: result.filled, failed: result.failed, needsYou: [...new Set(missing)], captcha: scanPage().captcha, submitted: false, ms: Date.now() - started };
+  return { filled: result.filled, failed: result.failed, attempts: result.attempts, needsYou: [...new Set(missing)], captcha: scanPage().captcha, submitted: false, ms: Date.now() - started };
 }
 
 /** Answers the student typed themselves: anything with a value that Unnepo didn't fill or that they changed. */

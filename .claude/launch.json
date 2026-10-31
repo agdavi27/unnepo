@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "practice",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["tests/practice/build.mjs", "--serve", "43180"],
+      "port": 43180
+    }
+  ]
+}

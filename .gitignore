@@ -46,3 +46,6 @@ next-env.d.ts
 
 # Chrome extension build
 /extension/dist/
+
+# practice pages for the extension filler, built
+/tests/practice/dist

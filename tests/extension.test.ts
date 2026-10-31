@@ -12,6 +12,7 @@ import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
+import { autofillProblems, siteName } from "@/lib/services/admin";
 
 const model = vi.hoisted(() => ({ replies: [] as string[], calls: 0, lastPrompt: "" }));
 vi.mock("@anthropic-ai/sdk", () => ({
@@ -352,5 +353,49 @@ describe("phone numbers next to a country code dropdown", () => {
     expect(nationalNumber("1-207-555-0100")).toBe("2075550100");
     expect(nationalNumber("207.555.0100")).toBe("2075550100");
     expect(nationalNumber("+44 20 7946 0958")).toBe("2079460958");
+  });
+});
+
+describe("autofill failure records", () => {
+  it("keeps what the extension tried on the application and counts the failures for the admin page", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const portal = await (await call("POST", "jobs", token, { url: "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Boston/Analyst_R123/apply", title: "Analyst", company: "Acme" })).json();
+    const applicationId = portal.application.id;
+    const site = "acme.wd5.myworkdayjobs.com";
+    const sent = await (await call("POST", "attempts", token, {
+      applicationId,
+      attempts: [
+        { site, label: "First Name", type: "text", answer: "", method: "set", ok: true },
+        { site, label: "Country", type: "combobox", answer: "United States", method: "click", ok: false, problem: "list_didnt_open", reason: "the list didn't open, by click or keyboard" },
+        { site, label: "How did you hear about us?", type: "combobox", answer: "LinkedIn", method: "", ok: false, problem: "no_option", reason: 'no option matching "LinkedIn"' },
+        { site, label: "", type: "text", ok: false },
+        { site, label: "Weird", type: "text", ok: false, problem: "made_up" },
+      ],
+    })).json();
+    expect(sent.saved).toBe(4);
+    await call("POST", "attempts", token, { applicationId, attempts: [{ site, label: "State", type: "combobox", answer: "Maine", method: "click", ok: false, problem: "list_didnt_open", reason: "the list didn't open" }] });
+
+    const saved = await applications.get(userId, applicationId);
+    expect(saved?.fillReport?.attempts).toHaveLength(5);
+    expect(saved?.fillReport?.attempts?.[3]).toMatchObject({ label: "Weird", problem: "error" });
+    // An answers call afterwards keeps the record.
+    await call("POST", "map", token, { applicationId, fields: [{ id: "f1", label: "Legal first name", type: "text", required: true }], ai: false });
+    expect((await applications.get(userId, applicationId))?.fillReport?.attempts).toHaveLength(5);
+
+    const report = await autofillProblems();
+    expect(report).toMatchObject({ tried: 5, failed: 4 });
+    expect(report.problems[0]).toMatchObject({ site: "Workday", type: "combobox", problem: "list didn't open", count: 2 });
+    expect(report.problems[0].examples.map((example) => example.label)).toEqual(["Country", "State"]);
+    expect(report.sites[0]).toMatchObject({ site: "Workday", tried: 5, failed: 4 });
+    expect(siteName("jobs.lever.co")).toBe("Lever");
+    expect(siteName("careers.globex.com")).toBe("globex.com");
+
+    // Someone else's application can't be written to.
+    const other = await signUp({ email: "sam.roe@colby.edu", password: "password123", name: "Sam Roe" });
+    await verifyEmail(other.verifyToken!);
+    const otherId = (await login("sam.roe@colby.edu", "password123")).user.id;
+    const { token: otherToken } = await issueExtensionToken(otherId);
+    expect((await call("POST", "attempts", otherToken, { applicationId, attempts: [{ site, label: "X", type: "text", ok: true }] })).status).toBe(404);
   });
 });
