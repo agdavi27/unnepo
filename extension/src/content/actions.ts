@@ -34,11 +34,35 @@ function usable(el: HTMLElement | null): el is HTMLElement {
 
 const byId = (id: string) => Array.from(document.querySelectorAll<HTMLElement>(`[data-automation-id='${id}']`)).find(usable) ?? null;
 
+// Buttons that go backward: never pressed, whatever else they look like.
+const BACKWARD = /^(back|previous|go back|prev)\b/i;
+const BACKWARD_ID = /back|previous|prev\b/i;
+
+/** Whether a button would take the application backward: Back, Previous, or a step in Workday's step bar. */
+export function goesBack(el: HTMLElement) {
+  const id = el.closest("[data-automation-id]")?.getAttribute("data-automation-id") ?? "";
+  return BACKWARD.test(text(el)) || BACKWARD_ID.test(id) || Boolean(el.closest("[data-automation-id^='progressBar']"));
+}
+
 /** Buttons and button-like links on the page (or only in the open popup), minus the site header and footer. */
 function buttons() {
   return deepAll<HTMLElement>("button, input[type=submit], input[type=button], a, [role=button]", openDialog() ?? document)
     .filter(usable)
-    .filter((el) => !el.closest("header, footer, nav, [data-automation-id='utilityButtonBar'], [role=banner], [role=navigation]"));
+    .filter((el) => !el.closest("header, footer, nav, [data-automation-id='utilityButtonBar'], [role=banner], [role=navigation]"))
+    .filter((el) => !goesBack(el));
+}
+
+/**
+ * Where a Workday application is: the step bar's current step ("current step 3 of 6 My Experience").
+ * Workday keeps one address for every step, so this is how a new step, or a step backward, is told apart.
+ */
+export function workdayStep(): { index: number; total: number; name: string } | null {
+  const active = Array.from(document.querySelectorAll<HTMLElement>("[data-automation-id='progressBarActiveStep']")).find(usable);
+  if (!active) return null;
+  const words = (active.textContent ?? "").replace(/\s+/g, " ").trim();
+  const found = words.match(/step (\d+) of (\d+)\s*(.*)$/i);
+  if (!found) return null;
+  return { index: Number(found[1]), total: Number(found[2]), name: found[3].trim().slice(0, 80) };
 }
 
 const find = (pattern: RegExp) => buttons().find((el) => pattern.test(text(el))) ?? null;
@@ -64,7 +88,7 @@ export function findAction(knownAccount: boolean, formFields: number): (PageActi
   }
 
   // Workday's footer button says "Next" or "Save and Continue" on every page, and "Submit" on the last.
-  const footer = byId("bottom-navigation-next-button") ?? byId("pageFooterNextButton");
+  const footer = [byId("bottom-navigation-next-button"), byId("pageFooterNextButton")].find((el) => el && !goesBack(el)) ?? null;
   if (footer) return make(SUBMIT.test(text(footer)) ? "submit" : "next", footer);
   const next = buttons().find((el) => NEXT.test(text(el)) && !NOT_NEXT.test(text(el))) ?? null;
   if (next) return make("next", next);
@@ -101,15 +125,45 @@ export function findApply(): HTMLElement | null {
 /** Whether the page is a step of an application already, not the job posting. */
 export function inApplication() {
   if (/\/apply(\/|$|\?)/.test(location.pathname + location.search) && !byId("applyManually")) return true;
-  if (byId("bottom-navigation-next-button") || byId("pageFooterNextButton") || byId("progressBar")) return true;
-  return false;
+  if (byId("bottom-navigation-next-button") || byId("pageFooterNextButton") || byId("progressBar") || byId("progressBarActiveStep")) return true;
+  // Workday's step bar can be there without its ids being visible yet; its words give it away.
+  return Boolean(document.querySelector("[data-automation-id^='progressBar']"));
 }
 
-/** Presses the button. Workday puts a clickable overlay over some of its buttons; that's what listens. */
-export function pressAction(el: HTMLElement) {
+/**
+ * Workday's clickable overlay on a button, only when it really sits on top of that button (its middle).
+ * Taking any overlay near the button can mean Back's, which sends the application a step backward.
+ */
+export function overlayOn(el: HTMLElement): HTMLElement | null {
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return null;
+  const x = rect.left + rect.width / 2;
+  const y = rect.top + rect.height / 2;
+  const root = el.getRootNode() as Document | ShadowRoot;
+  const hits = "elementsFromPoint" in root ? root.elementsFromPoint(x, y) : document.elementsFromPoint(x, y);
+  const overlay = hits.find((hit) => hit.matches("[data-automation-id='click_filter']")) as HTMLElement | undefined;
+  if (!overlay || !usable(overlay)) return null;
+  const box = overlay.getBoundingClientRect();
+  return box.left <= x && x <= box.right && box.top <= y && y <= box.bottom ? overlay : null;
+}
+
+/** What was pressed, for the record: the button's words, its Workday id, and whether its overlay took the click. */
+export type Pressed = { label: string; id: string; overlay: boolean };
+
+/** Presses the button. Workday puts a clickable overlay over some of its buttons; that's what listens. Never a Back button. */
+export function pressAction(el: HTMLElement): Pressed | null {
+  if (goesBack(el)) return null;
   el.scrollIntoView({ block: "center" });
-  const overlay = el.parentElement?.querySelector<HTMLElement>("[data-automation-id='click_filter']");
-  press(overlay && usable(overlay) ? overlay : el);
+  const overlay = overlayOn(el);
+  press(overlay ?? el);
+  return { label: text(el).slice(0, 80), id: el.getAttribute("data-automation-id") ?? "", overlay: Boolean(overlay) };
+}
+
+/** The button under a Workday overlay the student clicked: the one it sits on top of. */
+export function buttonUnder(overlay: HTMLElement): HTMLElement | null {
+  const box = overlay.getBoundingClientRect();
+  const hits = document.elementsFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return (hits.find((hit) => hit !== overlay && hit.matches("button, [role=button]")) as HTMLElement | undefined) ?? null;
 }
 
 // "Error: Invalid Data", "Please check all information before trying again", "This field is required".

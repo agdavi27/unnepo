@@ -1,3 +1,4 @@
+import { findAction, findApply, pressAction, workdayStep } from "@/extension/src/content/actions";
 import { watchEdits } from "@/extension/src/content/edits";
 import { fillGeneric } from "@/extension/src/content/generic";
 import { keptByStudent } from "@/extension/src/content/kept";
@@ -8,7 +9,8 @@ import type { Answer, DropdownMethod } from "@/extension/src/shared/types";
 /**
  * Runs the extension's real scanner and filler on a practice page: window.practice(answers by question,
  * ways) fills the page and returns the fill report next to what the page itself says it holds. Like Fill,
- * it leaves alone what was typed into the page by hand. window.celebrate() runs the spiders' dance.
+ * it leaves alone what was typed into the page by hand. window.celebrate() runs the spiders' dance, and
+ * window.next() presses what Fill would press next, with the Workday step before and after.
  */
 
 declare global {
@@ -17,6 +19,7 @@ declare global {
     /** Each practice page's own record of what it holds, by question. */
     pageValues: () => Record<string, string>;
     celebrate: () => void;
+    next: () => Promise<unknown>;
   }
 }
 
@@ -32,4 +35,11 @@ window.practice = async (answers, ways) => {
   return { scanned: fields.map((field) => `${field.type}: ${field.label}`), ...report, kept: kept.map((answer) => answer.label), holds: window.pageValues(), ms: Date.now() - started };
 };
 window.celebrate = celebrateSpiders;
+window.next = async () => {
+  const before = workdayStep();
+  const action = findAction(false, scanFields().length);
+  const pressed = action ? pressAction(action.el) : null;
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  return { before, action: action && { kind: action.kind, label: action.label }, pressed, after: workdayStep(), apply: Boolean(findApply()) };
+};
 watchEdits();

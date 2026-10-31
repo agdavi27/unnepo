@@ -414,3 +414,21 @@ describe("autofill failure records", () => {
     expect((await call("POST", "attempts", otherToken, { applicationId, attempts: [{ site, label: "X", type: "text", ok: true }] })).status).toBe(404);
   });
 });
+
+describe("Workday steps", () => {
+  it("tells a step backward, or a fall back to the start, from moving on", async () => {
+    const { wentBack, pressLine, stepText } = await import("@/extension/src/shared/steps");
+    const step = (index: number, name = "") => ({ index, total: 6, name });
+    expect(wentBack(step(2), step(3), false)).toBe(false);
+    expect(wentBack(step(3), step(3), false)).toBe(false);
+    expect(wentBack(step(3, "My Experience"), step(1, "Autofill with Resume"), false)).toBe(true);
+    // Out of the steps, back at "how do you want to apply".
+    expect(wentBack(step(2), null, true)).toBe(true);
+    // Between steps the bar can briefly vanish: not backward on its own.
+    expect(wentBack(step(2), null, false)).toBe(false);
+    expect(wentBack(null, step(1), false)).toBe(false);
+    expect(stepText(step(3, "My Experience"))).toBe("step 3 of 6 (My Experience)");
+    expect(pressLine({ label: "Save and Continue", id: "pageFooterNextButton", overlay: true, from: step(2), to: step(1) }))
+      .toBe('"Save and Continue" [pageFooterNextButton] via overlay: step 2 of 6 → step 1 of 6');
+  });
+});

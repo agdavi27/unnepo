@@ -1,5 +1,5 @@
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
-import { findAction, findApply, pageNotes, pressAction, SUBMIT } from "./actions";
+import { buttonUnder, findAction, findApply, pageNotes, pressAction, SUBMIT, workdayStep } from "./actions";
 import { press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
@@ -156,7 +156,7 @@ function watchSubmit() {
   document.addEventListener("click", (event) => {
     let target = (event.target as Element | null)?.closest("button, input[type=submit], [data-automation-id='click_filter']") as HTMLElement | null;
     // Workday's overlay sits on top of the real button.
-    if (target?.matches("[data-automation-id='click_filter']")) target = target.parentElement?.querySelector("button") ?? target;
+    if (target?.matches("[data-automation-id='click_filter']")) target = buttonUnder(target) ?? target;
     if (target && SUBMIT.test((target.textContent || (target as HTMLInputElement).value || target.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim())) announceSubmit();
   }, true);
 }
@@ -184,7 +184,7 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       const fields = scanFields();
       const action = findAction(Boolean(message.knownAccount), fields.length);
       const apply = findApply();
-      reply({ needsYou: emptyRequired(fields).map((field) => field.label), action: action ? { kind: action.kind, label: action.label } : null, apply: apply ? (apply.textContent ?? "").trim() || "Apply" : null, captcha: scanPage().captcha, ...pageNotes() });
+      reply({ needsYou: emptyRequired(fields).map((field) => field.label), action: action ? { kind: action.kind, label: action.label } : null, apply: apply ? (apply.textContent ?? "").trim() || "Apply" : null, captcha: scanPage().captcha, step: workdayStep(), ...pageNotes() });
       return false;
     }
     if (message?.type === "leftovers") {
@@ -210,8 +210,8 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
     }
     if (message?.type === "press" && message.first) {
       const apply = findApply();
-      if (apply) pressAction(apply);
-      reply({ pressed: Boolean(apply), label: apply?.textContent?.trim() });
+      const pressed = apply ? pressAction(apply) : null;
+      reply({ pressed: Boolean(pressed), label: apply?.textContent?.trim(), what: pressed });
       return false;
     }
     if (message?.type === "press") {
@@ -222,8 +222,8 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
         return false;
       }
       if (action.kind === "submit") announceSubmit();
-      pressAction(action.el);
-      reply({ pressed: true, label: action.label });
+      const pressed = pressAction(action.el);
+      reply({ pressed: Boolean(pressed), label: action.label, what: pressed });
       return false;
     }
     if (message?.type === "fill") {

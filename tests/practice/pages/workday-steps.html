@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: Workday steps</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  ol { display: flex; gap: 12px; list-style: none; padding: 0; font-size: 13px; }
+  li[data-automation-id="progressBarActiveStep"] { font-weight: 700; }
+  .field { margin: 14px 0; }
+  label { display: block; font-weight: 600; }
+  input { font: inherit; padding: 6px 8px; min-width: 260px; }
+  /* Like Workday: both footer buttons in one row, each under its own clickable overlay. */
+  footer { position: relative; display: flex; gap: 16px; margin-top: 24px; }
+  footer button { font: inherit; padding: 8px 16px; }
+  [data-automation-id="click_filter"] { position: absolute; inset: 0; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Practice: Workday steps</h1>
+<p>Six steps on one address. Back and Next sit side by side in one footer, each under its own overlay, and the
+  overlays come before the buttons in the page, the way Workday builds it.</p>
+<ol data-automation-id="progressBar"></ol>
+<div id="step"></div>
+<div data-automation-id="pageFooter" id="footer"></div>
+<script>
+  const STEPS = ["Autofill with Resume", "My Information", "My Experience", "Application Questions", "Voluntary Disclosures", "Review"];
+  let at = 1;
+  window.pressedLog = [];
+  function render() {
+    document.querySelector("ol").innerHTML = STEPS.map((name, index) => {
+      const n = index + 1;
+      const id = n === at ? "progressBarActiveStep" : n < at ? "progressBarCompletedStep" : "progressBarInactiveStep";
+      return `<li data-automation-id="${id}">${n === at ? "current " : ""}step ${n} of ${STEPS.length}${name}</li>`;
+    }).join("");
+    document.getElementById("step").innerHTML = `<h2>${STEPS[at - 1]}</h2>` + [1, 2, 3].map((n) => `<div class="field"><label for="f${at}-${n}">Question ${n} on ${STEPS[at - 1]}</label><input id="f${at}-${n}"></div>`).join("");
+    // Both overlays first, then both buttons: "the first overlay near the button" is Back's.
+    const footer = document.getElementById("footer");
+    footer.innerHTML = "<footer></footer>";
+    const row = footer.querySelector("footer");
+    const backFilter = Object.assign(document.createElement("div"), { onclick: () => go(-1, "back overlay") });
+    backFilter.setAttribute("data-automation-id", "click_filter");
+    const nextFilter = Object.assign(document.createElement("div"), { onclick: () => go(1, "next overlay") });
+    nextFilter.setAttribute("data-automation-id", "click_filter");
+    const back = Object.assign(document.createElement("button"), { textContent: "Back", onclick: () => go(-1, "back button") });
+    back.setAttribute("data-automation-id", "pageFooterBackButton");
+    const next = Object.assign(document.createElement("button"), { textContent: at === STEPS.length ? "Submit" : "Save and Continue", onclick: () => go(1, "next button") });
+    next.setAttribute("data-automation-id", "pageFooterNextButton");
+    row.append(backFilter, nextFilter, back, next);
+    // Each overlay covers its own button.
+    requestAnimationFrame(() => {
+      for (const [filter, button] of [[backFilter, back], [nextFilter, next]]) {
+        const box = button.getBoundingClientRect();
+        const base = row.getBoundingClientRect();
+        Object.assign(filter.style, { inset: "auto", left: `${box.left - base.left}px`, top: `${box.top - base.top}px`, width: `${box.width}px`, height: `${box.height}px`, zIndex: 2 });
+      }
+    });
+  }
+  function go(by, how) {
+    window.pressedLog.push(how);
+    at = Math.min(STEPS.length, Math.max(1, at + by));
+    render();
+  }
+  window.goToStep = (n) => { at = n; render(); };
+  render();
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

@@ -1,3 +1,4 @@
+import { pressLine, stepText, wentBack, type PressRecord, type Step } from "./shared/steps";
 import { generatePassword, unmetRules } from "./shared/password";
 import { NEVER_READ, type Answer, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type PanelState, type Scan } from "./shared/types";
 
@@ -74,7 +75,7 @@ async function addIssues(url: string, items: Array<Pick<Issue, "kind" | "what" |
   const recent = (item: Pick<Issue, "kind" | "what" | "question">) => list.some((known) => known.kind === item.kind && known.page === where.page && known.question === item.question && known.what === item.what && now - Date.parse(known.at) < SAME_ISSUE_MS);
   const fresh = items.filter((item) => item.kind === "note" || !recent(item)).map((item): Issue => ({
     id: `${now.toString(36)}${Math.random().toString(36).slice(2, 7)}`, at: new Date(now).toISOString(), ...where,
-    kind: item.kind, what: item.what.replace(/\s+/g, " ").trim().slice(0, 500), ...(item.question ? { question: item.question.slice(0, 200) } : {}),
+    kind: item.kind, what: item.what.replace(/\s+/g, " ").trim().slice(0, 1500), ...(item.question ? { question: item.question.slice(0, 200) } : {}),
   }));
   if (!fresh.length) return;
   await chrome.storage.local.set({ issues: [...fresh.reverse(), ...list].slice(0, ISSUES_KEPT) });
@@ -212,7 +213,7 @@ function sameHost(a: string, b: string) {
 
 const signature = (scan: Scan) => `${scan.url}|${scan.passwordBoxes}|${scan.fields.map((field) => field.label).join("|")}`;
 const hasForm = (scan: Scan) => scan.useServerSchema || scan.fields.length > 0 || scan.passwordBoxes > 0;
-type Status = { apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; signInFailed: boolean; verifyEmail: boolean; confirmed: boolean; formErrors: string[]; flagged: string[]; valuesKey: string };
+type Status = { step: Step | null; apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; signInFailed: boolean; verifyEmail: boolean; confirmed: boolean; formErrors: string[]; flagged: string[]; valuesKey: string };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -315,6 +316,12 @@ async function run(tabId: number) {
   // Sites where signing in failed on this run: never pressed again.
   const signInFailedAt = new Set<string>();
   let triedApply = false;
+  // Every press on this run, with the step before and after, for the issues list when something goes wrong.
+  const pressLog: PressRecord[] = [];
+  const pressed = (what: { label?: string; id?: string; overlay?: boolean } | null | undefined, label: string, from: Step | null) => {
+    pressLog.push({ label: (what?.label || label).slice(0, 80), id: what?.id ?? "", overlay: Boolean(what?.overlay), from });
+    if (pressLog.length > 12) pressLog.shift();
+  };
   /** After a press: waits for a new page, new fields, or new buttons (Workday's "how to apply" choice). */
   const waitForChange = async (key: string, buttonsBefore: string, known: boolean, timeout = 12_000) => {
     const until = Date.now() + timeout;
@@ -373,14 +380,25 @@ async function run(tabId: number) {
       const status = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
       if (!status) { await wait(400); continue; }
       if (!stillRunning(tabId, runId)) break;
+      // Where the last press landed. A press that went backward stops the run, so it can't fill the start again.
+      const last = pressLog.at(-1);
+      if (last && last.to === undefined) {
+        last.to = status.step ?? null;
+        // After Submit the steps end and the posting shows again: that's done, not backward.
+        if (wentBack(last.from, last.to, Boolean(status.apply)) && !status.confirmed && !/submit/i.test(last.label)) {
+          // The stop below puts this on the issues list with every press that led here.
+          throw new Error(`The site went back from ${stepText(last.from)} to ${stepText(last.to)} after Unnepo pressed "${last.label}", so Unnepo stopped instead of starting over. Go to the step you were on and press Fill. This is on your issues list (Profile).`);
+        }
+      }
       // First thing on every run: if there's an Apply button, press it.
       if (!triedApply) {
         triedApply = true;
         if (status.apply) {
           await step("Opening the application…");
-          const pressed = await send<{ pressed: boolean }>(tabId, { type: "press", first: true }).catch(() => ({ pressed: false }));
+          const reply = await send<{ pressed: boolean; what?: PressRecord }>(tabId, { type: "press", first: true }).catch(() => ({ pressed: false, what: undefined }));
+          if (reply.pressed) pressed(reply.what, status.apply, status.step ?? null);
           // Some Apply buttons only scroll to the form below, so this doesn't wait long.
-          if (pressed.pressed) await waitForChange(signature(scan), `${status.action?.kind}|${status.action?.label}|${status.apply}`, known, 4000);
+          if (reply.pressed) await waitForChange(signature(scan), `${status.action?.kind}|${status.action?.label}|${status.apply}`, known, 4000);
           continue;
         }
       }
@@ -574,8 +592,9 @@ async function run(tabId: number) {
       pressedKey = pressKey;
       pressedAt = Date.now();
       await step(ACTION_STEP[action.kind]);
-      const pressed = await send<{ pressed: boolean }>(tabId, { type: "press", kind: action.kind, knownAccount: known }).catch(() => ({ pressed: false }));
-      if (!pressed.pressed) { await wait(300); continue; }
+      const reply = await send<{ pressed: boolean; what?: PressRecord }>(tabId, { type: "press", kind: action.kind, knownAccount: known }).catch(() => ({ pressed: false, what: undefined }));
+      if (!reply.pressed) { await wait(300); continue; }
+      pressed(reply.what, action.label, status.step ?? null);
       await waitForChange(key, `${action.kind}|${action.label}|${status.apply}`, known);
       if (action.kind === "create_account") {
         const notes = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
@@ -588,7 +607,9 @@ async function run(tabId: number) {
     await saveJob(tabId, { step: "Stopped. Press Fill to start again." });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Something went wrong.";
-    await addIssues((await chrome.tabs.get(tabId).catch(() => null))?.url ?? lastUrl, [{ kind: "stopped", what: `Stopped: ${message}` }]).catch(() => undefined);
+    // On a stepped application, the presses that led here help find the cause.
+    const trail = pressLog.some((item) => item.from || item.to) ? ` Presses: ${pressLog.map(pressLine).join("; ")}` : "";
+    await addIssues((await chrome.tabs.get(tabId).catch(() => null))?.url ?? lastUrl, [{ kind: "stopped", what: `Stopped: ${message}${trail}`.slice(0, 1500) }]).catch(() => undefined);
     await saveJob(tabId, { error: message, step: "Stopped." });
   } finally {
     if (stillRunning(tabId, runId)) runs.delete(tabId);
