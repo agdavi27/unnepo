@@ -10,6 +10,7 @@ type Problems = {
   problems: Array<{ site: string; type: string; problem: string; count: number; lastAt: string; examples: Array<{ label: string; answer: string; method: string; reason: string }> }>;
   sites: Array<{ site: string; tried: number; failed: number }>;
   methods: Array<{ method: string; ok: number; tried: number }>;
+  people: { searched: number; foundNobody: number; byGroup: Array<{ group: string; count: number }>; nobody: Array<{ at: string; company: string; domains: string[]; school: string; steps: string[] }> };
 };
 
 const percent = (part: number, whole: number) => (whole ? `${Math.round((part / whole) * 100)}%` : "–");
@@ -76,6 +77,21 @@ export function AutofillProblemsView() {
           <ul className="mt-3 space-y-1 text-sm text-muted">{data.methods.map((method) => <li key={method.method}>{method.method}: {method.ok} of {method.tried} stuck ({percent(method.ok, method.tried)})</li>)}</ul>
         </article>
       </div>
+      <h2 className="mt-8 text-2xl font-semibold">People to email</h2>
+      <p className="mt-2 text-muted">
+        {data.people.searched} recent searches, {data.people.foundNobody} found no one ({percent(data.people.foundNobody, data.people.searched)}).
+        {data.people.byGroup.length ? ` ${data.people.byGroup.map((row) => `${row.group}: ${row.count}`).join(" · ")}.` : ""}
+      </p>
+      {data.people.nobody.length > 0 && (
+        <ul className="mt-3 space-y-2 text-sm">
+          {data.people.nobody.map((search) => (
+            <li key={`${search.company}|${search.at}`} className="rounded-2xl border border-line bg-card p-3">
+              <p className="font-medium">{search.company}<span className="text-muted"> · {search.domains.length ? search.domains.join(", ") : "no company match"}{search.school ? ` · ${search.school}` : ""}</span></p>
+              <ul className="mt-1 text-muted">{search.steps.map((step, index) => <li key={index}>{step}</li>)}</ul>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

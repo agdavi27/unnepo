@@ -162,3 +162,12 @@ a.px { display: flex; align-items: center; justify-content: center; text-decorat
 .status { flex: none; font-family: var(--mono); font-size: 10px; letter-spacing: .6px; text-transform: uppercase; color: var(--muted-3); border: 1px solid var(--control); border-radius: 6px; padding: 3px 6px; }
 .status.done { color: var(--ok); border-color: rgba(74, 222, 128, .35); }
 .view { padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+
+/* Profile: the running issues list */
+.issues { border-top: 1px solid var(--line); }
+.issue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.issue-list li { display: flex; flex-direction: column; gap: 4px; padding: 12px 2px; min-width: 0; }
+.issue-list li + li { border-top: 1px solid var(--line); }
+.issue-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.issue-question { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.issue-list .small, .issue-list .mono { overflow-wrap: anywhere; }

@@ -97,14 +97,15 @@ export function isPersonalWorkEmail(email: string) {
   return Boolean(local) && !GENERIC_INBOXES.has(local) && !local.startsWith("noreply");
 }
 
-function mapApolloPerson(raw: Record<string, unknown>): Contact | null {
+/** `anyEmail`: keep people Apollo has no email for too (shown with their LinkedIn instead). */
+function mapApolloPerson(raw: Record<string, unknown>, options: { anyEmail?: boolean } = {}): Contact | null {
   const first = String(raw.first_name ?? "").trim();
   const last = String(raw.last_name || raw.last_name_obfuscated || "").trim();
   const fullName = `${first} ${last}`.trim();
   const externalId = String(raw.id ?? "");
   if (!fullName || !externalId) return null;
   const organization = (raw.organization ?? {}) as Record<string, unknown>;
-  if (raw.has_email === false) return null;
+  if (raw.has_email === false && !options.anyEmail) return null;
   if (!looksLikePerson(first, last, String(organization.name ?? raw.organization_name ?? ""))) return null;
   // People search returns no education, so a school is never assumed for the contact.
   const school = null;
@@ -293,8 +294,36 @@ export async function resolveCompanyDomains(userId: string, names: string[], max
   return { domains: [...domains], unresolved };
 }
 
+/** Companies Apollo has under a name, best match first, with their websites. Nothing is cached here. */
+export async function searchCompanies(userId: string, name: string, perPage = 5) {
+  const apolloKey = await readApolloKey();
+  if (!apolloKey || !name.trim()) return [];
+  const estimate = estimateRequestCost("enrich");
+  const started = Date.now();
+  try {
+    await assertSpendAllowed(userId, estimate.cents);
+    const response = await contactFetch("https://api.apollo.io/api/v1/mixed_companies/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": apolloKey },
+      body: JSON.stringify({ q_organization_name: name, page: 1, per_page: perPage }),
+    });
+    if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 200));
+    const body = (await response.json()) as { organizations?: Array<Record<string, unknown>>; accounts?: Array<Record<string, unknown>> };
+    const found = [...(body.organizations ?? []), ...(body.accounts ?? [])]
+      .map((org) => ({ name: String(org.name ?? "").trim(), domain: String(org.primary_domain ?? "").trim().toLowerCase().replace(/^www\./, "") }))
+      .filter((org) => org.domain);
+    await recordUsage({ userId, provider: "apollo", operation: "company_lookup", success: found.length > 0, latencyMs: Date.now() - started, costCents: estimate.cents, estimated: true });
+    return found;
+  } catch (error) {
+    await recordUsage({ userId, provider: "apollo", operation: "company_lookup", success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true, error: error instanceof Error ? error.message : "company_lookup_failed" });
+    return [];
+  }
+}
+
 /** One page of Apollo People API Search. It costs no Apollo credits. */
-export async function searchPeopleQuery(userId: string, query: ApolloPeopleQuery, page: number, perPage: number) {
+/** `verifiedOnly` (the default): only people Apollo already holds a verified email for. */
+export async function searchPeopleQuery(userId: string, query: ApolloPeopleQuery, page: number, perPage: number, options: { verifiedOnly?: boolean } = {}) {
+  const verifiedOnly = options.verifiedOnly ?? true;
   const apolloKey = await readApolloKey();
   if (!apolloKey) throw new ServiceError("Live people search is not available right now. No credits were used.", "provider_missing", 503);
   const started = Date.now();
@@ -302,14 +331,13 @@ export async function searchPeopleQuery(userId: string, query: ApolloPeopleQuery
     const response = await contactFetch("https://api.apollo.io/api/v1/mixed_people/api_search", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": apolloKey },
-      // Only people Apollo already holds a verified email for.
-      body: JSON.stringify({ ...query, contact_email_status: ["verified"], ...(query.person_titles?.length ? { include_similar_titles: true } : {}), page, per_page: perPage }),
+      body: JSON.stringify({ ...query, ...(verifiedOnly ? { contact_email_status: ["verified"] } : {}), ...(query.person_titles?.length ? { include_similar_titles: true } : {}), page, per_page: perPage }),
     });
     if (!response.ok) throw new ApolloError(response.status, (await response.text().catch(() => "")).slice(0, 300));
     const body = (await response.json()) as { people?: Array<Record<string, unknown>>; total_entries?: number };
     // Search results are candidates only. Nothing is stored until a search keeps someone,
     // and the free call writes no usage row, so a long search doesn't rewrite the data record.
-    const people = (body.people ?? []).map((person) => mapApolloPerson(person)).filter((person) => person !== null) as Contact[];
+    const people = (body.people ?? []).map((person) => mapApolloPerson(person, { anyEmail: !verifiedOnly })).filter((person) => person !== null) as Contact[];
     return { people, total: Number(body.total_entries ?? people.length) };
   } catch (error) {
     await recordUsage({

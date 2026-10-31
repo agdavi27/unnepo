@@ -7,7 +7,7 @@ import { assertPublicUrl, setJobPageFetcherForTests } from "@/lib/apply/safe-fet
 import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { acceptAiAnswer, classifyQuestion, headlineAnswer, missingAnswers, planAnswers, policyAnswer, RECRUITER_NOTE, toolExperienceAnswer } from "@/lib/apply/questions";
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
-import { coreTitle } from "@/lib/apply/contacts";
+import { companyNames, coreTitle, departmentOf, siteDomain } from "@/lib/apply/contacts";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { acceptFixes } from "@/lib/apply/fast/fields";
 import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
@@ -527,67 +527,106 @@ describe("job-site passwords", () => {
 });
 
 describe("people after applying", () => {
-  it("ranks people with verified emails first, keeps photos, and writes an email for each person", async () => {
+  const person = (id: string, first: string, last: string, title: string) => ({ id, first_name: first, last_name: last, title, organization: { name: "Acme Corp", primary_domain: "acme.com" }, linkedin_url: `https://linkedin.com/in/${id}` });
+  type Search = { q_organization_domains_list: string[]; person_titles?: string[]; q_keywords?: string; contact_email_status?: string[] };
+
+  /** A student who applied to Acme's Greenhouse job, and an Apollo that answers searches with `people`. */
+  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { verified?: string[]; poster?: boolean } = {}) {
     process.env.APOLLO_API_KEY = "apollo";
-    process.env.HUNTER_API_KEY = "hunter";
+    delete process.env.HUNTER_API_KEY;
     process.env.ANTHROPIC_API_KEY = "anthropic";
     process.env.DAILY_USER_SPEND_CENTS = "5000";
     process.env.DAILY_GLOBAL_SPEND_CENTS = "50000";
     const userId = await student();
     model.replies.push("{}");
     const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
-    await runContactDiscovery(userId, application.id);
-    expect((await applications.get(userId, application.id))?.contactsStatus).toBe("idle");
-
-    const person = (id: string, first: string, last: string, title: string) => ({ id, first_name: first, last_name: last, title, organization: { name: "Acme Corp", primary_domain: "acme.com" }, linkedin_url: `https://linkedin.com/in/${id}` });
-    const seen: string[] = [];
+    if (options.poster === false) await applications.update(userId, application.id, { postedRecruiter: null });
+    const searches: Search[] = [];
     setContactFetcher(async (input, init) => {
       const url = String(input);
-      seen.push(url.replace(/api_key=[^&]+/, "api_key=…"));
-      if (url.includes("mixed_companies/search")) return Response.json({ organizations: [{ primary_domain: "acme.com" }] });
-      if (url.includes("people/match")) return Response.json({ person: { title: "Senior Recruiter", email: "jordan.smith@acme.com", email_status: "verified" } });
+      if (url.includes("mixed_companies/search")) return Response.json({ organizations: [{ name: "Acme Dental", primary_domain: "acmedental.com" }, { name: "Acme Corp", primary_domain: "acme.com" }] });
+      if (url.includes("people/match")) return Response.json({ person: { title: "Recruiter", email: null } });
       if (url.includes("mixed_people/api_search")) {
-        const titles = JSON.parse(String(init?.body)).person_titles as string[];
-        if (titles.includes("recruiter")) return Response.json({ people: [person("r1", "Avery", "Kim", "University Recruiter"), person("r2", "Sam", "Lee", "Talent Acquisition Partner"), person("r3", "Extra", "Person", "Recruiter")] });
-        if (titles.some((title) => /manager|head|director/.test(title))) return Response.json({ people: [person("m1", "Taylor", "Brooks", "Head of Product")] });
-        return Response.json({ people: [person("t1", "Riley", "Chen", "Product Analyst")] });
+        const search = JSON.parse(String(init?.body)) as Search;
+        searches.push(search);
+        const found = people(search);
+        return found === "fail" ? new Response("busy", { status: 500 }) : Response.json({ people: found });
       }
       if (url.includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
-        // Apollo verifies everyone except Taylor and the extra recruiter, and returns photos for all.
-        const unverified = new Set(["m1", "r3"]);
-        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@acme.com`, email_status: unverified.has(item.id) ? "guessed" : "verified", photo_url: `https://img.example.com/${item.id}.jpg` })) });
-      }
-      if (url.includes("email-finder")) {
-        const found = new URL(url).searchParams.get("first_name") === "Taylor";
-        return Response.json({ data: found ? { email: "taylor.brooks@acme.com", verification: { status: "valid" } } : { email: null } });
+        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@acme.com`, email_status: options.verified?.includes(item.id) ? "verified" : "guessed", photo_url: `https://img.example.com/${item.id}.jpg` })) });
       }
       return new Response("unexpected", { status: 500 });
     });
-    model.replies.push(JSON.stringify({ emails: [1, 2, 3, 4, 5].map((index) => ({ index, subject: `Subject ${index}`, body: `Hi ${index}, I applied to the Product Analyst Intern role.` })) }));
-
+    model.replies.push(JSON.stringify({ emails: [{ index: 1, subject: "Hello", body: "Hi, I applied to the Product Analyst Intern role." }] }));
     await markApplied(userId, { applicationId: application.id });
     await runContactDiscovery(userId, application.id);
+    return { userId, application: (await applications.get(userId, application.id))!, contacts: await applicationContacts.list(userId, [application.id]), searches };
+  }
 
-    const app = await applications.get(userId, application.id);
-    expect(app).toMatchObject({ status: "applied_manual", contactsStatus: "done", companyDomain: "acme.com" });
-    const contacts = await applicationContacts.list(userId, [application.id]);
-    expect(contacts.map((item) => [item.rank, item.role, item.name])).toEqual([
-      [1, "job_poster", "Jordan Smith"],
-      [2, "recruiter", "Avery Kim"],
-      [3, "recruiter", "Sam Lee"],
-      [4, "hiring_manager", "Taylor Brooks"],
-      [5, "team_member", "Riley Chen"],
+  it("finds one person from the student's school first, on the company's real website", async () => {
+    // An old wrong match for Acme is tried first and turns up no one; it's replaced by the site that does.
+    await repo.setCompanyDomains("Acme Corp", ["acme.org"]);
+    const { application, contacts, searches } = await appliedWith((search) => {
+      if (search.q_organization_domains_list[0] !== "acme.com") return [];
+      if (search.q_keywords === "Colby College") return [person("a1", "Casey", "Park", "Product Manager")];
+      return [person("r1", "Avery", "Kim", "Recruiter")];
+    }, { verified: ["a1"] });
+    expect(contacts.map((item) => [item.rank, item.role, item.name, item.email])).toEqual([[1, "alumni", "Casey Park", "a1@acme.com"]]);
+    expect(contacts[0].relevance).toContain("Colby College");
+    expect(contacts[0].emailBody).toContain("Product Analyst Intern");
+    expect(application).toMatchObject({ contactsStatus: "done", companyDomain: "acme.com" });
+    expect((await repo.getCompanyDomains(["Acme Corp"]))["acme corp"]).toEqual(["acme.com"]);
+    // People are searched for whether or not Apollo has an email yet; emails are checked after.
+    expect(searches.every((search) => !search.contact_email_status)).toBe(true);
+    expect(application.fillReport?.peopleSearch).toMatchObject({ domain: "acme.com", school: "Colby College", chosen: { name: "Casey Park", role: "alumni", email: true } });
+    expect(application.fillReport?.peopleSearch?.steps.slice(0, 3)).toEqual([
+      { step: "From Colby College", domain: "acme.org", found: 0 },
+      { step: "Named on the posting", domain: "acme.org", found: 1 },
+      { step: "Recruiters", domain: "acme.org", found: 0 },
     ]);
-    expect(contacts[0]).toMatchObject({ email: "jordan.smith@acme.com", emailSource: "apollo", title: "Senior Recruiter" });
-    // Apollo's guess is dropped; Hunter's verified address is used instead.
-    expect(contacts[3]).toMatchObject({ email: "taylor.brooks@acme.com", emailSource: "hunter", photoUrl: "https://img.example.com/m1.jpg" });
-    expect(contacts[1]).toMatchObject({ photoUrl: "https://img.example.com/r1.jpg", linkedinUrl: "https://linkedin.com/in/r1" });
-    // The third recruiter had no verified email, so verified people outranked them.
-    expect(contacts.map((item) => item.name)).not.toContain("Extra Person");
-    expect(contacts.every((item) => item.emailBody?.includes("Product Analyst Intern"))).toBe(true);
-    expect(model.calls.at(-1)).toContain("Jordan Smith");
-    expect(seen.some((url) => url.includes("api_key=hunter"))).toBe(false);
+  });
+
+  it("falls back to a campus recruiter when no one from the school turns up, even if a search fails", async () => {
+    const { application, contacts } = await appliedWith((search) => {
+      if (search.q_keywords) return "fail";
+      if (search.person_titles?.includes("recruiter")) return [person("r1", "Avery", "Kim", "Senior Recruiter"), person("r2", "Sam", "Lee", "University Recruiter")];
+      return [];
+    }, { verified: ["r1", "r2"] });
+    expect(contacts.map((item) => [item.role, item.name, item.email])).toEqual([["recruiter", "Sam Lee", "r2@acme.com"]]);
+    expect(application.contactsMessage).toContain("No one from Colby College turned up");
+    expect(application.fillReport?.peopleSearch?.steps[0]).toMatchObject({ step: "From Colby College", found: 0, error: expect.stringContaining("500") });
+  });
+
+  it("shows the best match without an email rather than no one, and someone in the department last", async () => {
+    const { contacts, application } = await appliedWith((search) => (search.person_titles?.includes("Product") ? [person("t1", "Riley", "Chen", "Product Lead")] : []), { poster: false });
+    expect(contacts.map((item) => [item.role, item.name, item.email, item.linkedinUrl])).toEqual([["team_member", "Riley Chen", null, "https://linkedin.com/in/t1"]]);
+    expect(application.contactsMessage).toContain("reach out on LinkedIn");
+  });
+
+  it("says why no one was found, and keeps no guess about the company", async () => {
+    const { contacts, application } = await appliedWith(() => [], { poster: false });
+    expect(contacts).toEqual([]);
+    expect(application).toMatchObject({ contactsStatus: "done", companyDomain: null });
+    expect(application.contactsMessage).toMatch(/Apollo found no one at Acme/);
+    expect(application.fillReport?.peopleSearch?.steps.length).toBeGreaterThanOrEqual(3);
+    expect(await repo.getCompanyDomains(["Acme Corp"])).toEqual({});
+  });
+
+  it("asks to try again when every search fails", async () => {
+    const { contacts, application } = await appliedWith(() => "fail", { poster: false });
+    expect(contacts).toEqual([]);
+    expect(application.contactsStatus).toBe("failed");
+  });
+
+  it("reads the company's own website and names from the posting", () => {
+    expect(siteDomain("https://careers.globex.com/jobs/1")).toBe("globex.com");
+    expect(siteDomain("https://jobs.acme.co.uk/apply")).toBe("acme.co.uk");
+    expect(siteDomain("https://acme.wd5.myworkdayjobs.com/en-US/careers")).toBeNull();
+    expect(companyNames({ company: "Acme Corp, Inc.", jobUrl: "https://acme.wd5.myworkdayjobs.com/x" })).toEqual(["Acme Corp, Inc.", "Acme"]);
+    expect(companyNames({ company: "Globex", jobUrl: "https://jobs.lever.co/globex-labs/1" })).toEqual(["Globex", "globex labs"]);
+    expect(departmentOf({ department: null, title: "Data Analyst Intern" })).toBe("Data");
+    expect(departmentOf({ department: "Marketing & Growth", title: "Intern" })).toBe("Marketing");
   });
 
   it("shortens job titles for team searches", () => {

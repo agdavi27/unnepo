@@ -11,7 +11,8 @@
     "setup:db": "node scripts/setup-db.mjs",
     "extension:build": "node extension/build.mjs",
     "extension:typecheck": "tsc -p extension/tsconfig.json",
-    "icons": "node scripts/spider-icons.mjs"
+    "icons": "node scripts/spider-icons.mjs",
+    "push": "node scripts/push.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.3.0",

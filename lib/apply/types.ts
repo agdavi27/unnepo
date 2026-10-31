@@ -84,6 +84,8 @@ export type FillReport = {
   fromResume?: string[];
   /** Required questions on the page where autofill stopped that the student can answer in Unnepo. */
   pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
+  /** The last search for people to email: every step and what it found. */
+  peopleSearch?: PeopleSearch;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
   attempts?: FillAttempt[];
 };
@@ -130,7 +132,13 @@ export type JobApplication = {
   updatedAt: string;
 };
 
-export type ContactRole = "job_poster" | "recruiter" | "hiring_manager" | "team_member";
+export type ContactRole = "alumni" | "job_poster" | "recruiter" | "hiring_manager" | "team_member";
+
+/** One search Unnepo ran to find someone to email, and how many people it turned up. */
+export type PeopleStep = { step: string; domain: string; found: number; error?: string };
+
+/** What the last people search tried, kept so "no one found" can be explained and fixed. */
+export type PeopleSearch = { at: string; company: string; domains: string[]; domain: string | null; school: string; steps: PeopleStep[]; chosen: { name: string; role: ContactRole; email: boolean } | null };
 export type OutreachState = "not_contacted" | "emailed" | "replied" | "no_response";
 
 export type ApplicationContact = {

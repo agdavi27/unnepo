@@ -447,8 +447,9 @@ export async function runContactDiscovery(userId: string, applicationId: string)
   if (busy) return;
   await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: "Finding people…" });
   let found: Awaited<ReturnType<typeof findPeopleForApplication>>;
+  const info = await student(userId);
   try {
-    found = await findPeopleForApplication(userId, app);
+    found = await findPeopleForApplication(userId, app, { school: info.context.school });
   } catch (error) {
     // Apollo's own messages mention search credits, which don't apply here; the application credit covers this.
     const reason = error instanceof ServiceError ? error.message.replace(/\s*No credits were used\.?/i, "") : "Couldn't look up people right now.";
@@ -456,10 +457,12 @@ export async function runContactDiscovery(userId: string, applicationId: string)
     return;
   }
   const rows = await applicationContacts.replace(userId, app.id, found.people.map((person) => ({ ...person, applicationId: app.id, userId, emailSubject: null, emailBody: null })));
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: rows.length ? "writing" : "done", contactsMessage: found.notes.join(" ") });
+  // What each search found is kept with the application, so "no one found" can be traced.
+  const latest = (await applications.get(userId, app.id)) ?? app;
+  const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: rows.length ? "writing" : "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleSearch: found.search } });
   if (!rows.length) return;
   try {
-    const info = await student(userId);
     const emails = await writeOutreachEmails(userId, app, rows, { name: info.user.name, resumeText: info.resumeText, profile: info.profileText });
     for (const [index, row] of rows.entries()) {
       if (emails[index]?.body) await applicationContacts.update(userId, row.id, { emailSubject: emails[index].subject, emailBody: emails[index].body });

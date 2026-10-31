@@ -152,7 +152,23 @@ export async function autofillProblems() {
     if (group.examples.length < 5) group.examples.push({ label: attempt.label, answer: attempt.answer, method: attempt.method, reason: attempt.reason ?? "" });
     groups.set(key, group);
   }
+  const searches = await applications.recentPeopleSearches();
+  const people = {
+    searched: searches.length,
+    foundNobody: searches.filter((search) => !search.chosen).length,
+    // Which group the person came from: school, recruiter, department.
+    byGroup: Object.entries(searches.reduce<Record<string, number>>((counts, search) => {
+      const group = search.chosen ? (search.chosen.role === "alumni" ? "From the school" : search.chosen.role === "team_member" ? "Department" : "Recruiter") : "No one";
+      counts[group] = (counts[group] ?? 0) + 1;
+      return counts;
+    }, {})).map(([group, count]) => ({ group, count })),
+    nobody: searches.filter((search) => !search.chosen).slice(0, 30).map((search) => ({
+      at: search.at, company: search.company, domains: search.domains, school: search.school,
+      steps: search.steps.map((step) => `${step.step} @ ${step.domain}: ${step.error ? `failed (${step.error})` : step.found}`),
+    })),
+  };
   return {
+    people,
     tried: all.length,
     failed: all.filter((attempt) => !attempt.ok).length,
     problems: [...groups.values()].sort((a, b) => b.count - a.count || b.lastAt.localeCompare(a.lastAt)).slice(0, 100),

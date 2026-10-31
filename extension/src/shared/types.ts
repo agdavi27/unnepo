@@ -56,6 +56,12 @@ export type FillReport = {
   ms: number;
 };
 
+/**
+ * One problem on the running issues list in Profile: a question that didn't fill, an error a site showed, a
+ * run that stopped, or a note the student wrote. Kept only on this computer; never a password or a typed answer.
+ */
+export type Issue = { id: string; at: string; kind: "fill" | "site" | "stopped" | "note"; site: string; page: string; question?: string; what: string };
+
 /** Sites Unnepo never reads or fills, whatever is open in the panel: LinkedIn. */
 export const NEVER_READ = /(^|\.)linkedin\.com$/i;
 

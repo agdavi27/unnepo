@@ -1,7 +1,7 @@
 import { id, nowIso, persistenceMode, withLock } from "@/lib/db/file-store";
 import { supabaseTables } from "@/lib/db/remote";
 import { ServiceError } from "@/lib/errors";
-import type { ApplicationContact, ApplicationProfile, FillAttempt, JobApplication } from "@/lib/apply/types";
+import type { ApplicationContact, ApplicationProfile, FillAttempt, JobApplication, PeopleSearch } from "@/lib/apply/types";
 
 /**
  * Storage for V1 applications. Production uses the Supabase tables from
@@ -75,6 +75,16 @@ export const applications = {
       return (data ?? []).map((row) => ((row as { attempts?: unknown }).attempts as FillAttempt[] | null) ?? []);
     }
     return withLock((db) => (db.jobApplications ?? []).filter((app) => app.fillReport?.attempts?.length).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit).map((app) => app.fillReport!.attempts!));
+  },
+
+  /** Every student's last people search on their most recently updated applications, for the admin page. */
+  async recentPeopleSearches(limit = 300): Promise<PeopleSearch[]> {
+    if (onTables()) {
+      const { data, error } = await supabaseTables().from("job_applications").select("search:fill_report->peopleSearch").not("fill_report->peopleSearch", "is", null).order("updated_at", { ascending: false }).limit(limit);
+      if (error) throw tableError(error);
+      return (data ?? []).map((row) => (row as { search?: unknown }).search as PeopleSearch | null).filter((search): search is PeopleSearch => Boolean(search));
+    }
+    return withLock((db) => (db.jobApplications ?? []).filter((app) => app.fillReport?.peopleSearch).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, limit).map((app) => app.fillReport!.peopleSearch!));
   },
 
   async get(userId: string, applicationId: string): Promise<JobApplication | null> {

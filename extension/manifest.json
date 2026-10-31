@@ -2,7 +2,8 @@
   "manifest_version": 3,
   "name": "Unnepo",
   "short_name": "Unnepo",
-  "version": "0.1.0",
+  "version": "1.0",
+  "version_name": "1",
   "description": "Fills job and internship applications from your Unnepo profile, in your own browser. You approve every submit.",
   "minimum_chrome_version": "116",
   "action": {

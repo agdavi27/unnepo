@@ -23,6 +23,7 @@ export type ApplyData = {
 export type TrackerView = "applied" | "stats";
 
 const ROLE_LABEL: Record<ApplicationContact["role"], string> = {
+  alumni: "From your school",
   job_poster: "Named on posting",
   recruiter: "Recruiter",
   hiring_manager: "Hiring manager",

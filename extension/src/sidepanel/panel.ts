@@ -1,6 +1,6 @@
 import { heroSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
-import { NEVER_READ, type PanelState } from "../shared/types";
+import { NEVER_READ, type Issue, type PanelState } from "../shared/types";
 
 /**
  * The side panel ("Spider guide" design): the spider talks you through what's on the tab and what
@@ -19,6 +19,8 @@ type View = "home" | "jobs" | "profile" | "settings";
 let view: View = "home";
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+/** "1.001": the version name, which keeps the zeros Chrome's own version number can't have. */
+const extensionVersion = () => chrome.runtime.getManifest().version_name ?? chrome.runtime.getManifest().version;
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
 const short = (text: string, max = 60) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
@@ -402,6 +404,89 @@ function profileCard(state: PanelState) {
     </section>`;
 }
 
+/** The running issues list in Profile: loaded from the background worker, newest first. */
+let issueList: Issue[] | null = null;
+let issueNote = "";
+let issuesLoading = false;
+
+async function loadIssues() {
+  if (issuesLoading) return;
+  issuesLoading = true;
+  const result = await ask<{ issues?: Issue[] }>({ type: "list-issues" }).catch(() => ({ issues: [] }));
+  issuesLoading = false;
+  issueList = result.issues ?? [];
+  void render();
+}
+
+const KIND: Record<Issue["kind"], string> = { fill: "Didn't fill", site: "Site error", stopped: "Stopped", note: "Your note" };
+const when = (at: string) => new Date(at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+
+/** The whole list as plain text, to paste into a chat with Claude. */
+function issuesText(list: Issue[]) {
+  const head = `Unnepo extension issues (V${extensionVersion()}), copied ${new Date().toLocaleString()}. ${list.length} ${list.length === 1 ? "entry" : "entries"}, newest first.`;
+  const rows = list.map((issue, index) => [
+    `${index + 1}. ${when(issue.at)} · ${KIND[issue.kind]} · ${issue.site || "no page"}`,
+    issue.question ? `   Question: ${issue.question}` : "",
+    `   ${issue.what}`,
+    issue.page ? `   Page: ${issue.page}` : "",
+  ].filter(Boolean).join("\n"));
+  return [head, "", ...rows].join("\n");
+}
+
+function issuesCard() {
+  if (!issueList) void loadIssues();
+  const list = issueList ?? [];
+  return `
+    <section class="view issues" aria-label="Issues">
+      <div class="row"><span class="heading">Issues</span><span class="mono">${list.length} SAVED</span></div>
+      <p class="small">Problems Unnepo ran into, and ones you report. Copy them all to send to support. Kept only on this computer.</p>
+      <div class="letter-form">
+        <textarea class="field letter-input" id="issue-note" rows="2" maxlength="500" placeholder="What went wrong? (saved with this tab's page)" aria-label="Report a problem">${escape(issueNote)}</textarea>
+        <div class="links">
+          <button type="button" class="solid" id="add-issue" ${issueNote.trim() ? "" : "disabled"}>Report a problem</button>
+          ${list.length ? `<button type="button" class="link" id="copy-issues">Copy all</button><button type="button" class="link" id="clear-issues">Clear</button>` : ""}
+        </div>
+        <span class="small" id="issues-status" role="status"></span>
+      </div>
+      ${!issueList ? `<p class="note">Loading…</p>` : !list.length ? `<p class="note">Nothing yet. Problems show up here as Unnepo fills applications.</p>` : `
+        <ul class="issue-list">${list.slice(0, 50).map((issue) => `
+          <li>
+            <span class="issue-top"><span class="status${issue.kind === "note" ? " done" : ""}">${KIND[issue.kind]}</span><span class="mono">${escape(when(issue.at))}</span></span>
+            ${issue.question ? `<span class="issue-question">${escape(short(issue.question, 80))}</span>` : ""}
+            <span class="small">${escape(short(issue.what, 160))}</span>
+            ${issue.site ? `<span class="mono">${escape(issue.site)}</span>` : ""}
+          </li>`).join("")}</ul>
+        ${list.length > 50 ? `<p class="small">Showing the newest 50. Copy all includes all ${list.length}.</p>` : ""}`}
+    </section>`;
+}
+
+function wireIssues() {
+  const note = document.getElementById("issue-note") as HTMLTextAreaElement | null;
+  const add = document.getElementById("add-issue") as HTMLButtonElement | null;
+  const said = (text: string) => { const status = document.getElementById("issues-status"); if (status) status.textContent = text; };
+  note?.addEventListener("input", () => {
+    issueNote = note.value;
+    if (add) add.disabled = !note.value.trim();
+  });
+  add?.addEventListener("click", async () => {
+    const text = issueNote.trim();
+    if (!text) return;
+    await ask({ type: "add-issue", note: text });
+    issueNote = "";
+    issueList = null;
+    void render();
+  });
+  document.getElementById("copy-issues")?.addEventListener("click", async () => {
+    await navigator.clipboard.writeText(issuesText(issueList ?? [])).then(() => said("Copied. Paste it into your chat."), () => said("Couldn't copy. Try again."));
+  });
+  document.getElementById("clear-issues")?.addEventListener("click", async () => {
+    if (!confirm("Clear the issues list? Copy it first if you still need it.")) return;
+    await ask({ type: "clear-issues" });
+    issueList = null;
+    void render();
+  });
+}
+
 /**
  * The job-site password. Drawn on its own, not with the rest of the panel, so a password being typed
  * isn't wiped when the panel refreshes.
@@ -518,7 +603,7 @@ resumeInput.addEventListener("change", () => {
   if (file) void replaceResume(file);
 });
 
-document.getElementById("version")!.textContent = `V${chrome.runtime.getManifest().version}`;
+document.getElementById("version")!.textContent = `V${extensionVersion()}`;
 document.getElementById("disconnect")!.addEventListener("click", async () => {
   await ask({ type: "disconnect" });
   void render();
@@ -551,8 +636,9 @@ async function render() {
   // Don't wipe a code being typed when something else changes.
   if (!state.connected && document.getElementById("code") === document.activeElement) return;
   // Don't wipe what's being typed in the cover letter questions or edits box when the page changes.
+  // The same for a problem being reported.
   if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea")) return;
-  const views: Record<View, () => string> = { home: () => pageCard(state), jobs: () => jobsView(state), profile: () => profileCard(state), settings: () => settingsView(state) };
+  const views: Record<View, () => string> = { home: () => pageCard(state), jobs: () => jobsView(state), profile: () => profileCard(state) + issuesCard(), settings: () => settingsView(state) };
   app.innerHTML = state.connected ? views[view]() : connectView(state);
   app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
     if (/^https:\/\//.test(button.dataset.url ?? "")) void chrome.tabs.create({ url: button.dataset.url! });
@@ -571,6 +657,7 @@ async function render() {
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
   document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));
+  if (view === "profile") wireIssues();
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
 }
 
@@ -582,7 +669,10 @@ menu.querySelectorAll<HTMLButtonElement>("button").forEach((button) => button.ad
 }));
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === "state-changed") void render();
+  if (message?.type !== "state-changed") return;
+  // New problems may have been added; Profile reads the list again.
+  if (view === "profile") void loadIssues();
+  else void render();
 });
 chrome.tabs.onUpdated.addListener((_id, info) => {
   if (info.status === "complete") void render();

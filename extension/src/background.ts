@@ -1,5 +1,5 @@
 import { generatePassword, unmetRules } from "./shared/password";
-import { NEVER_READ, type Answer, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type PanelState, type Scan } from "./shared/types";
+import { NEVER_READ, type Answer, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type PanelState, type Scan } from "./shared/types";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -44,6 +44,41 @@ async function rememberDropdownWay(host: string, attempts: FillAttempt[]) {
   // A few hundred sites at most; the oldest go first.
   const kept = Object.entries({ ...stored, [host]: best }).slice(-300);
   await chrome.storage.local.set({ dropdownWays: Object.fromEntries(kept) });
+}
+
+/** The newest entries kept on the issues list. */
+const ISSUES_KEPT = 200;
+/** The same problem on the same page within this long is one entry, not one per check. */
+const SAME_ISSUE_MS = 30 * 60 * 1000;
+
+async function issues(): Promise<Issue[]> {
+  return ((await chrome.storage.local.get("issues")).issues as Issue[] | undefined) ?? [];
+}
+
+/** The page an issue happened on, without its query string (which can carry tokens). */
+function issuePage(url: string) {
+  try {
+    const parsed = new URL(url);
+    return { site: parsed.hostname, page: `${parsed.origin}${parsed.pathname}` };
+  } catch {
+    return { site: "", page: "" };
+  }
+}
+
+/** Adds problems to the running issues list in Profile, newest first. */
+async function addIssues(url: string, items: Array<Pick<Issue, "kind" | "what" | "question">>) {
+  if (!items.length) return;
+  const where = issuePage(url);
+  const list = await issues();
+  const now = Date.now();
+  const recent = (item: Pick<Issue, "kind" | "what" | "question">) => list.some((known) => known.kind === item.kind && known.page === where.page && known.question === item.question && known.what === item.what && now - Date.parse(known.at) < SAME_ISSUE_MS);
+  const fresh = items.filter((item) => item.kind === "note" || !recent(item)).map((item): Issue => ({
+    id: `${now.toString(36)}${Math.random().toString(36).slice(2, 7)}`, at: new Date(now).toISOString(), ...where,
+    kind: item.kind, what: item.what.replace(/\s+/g, " ").trim().slice(0, 500), ...(item.question ? { question: item.question.slice(0, 200) } : {}),
+  }));
+  if (!fresh.length) return;
+  await chrome.storage.local.set({ issues: [...fresh.reverse(), ...list].slice(0, ISSUES_KEPT) });
+  void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
 }
 
 async function jobs(): Promise<Record<string, Job>> {
@@ -352,6 +387,7 @@ async function run(tabId: number) {
       if (status.accountExists && !known) { await rememberAccount(site); continue; }
       // A failed sign-in is never retried: a few wrong passwords in a row is how job sites lock accounts.
       if (status.signInFailed) {
+        if (!signInFailedAt.has(site)) void addIssues(scan.url, [{ kind: "stopped", what: "The site didn't accept the sign-in." }]).catch(() => undefined);
         signInFailedAt.add(site);
         const account = (await knownAccounts())[site];
         await step(typeof account === "object"
@@ -458,6 +494,7 @@ async function run(tabId: number) {
         if (report) {
           filledAll.push(...report.filled);
           await saveJob(tabId, { report: { ...report, filled: [...filledAll] }, llmCalls });
+          void addIssues(scan.url, report.failed.map((item) => ({ kind: "fill" as const, question: item.label, what: `Couldn't fill: ${item.reason}` }))).catch(() => undefined);
           // The record of every question tried, for fixing what fails; the page's fill never waits on it.
           if (report.attempts?.length) {
             void rememberDropdownWay(pageHost, report.attempts).catch(() => undefined);
@@ -482,6 +519,7 @@ async function run(tabId: number) {
           const needs = [...new Set([...status.flagged, ...status.needsYou])];
           if (job?.report) await saveJob(tabId, { report: { ...job.report, needsYou: needs } });
           const said = status.formErrors[0] ? `The site says: "${status.formErrors[0].slice(0, 140)}". ` : "The site flagged some answers. ";
+          void addIssues(scan.url, [{ kind: "site", what: `${said}${status.flagged.length ? `Flagged: ${status.flagged.slice(0, 5).join(", ")}.` : ""}`.trim() }]).catch(() => undefined);
           await step(`${said}${needs.length ? `Check ${needs.slice(0, 3).join(", ")}${needs.length > 3 ? ` and ${needs.length - 3} more` : ""}. ` : ""}Unnepo won't go on until you've fixed it.`);
           await wait(1200);
           continue;
@@ -548,7 +586,9 @@ async function run(tabId: number) {
     if ((await jobs())[tabId]?.submission) return;
     await saveJob(tabId, { step: "Stopped. Press Fill to start again." });
   } catch (error) {
-    await saveJob(tabId, { error: error instanceof Error ? error.message : "Something went wrong.", step: "Stopped." });
+    const message = error instanceof Error ? error.message : "Something went wrong.";
+    await addIssues((await chrome.tabs.get(tabId).catch(() => null))?.url ?? lastUrl, [{ kind: "stopped", what: `Stopped: ${message}` }]).catch(() => undefined);
+    await saveJob(tabId, { error: message, step: "Stopped." });
   } finally {
     if (stillRunning(tabId, runId)) runs.delete(tabId);
     await saveJob(tabId, { running: false }).catch(() => undefined);
@@ -596,6 +636,19 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
     switch (message?.type) {
       case "state":
         return reply(await state());
+      case "list-issues":
+        return reply({ issues: await issues() });
+      case "add-issue": {
+        const note = String(message.note ?? "").trim();
+        if (!note) return reply({ ok: false });
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        await addIssues(tab?.url && /^https?:/.test(tab.url) ? tab.url : "", [{ kind: "note", what: note }]);
+        return reply({ ok: true });
+      }
+      case "clear-issues":
+        await chrome.storage.local.remove("issues");
+        void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+        return reply({ ok: true });
       case "connect": {
         // From the connect page's content script, or a code the student pasted in the panel.
         const origin = sender.tab ? String(message.origin ?? "") : (await settings()).apiBase;
