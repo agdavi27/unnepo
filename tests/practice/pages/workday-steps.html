@@ -15,12 +15,17 @@
   footer { position: relative; display: flex; gap: 16px; margin-top: 24px; }
   footer button { font: inherit; padding: 8px 16px; }
   [data-automation-id="click_filter"] { position: absolute; inset: 0; cursor: pointer; }
+  .language { position: relative; display: inline-block; margin-bottom: 12px; }
+  .language [role=listbox] { position: absolute; background: #fff; border: 1px solid #999; padding: 4px 0; z-index: 3; }
+  .language [role=option] { padding: 4px 12px; cursor: pointer; }
 </style>
 </head>
 <body>
 <h1>Practice: Workday steps</h1>
 <p>Six steps on one address. Back and Next sit side by side in one footer, each under its own overlay, and the
-  overlays come before the buttons in the page, the way Workday builds it.</p>
+  overlays come before the buttons in the page, the way Workday builds it. Like Uline's, the step bar leaves the
+  step's name out, and the language dropdown above it (not in a header) starts the application over when changed.</p>
+<div class="language" id="language"></div>
 <ol data-automation-id="progressBar"></ol>
 <div id="step"></div>
 <div data-automation-id="pageFooter" id="footer"></div>
@@ -32,7 +37,7 @@
     document.querySelector("ol").innerHTML = STEPS.map((name, index) => {
       const n = index + 1;
       const id = n === at ? "progressBarActiveStep" : n < at ? "progressBarCompletedStep" : "progressBarInactiveStep";
-      return `<li data-automation-id="${id}">${n === at ? "current " : ""}step ${n} of ${STEPS.length}${name}</li>`;
+      return `<li data-automation-id="${id}">${n === at ? "current " : ""}step ${n} of ${STEPS.length}</li>`;
     }).join("");
     document.getElementById("step").innerHTML = `<h2>${STEPS[at - 1]}</h2>` + [1, 2, 3].map((n) => `<div class="field"><label for="f${at}-${n}">Question ${n} on ${STEPS[at - 1]}</label><input id="f${at}-${n}"></div>`).join("");
     // Both overlays first, then both buttons: "the first overlay near the button" is Back's.
@@ -63,6 +68,26 @@
     render();
   }
   window.goToStep = (n) => { at = n; render(); };
+  // Workday's language dropdown: picking a language reloads the application from its first step.
+  function language(chosen) {
+    const box = document.getElementById("language");
+    box.innerHTML = "";
+    const button = Object.assign(document.createElement("button"), { textContent: chosen, type: "button" });
+    button.setAttribute("aria-haspopup", "listbox");
+    button.onclick = () => {
+      const list = document.createElement("div");
+      list.setAttribute("role", "listbox");
+      for (const name of ["English", "Español", "Français"]) {
+        const option = Object.assign(document.createElement("div"), { textContent: name, onclick: () => { window.pressedLog.push(`language ${name}`); at = 1; render(); language(name); } });
+        option.setAttribute("role", "option");
+        list.append(option);
+      }
+      box.append(list);
+    };
+    box.append(button);
+  }
+  window.pageValues = () => Object.fromEntries(Array.from(document.querySelectorAll("#step input"), (input) => [document.querySelector(`label[for="${input.id}"]`).textContent, input.value]));
+  language("English");
   render();
 </script>
 <script src="harness.js"></script>

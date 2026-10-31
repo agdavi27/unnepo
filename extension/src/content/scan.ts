@@ -10,6 +10,23 @@ import type { FieldType, PageField, Scan } from "../shared/types";
 const clean = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").replace(/\b(select one|required)\b/gi, "").replace(/[*✱]/g, "").trim();
 const machine = (text: string) => !/\s/.test(text) && /[[\]_]/.test(text);
 const FORMAT_ONLY = /^(mm\/yyyy|mm\/dd\/yyyy|dd\/mm\/yyyy|yyyy|mm|month|year|select|search|choose|type to search|start typing)$/i;
+// The site's own controls around a form (its header, menus, footer, language and account switchers), never
+// questions. A form that sits inside one of these still counts.
+const PAGE_AREA = "nav, header, footer, [role=navigation], [role=banner], [role=contentinfo], [data-automation-id*='utility' i], [data-automation-id*='languagePicker' i], [data-automation-id*='locale' i]";
+// A language switcher shows the page's language as its only words ("English"). A question about languages
+// is labelled "Language" or "Languages spoken", so it never matches. On Workday, changing the language
+// reloads the application from its first step.
+export const LANGUAGE_SWITCH = /^(english|español|espanol|français|francais|deutsch|italiano|português|portugues|nederlands|polski|svenska|dansk|norsk|suomi|čeština|magyar|română|türkçe|ελληνικά|русский|українська|日本語|中文|简体中文|繁體中文|한국어|العربية|עברית|हिन्दी|ไทย|tiếng việt|bahasa indonesia)(\s*[(-].*)?$/i;
+
+/**
+ * Whether this control belongs to the site rather than the form: its header, menus, footer, or a language
+ * dropdown. Only dropdowns count as language switchers: an "English" checkbox answers a question.
+ */
+export function pageControl(el: Element, label: string, dropdown: boolean) {
+  const area = el.closest(PAGE_AREA);
+  return Boolean(area && !area.closest("form")) || (dropdown && LANGUAGE_SWITCH.test(label.trim()));
+}
+
 const CONTROLS = "input:not([type=hidden]), select, textarea, button[aria-haspopup='listbox'], [role=combobox]:not(input), [aria-haspopup=listbox]:not(input):not(button)";
 
 /**
@@ -239,7 +256,7 @@ export function scanFields(): PageField[] {
     }
     const source = target === el ? el : (target.querySelector("input") as HTMLElement) ?? el;
     const label = fieldType === "multiselect" ? (clean(target.querySelector("legend")?.textContent) || questionText(source)) : questionText(el);
-    if (!label) continue;
+    if (!label || pageControl(el, label, fieldType === "combobox" || fieldType === "select")) continue;
     const placeholder = el.getAttribute("placeholder") ?? "";
     out.push({
       id: mark(target),

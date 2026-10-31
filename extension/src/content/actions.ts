@@ -62,7 +62,10 @@ export function workdayStep(): { index: number; total: number; name: string } | 
   const words = (active.textContent ?? "").replace(/\s+/g, " ").trim();
   const found = words.match(/step (\d+) of (\d+)\s*(.*)$/i);
   if (!found) return null;
-  return { index: Number(found[1]), total: Number(found[2]), name: found[3].trim().slice(0, 80) };
+  // Some Workday sites leave the step's name out of the step bar ("current step 2 of 8"): the page's heading has it.
+  const heading = Array.from(document.querySelectorAll<HTMLElement>("[data-automation-id*='pageHeader' i], main h2, [role=main] h2, h2")).find((el) => el.getBoundingClientRect().height > 0 && Boolean(el.textContent?.trim()));
+  const name = found[3].trim() || active.getAttribute("aria-label")?.match(/step \d+ of \d+\s*(.*)$/i)?.[1]?.trim() || (heading?.textContent ?? "").replace(/\s+/g, " ").trim();
+  return { index: Number(found[1]), total: Number(found[2]), name: name.slice(0, 80) };
 }
 
 const find = (pattern: RegExp) => buttons().find((el) => pattern.test(text(el))) ?? null;

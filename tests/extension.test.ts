@@ -429,4 +429,11 @@ describe("Workday steps", () => {
     expect(wentBack(null, step(1), false)).toBe(false);
     expect(stepText(step(3, "My Experience"))).toBe("step 3 of 6 (My Experience)");
   });
+
+  it("knows the site's language dropdown from a question about languages", async () => {
+    const { LANGUAGE_SWITCH } = await import("@/extension/src/content/scan");
+    // What Workday's language dropdown says: changing it starts the application over.
+    for (const label of ["English", "English (United States)", "Español", "Français", "日本語"]) expect(LANGUAGE_SWITCH.test(label)).toBe(true);
+    for (const label of ["Language", "Languages spoken", "English proficiency", "What languages do you speak?", "Country"]) expect(LANGUAGE_SWITCH.test(label)).toBe(false);
+  });
 });
