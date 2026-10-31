@@ -5,7 +5,7 @@ import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, scanFields, scanPage } from "./scan";
 import { fieldControl, markNeeds } from "./needs";
-import { startSpiders, stopSpiders } from "./spiders";
+import { celebrateSpiders, startSpiders, stopSpiders } from "./spiders";
 
 /**
  * Injected into the job page when the student presses Fill. Scans the form, fills it from the plan the
@@ -165,7 +165,8 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       return false;
     }
     if (message?.type === "spiders") {
-      if (message.on) startSpiders(Boolean(message.drop));
+      if (message.celebrate) celebrateSpiders();
+      else if (message.on) startSpiders(Boolean(message.drop));
       else stopSpiders();
       reply({ ok: true });
       return false;

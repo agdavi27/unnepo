@@ -3,7 +3,7 @@ import { H, spiderRects, W } from "../shared/sprite";
 /**
  * The fill animation: when the student presses Fill, a few little pixel spiders drop down on threads,
  * land, and crawl around the page the whole time Unnepo is running, then scurry off once the
- * application is submitted, something goes wrong, or the student presses Stop. At most five. It never blocks
+ * application is submitted (after a little victory dance), something goes wrong, or the student presses Stop. At most five. It never blocks
  * the page (no pointer events), lives in its own shadow root so the site's CSS can't touch it, and is
  * skipped entirely for people who turn on reduced motion. It doesn't slow the fill down.
  */
@@ -20,7 +20,7 @@ type Spider = {
   x: number;
   y: number;
   angle: number;
-  phase: "wait" | "drop" | "turn" | "crawl" | "rest" | "leave" | "gone";
+  phase: "wait" | "drop" | "turn" | "crawl" | "rest" | "dance" | "leave" | "gone";
   start: number;
   dropTo: number;
   target: Point;
@@ -28,6 +28,9 @@ type Spider = {
   restUntil: number;
   frame: number;
   lastStep: number;
+  /** Where a dancing spider stands, and how big it's drawn (it puffs up at the top of each hop). */
+  home: Point;
+  scale: number;
 };
 
 let host: HTMLDivElement | null = null;
@@ -68,7 +71,7 @@ function make(root: ShadowRoot, index: number, count: number, now: number, drop:
   const spider: Spider = {
     el, thread, frames: Array.from(el.querySelectorAll("g")) as SVGGElement[], size, x, y: -size, angle: 180, phase: "wait",
     start: now + index * rand(90, 180), dropTo: rand(innerHeight * 0.18, innerHeight * 0.55), target: [0, 0], speed: rand(70, 120),
-    restUntil: 0, frame: 0, lastStep: 0,
+    restUntil: 0, frame: 0, lastStep: 0, home: [0, 0], scale: 1,
   };
   if (!drop) {
     // The same spiders carrying on after the page changed: already down and crawling, no new batch dropping in.
@@ -85,7 +88,7 @@ function draw(spider: Spider) {
   const h = (spider.size * H) / W;
   spider.el.style.transform = `translate(${spider.x - spider.size / 2}px, ${spider.y - h / 2}px)`;
   const svg = spider.el.querySelector("svg") as SVGSVGElement;
-  svg.style.transform = `rotate(${spider.angle}deg)`;
+  svg.style.transform = `rotate(${spider.angle}deg) scale(${spider.scale})`;
   spider.frames[0].style.display = spider.frame ? "none" : "";
   spider.frames[1].style.display = spider.frame ? "" : "none";
 }
@@ -132,6 +135,28 @@ function tick(now: number) {
         spider.angle += diff * Math.min(1, dt * 10);
         moving();
       }
+    } else if (spider.phase === "dance") {
+      // One big jump, then standing up and dancing: little hops, swaying side to side, legs going.
+      const t = (now - spider.start) / 1000;
+      const [hx, hy] = spider.home;
+      if (t < 0) {
+        draw(spider);
+        continue;
+      }
+      if (t < 0.5) {
+        const jump = Math.sin((t / 0.5) * Math.PI);
+        spider.y = hy - jump * 110;
+        spider.x = hx;
+        spider.scale = 1 + jump * 0.25;
+        spider.angle += ((((0 - spider.angle + 540) % 360) - 180)) * Math.min(1, dt * 14);
+      } else {
+        const beat = (t - 0.5) * Math.PI * 3.2;
+        spider.y = hy - Math.abs(Math.sin(beat)) * 30;
+        spider.x = hx + Math.sin(beat / 2) * 14;
+        spider.angle = Math.sin(beat / 2) * 22;
+        spider.scale = 1 + Math.abs(Math.sin(beat)) * 0.08;
+      }
+      if (now - spider.lastStep > 80) { spider.frame = spider.frame ? 0 : 1; spider.lastStep = now; }
     } else if (spider.phase === "rest" && now >= spider.restUntil) {
       spider.target = pickTarget(spider);
       spider.phase = "crawl";
@@ -144,6 +169,7 @@ function tick(now: number) {
 
 function stop() {
   cancelAnimationFrame(raf);
+  dancing = false;
   host?.remove();
   host = null;
   spiders = [];
@@ -159,6 +185,7 @@ export function startSpiders(drop = true) {
   clearTimeout(exitTimer);
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   if (host) {
+    if (dancing) return;
     // Called back before they'd left: stop leaving and keep crawling.
     if (leaving) {
       leaving = false;
@@ -190,8 +217,38 @@ export function startSpiders(drop = true) {
   raf = requestAnimationFrame(tick);
 }
 
-/** Every spider scurries off the nearest edge. */
+const DANCE_MS = 4800;
+let dancing = false;
+
+/**
+ * The application went through: every spider still on the screen jumps up and dances on the spot for a few
+ * seconds, then scurries off. Nothing happens when they've already gone.
+ */
+export function celebrateSpiders() {
+  // Spiders already heading off come back to dance too, as long as they're still on the page.
+  if (!host || !spiders.some((spider) => spider.phase !== "gone")) return;
+  clearTimeout(exitTimer);
+  dancing = true;
+  leaving = false;
+  const now = performance.now();
+  spiders.forEach((spider, index) => {
+    if (spider.phase === "gone") return;
+    spider.thread.remove();
+    // Stand where they are, kept clear of the edges so a whole hop shows; each starts a beat after the last.
+    spider.home = [Math.min(innerWidth - spider.size, Math.max(spider.size, spider.x)), Math.min(innerHeight - spider.size, Math.max(spider.size + 120, spider.y))];
+    spider.phase = "dance";
+    spider.start = now + index * 120;
+  });
+  exitTimer = window.setTimeout(() => {
+    dancing = false;
+    for (const spider of spiders) spider.scale = 1;
+    stopSpiders(0);
+  }, DANCE_MS);
+}
+
+/** Every spider scurries off the nearest edge (after any dance finishes). */
 export function stopSpiders(after = 400) {
+  if (dancing) return;
   clearTimeout(exitTimer);
   exitTimer = window.setTimeout(() => {
     if (!host) return;

@@ -413,9 +413,10 @@ async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof stu
   return { schema, questions: questionsFromMapping(schema, mapped.answers), timings };
 }
 
-export function startContacts(userId: string, applicationId: string) {
+/** `claimed`: the caller already marked the search as running. */
+export function startContacts(userId: string, applicationId: string, claimed = false) {
   defer(async () => {
-    await runContactDiscovery(userId, applicationId).catch((error) => console.error("contact discovery failed", error));
+    await runContactDiscovery(userId, applicationId, claimed).catch((error) => console.error("contact discovery failed", error));
   });
 }
 
@@ -433,19 +434,21 @@ export async function markApplied(userId: string, raw: unknown) {
   if (app.status === "submitted" || app.status === "applied_manual") return { application: summary(app) };
   await ensureCharged(userId, app);
   const updated = await applications.update(userId, app.id, { status: "applied_manual", browserSessionId: null, submittedAt: nowIso(), statusMessage: "You marked this as applied." });
-  startContacts(userId, app.id);
   return { application: summary(updated!) };
 }
 
 const STALE_MS = 5 * 60 * 1000;
 
-/** Finds people, then writes their emails. Safe to retry; a run already in progress is left alone. */
-export async function runContactDiscovery(userId: string, applicationId: string) {
+const contactsBusy = (app: JobApplication) => (app.contactsStatus === "finding" || app.contactsStatus === "writing") && Date.now() - Date.parse(app.updatedAt) < STALE_MS;
+
+/** Finds the best person, then writes their email. Safe to retry; a run already in progress is left alone. */
+export async function runContactDiscovery(userId: string, applicationId: string, claimed = false) {
   const app = await applications.get(userId, applicationId);
   if (!app || (app.status !== "submitted" && app.status !== "applied_manual")) return;
-  const busy = (app.contactsStatus === "finding" || app.contactsStatus === "writing") && Date.now() - Date.parse(app.updatedAt) < STALE_MS;
-  if (busy) return;
-  await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: "Finding people…" });
+  if (!claimed) {
+    if (contactsBusy(app)) return;
+    await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
+  }
   let found: Awaited<ReturnType<typeof findPeopleForApplication>>;
   const info = await student(userId);
   try {
@@ -473,10 +476,13 @@ export async function runContactDiscovery(userId: string, applicationId: string)
   }
 }
 
+/** "Find me the best person to connect with": starts the search, marked running right away so the page shows it. */
 export async function retryContacts(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
   if (app.status !== "submitted" && app.status !== "applied_manual") throw new ServiceError("People are found after you apply.", "state", 409);
-  startContacts(userId, app.id);
+  if (contactsBusy(app)) return { ok: true };
+  await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
+  startContacts(userId, app.id, true);
   return { ok: true };
 }
 

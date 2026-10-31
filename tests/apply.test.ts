@@ -14,7 +14,7 @@ import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/a
 import { supportedBy } from "@/lib/apply/questions";
 import { bestOption } from "@/lib/apply/options";
 import { checkSchool } from "@/lib/school-plans";
-import { applyState, saveApplicationProfile, createApplication, markApplied, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers } from "@/lib/apply/service";
+import { applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -582,7 +582,8 @@ describe("people after applying", () => {
     expect(application.fillReport?.peopleSearch).toMatchObject({ domain: "acme.com", school: "Colby College", chosen: { name: "Casey Park", role: "alumni", email: true } });
     expect(application.fillReport?.peopleSearch?.steps.slice(0, 3)).toEqual([
       { step: "From Colby College", domain: "acme.org", found: 0 },
-      { step: "Named on the posting", domain: "acme.org", found: 1 },
+      // The posting's recruiter has no verified email, so they don't count.
+      { step: "Named on the posting", domain: "acme.org", found: 0 },
       { step: "Recruiters", domain: "acme.org", found: 0 },
     ]);
   });
@@ -594,14 +595,32 @@ describe("people after applying", () => {
       return [];
     }, { verified: ["r1", "r2"] });
     expect(contacts.map((item) => [item.role, item.name, item.email])).toEqual([["recruiter", "Sam Lee", "r2@acme.com"]]);
-    expect(application.contactsMessage).toContain("No one from Colby College turned up");
+    expect(application.contactsMessage).toContain("No one from Colby College with a verified email turned up");
     expect(application.fillReport?.peopleSearch?.steps[0]).toMatchObject({ step: "From Colby College", found: 0, error: expect.stringContaining("500") });
   });
 
-  it("shows the best match without an email rather than no one, and someone in the department last", async () => {
-    const { contacts, application } = await appliedWith((search) => (search.person_titles?.includes("Product") ? [person("t1", "Riley", "Chen", "Product Lead")] : []), { poster: false });
-    expect(contacts.map((item) => [item.role, item.name, item.email, item.linkedinUrl])).toEqual([["team_member", "Riley Chen", null, "https://linkedin.com/in/t1"]]);
-    expect(application.contactsMessage).toContain("reach out on LinkedIn");
+  it("only picks someone with a verified email, looking in the department last", async () => {
+    const team = (search: Search) => (search.person_titles?.includes("Product") ? [person("t1", "Riley", "Chen", "Product Lead")] : search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []);
+    const verified = await appliedWith(team, { poster: false, verified: ["t1"] });
+    expect(verified.contacts.map((item) => [item.role, item.name, item.email, item.linkedinUrl])).toEqual([["team_member", "Riley Chen", "t1@acme.com", "https://linkedin.com/in/t1"]]);
+  });
+
+  it("says when people turned up but none has a verified email, and shows no one", async () => {
+    const { contacts, application } = await appliedWith((search) => (search.person_titles?.includes("Product") ? [person("t1", "Riley", "Chen", "Product Lead")] : []));
+    expect(contacts).toEqual([]);
+    expect(application.contactsMessage).toContain("none with a verified email");
+    expect(application.companyDomain).toBeNull();
+  });
+
+  it("looks for people only when the student asks", async () => {
+    process.env.APOLLO_API_KEY = "apollo";
+    const userId = await student();
+    model.replies.push("{}");
+    const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
+    await markApplied(userId, { applicationId: application.id });
+    expect((await applications.get(userId, application.id))?.contactsStatus).toBe("idle");
+    await retryContacts(userId, { applicationId: application.id });
+    expect((await applications.get(userId, application.id))?.contactsStatus).toBe("finding");
   });
 
   it("says why no one was found, and keeps no guess about the company", async () => {

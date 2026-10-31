@@ -544,7 +544,7 @@ async function renderPassword() {
   });
 }
 
-/** "My jobs": the newest jobs in Unnepo, each opening its posting, and a link to the full tracker. */
+/** "My jobs": the newest jobs in Unnepo, each opening its page in Unnepo, and a link to the full tracker. */
 type JobRow = { id: string; title: string; company: string; status: string; url: string; submittedAt: string | null; createdAt: string };
 let jobsList: { rows: JobRow[]; total: number; error: string; loadedAt: number } | null = null;
 let jobsLoading = false;
@@ -573,7 +573,7 @@ function jobsView(state: PanelState) {
       : !rows.length
         ? `<p class="note">No jobs yet. Open a job posting and press Autofill, and it shows up here.</p>`
         : `<ul class="jobs-list">${rows.map((row) => `
-            <li><button type="button" class="job-row" data-url="${escape(row.url)}" title="Open this job">
+            <li><button type="button" class="job-row" data-url="${escape(`${state.apiBase}/home?job=${encodeURIComponent(row.id)}`)}" title="Open this job in Unnepo">
               <span class="job-row-text"><span class="job-row-title">${escape(row.title || "Job")}</span><span class="job-row-company">${escape(row.company)}</span></span>
               <span class="status${row.status === "submitted" || row.status === "applied_manual" ? " done" : ""}">${escape(STATUS[row.status] ?? row.status)}</span>
             </button></li>`).join("")}</ul>`;
@@ -640,8 +640,10 @@ async function render() {
   if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea")) return;
   const views: Record<View, () => string> = { home: () => pageCard(state), jobs: () => jobsView(state), profile: () => profileCard(state) + issuesCard(), settings: () => settingsView(state) };
   app.innerHTML = state.connected ? views[view]() : connectView(state);
+  // A job opens on its own page in Unnepo, the tracker with its details open.
   app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
-    if (/^https:\/\//.test(button.dataset.url ?? "")) void chrome.tabs.create({ url: button.dataset.url! });
+    const url = button.dataset.url ?? "";
+    if (url.startsWith(`${state.apiBase}/home?job=`)) void chrome.tabs.create({ url });
   }));
   document.getElementById("use-code")?.addEventListener("click", async () => {
     const code = (document.getElementById("code") as HTMLInputElement).value.trim();

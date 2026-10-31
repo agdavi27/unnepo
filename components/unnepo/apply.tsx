@@ -180,6 +180,19 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
   const [removed, setRemoved] = useState<App[]>([]);
   const pending = useRef(new Map<string, number>());
   const [open, setOpen] = useState<string | null>(null);
+  // The extension's My jobs opens /home?job=<id>: that job's details, scrolled into view.
+  const linked = useRef(false);
+  useEffect(() => {
+    if (linked.current || !apps.length) return;
+    const wanted = new URLSearchParams(window.location.search).get("job");
+    if (!wanted) return;
+    linked.current = true;
+    window.history.replaceState(null, "", "/home");
+    if (!apps.some((app) => app.id === wanted)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
+    setOpen(wanted);
+    requestAnimationFrame(() => document.getElementById(`job-${wanted}`)?.scrollIntoView({ block: "center" }));
+  }, [apps]);
   const [filter, setFilter] = useState<"all" | Stage>("all");
   const [query, setQuery] = useState("");
   const [problem, setProblem] = useState("");
@@ -313,7 +326,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
             const people = app.contacts?.length ?? 0;
             const toggle = () => setOpen(expanded ? null : app.id);
             return (
-              <li key={app.id} className="group border-b border-line">
+              <li key={app.id} id={`job-${app.id}`} className="group border-b border-line">
                 <div className="flex items-center gap-3 py-3.5 sm:grid sm:grid-cols-[minmax(0,1fr)_5.5rem_9rem_6.5rem_2rem] sm:gap-4">
                   <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={toggle} aria-expanded={expanded}>
                     <CompanyLogo app={app} />
@@ -402,14 +415,23 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
       setCopied("");
     }
   }
-  if (app.contactsStatus === "finding" || app.contactsStatus === "idle") return <p className="text-sm text-muted">Finding people for this role…</p>;
+  // Nobody is looked up until the student asks.
+  if (app.contactsStatus === "idle") {
+    return (
+      <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
+        <button type="button" className={primary} onClick={onRetry}>Find me the best person to connect with</button>
+        <p>Someone from your school at {app.company}, else a recruiter, else someone on the team. Always with a verified email.</p>
+      </div>
+    );
+  }
+  if (app.contactsStatus === "finding") return <p className="text-sm text-muted">Finding the best person to connect with…</p>;
   return (
     <div className="space-y-3">
       {app.contactsStatus === "writing" && <p className="text-sm text-muted">Writing emails…</p>}
       {app.contactsMessage && <p className="text-xs text-faint">{app.contactsMessage}</p>}
       {app.contactsStatus === "failed" && <button type="button" className={secondary} onClick={onRetry}>Try again</button>}
       {contacts.length === 0 && app.contactsStatus === "done" && (
-        <div className="flex flex-wrap items-center gap-3 text-sm text-muted"><p>No one found for this role.</p><button type="button" className={secondary} onClick={onRetry}>Search again</button></div>
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted"><p>No one with a verified email yet.</p><button type="button" className={secondary} onClick={onRetry}>Search again</button></div>
       )}
       {contacts.map((contact) => {
         const email = contact.emailBody ? `Subject: ${contact.emailSubject ?? ""}\n\n${contact.emailBody}` : "";

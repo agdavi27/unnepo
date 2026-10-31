@@ -1,7 +1,7 @@
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { createApplication, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, startContacts, student, summary } from "@/lib/apply/service";
+import { createApplication, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
 import { extractJob, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { buildMapping, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
@@ -336,7 +336,7 @@ async function saveScreenshot(userId: string, applicationId: string, dataUrl: un
 
 /**
  * The extension saw an application go through: the site's submit call succeeded ("confirmed"), or the page
- * said so after a submit click ("likely"). Records it, keeps the screenshot, and finds people to email.
+ * said so after a submit click ("likely"). Records it and keeps the screenshot.
  */
 export async function extensionSubmission(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { applicationId?: unknown; url?: unknown; title?: unknown; company?: unknown; confidence?: unknown; screenshot?: unknown; text?: unknown };
@@ -360,7 +360,7 @@ export async function extensionSubmission(userId: string, raw: unknown) {
     confirmation: { url: url || app.applicationUrl || app.jobUrl, text: String(body.text ?? "").slice(0, 240) || `Detected by the Unnepo extension (${confidence}).`, detectedAt, receiptPath, confidence },
     statusMessage: confidence === "confirmed" ? "Submitted. The site accepted your application." : "Submitted, as far as the page shows. Check your email for the site's confirmation.",
   });
-  startContacts(userId, app.id);
+  // People to email are found only when the student asks ("Find me the best person to connect with").
   return { application: summary(updated!) };
 }
 

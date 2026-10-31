@@ -212,9 +212,9 @@ function found(contact: Contact, role: ContactRole, relevance: string): FoundPer
  * 1. someone from the student's school who works at the company,
  * 2. a recruiter there (the one named on the posting first, then campus recruiters),
  * 3. someone in the job's department.
- * The first group with anyone in it wins; within it, someone with a verified email comes first, and if
- * nobody has one the best match is still shown, with their LinkedIn. Every person comes from Apollo or
- * the posting itself. Nobody is invented. Each search is recorded, so "no one found" says why.
+ * Only someone with a verified email counts, so a group without one gives way to the next. Their LinkedIn
+ * comes along when Apollo has it. Every person comes from Apollo or the posting itself. Nobody is invented.
+ * Each search is recorded, so "no one found" says why.
  */
 export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string } = {}): Promise<{ people: FoundPerson[]; domain: string | null; notes: string[]; search: PeopleSearch }> {
   const school = (options.school ?? "").trim();
@@ -249,22 +249,18 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
       const alumni = await look(`From ${school}`, domain, { q_keywords: school });
       chosen = await best(userId, domain, alumni.map((person) => found(person, "alumni", `Apollo's profile for them mentions ${school}, and they work at ${app.company}${person.title ? ` as ${person.title}` : ""}.`)), alumni);
     }
-    // 2. A recruiter: the one the posting names first. Without a verified email they're kept as a last
-    // resort, so the other company websites still get searched.
+    // 2. A recruiter: the one the posting names first, when their email checks out.
     if (!chosen && app.postedRecruiter) {
       poster ??= await posterFor(userId, app, domain);
-      search.steps.push({ step: "Named on the posting", domain, found: 1 });
+      search.steps.push({ step: "Named on the posting", domain, found: poster.email ? 1 : 0 });
       if (poster.email) chosen = poster;
-      else {
-        const recruiters = await look("Recruiters", domain, { person_titles: RECRUITER_TITLES });
-        chosen = await best(userId, domain, recruiters.map((person) => found(person, "recruiter", recruiterWhy(app, person))), recruiters, true);
-      }
-    } else if (!chosen) {
+    }
+    if (!chosen) {
       const recruiters = await look("Recruiters", domain, { person_titles: RECRUITER_TITLES });
       chosen = await best(userId, domain, recruiters.map((person) => found(person, "recruiter", recruiterWhy(app, person))), recruiters);
     }
-    // 3. Someone in the job's department, only when no recruiter turned up at all.
-    if (!chosen && !poster) {
+    // 3. Someone in the job's department.
+    if (!chosen) {
       const titles = [...new Set([team, core].filter(Boolean))];
       const teamPeople = titles.length ? await look(team ? `${team} department` : `${core} roles`, domain, { person_titles: titles }) : [];
       chosen = await best(userId, domain, teamPeople.map((person) => found(person, "team_member", `${person.title || "Works"} in ${team || "the same kind of role"} at ${app.company}, the team this job is in.`)), teamPeople);
@@ -274,7 +270,6 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
       break;
     }
   }
-  chosen ??= poster;
 
   // Every search failed: say so, so the student can try again, instead of "no one found".
   if (!chosen && searches > 0 && search.steps.every((step) => step.error)) {
@@ -288,10 +283,11 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   if (proven && proven !== app.companyDomain) await repo.setCompanyDomains(app.company, [proven]).catch(() => undefined);
 
   const notes: string[] = [];
+  const seen = search.steps.reduce((sum, step) => sum + step.found, 0);
   if (!domains.length) notes.push(`Couldn't match ${app.company} to a company in Apollo.`);
+  else if (!chosen && seen) notes.push(`Found ${seen} ${seen === 1 ? "person" : "people"} at ${app.company}, but none with a verified email yet.`);
   else if (!chosen) notes.push(`Apollo found no one at ${app.company} (${domains.join(", ")})${school ? ` from ${school},` : ""} in recruiting, or in ${team || "this kind of role"}.`);
-  else if (chosen.role !== "alumni" && school) notes.push(`No one from ${school} turned up at ${app.company}, so this is ${chosen.role === "team_member" ? `someone in ${team || "the team"}` : "a recruiter"}.`);
-  if (chosen && !chosen.email) notes.push("No verified email for them yet; reach out on LinkedIn.");
+  else if (chosen.role !== "alumni" && school) notes.push(`No one from ${school} with a verified email turned up at ${app.company}, so this is ${chosen.role === "team_member" ? `someone in ${team || "the team"}` : "a recruiter"}.`);
   return { people: chosen ? [chosen] : [], domain: proven, notes, search };
 }
 
@@ -321,9 +317,9 @@ const CAMPUS = /\b(campus|university|college|early (career|talent)|emerging tale
 
 /**
  * The best of one group: its first few people are checked for a verified email (Apollo, then Hunter) and the
- * first with one wins. When none has one, the group's top person is still returned, unless `emailOnly`.
+ * first with one wins. Nobody without a verified email is chosen.
  */
-async function best(userId: string, domain: string, people: FoundPerson[], sources: Contact[], emailOnly = false): Promise<FoundPerson | null> {
+async function best(userId: string, domain: string, people: FoundPerson[], sources: Contact[]): Promise<FoundPerson | null> {
   if (!people.length) return null;
   const order = people.map((person, index) => ({ person, source: sources[index] }))
     .sort((a, b) => (a.person.role === "recruiter" ? Number(CAMPUS.test(b.person.title)) - Number(CAMPUS.test(a.person.title)) : 0))
@@ -354,7 +350,7 @@ async function best(userId: string, domain: string, people: FoundPerson[], sourc
       return top;
     }
   }
-  return emailOnly ? null : top;
+  return null;
 }
 
 export const OUTREACH_EMAIL_PROMPT = `You write short cold emails from a college student to people at a company where the student just applied.

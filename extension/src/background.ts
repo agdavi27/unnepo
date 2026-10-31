@@ -528,6 +528,7 @@ async function run(tabId: number) {
 
       // Something only the student can answer: wait for it, then keep going.
       if (status.needsYou.length) {
+        void addIssues(scan.url, status.needsYou.map((label) => ({ kind: "fill" as const, question: label, what: "Unnepo couldn't answer this, so you had to." }))).catch(() => undefined);
         const job = (await jobs())[tabId];
         if (job?.report) await saveJob(tabId, { report: { ...job.report, needsYou: status.needsYou } });
         await step(`Waiting for you: ${status.needsYou.slice(0, 3).join(", ")}${status.needsYou.length > 3 ? ` and ${status.needsYou.length - 3} more` : ""}. Unnepo carries on when they're filled.`);
@@ -608,6 +609,8 @@ async function record(tabId: number, confidence: "confirmed" | "likely", text: s
   } catch {
     // A screenshot is a bonus; the submission is still recorded.
   }
+  // It went through: any spiders still out dance, then leave. After the screenshot, so the receipt is clean.
+  void send(tabId, { type: "spiders", celebrate: true }, 0).catch(() => undefined);
   try {
     await api("POST", "submissions", { applicationId: job.applicationId, url: job.url, confidence, text, screenshot });
     await saveJob(tabId, { step: confidence === "confirmed" ? "Submitted. The site accepted your application, and it's in your Unnepo tracker." : "Looks submitted. It's in your Unnepo tracker; check your email for the site's confirmation." });
@@ -785,7 +788,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         // The page script also runs on tabs the panel only looked at; only an application Unnepo opened counts.
         if (tabId === undefined || !(await jobs())[tabId]?.applicationId) return reply({ ok: false });
         await saveJob(tabId, { clickedAt: Date.now() });
-        if (Array.isArray(message.answers) && message.answers.length) await api("POST", "answers", { answers: message.answers }).catch(() => undefined);
+        if (Array.isArray(message.answers) && message.answers.length) {
+          await api("POST", "answers", { answers: message.answers }).catch(() => undefined);
+          // What the student typed or changed themselves is a question Unnepo didn't get right. Only the question
+          // goes on the issues list, never the answer, and not twice for one already listed on this page.
+          const page = issuePage(String(message.url ?? sender.tab?.url ?? "")).page;
+          const listed = new Set((await issues()).filter((issue) => issue.page === page && issue.kind === "fill").map((issue) => issue.question));
+          const questions = (message.answers as Array<{ question?: unknown }>).map((answer) => String(answer.question ?? "").trim()).filter((question) => question && !listed.has(question));
+          await addIssues(String(message.url ?? sender.tab?.url ?? ""), questions.map((question) => ({ kind: "fill" as const, question, what: "You filled this in yourself: Unnepo left it empty or got it wrong." }))).catch(() => undefined);
+        }
         return reply({ ok: true });
       case "submitted-page":
         if (tabId === undefined) return reply({ ok: false });
