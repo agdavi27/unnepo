@@ -31,7 +31,18 @@ const uploadedHere = new Set<string>();
 function alreadyUploaded(field: PageField) {
   if (uploadedHere.has(`${location.pathname}|${field.label}`)) return true;
   const el = findMarked(field.id);
-  return Boolean(el && !isEmpty(el));
+  if (!el) return false;
+  if (!isEmpty(el)) return true;
+  // Workday (and others) empty the input and list the file beside it instead. Uploading again there makes
+  // Workday read the resume again, which can redo the application from its first step.
+  let box: Element | null = el.parentElement;
+  for (let depth = 0; box && depth < 6; depth += 1, box = box.parentElement) {
+    if (box.querySelector("[data-automation-id*='file-upload-item' i], [data-automation-id*='fileName' i], [data-automation-id*='uploaded' i], [data-automation-id='delete-file']")) return true;
+    // A file's name ("Pat Doe Resume.pdf"), not a list of allowed types ("Accepted: .pdf, .docx").
+    if (/successfully uploaded|[\w)-]\.(pdf|docx?|rtf)\b/i.test((box as HTMLElement).innerText ?? "")) return true;
+    if (box.querySelectorAll("input[type=file]").length > 1) break;
+  }
+  return false;
 }
 
 /**

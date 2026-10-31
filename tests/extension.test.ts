@@ -417,7 +417,7 @@ describe("autofill failure records", () => {
 
 describe("Workday steps", () => {
   it("tells a step backward, or a fall back to the start, from moving on", async () => {
-    const { wentBack, pressLine, stepText } = await import("@/extension/src/shared/steps");
+    const { wentBack, stepText } = await import("@/extension/src/shared/steps");
     const step = (index: number, name = "") => ({ index, total: 6, name });
     expect(wentBack(step(2), step(3), false)).toBe(false);
     expect(wentBack(step(3), step(3), false)).toBe(false);
@@ -428,7 +428,5 @@ describe("Workday steps", () => {
     expect(wentBack(step(2), null, false)).toBe(false);
     expect(wentBack(null, step(1), false)).toBe(false);
     expect(stepText(step(3, "My Experience"))).toBe("step 3 of 6 (My Experience)");
-    expect(pressLine({ label: "Save and Continue", id: "pageFooterNextButton", overlay: true, from: step(2), to: step(1) }))
-      .toBe('"Save and Continue" [pageFooterNextButton] via overlay: step 2 of 6 → step 1 of 6');
   });
 });

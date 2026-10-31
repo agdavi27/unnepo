@@ -1,4 +1,4 @@
-import { pressLine, stepText, wentBack, type PressRecord, type Step } from "./shared/steps";
+import { stepText, wentBack, type Step } from "./shared/steps";
 import { generatePassword, unmetRules } from "./shared/password";
 import { NEVER_READ, type Answer, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type PanelState, type Scan } from "./shared/types";
 
@@ -316,12 +316,26 @@ async function run(tabId: number) {
   // Sites where signing in failed on this run: never pressed again.
   const signInFailedAt = new Set<string>();
   let triedApply = false;
-  // Every press on this run, with the step before and after, for the issues list when something goes wrong.
-  const pressLog: PressRecord[] = [];
-  const pressed = (what: { label?: string; id?: string; overlay?: boolean } | null | undefined, label: string, from: Step | null) => {
-    pressLog.push({ label: (what?.label || label).slice(0, 80), id: what?.id ?? "", overlay: Boolean(what?.overlay), from });
-    if (pressLog.length > 12) pressLog.shift();
+  // What Unnepo did on this run, in order (filled a step, pressed a button, the page moved), for the issues
+  // list whenever a run ends, so a loop or a jump backward can be traced to what came right before it.
+  const started = Date.now();
+  const trail: string[] = [];
+  const note = (line: string) => {
+    const at = Math.round((Date.now() - started) / 1000);
+    trail.push(`${at}s ${line}`);
+    if (trail.length > 25) trail.shift();
   };
+  const pressed = (what: { label?: string; id?: string; overlay?: boolean } | null | undefined, label: string) => {
+    note(`pressed "${(what?.label || label).slice(0, 60)}"${what?.id ? ` [${what.id}]` : ""}${what?.overlay ? " via overlay" : ""}`);
+  };
+  // The furthest Workday step reached, and the step last seen. Landing on an earlier step, for any reason,
+  // stops the run: filling the start again is what made it go round in circles.
+  let furthest: Step | null = null;
+  let seenStep: Step | null = null;
+  let lastPath = "";
+  // How many times each step, and each page, was filled on this run.
+  const stepFills = new Map<string, number>();
+  const filledKeys = new Set<string>();
   /** After a press: waits for a new page, new fields, or new buttons (Workday's "how to apply" choice). */
   const waitForChange = async (key: string, buttonsBefore: string, known: boolean, timeout = 12_000) => {
     const until = Date.now() + timeout;
@@ -380,23 +394,24 @@ async function run(tabId: number) {
       const status = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
       if (!status) { await wait(400); continue; }
       if (!stillRunning(tabId, runId)) break;
-      // Where the last press landed. A press that went backward stops the run, so it can't fill the start again.
-      const last = pressLog.at(-1);
-      if (last && last.to === undefined) {
-        last.to = status.step ?? null;
-        // After Submit the steps end and the posting shows again: that's done, not backward.
-        if (wentBack(last.from, last.to, Boolean(status.apply)) && !status.confirmed && !/submit/i.test(last.label)) {
-          // The stop below puts this on the issues list with every press that led here.
-          throw new Error(`The site went back from ${stepText(last.from)} to ${stepText(last.to)} after Unnepo pressed "${last.label}", so Unnepo stopped instead of starting over. Go to the step you were on and press Fill. This is on your issues list (Profile).`);
-        }
+      // Where the application is now. Any step backward, whatever caused it, stops the run.
+      const path = (() => { try { return new URL(scan.url).pathname; } catch { return scan.url; } })();
+      if (path !== lastPath) { note(`page ${path.slice(-80)}`); lastPath = path; }
+      const now = status.step ?? null;
+      if (stepText(now) !== stepText(seenStep)) { note(`now on ${stepText(now)}`); seenStep = now; }
+      // After Submit the steps end and the posting shows again: that's done, not backward.
+      const submitted = status.confirmed || trail.some((line) => /pressed "[^"]*submit/i.test(line));
+      if (!submitted && wentBack(furthest, now, Boolean(status.apply || status.action?.kind === "apply"))) {
+        throw new Error(`Workday went back from ${stepText(furthest)} to ${stepText(now)}, so Unnepo stopped instead of filling it all again. Go back to ${stepText(furthest)} and press Fill. What happened is on your issues list (Profile).`);
       }
+      if (now && (!furthest || now.total !== furthest.total || now.index > furthest.index)) furthest = now;
       // First thing on every run: if there's an Apply button, press it.
       if (!triedApply) {
         triedApply = true;
         if (status.apply) {
           await step("Opening the application…");
-          const reply = await send<{ pressed: boolean; what?: PressRecord }>(tabId, { type: "press", first: true }).catch(() => ({ pressed: false, what: undefined }));
-          if (reply.pressed) pressed(reply.what, status.apply, status.step ?? null);
+          const reply = await send<{ pressed: boolean; what?: { label?: string; id?: string; overlay?: boolean } }>(tabId, { type: "press", first: true }).catch(() => ({ pressed: false, what: undefined }));
+          if (reply.pressed) pressed(reply.what, status.apply);
           // Some Apply buttons only scroll to the form below, so this doesn't wait long.
           if (reply.pressed) await waitForChange(signature(scan), `${status.action?.kind}|${status.action?.label}|${status.apply}`, known, 4000);
           continue;
@@ -417,9 +432,22 @@ async function run(tabId: number) {
       if (status.captcha) { await step("A CAPTCHA is on the page. Solve it and Unnepo carries on. Unnepo never solves CAPTCHAs."); await wait(1200); continue; }
       if (status.verifyEmail) { await step("The site sent you an email to verify your account. Open the link, come back to this tab, and Unnepo carries on."); await wait(1500); continue; }
 
-      // A new form (page or step): fill it once.
+      // A new form (page or step): fill it once. A Workday step that changes as it's filled (a State box
+      // appears after Country) gets one more go for its new questions, never a third: refilling a step
+      // over and over was how a run went round in circles.
       const key = signature(scan);
+      const stepKey = status.step ? `${status.step.index}/${status.step.total}` : "";
+      if (hasForm(scan) && key !== filledKey && !stepKey && filledKeys.has(key)) {
+        throw new Error("Unnepo is back on a page it already filled, so it stopped instead of filling it again. Go to where you were and press Fill. What happened is on your issues list (Profile).");
+      }
+      if (hasForm(scan) && key !== filledKey && stepKey && (stepFills.get(stepKey) ?? 0) >= 2) {
+        note(`didn't fill ${stepText(status.step)} a third time`);
+        filledKey = key;
+      }
       if (hasForm(scan) && key !== filledKey) {
+        if (stepKey) stepFills.set(stepKey, (stepFills.get(stepKey) ?? 0) + 1);
+        filledKeys.add(key);
+        note(`filling ${status.step ? stepText(status.step) : "the page"}: ${scan.fields.length} questions`);
         if (!applicationId && (scan.fields.length || scan.useServerSchema)) {
           await step("Opening the job in Unnepo…");
           const where = posting ?? { url: scan.url, title: scan.title, company: scan.company, description: scan.description };
@@ -557,6 +585,11 @@ async function run(tabId: number) {
       if (job?.report?.needsYou.length) await saveJob(tabId, { report: { ...job.report, needsYou: [] } });
 
       const action = status.action;
+      // Apply after filling means the site sent the application back to the job posting: starting over would
+      // go round in circles, so it stops instead.
+      if (action?.kind === "apply" && (furthest || (scan.ats === "workday" && filledKeys.size)) && !status.confirmed) {
+        throw new Error("The site went back to the job posting after Unnepo had filled the application, so Unnepo stopped instead of starting over. What happened is on your issues list (Profile).");
+      }
       if (!action) {
         await step(status.confirmed ? "Looks submitted. Saving it to your tracker…" : `Filled ${filledAll.length} fields. Watching the page; press Stop when you're done.`);
         await wait(1000);
@@ -592,9 +625,9 @@ async function run(tabId: number) {
       pressedKey = pressKey;
       pressedAt = Date.now();
       await step(ACTION_STEP[action.kind]);
-      const reply = await send<{ pressed: boolean; what?: PressRecord }>(tabId, { type: "press", kind: action.kind, knownAccount: known }).catch(() => ({ pressed: false, what: undefined }));
+      const reply = await send<{ pressed: boolean; what?: { label?: string; id?: string; overlay?: boolean } }>(tabId, { type: "press", kind: action.kind, knownAccount: known }).catch(() => ({ pressed: false, what: undefined }));
       if (!reply.pressed) { await wait(300); continue; }
-      pressed(reply.what, action.label, status.step ?? null);
+      pressed(reply.what, action.label);
       await waitForChange(key, `${action.kind}|${action.label}|${status.apply}`, known);
       if (action.kind === "create_account") {
         const notes = await send<Status>(tabId, { type: "status", knownAccount: known }).catch(() => null);
@@ -604,12 +637,15 @@ async function run(tabId: number) {
       }
     }
     if ((await jobs())[tabId]?.submission) return;
+    // Stopped by the student. On a stepped application, what happened goes on the issues list, so a run
+    // that went wrong can be traced even when Unnepo didn't notice anything itself.
+    if (furthest) await addIssues(lastUrl, [{ kind: "stopped", what: `You pressed Stop on ${stepText(seenStep)}. What happened: ${trail.join("; ")}`.slice(0, 1500) }]).catch(() => undefined);
     await saveJob(tabId, { step: "Stopped. Press Fill to start again." });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Something went wrong.";
     // On a stepped application, the presses that led here help find the cause.
-    const trail = pressLog.some((item) => item.from || item.to) ? ` Presses: ${pressLog.map(pressLine).join("; ")}` : "";
-    await addIssues((await chrome.tabs.get(tabId).catch(() => null))?.url ?? lastUrl, [{ kind: "stopped", what: `Stopped: ${message}${trail}`.slice(0, 1500) }]).catch(() => undefined);
+    const happened = trail.length ? ` What happened: ${trail.join("; ")}` : "";
+    await addIssues((await chrome.tabs.get(tabId).catch(() => null))?.url ?? lastUrl, [{ kind: "stopped", what: `Stopped: ${message}${happened}`.slice(0, 1500) }]).catch(() => undefined);
     await saveJob(tabId, { error: message, step: "Stopped." });
   } finally {
     if (stillRunning(tabId, runId)) runs.delete(tabId);
