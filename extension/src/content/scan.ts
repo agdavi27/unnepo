@@ -337,6 +337,35 @@ export function handshakeJob(where: { hostname: string; pathname: string } = win
   return { title: title.slice(0, 200), company: (employer || logo || "").slice(0, 200), description };
 }
 
+/**
+ * The person LinkedIn shows under "Meet the hiring team" on a job the student opened: the first profile link
+ * in that box, its name, and the line under it. Only what the page already shows; nothing is looked up.
+ */
+export function hiringTeam(): { name: string; title: string; profileUrl: string } | null {
+  if (!/(^|\.)linkedin\.com$/.test(window.location.hostname)) return null;
+  const heading = Array.from(document.querySelectorAll<HTMLElement>("h2, h3, span, div"))
+    .find((el) => el.children.length <= 1 && /^(meet the hiring team|people you can reach out to)$/i.test(clean(el.textContent)) && visible(el));
+  if (!heading) return null;
+  let box: HTMLElement | null = heading;
+  while (box && box !== document.body && !box.querySelector("a[href*='/in/']")) box = box.parentElement;
+  const link = box?.querySelector<HTMLAnchorElement>("a[href*='/in/']");
+  if (!box || !link) return null;
+  const lines = (box.innerText || "").split("\n").map((line) => clean(line)).filter(Boolean);
+  // "Jane Doe" then "• 2nd" or "3rd+", then the title, then "Job poster".
+  const name = clean(link.innerText.split("\n")[0]).replace(/\s*•.*$/, "") || lines.find((line) => /^[A-Z][a-zA-Z'’.-]+( [A-Z][a-zA-Z'’.-]+)+$/.test(line)) || "";
+  if (name.split(" ").length < 2 || name.length > 80) return null;
+  const after = lines.slice(lines.findIndex((line) => line.startsWith(name)) + 1);
+  const title = after.find((line) => !/^(•|\d|1st|2nd|3rd|job poster|message|connect|follow|meet the hiring team)/i.test(line) && line.length <= 160) ?? "";
+  let profileUrl = "";
+  try {
+    const url = new URL(link.href);
+    profileUrl = `${url.origin}${url.pathname}`;
+  } catch {
+    profileUrl = "";
+  }
+  return { name, title, profileUrl };
+}
+
 // What job sites call themselves, which isn't the company's name.
 const JOB_SITE_NAME = /^(workday|greenhouse|lever|ashby|icims|smartrecruiters|jobvite|taleo|workable|careers?|jobs?|job application)$/i;
 
@@ -359,6 +388,7 @@ export function scanPage(): Scan {
   // Greenhouse titles read "Job Application for Product Analyst at Acme".
   const greenhouseTitle = document.title.match(/^Job Application for (.+) at (.+)$/);
   const handshake = handshakeJob();
+  const poster = hiringTeam();
   const title = (handshake?.title || greenhouseTitle?.[1] || heading || meta("og:title") || document.title).slice(0, 200);
   const siteName = meta("og:site_name");
   const company = (handshake?.company || greenhouseTitle?.[2] || (ats === "workday" ? workdayCompany() : "")
@@ -370,6 +400,7 @@ export function scanPage(): Scan {
     title,
     company,
     ...(handshake?.description ? { description: handshake.description } : {}),
+    ...(poster ? { poster } : {}),
     ats,
     useServerSchema: ats === "greenhouse" && Boolean(document.getElementById("first_name")),
     fields: scanFields(),

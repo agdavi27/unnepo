@@ -32,7 +32,8 @@ export type ApplicationQuestion = {
   evidence: string | null;
 };
 
-export type PostedRecruiter = { name: string; title: string | null; email: string | null };
+/** Someone the posting names, or LinkedIn shows under "Meet the hiring team" (then with their profile). */
+export type PostedRecruiter = { name: string; title: string | null; email: string | null; linkedinUrl?: string | null };
 
 export type JobDetails = {
   ats: Ats;
@@ -86,6 +87,8 @@ export type FillReport = {
   pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
   /** The last search for people to email: every step and what it found. */
   peopleSearch?: PeopleSearch;
+  /** The credit for this job's person was spent, so searching again is free. */
+  personCharged?: boolean;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
   attempts?: FillAttempt[];
 };
@@ -181,6 +184,8 @@ export type ApplicationProfile = {
   resumeProfile?: ResumeProfile | null;
   /** Applications per week the student is aiming for. */
   weeklyGoal?: number;
+  /** The spider the student picked on the Stats page (lib/spiders.ts); worn once it's unlocked. */
+  spiderSkin?: string;
   /** CVs Unnepo has written for the student; 1 credit covers CVS_PER_CREDIT of them. */
   cvCount?: number;
   /** Answers the AI wrote for questions, by question and options, so the same question costs nothing next time. */

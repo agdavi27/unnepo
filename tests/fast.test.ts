@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { mapAnswers } from "@/lib/apply/fast/mapper";
 import { knownAnswers, mappingFromQuestions, questionsFromMapping } from "@/lib/apply/fast/pipeline";
 import { parseGreenhouse, type GreenhouseJobJson } from "@/lib/apply/fast/schema";
-import { askedLength, fitsLength, fullUrl, nameCase, planAnswers, plainWriting } from "@/lib/apply/questions";
+import { askedLength, fitsLength, fullUrl, nameCase, planAnswers, plainWriting, shortAnswer } from "@/lib/apply/questions";
 import { degreeAnswer, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import type { ApplicationProfile } from "@/lib/apply/types";
 
@@ -220,5 +220,12 @@ describe("a single checkbox", () => {
     });
     expect(mapped.answers.get("u1")?.values).toEqual(["No"]);
     expect(asked).toBe(0);
+  });
+
+  it("keeps written answers to two sentences unless the question asks for a minimum", () => {
+    const long = "I ran the campus coffee shop's books for two years. That taught me to close a month on time. I also led a club. It had 40 members.";
+    expect(shortAnswer("Why do you want to work here?", long)).toBe("I ran the campus coffee shop's books for two years. That taught me to close a month on time.");
+    expect(shortAnswer("Why do you want to work here? (at least 100 words)", long)).toBe(long);
+    expect(shortAnswer("Tell us about yourself (250 characters max)", "One sentence. Two sentences.")).toBe("One sentence. Two sentences.");
   });
 });

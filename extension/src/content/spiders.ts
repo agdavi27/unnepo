@@ -1,4 +1,4 @@
-import { H, spiderRects, W } from "../shared/sprite";
+import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
 
 /**
  * The fill animation: when the student presses Fill, a few little pixel spiders drop down on threads,
@@ -10,7 +10,9 @@ import { H, spiderRects, W } from "../shared/sprite";
 
 type Point = [number, number];
 
-const FRAMES = [spiderRects(0), spiderRects(1)];
+let FRAMES = [spiderRects(0), spiderRects(1)];
+// The student's spider from the Stats page, once storage answers.
+void storedSpiderColors().then((colors) => { FRAMES = [spiderRects(0, colors), spiderRects(1, colors)]; });
 
 type Spider = {
   el: HTMLDivElement;

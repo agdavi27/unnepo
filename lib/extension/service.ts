@@ -2,13 +2,15 @@ import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
 import { createApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
-import { companyFromUrl, extractJob, isJobSiteName, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
-import { buildMapping, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
+import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
+import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
-import { classifyQuestion, normalizeLabel } from "@/lib/apply/questions";
+import { WRITING_STYLE, classifyQuestion, normalizeLabel, plainWriting, shortAnswer } from "@/lib/apply/questions";
 import { applicationProfiles, applications } from "@/lib/apply/store";
+import { isApplied } from "@/lib/apply/stats";
+import { wornSkin } from "@/lib/spiders";
 import { CVS_PER_CREDIT, cvUsesLeft } from "@/lib/apply/cv";
-import type { FillAttempt, FillProblem, JobApplication } from "@/lib/apply/types";
+import type { FillAttempt, FillProblem, JobApplication, PostedRecruiter } from "@/lib/apply/types";
 import { profileReady, profileState } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
 
@@ -36,6 +38,8 @@ export async function extensionMe(userId: string) {
     // The resume the extension attaches. `file` is false when only its text was kept, so it must be uploaded again.
     resume: resume ? { fileName: resume.fileName, uploadedAt: resume.createdAt, file: Boolean(resume.storagePath) && resume.byteSize > 0 } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
+    // The spider the student wears from the Stats page, for the panel and the crawling spiders.
+    spider: { skin: wornSkin(stored?.spiderSkin, (await applications.list(userId)).filter((app) => isApplied(app.status)).length), school: state.profile.education?.[0]?.school ?? "" },
   };
 }
 
@@ -70,14 +74,14 @@ function keyFor(url: string) {
 }
 
 /** A job the extension is on. Unnepo reads it when it can; otherwise it keeps what the page showed. */
-async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string }) {
+async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string; poster?: PostedRecruiter | null }) {
   let ats: JobApplication["ats"] = "other";
   try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
   // A Workday page calls itself "Workday"; the link names the company.
   const company = isJobSiteName(input.company) ? companyFromUrl(input.url) || input.company : input.company;
   const { app } = await applications.insert({
     userId, jobKey: keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: company.slice(0, 200), companyDomain: null,
-    department: null, location: null, description: input.description ?? "", requirements: [], applicationUrl: input.url, postedRecruiter: null, status: "extracted",
+    department: null, location: null, description: input.description ?? "", requirements: [], applicationUrl: input.url, postedRecruiter: input.poster ?? (input.description ? findPostedRecruiter(input.description) : null), status: "extracted",
     statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
     contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
   });
@@ -85,16 +89,29 @@ async function minimalApplication(userId: string, input: { url: string; title: s
   return (await applications.get(userId, app.id))!;
 }
 
+/** LinkedIn's "Meet the hiring team" person as the extension read it, checked. */
+export function pagePoster(raw: unknown): PostedRecruiter | null {
+  const poster = (raw ?? {}) as { name?: unknown; title?: unknown; profileUrl?: unknown };
+  const name = typeof poster.name === "string" ? poster.name.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  if (name.split(" ").length < 2) return null;
+  const profile = typeof poster.profileUrl === "string" ? poster.profileUrl.trim() : "";
+  const linkedinUrl = /^https:\/\/([a-z]+\.)?linkedin\.com\/in\/[^/?#\s]+\/?$/i.test(profile) ? profile : null;
+  const title = typeof poster.title === "string" && poster.title.trim() ? poster.title.trim().slice(0, 160) : "Job poster";
+  return { name, title, email: null, linkedinUrl };
+}
+
 /** Opens (or reuses) the application for the job the extension is on. A new job spends credits as usual. */
 export async function extensionJob(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { url?: unknown; title?: unknown; company?: unknown; description?: unknown };
+  const body = (raw ?? {}) as { url?: unknown; title?: unknown; company?: unknown; description?: unknown; poster?: unknown };
   const url = String(body.url ?? "").trim().slice(0, 2000);
   if (!/^https:\/\//i.test(url)) throw new ServiceError("Open a job application page first.", "job_url", 400);
   // The posting's text as the page shows it (Handshake, which Unnepo can't read on its own).
   const pageDescription = typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
+  const poster = pagePoster(body.poster);
   const existing = await applications.findByKey(userId, keyFor(url));
   if (existing) {
-    if (pageDescription && !existing.description) return { application: summary((await applications.update(userId, existing.id, { description: pageDescription }))!), created: false };
+    if (poster && !existing.postedRecruiter) return { application: summary((await applications.update(userId, existing.id, { postedRecruiter: poster, ...(pageDescription && !existing.description ? { description: pageDescription } : {}) }))!), created: false };
+    if (pageDescription && !existing.description) return { application: summary((await applications.update(userId, existing.id, { description: pageDescription, postedRecruiter: existing.postedRecruiter ?? findPostedRecruiter(pageDescription) }))!), created: false };
     return { application: summary(existing), created: false };
   }
   // The fast way: open the job from what the page shows, so filling starts right away, and read the posting
@@ -103,7 +120,7 @@ export async function extensionJob(userId: string, raw: unknown) {
   const pageCompany = String(body.company ?? "").trim();
   if (pageTitle && pageCompany) {
     if (!(await profileReady(userId))) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
-    const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany, description: pageDescription });
+    const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany, description: pageDescription, poster });
     if (!pageDescription) runLater(() => enrichFromPosting(userId, app.id, url));
     return { application: summary(app), created: true };
   }
@@ -116,7 +133,7 @@ export async function extensionJob(userId: string, raw: unknown) {
     const company = String(body.company ?? "").trim();
     if (error instanceof ServiceError && (error.code === "credits" || error.code === "profile" || error.code === "job_url")) throw error;
     if (!title || !company) throw error;
-    return { application: summary(await minimalApplication(userId, { url, title, company, description: pageDescription })), created: true };
+    return { application: summary(await minimalApplication(userId, { url, title, company, description: pageDescription, poster })), created: true };
   }
 }
 
@@ -136,9 +153,10 @@ export async function extensionJobs(userId: string) {
 async function enrichFromPosting(userId: string, applicationId: string, url: string) {
   try {
     const job = await extractJob(url);
+    const saved = await applications.get(userId, applicationId);
     await applications.update(userId, applicationId, {
       ats: job.ats, department: job.department, location: job.location, description: job.description,
-      requirements: job.requirements, applicationUrl: job.applicationUrl, postedRecruiter: job.postedRecruiter,
+      requirements: job.requirements, applicationUrl: job.applicationUrl, postedRecruiter: job.postedRecruiter ?? saved?.postedRecruiter ?? null,
       ...(job.title ? { title: job.title } : {}), ...(job.company && !isJobSiteName(job.company) ? { company: job.company } : {}),
     });
   } catch {
@@ -178,7 +196,36 @@ const cacheKey = (field: SchemaField) => `${normalizeLabel(field.label)}|${field
 async function aiCallsToday(userId: string) {
   const start = new Date();
   start.setUTCHours(0, 0, 0, 0);
-  return (await repo.listUsage(start.toISOString())).filter((row) => row.userId === userId && row.operation === "application_mapping").length;
+  return (await repo.listUsage(start.toISOString())).filter((row) => row.userId === userId && (row.operation === "application_mapping" || row.operation === "question_draft")).length;
+}
+
+const DRAFT_PROMPT = `You draft one answer to a job application question for a college student, who will read it and edit it before sending.
+Use only facts from the student's resume and profile and the job posting. Never invent experience, numbers, skills, employers, or anything about the student.
+If the question asks for a fact the resume and profile don't give (a date, a number, a yes or no about them), reply with exactly: NONE
+${WRITING_STYLE}
+Reply with only the answer text, no quotes and no preamble.`;
+
+/** The orange questions Unnepo couldn't fill: a short draft for one, on the student's request, for them to check. */
+export async function extensionWrite(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; question?: unknown };
+  const question = String(body.question ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
+  if (!question) throw new ServiceError("Which question should Unnepo write?", "question", 400);
+  if (classifyQuestion(question).sensitive) throw new ServiceError("Unnepo doesn't answer questions about you like this one. Answer it yourself.", "sensitive", 400);
+  const app = await requireApp(userId, body.applicationId);
+  if ((await aiCallsToday(userId)) >= DAILY_AI_CALLS) throw new ServiceError("That's today's AI limit. Write this one yourself, or try again tomorrow.", "limit", 429);
+  const info = await student(userId);
+  const context = runContext(userId, info, app);
+  const text = await claudeAsk(userId, "question_draft")(DRAFT_PROMPT, [
+    `Question: ${question}`,
+    `Job: ${app.title} at ${app.company}\n${app.description.slice(0, 3500)}`,
+    `Student's details:\n${context.facts}`,
+    `Resume and profile:\n${context.sources.slice(0, 12000)}`,
+  ].join("\n\n")).catch(() => {
+    throw new ServiceError("Couldn't write that right now. Try again.", "ai_failed", 502);
+  });
+  const answer = shortAnswer(question, plainWriting(text.trim().replace(/^["“]|["”]$/g, ""))).slice(0, 4000);
+  if (!answer || /^none\.?$/i.test(answer)) throw new ServiceError("Your resume doesn't say enough to answer this one. Answer it yourself.", "no_facts", 422);
+  return { answer };
 }
 
 /**

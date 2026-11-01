@@ -8,18 +8,20 @@ function intEnv(name: string, fallback: number) {
 /** Pricing, credit rules, and spend caps. All of these are environment-configurable. */
 export function serverConfig() {
   return {
-    signupCredits: intEnv("SIGNUP_CREDITS", 5),
+    signupCredits: intEnv("SIGNUP_CREDITS", 3),
     unlockCreditCost: intEnv("UNLOCK_CREDIT_COST", 1),
     referralCredits: intEnv("REFERRAL_CREDITS", 25),
     referralDailyCap: intEnv("REFERRAL_DAILY_CAP", 10),
     grindPriceCents: intEnv("GRIND_PRICE_CENTS", 2900),
     grindMonthlyCredits: intEnv("GRIND_MONTHLY_CREDITS", 30),
-    packPriceCents: intEnv("PACK_PRICE_CENTS", 6000),
-    packCredits: intEnv("PACK_CREDITS", 75),
-    proPriceCents: intEnv("PRO_PRICE_CENTS", 3000),
-    proMonthlyCredits: intEnv("PRO_MONTHLY_CREDITS", 25),
-    premiumPriceCents: intEnv("PREMIUM_PRICE_CENTS", 6000),
-    premiumMonthlyCredits: intEnv("PREMIUM_MONTHLY_CREDITS", 60),
+    packPriceCents: intEnv("PACK_PRICE_CENTS", 500),
+    packCredits: intEnv("PACK_CREDITS", 25),
+    proPriceCents: intEnv("PRO_PRICE_CENTS", 2400),
+    proMonthlyCredits: intEnv("PRO_MONTHLY_CREDITS", 40),
+    proSemesterPriceCents: intEnv("PRO_SEMESTER_PRICE_CENTS", 6900),
+    premiumPriceCents: intEnv("PREMIUM_PRICE_CENTS", 4400),
+    premiumMonthlyCredits: intEnv("PREMIUM_MONTHLY_CREDITS", 100),
+    premiumSemesterPriceCents: intEnv("PREMIUM_SEMESTER_PRICE_CENTS", 11900),
     proAiLimit: intEnv("PRO_AI_LIMIT", 200),
     premiumAiLimit: intEnv("PREMIUM_AI_LIMIT", 600),
     dailyGlobalSpendCents: intEnv("DAILY_GLOBAL_SPEND_CENTS", 25000),
@@ -39,23 +41,20 @@ export function serverConfig() {
   };
 }
 
-/** One credit finds this many contacts, each with a verified work email. Matches the search quote in lib/credits/quote.ts. */
-export const PEOPLE_PER_CREDIT = 25;
+/**
+ * Pricing: autofill is cheap to run, so applications aren't metered by credits. Free covers
+ * FREE_APPLICATIONS of them; Pro and Premium have no limit beyond a daily fair-use cap on AI. What costs
+ * real money is finding a person with a verified email, so 1 credit = 1 person found, charged only when
+ * one is found.
+ */
+export const FREE_APPLICATIONS = 25;
 
-export function peopleFromCredits(credits: number) {
-  return credits * PEOPLE_PER_CREDIT;
-}
+/** A semester plan: four months paid up front, with four months of credits at once. */
+export const SEMESTER_MONTHS = 4;
 
-/** V1: one credit covers this many job applications, each with up to five contacts and their emails. */
-export const APPLICATIONS_PER_CREDIT = 15;
-
-export function applicationsFromCredits(credits: number) {
-  return credits * APPLICATIONS_PER_CREDIT;
-}
-
-/** "5 credits = 75 applications" */
+/** "40 people with verified emails" */
 export function creditMath(credits: number) {
-  return `${credits} credits = ${applicationsFromCredits(credits).toLocaleString("en-US")} applications`;
+  return credits === 1 ? "1 person with a verified email" : `${credits} people with verified emails`;
 }
 
 export const PUBLIC_PLANS = [
@@ -63,43 +62,43 @@ export const PUBLIC_PLANS = [
     id: "free" as const,
     name: "Free",
     priceLabel: "$0",
+    semesterLabel: null,
     cadence: "When you join",
     blurb: "Start here",
     cta: "Get started free",
     popular: false,
     monthly: false,
-    credits: 5,
-    people: peopleFromCredits(5),
-    peopleLabel: `${applicationsFromCredits(5)} applications to start`,
-    features: ["Autofill applications from your profile", "Up to 5 contacts per application", "Copy-ready outreach emails"],
+    credits: 3,
+    applicationsLabel: `${FREE_APPLICATIONS} applications`,
+    features: [`Autofill ${FREE_APPLICATIONS} applications`, "3 people to reach, with verified emails", "Cover letters and the tracker"],
   },
   {
     id: "pro" as const,
     name: "Pro",
-    priceLabel: "$30",
-    cadence: "Billed monthly",
+    priceLabel: "$24",
+    semesterLabel: "or $69 a semester",
+    cadence: "Billed monthly or each semester",
     blurb: "For an active search",
     cta: "Choose Pro",
     popular: true,
     monthly: true,
-    credits: 25,
-    people: peopleFromCredits(25),
-    peopleLabel: `${applicationsFromCredits(25).toLocaleString("en-US")} applications each month`,
-    features: ["Contacts and emails included", "Track every application", "Everything in Free"],
+    credits: 40,
+    applicationsLabel: "Unlimited applications",
+    features: ["Unlimited autofill and cover letters", "40 people a month, with verified emails", "Everything in Free"],
   },
   {
     id: "premium" as const,
     name: "Premium",
-    priceLabel: "$60",
-    cadence: "Billed monthly",
+    priceLabel: "$44",
+    semesterLabel: "or $119 a semester",
+    cadence: "Billed monthly or each semester",
     blurb: "For a full search",
     cta: "Choose Premium",
     popular: false,
     monthly: true,
-    credits: 60,
-    people: peopleFromCredits(60),
-    peopleLabel: `${applicationsFromCredits(60).toLocaleString("en-US")} applications each month`,
-    features: ["Contacts and emails included", "Track every application", "Everything in Pro"],
+    credits: 100,
+    applicationsLabel: "Unlimited applications",
+    features: ["100 people a month, with verified emails", "More people any time: 25 for $5", "Everything in Pro"],
   },
 ];
 

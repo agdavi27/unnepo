@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { App } from "@/components/unnepo/apply";
 import { AtsBadge } from "@/components/unnepo/company";
 import { applicationStats } from "@/lib/apply/stats";
+import { SKINS, schoolStyle, skinUnlocked, spiderSvg, wornSkin, type SkinId } from "@/lib/spiders";
 
 const card = "rounded-2xl border border-line bg-panel p-5";
 const sectionTitle = "text-xs font-semibold uppercase tracking-wider text-faint";
@@ -23,7 +24,16 @@ function duration(minutes: number | null) {
   return `${(minutes / 60).toFixed(1)} h`;
 }
 
-export function StatsPage({ applications, weeklyGoal, onGoal }: { applications: App[]; weeklyGoal: number | null; onGoal: (goal: number) => Promise<void> }) {
+type StatsProps = {
+  applications: App[];
+  weeklyGoal: number | null;
+  onGoal: (goal: number) => Promise<void>;
+  school: string;
+  spiderSkin: string | null;
+  onSpider: (skin: SkinId) => Promise<void>;
+};
+
+export function StatsPage({ applications, weeklyGoal, onGoal, school, spiderSkin, onSpider }: StatsProps) {
   const stats = useMemo(() => applicationStats(applications), [applications]);
   return (
     <div className="flex flex-col gap-6">
@@ -31,6 +41,7 @@ export function StatsPage({ applications, weeklyGoal, onGoal }: { applications: 
         <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Stats</h1>
         <p className="mt-2 text-sm text-muted">How your search is going. Set an outcome on each job in Applied to fill in responses.</p>
       </div>
+      <Spiders applied={stats.applied} school={school} picked={spiderSkin} onPick={onSpider} />
       <Goal thisWeek={stats.thisWeek} daysLeft={stats.daysLeft} streak={stats.streak} goal={weeklyGoal} onGoal={onGoal} />
       <section className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4" aria-label="Totals">
         <Tile label="Applications" value={String(stats.applied)} note={stats.inProgress ? `${stats.inProgress} in progress` : "submitted"} />
@@ -44,6 +55,57 @@ export function StatsPage({ applications, weeklyGoal, onGoal }: { applications: 
         <Systems rows={stats.bySystem} />
       </div>
     </div>
+  );
+}
+
+/**
+ * The six spiders to collect: the school one from the start, the rest at 50, 150, 300, 500 and 1,000
+ * applications. Locked ones are grey and say when they unlock. Picking one dresses the extension's spiders.
+ */
+function Spiders({ applied, school, picked, onPick }: { applied: number; school: string; picked: string | null; onPick: (skin: SkinId) => Promise<void> }) {
+  const [state, setState] = useState("");
+  const worn = wornSkin(picked, applied);
+  const style = schoolStyle(school);
+  async function pick(skin: SkinId) {
+    if (skin === worn) return;
+    setState("Saving…");
+    try {
+      await onPick(skin);
+      setState("");
+    } catch (reason) {
+      setState(reason instanceof Error ? reason.message : "Couldn't save.");
+    }
+  }
+  return (
+    <section className={card} aria-label="Your spiders">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className={sectionTitle}>Your spiders</h2>
+        <p className="text-xs text-faint" role="status">{state || "Pick one to wear in the extension."}</p>
+      </div>
+      <ul className="mt-4 grid list-none grid-cols-3 gap-3 p-0 sm:grid-cols-6">
+        {SKINS.map((skin) => {
+          const open = skinUnlocked(skin, applied);
+          const name = skin.id === "school" ? (school ? `${school}` : "School spirit") : skin.name;
+          const look = { skin: skin.id, school };
+          return (
+            <li key={skin.id}>
+              <button
+                type="button"
+                disabled={!open}
+                onClick={() => void pick(skin.id)}
+                aria-pressed={worn === skin.id}
+                aria-label={open ? `Wear the ${name} spider` : `${skin.name} spider, unlocks after ${skin.unlockAt} applications`}
+                className={`flex w-full flex-col items-center gap-2 rounded-xl border p-3 text-center transition-colors ${worn === skin.id ? "border-[#3D8BFF] bg-[#0C1424]" : "border-line hover:bg-white/5"} disabled:cursor-not-allowed disabled:hover:bg-transparent`}
+              >
+                <span className={`block ${open ? "" : "opacity-60"}`} dangerouslySetInnerHTML={{ __html: spiderSvg(look, { size: 72, grey: !open }) }} />
+                <span className="line-clamp-2 text-xs font-medium">{skin.id === "school" && style ? `${style.letters} sweater` : skin.name}</span>
+                <span className="text-[11px] text-faint">{open ? (worn === skin.id ? "Wearing" : skin.id === "school" ? "Unlocked" : `${skin.unlockAt} apps`) : `Unlocks after ${skin.unlockAt} applications`}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

@@ -1,3 +1,5 @@
+import { crawlerColors, isSkin, type SpiderLook } from "@/lib/spiders";
+
 /**
  * Unnepo's spider: our own pixel drawing (round body, big eyes, pink cheeks, four legs a side), facing up.
  * The fill animation uses both leg frames; the website and extension icons are made from frame 0
@@ -36,8 +38,9 @@ export function spiderGrid(step: 0 | 1): string[][] {
 }
 
 /** The spider as SVG rectangles, one per run of same-color pixels. */
-export function spiderRects(step: 0 | 1) {
+export function spiderRects(step: 0 | 1, colors: Partial<Record<string, string>> = {}) {
   const out = spiderGrid(step);
+  const palette = { ...COLORS, ...colors };
   let rects = "";
   for (let y = 0; y < H; y++) {
     let x = 0;
@@ -46,9 +49,19 @@ export function spiderRects(step: 0 | 1) {
       if (!c) { x++; continue; }
       let w = 1;
       while (x + w < W && out[y][x + w] === c) w++;
-      rects += `<rect x="${x}" y="${y}" width="${w}" height="1" fill="${COLORS[c]}"/>`;
+      rects += `<rect x="${x}" y="${y}" width="${w}" height="1" fill="${palette[c]}"/>`;
       x += w;
     }
   }
   return rects;
+}
+
+/** The student's spider colors for the little sprite, kept in extension storage by the background worker. */
+export async function storedSpiderColors(): Promise<Partial<Record<string, string>>> {
+  try {
+    const { spider } = (await chrome.storage.local.get("spider")) as { spider?: SpiderLook };
+    return spider && isSkin(spider.skin) ? crawlerColors(spider) : {};
+  } catch {
+    return {};
+  }
 }

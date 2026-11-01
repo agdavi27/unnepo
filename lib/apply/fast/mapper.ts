@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { acceptFixes, type EmptyField } from "@/lib/apply/fast/fields";
 import { bestOption } from "@/lib/apply/options";
-import { WRITING_STYLE, answerChoices, askedLength, fitsLength, lengthGap, plainWriting, wordCount } from "@/lib/apply/questions";
+import { WRITING_STYLE, answerChoices, askedLength, fitsLength, lengthGap, plainWriting, shortAnswer, wordCount } from "@/lib/apply/questions";
 import type { FormSchema, SchemaField } from "@/lib/apply/fast/schema";
 
 /**
@@ -131,7 +131,7 @@ export async function mapAnswers(input: MapperInput) {
         const field = pending[index];
         const written = !field.options.length && (field.type === "textarea" || wordCount(String(proposal.value)) > 25);
         // Each chosen value passes the same source and option checks; a multi-select keeps the ones that pass.
-        const values = (Array.isArray(proposal.value) ? proposal.value : [proposal.value]).slice(0, 30).map((value) => written ? plainWriting(value) : value);
+        const values = (Array.isArray(proposal.value) ? proposal.value : [proposal.value]).slice(0, 30).map((value) => written ? shortAnswer(field.label, plainWriting(value)) : value);
         const kept = values.flatMap((value) => acceptFixes(fields, [{ index, value, source: proposal.source, evidence: proposal.evidence }], { facts: input.facts, sources: written ? withPosting : input.sources, consent: input.consent }));
         if (!kept.length) continue;
         answers.set(field.id, { id: field.id, values: [...new Set(kept.map((item) => item.value))], source: proposal.source === "resume" ? "ai" : proposal.source === "default" ? "default" : "student", why: kept[0].why });
@@ -156,7 +156,7 @@ export async function mapAnswers(input: MapperInput) {
         const reply = Rewrites.parse(JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)));
         for (const rewrite of reply.answers) {
           const field = off.find((item) => item.id === rewrite.id);
-          const value = plainWriting(rewrite.value).slice(0, 4000);
+          const value = field ? shortAnswer(field.label, plainWriting(rewrite.value)).slice(0, 4000) : "";
           // A rewrite is kept only when it's closer to the asked length than the draft was.
           if (field && value && lengthGap(field.label, value) < lengthGap(field.label, answers.get(field.id)!.values[0])) {
             answers.set(field.id, { ...answers.get(field.id)!, values: [value] });

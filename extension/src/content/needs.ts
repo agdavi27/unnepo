@@ -1,3 +1,4 @@
+import { typeInto } from "./dom";
 import { findMarked, isEmpty, scanFields } from "./scan";
 
 /**
@@ -75,6 +76,98 @@ function drawButton() {
   host.shadowRoot!.querySelector(".text")!.textContent = `Unnepo: ${count} ${count === 1 ? "question needs" : "questions need"} you · Go to ${count === 1 ? "it" : "next"}`;
 }
 
+/**
+ * Written questions Unnepo couldn't answer get a "Write with AI" chip just above them. It drafts a short
+ * answer from the resume and the posting and types it in for the student to check. Choices, dates and
+ * short facts don't get one: those are the student's to give.
+ */
+let chips: HTMLDivElement | null = null;
+let placing = 0;
+
+function writable(control: HTMLElement, label: string) {
+  if (control instanceof HTMLTextAreaElement) return true;
+  if (!(control instanceof HTMLInputElement) || control.type !== "text" || control.getAttribute("role") === "combobox") return false;
+  return label.split(/\s+/).length >= 5 || /\b(why|describe|tell us|explain|how would|what (makes|interests))\b/i.test(label);
+}
+
+function placeChips() {
+  placing = 0;
+  if (!chips) return;
+  for (const chip of Array.from(chips.shadowRoot!.querySelectorAll<HTMLButtonElement>("button"))) {
+    const item = marked.find((entry) => entry.label === chip.dataset.label);
+    const rect = item?.control.getBoundingClientRect();
+    if (!item || !rect || rect.height === 0 || rect.bottom < 0 || rect.top > innerHeight) {
+      chip.style.display = "none";
+      continue;
+    }
+    chip.style.display = "";
+    chip.style.top = `${Math.max(4, rect.top - 30)}px`;
+    chip.style.left = `${Math.max(4, Math.min(innerWidth - 150, rect.right - 140))}px`;
+  }
+}
+
+const schedulePlace = () => {
+  if (!placing) placing = requestAnimationFrame(placeChips);
+};
+
+async function writeFor(chip: HTMLButtonElement, item: Marked) {
+  chip.disabled = true;
+  chip.textContent = "Writing…";
+  const result = (await chrome.runtime.sendMessage({ type: "write-answer", label: item.label }).catch(() => null)) as { answer?: string; error?: string } | null;
+  const control = item.control;
+  if (result?.answer && control.isConnected && (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement) && isEmpty(control)) {
+    typeInto(control, result.answer);
+    control.focus({ preventScroll: true });
+    chip.textContent = "Written: check it";
+    setTimeout(refresh, 400);
+    return;
+  }
+  chip.disabled = false;
+  chip.textContent = "Write with AI";
+  chip.title = result?.error || "Couldn't write this one. Try again.";
+  chip.dataset.error = "1";
+  setTimeout(() => delete chip.dataset.error, 2500);
+}
+
+function drawChips() {
+  const items = marked.filter((item) => writable(item.control, item.label));
+  if (!items.length) {
+    chips?.remove();
+    chips = null;
+    return;
+  }
+  if (!chips) {
+    chips = document.createElement("div");
+    chips.setAttribute("data-unnepo-write", "");
+    const root = chips.attachShadow({ mode: "open" });
+    root.innerHTML = `
+      <style>
+        :host { all: initial; position: fixed; inset: 0; pointer-events: none; z-index: 2147483645; font: 600 12px/1 system-ui, -apple-system, sans-serif; }
+        button { all: unset; pointer-events: auto; cursor: pointer; position: fixed; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: #0A0A0B; color: #fff; border: 1.5px solid ${COLOR}; box-shadow: 0 4px 14px rgba(0,0,0,.22); white-space: nowrap; }
+        button:disabled { cursor: progress; opacity: .8; }
+        button[data-error] { border-color: #F87171; }
+        button:focus-visible { outline: 3px solid #3D8BFF; outline-offset: 2px; }
+      </style>`;
+    document.documentElement.appendChild(chips);
+    addEventListener("scroll", schedulePlace, { capture: true, passive: true });
+    addEventListener("resize", schedulePlace, { passive: true });
+  }
+  const root = chips.shadowRoot!;
+  const wanted = new Set(items.map((item) => item.label));
+  for (const chip of Array.from(root.querySelectorAll<HTMLButtonElement>("button"))) if (!wanted.has(chip.dataset.label ?? "")) chip.remove();
+  for (const item of items) {
+    if (Array.from(root.querySelectorAll<HTMLButtonElement>("button")).some((chip) => chip.dataset.label === item.label)) continue;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.dataset.label = item.label;
+    chip.textContent = "Write with AI";
+    chip.setAttribute("aria-label", `Write an answer with AI for: ${item.label}`);
+    chip.addEventListener("click", () => void writeFor(chip, item));
+    root.appendChild(chip);
+  }
+  placeChips();
+}
+
 /** Drops the questions that have been answered since. */
 function refresh() {
   const still: Marked[] = [];
@@ -84,6 +177,7 @@ function refresh() {
   }
   marked = still;
   drawButton();
+  drawChips();
 }
 
 /** Marks these questions, if they're on this page and still empty. Called again as the list changes. */
@@ -113,6 +207,7 @@ export function markNeeds(labels: string[]) {
   // Page order, so "Go to next" walks down the form.
   marked.sort((a, b) => (a.control.compareDocumentPosition(b.control) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
   drawButton();
+  drawChips();
   if (!listening) {
     listening = true;
     // Answering a question takes its mark off right away, without waiting for Unnepo's next look.

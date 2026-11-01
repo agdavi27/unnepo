@@ -18,7 +18,8 @@ export type ApplyData = {
   profile: PublicProfile;
   resume: { fileName: string; stored: boolean } | null;
   ready: { hunter: boolean; profile: boolean };
-  applicationsPerCredit: number;
+  freeApplications: number;
+  school: string;
 };
 export type TrackerView = "applied" | "stats";
 
@@ -96,6 +97,12 @@ export function ApplyArea({ view, refreshKey = 0 }: { view: TrackerView; refresh
         weeklyGoal={data.profile.weeklyGoal ?? null}
         onGoal={async (weeklyGoal) => {
           const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { weeklyGoal });
+          setData({ ...data, profile: result.profile });
+        }}
+        school={data.school}
+        spiderSkin={data.profile.spiderSkin ?? null}
+        onSpider={async (spiderSkin) => {
+          const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { spiderSkin });
           setData({ ...data, profile: result.profile });
         }}
       />
@@ -356,13 +363,14 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                 </div>
                 {expanded && (
                   <div className="mb-4 space-y-4 rounded-xl border border-line bg-panel p-4">
+                    {stage === "in_progress" && <PostedBy app={app} />}
                     {stage === "in_progress" ? (
                       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
                         <p>Not submitted yet. Open the application and press Fill in the Unnepo extension, or mark it applied if you sent it yourself.</p>
                         <button type="button" className={secondary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
                       </div>
                     ) : (
-                      <ContactsPanel app={app} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={() => void act("/retry-contacts", "POST", { applicationId: app.id })} />
+                      <ContactsPanel app={app} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} />
                     )}
                     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-faint">
                       <span className="min-w-0">
@@ -403,9 +411,33 @@ function Avatar({ name, photoUrl }: { name: string; photoUrl: string | null }) {
   return <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line bg-card text-sm font-medium text-muted">{initials}</span>;
 }
 
-function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contactId: string, status: OutreachState) => void; onRetry: () => void }) {
+/** The person the posting names, shown as soon as the job is saved, with the posting's own label for them. */
+function PostedBy({ app }: { app: App }) {
+  const named = app.postedRecruiter;
+  if (!named || (app.contacts ?? []).some((contact) => contact.name.toLowerCase() === named.name.toLowerCase())) return null;
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-line bg-panel p-3">
+      <Avatar name={named.name} photoUrl={null} />
+      <div className="min-w-0 text-sm">
+        <p className="truncate font-medium">{named.name} <span className="ml-1 rounded-full border border-line px-2 py-0.5 align-middle text-[10px] text-muted">{named.title || "Named on posting"}</span></p>
+        <p className="truncate text-muted">{named.linkedinUrl ? "Hiring team on LinkedIn" : "Named on the job posting"}{named.email ? ` · ${named.email}` : ""}</p>
+      </div>
+      {named.linkedinUrl && (
+        <a className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-white/5" href={named.linkedinUrl} target="_blank" rel="noreferrer" aria-label={`${named.name} on LinkedIn`}>
+          <span aria-hidden className="flex h-4 w-4 items-center justify-center rounded-[3px] bg-[#0A66C2] text-[9px] font-bold text-white">in</span>
+          LinkedIn
+        </a>
+      )}
+    </div>
+  );
+}
+
+function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void }) {
   const contacts = app.contacts ?? [];
   const [copied, setCopied] = useState("");
+  const [website, setWebsite] = useState("");
+  // No website means Apollo had nowhere to look, so the student can give one.
+  const needsSite = !app.companyDomain && contacts.length === 0 && (app.contactsStatus === "done" || app.contactsStatus === "failed");
   async function copy(key: string, text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -418,20 +450,34 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
   // Nobody is looked up until the student asks.
   if (app.contactsStatus === "idle") {
     return (
-      <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
-        <button type="button" className={primary} onClick={onRetry}>Find me the best person to connect with</button>
-        <p>Someone from your school at {app.company}, else a recruiter, else someone on the team. Always with a verified email.</p>
+      <div className="space-y-3">
+        <PostedBy app={app} />
+        <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
+          <button type="button" className={primary} onClick={() => onRetry()}>Find me the best person to connect with</button>
+          <p>Someone from your school at {app.company}, else a recruiter, else someone on the team. Always with a verified email.</p>
+        </div>
       </div>
     );
   }
-  if (app.contactsStatus === "finding") return <p className="text-sm text-muted">Finding the best person to connect with…</p>;
+  if (app.contactsStatus === "finding") return <div className="space-y-3"><PostedBy app={app} /><p className="text-sm text-muted">Finding the best person to connect with…</p></div>;
   return (
     <div className="space-y-3">
+      <PostedBy app={app} />
       {app.contactsStatus === "writing" && <p className="text-sm text-muted">Writing emails…</p>}
       {app.contactsMessage && <p className="text-xs text-faint">{app.contactsMessage}</p>}
-      {app.contactsStatus === "failed" && <button type="button" className={secondary} onClick={onRetry}>Try again</button>}
-      {contacts.length === 0 && app.contactsStatus === "done" && (
-        <div className="flex flex-wrap items-center gap-3 text-sm text-muted"><p>No one with a verified email yet.</p><button type="button" className={secondary} onClick={onRetry}>Search again</button></div>
+      {needsSite ? (
+        <form className="flex flex-wrap items-center gap-2 text-sm" onSubmit={(event) => { event.preventDefault(); onRetry(website.trim()); }}>
+          <label className="sr-only" htmlFor={`site-${app.id}`}>{app.company}&apos;s website</label>
+          <input id={`site-${app.id}`} value={website} onChange={(event) => setWebsite(event.target.value)} placeholder={`${app.company}'s website, like acme.com`} className="min-w-0 flex-1 rounded-lg border border-line bg-card px-3 py-2 text-sm" />
+          <button type="submit" className={secondary} disabled={!website.trim()}>Search again</button>
+        </form>
+      ) : (
+        <>
+          {app.contactsStatus === "failed" && <button type="button" className={secondary} onClick={() => onRetry()}>Try again</button>}
+          {contacts.length === 0 && app.contactsStatus === "done" && (
+            <div className="flex flex-wrap items-center gap-3 text-sm text-muted"><p>No one with a verified email yet.</p><button type="button" className={secondary} onClick={() => onRetry()}>Search again</button></div>
+          )}
+        </>
       )}
       {contacts.map((contact) => {
         const email = contact.emailBody ? `Subject: ${contact.emailSubject ?? ""}\n\n${contact.emailBody}` : "";

@@ -331,7 +331,7 @@ export function acceptAiAnswer(question: ApplicationQuestion, answer: string, ev
   if (evidence.trim().length < 4 || !supportedBy(evidence, sources)) return null;
   if (question.kind === "select") return matchOption(answer, question.options);
   if (question.kind === "file" || question.kind === "unknown") return null;
-  return (question.kind === "textarea" ? plainWriting(answer).slice(0, 4000) : answer.trim().slice(0, 300)) || null;
+  return (question.kind === "textarea" ? shortAnswer(question.label, plainWriting(answer)).slice(0, 4000) : answer.trim().slice(0, 300)) || null;
 }
 
 /** How every written answer should sound: like the student typed it, not like a model wrote it. */
@@ -342,7 +342,18 @@ export const WRITING_STYLE = `How written answers sound:
 - Never use em dashes or en dashes. Use commas or periods.
 - Never use these words or phrases: excited, thrilled, eager, passionate, passion, leverage, align, aligns, dynamic, fast-paced, furthermore, moreover, additionally, in today's, unique opportunity, meaningful impact, honed, foster, delve, testament, invaluable, synergy, cutting-edge, journey, landscape, I believe, I am confident, resonate, deeply, truly, seamless, robust, showcase, spearhead, utilize.
 - Don't restate the question, don't open with "As a ...", and don't end with a summary or a thank-you line. No lists or headings.
-- Length: if the question states one (words or characters), meet it: a bit over a minimum, under a maximum. Otherwise 60 to 110 words.`;
+- Length: if the question states one (words or characters), meet it: a bit over a minimum, under a maximum. Otherwise at most 2 sentences, about 20 to 45 words.`;
+
+/**
+ * Written answers stay at two sentences unless the question asks for a minimum length: longer reads as
+ * AI-written. "In at least 100 words" keeps the whole answer.
+ */
+export function shortAnswer(label: string, text: string) {
+  const asked = askedLength(label);
+  if (asked.minWords || asked.minChars) return text;
+  const sentences = text.trim().split(/(?<=[.!?])\s+(?=["'“A-Z0-9])/);
+  return sentences.length <= 2 ? text.trim() : sentences.slice(0, 2).join(" ");
+}
 
 const NUMBER_WORDS: Record<string, number> = { fifty: 50, hundred: 100, "one hundred": 100, "two hundred": 200, "three hundred": 300, "five hundred": 500 };
 

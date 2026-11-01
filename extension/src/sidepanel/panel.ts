@@ -1,3 +1,4 @@
+import type { SpiderLook } from "@/lib/spiders";
 import { heroSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { NEVER_READ, type Issue, type PanelState } from "../shared/types";
@@ -9,6 +10,7 @@ import { NEVER_READ, type Issue, type PanelState } from "../shared/types";
 
 const app = document.getElementById("app")!;
 const account = document.getElementById("account")!;
+const dashboard = document.getElementById("dashboard") as HTMLAnchorElement;
 const passwordSection = document.getElementById("password")!;
 const footer = document.getElementById("footer")!;
 const menu = document.getElementById("menu")!;
@@ -609,6 +611,17 @@ document.getElementById("disconnect")!.addEventListener("click", async () => {
   void render();
 });
 
+/** Puts the student's spider from the Stats page at the top of the panel. */
+let dressed = "";
+function dressSpider(look?: SpiderLook) {
+  const key = look ? `${look.skin}|${look.school ?? ""}` : "";
+  if (!look || key === dressed) return;
+  dressed = key;
+  const spider = document.getElementById("spider")!;
+  spider.querySelector("svg")?.remove();
+  spider.insertAdjacentHTML("beforeend", heroSpiderSvg(look));
+}
+
 async function render() {
   const state = await ask<PanelState>({ type: "state" });
   // A letter belongs to one job: opening another job (another tab, or another one in Handshake's search) closes it.
@@ -620,6 +633,9 @@ async function render() {
     letterFor = letterJob;
   }
   account.textContent = state.connected ? state.me!.user.email : "";
+  dashboard.hidden = !state.connected;
+  dashboard.href = `${state.apiBase}/home`;
+  dressSpider(state.me?.spider);
   const said = lines(state);
   speech(said.lines, said.alert);
   if (!state.connected) view = "home";

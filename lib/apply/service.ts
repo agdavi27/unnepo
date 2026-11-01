@@ -1,12 +1,14 @@
 import { after } from "next/server";
-import { APPLICATIONS_PER_CREDIT, serverConfig } from "@/lib/config";
+import { SKINS, skinUnlocked } from "@/lib/spiders";
+import { isApplied } from "@/lib/apply/stats";
+import { FREE_APPLICATIONS, serverConfig } from "@/lib/config";
 import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { splitProfileList } from "@/lib/profile/lists";
 import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
-import { findPeopleForApplication, hunterReady, writeOutreachEmails } from "@/lib/apply/contacts";
+import { findPeopleForApplication, hunterReady, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
 import { companyFromUrl, extractJob, isJobSiteName } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
@@ -63,6 +65,7 @@ export async function student(userId: string) {
     student: stored?.student,
     aiCache: stored?.aiCache,
     weeklyGoal: stored?.weeklyGoal,
+    spiderSkin: stored?.spiderSkin,
     cvCount: stored?.cvCount,
   };
   const form = document?.form;
@@ -258,7 +261,8 @@ export async function applyState(userId: string) {
     profile: publicProfile(info.profile),
     resume: info.resume ? { fileName: info.resume.fileName, stored: Boolean(info.resume.storagePath) } : null,
     ready: { hunter: hunterReady(), profile: await profileReady(userId) },
-    applicationsPerCredit: APPLICATIONS_PER_CREDIT,
+    freeApplications: FREE_APPLICATIONS,
+    school: info.context.school,
   };
 }
 
@@ -315,7 +319,7 @@ export async function createApplication(userId: string, raw: unknown) {
     attempts: 0,
   });
   if (timings && created) logTimings(app.id, "mapping", timings);
-  // Credits are spent when Unnepo prepares a job's answers (1 credit covers APPLICATIONS_PER_CREDIT jobs).
+  // Free covers FREE_APPLICATIONS jobs; paid plans have no limit.
   if (created) await ensureCharged(userId, app);
   return { application: summary(app), duplicate: !created, message: created ? "Job added." : "You already added this job." };
 }
@@ -380,19 +384,25 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     if (!Number.isFinite(goal) || goal < 1 || goal > 200) throw new ServiceError("Pick a weekly goal between 1 and 200 applications.", "goal", 400);
     next.weeklyGoal = goal;
   }
+  if (body.spiderSkin !== undefined) {
+    const skin = SKINS.find((item) => item.id === body.spiderSkin);
+    if (!skin) throw new ServiceError("Pick one of the spiders.", "spider", 400);
+    const applied = (await applications.list(userId)).filter((app) => isApplied(app.status)).length;
+    if (!skinUnlocked(skin, applied)) throw new ServiceError(`That spider unlocks after ${skin.unlockAt} applications.`, "spider", 403);
+    next.spiderSkin = skin.id;
+  }
   if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? (info.profile.accountConsentAt && info.profile.accountConsentAt !== CONSENT_BY_DEFAULT ? info.profile.accountConsentAt : nowIso()) : null;
   await applicationProfiles.put(userId, next);
   return { profile: publicProfile(next) };
 }
 
-/** 1 credit covers APPLICATIONS_PER_CREDIT applications: charged on the 1st, 16th, 31st… */
+/** Free covers FREE_APPLICATIONS applications; paid plans and school plans have no limit. Credits aren't spent here. */
 export async function ensureCharged(userId: string, app: JobApplication) {
   if (app.charged) return;
-  const count = await applications.countCharged(userId);
-  if (count % APPLICATIONS_PER_CREDIT === 0) {
-    const block = Math.floor(count / APPLICATIONS_PER_CREDIT);
-    const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: `application-block:${userId}:${block}`, note: `Applications ${block * APPLICATIONS_PER_CREDIT + 1}–${(block + 1) * APPLICATIONS_PER_CREDIT}`, entryType: "application_debit" });
-    if (spent.insufficient) throw new ServiceError(`You're out of credits. 1 credit covers your next ${APPLICATIONS_PER_CREDIT} applications.`, "credits", 402);
+  const account = await repo.getAccount(userId);
+  if (!account || account.plan === "free") {
+    const count = await applications.countCharged(userId);
+    if (count >= FREE_APPLICATIONS) throw new ServiceError(`Free covers ${FREE_APPLICATIONS} applications. Pro has no limit.`, "credits", 402);
   }
   await applications.update(userId, app.id, { charged: true });
 }
@@ -473,6 +483,13 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     if (contactsBusy(app)) return;
     await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
   }
+  // 1 credit finds 1 person, spent only when one with a verified email turns up. With none left, nothing is looked up.
+  const paidKey = `person:${userId}:${app.id}`;
+  const alreadyPaid = Boolean(app.fillReport?.personCharged);
+  if (!alreadyPaid && ((await repo.getAccount(userId))?.balance ?? 0) < 1) {
+    await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds 1 person with a verified email." });
+    return;
+  }
   let found: Awaited<ReturnType<typeof findPeopleForApplication>>;
   const info = await student(userId);
   try {
@@ -483,11 +500,20 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     await applications.update(userId, app.id, { contactsStatus: "failed", contactsMessage: `${reason} Try again.` });
     return;
   }
+  let charged = alreadyPaid;
+  if (found.people.some((person) => person.email) && !charged) {
+    const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: paidKey, note: `A person at ${app.company.slice(0, 80)}`, entryType: "unlock_debit" });
+    if (spent.insufficient) {
+      await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds 1 person with a verified email." });
+      return;
+    }
+    charged = true;
+  }
   const rows = await applicationContacts.replace(userId, app.id, found.people.map((person) => ({ ...person, applicationId: app.id, userId, emailSubject: null, emailBody: null })));
   // What each search found is kept with the application, so "no one found" can be traced.
   const latest = (await applications.get(userId, app.id)) ?? app;
   const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: rows.length ? "writing" : "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleSearch: found.search } });
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: rows.length ? "writing" : "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleSearch: found.search, ...(charged ? { personCharged: true } : {}) } });
   if (!rows.length) return;
   try {
     const emails = await writeOutreachEmails(userId, app, rows, { name: info.user.name, resumeText: info.resumeText, profile: info.profileText });
@@ -505,7 +531,11 @@ export async function retryContacts(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
   if (app.status !== "submitted" && app.status !== "applied_manual") throw new ServiceError("People are found after you apply.", "state", 409);
   if (contactsBusy(app)) return { ok: true };
-  await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
+  // The student can give the company's website when Unnepo couldn't find it.
+  const website = String((raw as { website?: unknown } | null)?.website ?? "").trim();
+  const domain = website ? siteDomain(/^https?:\/\//i.test(website) ? website : `https://${website}`) : null;
+  if (website && !domain) throw new ServiceError("That doesn't look like the company's own website. Try something like acme.com.", "website", 400);
+  await applications.update(userId, app.id, { ...(domain ? { companyDomain: domain } : {}), contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
   startContacts(userId, app.id, true);
   return { ok: true };
 }

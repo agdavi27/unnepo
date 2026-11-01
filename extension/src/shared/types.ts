@@ -1,6 +1,7 @@
 /** Messages and shapes shared by the background worker, the page scripts, and the side panel. */
 
 import type { FillAttempt, FillProblem } from "@/lib/apply/types";
+import type { SpiderLook } from "@/lib/spiders";
 
 export type { FillAttempt, FillProblem };
 
@@ -18,6 +19,8 @@ export type Scan = {
   company: string;
   /** The posting's text, when the page shows it and Unnepo can't read it on its own (Handshake, signed in). */
   description?: string;
+  /** The person LinkedIn shows under "Meet the hiring team", when the page has one. */
+  poster?: { name: string; title: string; profileUrl: string };
   /** "greenhouse" when this is Greenhouse's own hosted form; otherwise a best guess or "other". */
   ats: "greenhouse" | "lever" | "ashby" | "workday" | "other";
   /** Greenhouse forms are read from Greenhouse's API on the server, so the page fields aren't needed. */
@@ -67,7 +70,7 @@ export const NEVER_READ = /(^|\.)linkedin\.com$/i;
 
 export type PanelState = {
   connected: boolean;
-  me: { user: { name: string; email: string }; credits: number; profileReady: boolean; completeness: number; missing?: string[]; cv?: { usesLeft: number; perCredit: number }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null } | null;
+  me: { user: { name: string; email: string }; credits: number; profileReady: boolean; completeness: number; missing?: string[]; cv?: { usesLeft: number; perCredit: number }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
   /** What's on the tab before Fill is pressed: the job, how many fields, and whether there's an account to make. */
   page: { site: string; title: string; company: string; fields: number; posting: boolean; account: "new" | "sign_in" | null; mentionsCv: boolean } | null;
   tab: { id: number; url: string; title: string } | null;

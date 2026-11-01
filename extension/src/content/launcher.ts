@@ -1,4 +1,4 @@
-import { H, spiderRects, W } from "../shared/sprite";
+import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
 import { watchEdits } from "./edits";
 
 /**
@@ -51,6 +51,10 @@ function show() {
       <span class="tip" role="status">Fill with Unnepo</span>
       <button class="close" type="button" aria-label="Hide the Unnepo spider on this site">×</button>
     </div>`;
+  void storedSpiderColors().then((colors) => {
+    const svg = root.querySelector(".spider svg");
+    if (svg && Object.keys(colors).length) svg.innerHTML = spiderRects(0, colors);
+  });
   const tip = root.querySelector<HTMLElement>(".tip")!;
   const say = (words: string) => {
     tip.textContent = words;

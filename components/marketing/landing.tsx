@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Logo } from "@/components/brand/logo";
 import { ActivityToasts } from "@/components/marketing/activity-toasts";
+import { Features } from "@/components/marketing/features";
 import { FounderLink } from "@/components/marketing/founder-note";
 import { GetExtension } from "@/components/marketing/get-extension";
 import { Pricing } from "@/components/marketing/pricing";
@@ -49,6 +50,7 @@ export function Landing() {
         <h2 className="m-0 max-w-2xl text-[clamp(28px,4vw,40px)] font-bold leading-[1.05] tracking-[-1.2px]">Press Fill. Watch the spiders do the rest.</h2>
       </section>
       <ProductDemo id="demo" />
+      <Features />
       <Stats />
       <Pricing />
 

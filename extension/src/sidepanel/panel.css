@@ -25,7 +25,11 @@ button { font: inherit; color: inherit; }
 .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 20px; border-bottom: 1px solid var(--line); }
 .logo { font-size: 20px; font-weight: 700; letter-spacing: -0.6px; }
 .dot { color: var(--accent); }
-.email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-size: 11px; color: var(--muted-3); }
+.top-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dash { flex: none; height: 32px; padding: 0 12px; border-radius: 9px; background: var(--accent); color: #fff; font: 600 13px Geist, sans-serif; display: inline-flex; align-items: center; text-decoration: none; }
+.dash:hover { background: #5A9DFF; }
+.dash[hidden] { display: none; }
 
 /* The spider and his speech bubble */
 .speech { position: relative; padding: 0 20px 22px; display: flex; align-items: flex-end; gap: 14px; }

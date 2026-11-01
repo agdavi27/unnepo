@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { APPLICATIONS_PER_CREDIT, ENTERPRISE_PLAN, PUBLIC_PLANS, applicationsFromCredits } from "@/lib/config";
+import { ENTERPRISE_PLAN, FREE_APPLICATIONS, PUBLIC_PLANS, SEMESTER_MONTHS, creditMath } from "@/lib/config";
 
 /** The home page's plans, as cards: what each costs, what it covers, and one clear button. */
 
@@ -14,7 +14,7 @@ export function Pricing() {
         <p className="m-0 font-mono text-xs uppercase tracking-[1.2px] text-[#8B8B94]">Pricing</p>
         <h2 id="pricing-title" className="m-0 mt-3 max-w-2xl text-[clamp(32px,4.6vw,46px)] font-bold leading-[1.05] tracking-[-1.4px]">Free to start. Upgrade when you&apos;re applying a lot.</h2>
         <p className="m-0 mt-4 max-w-xl text-[15px] leading-relaxed text-[#9A9AA3]">
-          1 credit covers {APPLICATIONS_PER_CREDIT} applications, each with up to five people to reach and an email drafted for each. Some schools cover Pro for their students.
+          Free covers {FREE_APPLICATIONS} applications. 1 credit finds 1 person at the company with a verified email, and you&apos;re only charged when one is found. Pay by the semester ({SEMESTER_MONTHS} months) and save. Some schools cover Pro for their students.
         </p>
       </div>
 
@@ -30,10 +30,9 @@ export function Pricing() {
                 <span className="text-[44px] font-bold leading-none tracking-[-1.5px]">{plan.priceLabel}</span>
                 <span className="text-sm text-[#8B8B94]">{plan.monthly ? "/ month" : "to start"}</span>
               </p>
-              <p className="m-0 mt-3 text-sm font-medium text-[#F7F7F8]">
-                {applicationsFromCredits(plan.credits).toLocaleString("en-US")} applications{plan.monthly ? " every month" : " to start"}
-              </p>
-              <p className="m-0 text-xs text-[#6B6B74]">{plan.credits} credits</p>
+              {plan.semesterLabel && <p className="m-0 mt-1 text-sm text-[#3D8BFF]">{plan.semesterLabel}</p>}
+              <p className="m-0 mt-3 text-sm font-medium text-[#F7F7F8]">{plan.applicationsLabel}</p>
+              <p className="m-0 text-xs text-[#6B6B74]">{creditMath(plan.credits)}{plan.monthly ? " a month" : " to start"}</p>
               <ul className="m-0 mt-6 flex flex-1 list-none flex-col gap-2.5 p-0 text-sm text-[#B4B4BC]">
                 {plan.features.map((feature) => <li key={feature} className="flex gap-2.5">{check}<span>{feature}</span></li>)}
               </ul>

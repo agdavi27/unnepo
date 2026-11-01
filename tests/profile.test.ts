@@ -121,15 +121,16 @@ describe("structured profile", () => {
     expect((await repo.getAccount(a))?.balance).toBe(3);
   });
 
-  it("offers 5, 25, and 60 credit plans with the application math shown", () => {
-    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.credits])).toEqual([["free", "$0", 5], ["pro", "$30", 25], ["premium", "$60", 60]]);
-    expect(creditMath(5)).toBe("5 credits = 75 applications");
-    expect(creditMath(60)).toBe("60 credits = 900 applications");
+  it("offers Free, Pro and Premium, monthly or by the semester, with 1 credit per person", () => {
+    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 3], ["pro", "$24", "or $69 a semester", 40], ["premium", "$44", "or $119 a semester", 100]]);
+    expect(creditMath(1)).toBe("1 person with a verified email");
+    expect(creditMath(40)).toBe("40 people with verified emails");
     const saved = process.env.SIGNUP_CREDITS;
     delete process.env.SIGNUP_CREDITS;
-    expect(serverConfig().signupCredits).toBe(5);
-    expect(serverConfig().proMonthlyCredits).toBe(25);
-    expect(serverConfig().premiumMonthlyCredits).toBe(60);
+    expect(serverConfig().signupCredits).toBe(3);
+    expect(serverConfig().proMonthlyCredits).toBe(40);
+    expect(serverConfig().premiumMonthlyCredits).toBe(100);
+    expect(serverConfig().proSemesterPriceCents).toBe(6900);
     process.env.SIGNUP_CREDITS = saved;
   });
 

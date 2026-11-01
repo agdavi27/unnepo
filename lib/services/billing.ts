@@ -1,4 +1,4 @@
-import { serverConfig } from "@/lib/config";
+import { SEMESTER_MONTHS, serverConfig } from "@/lib/config";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 
@@ -211,9 +211,12 @@ export async function confirmDemoPurchase(userId: string, kind: CheckoutKind) {
   return { granted: grant.granted, credits: grant.granted ? offer.credits : 0, demo: true };
 }
 
-type CheckoutKind = "grind" | "pack" | "pro" | "premium";
+type CheckoutKind = "grind" | "pack" | "pro" | "premium" | "pro_semester" | "premium_semester";
 
+/** A semester plan bills every SEMESTER_MONTHS months and grants that many months of credits each time. */
 function checkoutOffer(kind: CheckoutKind, config: ReturnType<typeof serverConfig>) {
+  if (kind === "premium_semester") return { credits: config.premiumMonthlyCredits * SEMESTER_MONTHS, amount: config.premiumSemesterPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium (semester)", priceId: process.env.STRIPE_PRICE_PREMIUM_SEMESTER, recurring: true, months: SEMESTER_MONTHS };
+  if (kind === "pro_semester") return { credits: config.proMonthlyCredits * SEMESTER_MONTHS, amount: config.proSemesterPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro (semester)", priceId: process.env.STRIPE_PRICE_PRO_SEMESTER, recurring: true, months: SEMESTER_MONTHS };
   if (kind === "premium") return { credits: config.premiumMonthlyCredits, amount: config.premiumPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium", priceId: process.env.STRIPE_PRICE_PREMIUM, recurring: true };
   if (kind === "pro") return { credits: config.proMonthlyCredits, amount: config.proPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro", priceId: process.env.STRIPE_PRICE_PRO, recurring: true };
   if (kind === "grind") return { credits: config.grindMonthlyCredits, amount: config.grindPriceCents, bucket: "allowance" as const, plan: "grind" as const, name: "Unnepo The Grind", priceId: process.env.STRIPE_PRICE_GRIND, recurring: true };
@@ -242,7 +245,7 @@ export async function createStripeCheckout(userId: string, kind: CheckoutKind) {
             price_data: {
               currency: "usd",
               unit_amount: offer.amount,
-              recurring: offer.recurring ? { interval: "month" } : undefined,
+              recurring: offer.recurring ? { interval: "month", interval_count: "months" in offer ? offer.months : 1 } : undefined,
               product_data: { name: offer.name },
             },
           },

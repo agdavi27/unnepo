@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Logo } from "@/components/brand/logo";
+import { Features } from "@/components/marketing/features";
 import { GetExtension } from "@/components/marketing/get-extension";
 import { ProductDemo } from "@/components/marketing/product-demo";
 
@@ -15,7 +16,7 @@ const STEPS = [
   ["Open any job", "On Greenhouse, Lever, Workday, Ashby, iCIMS and more, a spider drops in. Click it to open Unnepo."],
   ["Press Fill", "Unnepo presses Apply, makes your account or signs in, and fills every page from your profile and resume."],
   ["Check and submit", "Anything only you can answer is listed, and clicking it takes you to that question. You press Submit, or let Unnepo."],
-  ["Reach the team", "It finds up to five people at the company and drafts an email to each, so you're not just a resume in a pile."],
+  ["Reach the team", "It finds the best person there to follow up with, with a verified email, and drafts the email, so you're not just a resume in a pile."],
 ];
 
 /** The demo on its own page, linked as "See how it works" from the home page and the web app. */
@@ -45,6 +46,7 @@ export default function DemoPage() {
             </li>
           ))}
         </ol>
+        <Features />
         <GetExtension href={EXTENSION_URL || "/signup"} external={Boolean(EXTENSION_URL)} />
       </main>
     </div>

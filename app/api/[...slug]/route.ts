@@ -15,7 +15,7 @@ import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/pro
 import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
-import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission } from "@/lib/extension/service";
+import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setOutcome, updateAnswers, updateOutreach } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
@@ -348,6 +348,10 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   if (action === "jobs" && method === "GET") return json(await extensionJobs(user.id));
   if (action === "map" && method === "POST") return json(await extensionMap(user.id, await request.json()));
   if (action === "answers" && method === "POST") return json(await extensionLearn(user.id, await request.json()));
+  if (action === "write" && method === "POST") {
+    if (!rateLimit(`extension-write:${user.id}`, 40, 60 * 60 * 1000)) throw new ServiceError("That's a lot of answers in an hour. Try again later.", "rate_limited", 429);
+    return json(await extensionWrite(user.id, await request.json()));
+  }
   if (action === "attempts" && method === "POST") return json(await extensionAttempts(user.id, await request.json()));
   if (action === "cover-letter" && method === "POST") {
     // Free, but each one is an AI call: a sensible cap per hour.

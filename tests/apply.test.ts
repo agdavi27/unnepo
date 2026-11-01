@@ -7,7 +7,8 @@ import { assertPublicUrl, setJobPageFetcherForTests } from "@/lib/apply/safe-fet
 import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { acceptAiAnswer, classifyQuestion, headlineAnswer, missingAnswers, planAnswers, policyAnswer, RECRUITER_NOTE, toolExperienceAnswer } from "@/lib/apply/questions";
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
-import { companyNames, coreTitle, departmentOf, siteDomain } from "@/lib/apply/contacts";
+import { companyNames, coreTitle, departmentOf, domainFits, guessedDomains, postingDomains, siteDomain, swapAnd } from "@/lib/apply/contacts";
+import { pagePoster } from "@/lib/extension/service";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { acceptFixes } from "@/lib/apply/fast/fields";
 import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
@@ -339,21 +340,13 @@ describe("applications", () => {
     await expect(createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" })).rejects.toThrow(/Finish your profile/);
   });
 
-  it("spends a credit when it prepares a new job's answers, and not again for the same job", async () => {
+  it("doesn't spend credits on applications, and stops Free after 25", async () => {
     const userId = await student();
     const before = (await repo.getAccount(userId))!.balance;
     await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
-    expect((await repo.getAccount(userId))!.balance).toBe(before - 1);
-    const again = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
-    expect(again.duplicate).toBe(true);
-    expect((await repo.getAccount(userId))!.balance).toBe(before - 1);
-  });
-
-  it("charges 1 credit per 15 applications and stops when credits run out", async () => {
-    const userId = await student();
-    await repo.setAccountForTests(userId, { balance: 1, allowanceBalance: 1, purchasedBalance: 0 });
+    expect((await repo.getAccount(userId))!.balance).toBe(before);
     const ids: string[] = [];
-    for (let index = 0; index < 16; index += 1) {
+    for (let index = 0; index < 25; index += 1) {
       const { app } = await applications.insert({
         userId, jobKey: `url:acme.com/job/${index}`, jobUrl: `https://acme.com/job/${index}`, ats: "other", title: `Role ${index}`, company: "Acme", companyDomain: null, department: null, location: null,
         description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "extracted", statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
@@ -361,13 +354,15 @@ describe("applications", () => {
       });
       ids.push(app.id);
     }
-    for (const applicationId of ids.slice(0, 15)) await markApplied(userId, { applicationId });
-    expect((await repo.getAccount(userId))?.balance).toBe(0);
-    await expect(markApplied(userId, { applicationId: ids[15] })).rejects.toThrow(/out of credits/);
-    expect((await applications.get(userId, ids[15]))?.status).toBe("extracted");
-    // Marking the same job again never charges twice.
-    await markApplied(userId, { applicationId: ids[0] });
-    expect((await repo.listLedger(userId)).filter((entry) => entry.entryType === "application_debit").length).toBe(1);
+    // The Greenhouse job above was the first; 24 more make 25.
+    for (const applicationId of ids.slice(0, 24)) await markApplied(userId, { applicationId });
+    await expect(markApplied(userId, { applicationId: ids[24] })).rejects.toThrow(/Free covers 25 applications/);
+    expect((await applications.get(userId, ids[24]))?.status).toBe("extracted");
+    // Pro has no limit.
+    await repo.setAccountForTests(userId, { plan: "pro" });
+    await markApplied(userId, { applicationId: ids[24] });
+    expect((await applications.get(userId, ids[24]))?.status).toBe("applied_manual");
+    expect((await repo.getAccount(userId))!.balance).toBe(before);
   });
 });
 
@@ -588,6 +583,30 @@ describe("people after applying", () => {
     ]);
   });
 
+  it("spends 1 credit when it finds a person, not again on a new search, and looks no one up without credits", async () => {
+    const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
+    const { userId, application, contacts, searches } = await appliedWith(found, { verified: ["a1"] });
+    expect(contacts).toHaveLength(1);
+    const debits = async () => (await repo.listLedger(userId)).filter((entry) => entry.entryType === "unlock_debit").reduce((sum, entry) => sum - entry.amount, 0);
+    expect(await debits()).toBe(1);
+    await applications.update(userId, application.id, { contactsStatus: "idle" });
+    await runContactDiscovery(userId, application.id);
+    expect(await debits()).toBe(1);
+
+    // Another job with no credits left: nobody is looked up.
+    await repo.setAccountForTests(userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
+    const { app } = await applications.insert({
+      userId, jobKey: "url:acme.com/job/2", jobUrl: "https://acme.com/job/2", ats: "other", title: "Analyst", company: "Acme Corp", companyDomain: "acme.com", department: null, location: null,
+      description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
+      confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: true, attempts: 0,
+    });
+    const searchesBefore = searches.length;
+    await runContactDiscovery(userId, app.id);
+    expect(searches.length).toBe(searchesBefore);
+    expect(await applicationContacts.list(userId, [app.id])).toEqual([]);
+    expect((await applications.get(userId, app.id))?.contactsMessage).toMatch(/out of credits/);
+  });
+
   it("falls back to a campus recruiter when no one from the school turns up, even if a search fails", async () => {
     const { application, contacts } = await appliedWith((search) => {
       if (search.q_keywords) return "fail";
@@ -646,6 +665,23 @@ describe("people after applying", () => {
     expect(companyNames({ company: "Globex", jobUrl: "https://jobs.lever.co/globex-labs/1" })).toEqual(["Globex", "globex labs"]);
     expect(departmentOf({ department: null, title: "Data Analyst Intern" })).toBe("Data");
     expect(departmentOf({ department: "Marketing & Growth", title: "Intern" })).toBe("Marketing");
+  });
+
+  it("finds a company Apollo writes with & instead of and, or from its own website", () => {
+    expect(swapAnd("Modjeski and Masters")).toBe("Modjeski & Masters");
+    expect(swapAnd("Ben & Jerry's")).toBe("Ben and Jerry's");
+    expect(swapAnd("Globex")).toBeNull();
+    expect(guessedDomains("Modjeski and Masters, Inc.")).toEqual(["modjeskiandmasters.com", "modjeskimasters.com", "modjeski.com"]);
+    expect(domainFits("modjeski.com", "Modjeski and Masters")).toBe(true);
+    expect(domainFits("mm.com", "Modjeski and Masters")).toBe(true);
+    expect(domainFits("eeoc.gov", "Modjeski and Masters")).toBe(false);
+    expect(postingDomains("Learn more at www.modjeski.com. EEO: https://www.eeoc.gov/poster. Apply on linkedin.com.", "Modjeski and Masters")).toEqual(["modjeski.com"]);
+  });
+
+  it("keeps LinkedIn's hiring-team person only with a real name and profile", () => {
+    expect(pagePoster({ name: "Jane  Doe", title: "Talent Partner", profileUrl: "https://www.linkedin.com/in/janedoe/" })).toEqual({ name: "Jane Doe", title: "Talent Partner", email: null, linkedinUrl: "https://www.linkedin.com/in/janedoe/" });
+    expect(pagePoster({ name: "Jane", title: "", profileUrl: "" })).toBeNull();
+    expect(pagePoster({ name: "Jane Doe", title: "", profileUrl: "https://evil.com/in/x" })?.linkedinUrl).toBeNull();
   });
 
   it("shortens job titles for team searches", () => {

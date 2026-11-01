@@ -177,6 +177,8 @@ async function state(): Promise<PanelState> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   let me: PanelState["me"] = null;
   if (token) me = await api<NonNullable<PanelState["me"]>>("GET", "me").catch(() => null);
+  // The page's spiders read the student's spider from here.
+  if (me?.spider) void chrome.storage.local.set({ spider: me.spider });
   const saved = tab?.id !== undefined ? (await jobs())[tab.id] ?? null : null;
   // A job from earlier on this tab stops showing once the student opens a different job on the same site.
   const job = saved && !saved.running && !saved.submission && saved.url && tab?.url && sameHost(saved.url, tab.url) && !sameApplication(saved.url, tab.url) ? null : saved;
@@ -310,7 +312,7 @@ async function run(tabId: number) {
   await saveJob(tabId, { running: true, step: "Reading the page…", report: null, submission: null, error: null, clickedAt: null, llmCalls: 0, cv: false });
   const filledAll: string[] = [];
   let applicationId = "";
-  let posting: { url: string; title: string; company: string; description?: string } | null = null;
+  let posting: { url: string; title: string; company: string; description?: string; poster?: Scan["poster"] } | null = null;
   let filledKey = "";
   let pressedKey = "";
   let presses = 0;
@@ -401,7 +403,7 @@ async function run(tabId: number) {
     // Pressing Fill again partway through keeps the same job instead of opening a new one per page.
     if (earlier?.applicationId && !earlier.submission && sameApplication(earlier.url, first.url)) applicationId = earlier.applicationId;
     // The posting itself (title, company, its link) is what the tracker shows, not the form's later steps.
-    if (!hasForm(first) || first.fields.length < 3) posting = { url: first.url, title: first.title, company: first.company, description: first.description };
+    if (!hasForm(first) || first.fields.length < 3) posting = { url: first.url, title: first.title, company: first.company, description: first.description, poster: first.poster };
 
     while (stillRunning(tabId, runId)) {
       if ((await jobs())[tabId]?.submission) break;
@@ -478,7 +480,7 @@ async function run(tabId: number) {
         note(`filling ${status.step ? stepText(status.step) : "the page"}: ${scan.fields.length} questions${scan.fields.length ? ` (${questions(scan.fields)})` : ""}`);
         if (!applicationId && (scan.fields.length || scan.useServerSchema)) {
           await step("Opening the job in Unnepo…");
-          const where = posting ?? { url: scan.url, title: scan.title, company: scan.company, description: scan.description };
+          const where = posting ?? { url: scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster };
           const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", where);
           applicationId = job.application.id;
           await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: where.url, host: firstHost });
@@ -805,7 +807,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           let applicationId = earlier?.applicationId && (!scan || earlier.running || sameApplication(earlier.url, scan.url)) ? earlier.applicationId : undefined;
           if (!applicationId) {
             if (!scan) throw new Error("Open the job posting or its application in this tab first.");
-            const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", { url: scan.url, title: scan.title, company: scan.company, description: scan.description });
+            const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", { url: scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster });
             applicationId = job.application.id;
             // A different job than the one saved for this tab: start its record fresh.
             if (earlier) await saveJob(tabId, null);
@@ -892,6 +894,17 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           await addIssues(String(message.url ?? sender.tab?.url ?? ""), questions.map((question) => ({ kind: "fill" as const, question, what: "You filled this in yourself: Unnepo left it empty or got it wrong." }))).catch(() => undefined);
         }
         return reply({ ok: true });
+      case "write-answer": {
+        // A "Write with AI" chip on an orange question: a short draft for the job in this tab.
+        const job = tabId === undefined ? null : (await jobs())[tabId];
+        if (!job?.applicationId) return reply({ error: "Press Fill in Unnepo first, so it knows which job this is." });
+        try {
+          const written = await api<{ answer: string }>("POST", "write", { applicationId: job.applicationId, question: String(message.label ?? "") });
+          return reply({ answer: written.answer });
+        } catch (error) {
+          return reply({ error: error instanceof Error ? error.message : "Couldn't write this one." });
+        }
+      }
       case "received-page": {
         // The page says the application went through, whoever filled it: the spiders come out and dance.
         if (tabId === undefined) return reply({ ok: false });

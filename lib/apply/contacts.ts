@@ -3,6 +3,7 @@ import { id, nowIso, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file
 import type { Contact } from "@/lib/db/types";
 import { contactFetch } from "@/lib/providers/contacts/http";
 import { ServiceError } from "@/lib/errors";
+import { safeGet } from "@/lib/apply/safe-fetch";
 import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, searchCompanies, searchPeopleQuery } from "@/lib/providers/contacts/router";
 import { COMPANY_DOMAINS, RECRUITER_TITLES, type ApolloPeopleQuery } from "@/lib/providers/contacts/apollo";
 import type { ApplicationContact, ContactRole, JobApplication, PeopleSearch } from "@/lib/apply/types";
@@ -131,7 +132,84 @@ export function siteDomain(url: string | null) {
   return labels.slice(-keep).join(".");
 }
 
-const plain = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, "");
+/** "Modjeski & Masters" and "Modjeski and Masters" read the same. */
+const plain = (text: string) => text.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "");
+
+/** The same name with "&" and "and" swapped, since Apollo searches the name as written. */
+export function swapAnd(name: string) {
+  if (/\s&\s/.test(name)) return name.replace(/\s&\s/g, " and ");
+  if (/\sand\s/i.test(name)) return name.replace(/\sand\s/gi, " & ");
+  return null;
+}
+
+const NAME_FILLER = new Set(["and", "the", "of", "inc", "llc", "ltd", "co", "corp", "company", "group", "holdings"]);
+
+/** The name's real words: "Modjeski and Masters, Inc." is ["modjeski", "masters"]. */
+const nameWords = (name: string) => name.toLowerCase().replace(/&/g, " ").split(/[^a-z0-9]+/).filter((word) => word && !NAME_FILLER.has(word));
+
+/** A website plausibly the company's: its name holds the company's first word, or all their initials. */
+export function domainFits(domain: string, name: string) {
+  const label = plain(domain.split(".")[0]);
+  const words = nameWords(name);
+  if (!words.length || !label) return false;
+  return label.includes(words[0]) || (words.length > 1 && label === words.map((word) => word[0]).join(""));
+}
+
+const SOCIAL = /(^|\.)(facebook|twitter|x|instagram|youtube|tiktok|eeoc|dol|e-verify|google|bit|apple|microsoft)\.(com|gov|ly)$/i;
+
+/** Company websites the posting itself links to ("Learn more at modjeski.com"), when they fit the name. */
+export function postingDomains(description: string, name: string) {
+  const links = description.match(/\b(?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|org|net|io|co|us|ai|edu)\b/gi) ?? [];
+  const domains = links.map((link) => siteDomain(/^https?:/i.test(link) ? link : `https://${link}`)).filter((domain): domain is string => Boolean(domain) && !SOCIAL.test(domain!));
+  return [...new Set(domains)].filter((domain) => domainFits(domain, name));
+}
+
+/** Likely websites from the name alone: "Modjeski and Masters" tries modjeskiandmasters.com, modjeskimasters.com, modjeski.com. */
+export function guessedDomains(name: string) {
+  const words = nameWords(name);
+  if (!words.length) return [];
+  const joined = name.toLowerCase().replace(/&/g, "and").replace(/[,.]?\s*\b(inc|llc|ltd|corp(oration)?|co|company|plc|group|holdings?)\b\.?/gi, "").replace(/^the\s+/, "").replace(/[^a-z0-9]+/g, "");
+  const guesses = [joined, words.join(""), words[0].length >= 4 ? words[0] : ""].filter(Boolean).map((label) => `${label}.com`);
+  return [...new Set(guesses)].slice(0, 3);
+}
+
+/** A website counts when its home page loads and mentions the company's first word. */
+async function siteMentions(domain: string, name: string) {
+  const word = nameWords(name)[0];
+  if (!word) return false;
+  try {
+    const page = await safeGet(`https://${domain}`, "text/html");
+    return page.ok && page.text.slice(0, 200_000).toLowerCase().includes(word);
+  } catch {
+    return false;
+  }
+}
+
+/** Last try: Haiku names the company's website, and it counts only once the site checks out. */
+async function aiDomain(userId: string, app: JobApplication) {
+  const apiKey = await readAnthropicKey();
+  if (!apiKey) return null;
+  const config = serverConfig();
+  const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+  const started = Date.now();
+  try {
+    await assertSpendAllowed(userId, 1);
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const response = await new Anthropic({ apiKey }).messages.create({
+      model,
+      max_tokens: 30,
+      messages: [{ role: "user", content: `What is the official website domain of the company "${app.company}"${app.location ? `, which is hiring in ${app.location}` : ""}? The job is "${app.title}". Reply with only the domain, like example.com, or "unknown".` }],
+    });
+    const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("").trim().toLowerCase();
+    const costCents = ((response.usage?.input_tokens ?? 0) * config.fastInputCentsPerMillion + (response.usage?.output_tokens ?? 0) * config.fastOutputCentsPerMillion) / 1_000_000;
+    await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "company_website", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
+    const domain = text.match(/[a-z0-9-]+(\.[a-z0-9-]+)+/)?.[0]?.replace(/^www\./, "") ?? null;
+    return domain && siteDomain(`https://${domain}`) ? siteDomain(`https://${domain}`) : null;
+  } catch (error) {
+    await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "company_website", success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true, error: error instanceof Error ? error.message : "anthropic_failed", createdAt: nowIso() });
+    return null;
+  }
+}
 
 /** Names to look the company up by: as written, without "Inc." and the like, and the job board's name for it. */
 export function companyNames(app: Pick<JobApplication, "company" | "jobUrl">) {
@@ -166,10 +244,13 @@ async function companyDomains(userId: string, app: JobApplication) {
   const names = companyNames(app);
   const cached = await repo.getCompanyDomains(names);
   for (const name of names) for (const domain of [...(COMPANY_DOMAINS[name.toLowerCase()] ?? []), ...(cached[name.toLowerCase()] ?? [])]) add(domain);
+  // Websites the posting links to that fit the name ("Learn more at modjeski.com").
+  postingDomains(app.description ?? "", app.company).forEach(add);
   if (found.length >= MAX_DOMAINS) return found.slice(0, MAX_DOMAINS);
   const fits: string[] = [];
   const others: string[] = [];
-  for (const name of names.slice(0, 2)) {
+  const searchNames = [...new Set(names.slice(0, 2).flatMap((name) => [name, swapAnd(name)].filter((item): item is string => Boolean(item))))];
+  for (const name of searchNames) {
     for (const org of await searchCompanies(userId, name)) {
       const same = plain(org.name) === plain(name) || plain(org.domain.split(".")[0]) === plain(name);
       const close = plain(org.name).startsWith(plain(name)) || plain(name).startsWith(plain(org.name));
@@ -180,6 +261,19 @@ async function companyDomains(userId: string, app: JobApplication) {
   fits.forEach(add);
   // Apollo's top result counts only when nothing fit by name.
   if (!fits.length) add(others[0]);
+  // Apollo didn't know the company: guess its website from the name, then ask Haiku, keeping only sites that check out.
+  if (!found.length) {
+    for (const guess of guessedDomains(app.company)) {
+      if (await siteMentions(guess, app.company)) {
+        add(guess);
+        break;
+      }
+    }
+  }
+  if (!found.length) {
+    const named = await aiDomain(userId, app);
+    if (named && (await siteMentions(named, app.company))) add(named);
+  }
   return found.slice(0, MAX_DOMAINS);
 }
 
@@ -284,7 +378,7 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
 
   const notes: string[] = [];
   const seen = search.steps.reduce((sum, step) => sum + step.found, 0);
-  if (!domains.length) notes.push(`Couldn't match ${app.company} to a company in Apollo.`);
+  if (!domains.length) notes.push(`Couldn't find ${app.company}'s website, so there was nowhere to look for people. Add it under the job and search again.`);
   else if (!chosen && seen) notes.push(`Found ${seen} ${seen === 1 ? "person" : "people"} at ${app.company}, but none with a verified email yet.`);
   else if (!chosen) notes.push(`Apollo found no one at ${app.company} (${domains.join(", ")})${school ? ` from ${school},` : ""} in recruiting, or in ${team || "this kind of role"}.`);
   else if (chosen.role !== "alumni" && school) notes.push(`No one from ${school} with a verified email turned up at ${app.company}, so this is ${chosen.role === "team_member" ? `someone in ${team || "the team"}` : "a recruiter"}.`);
@@ -303,7 +397,7 @@ async function posterFor(userId: string, app: JobApplication, domain: string): P
   const title = match?.title || named.title || "";
   const poster: FoundPerson = {
     rank: 1, role: "job_poster", name: named.name, title, email: match?.email ?? null, emailSource: match?.email ? "apollo" : null,
-    relevance: `Named on the ${app.title} posting${title ? ` as ${title}` : ""}.`, linkedinUrl: match?.linkedinUrl ?? null, photoUrl: match?.photoUrl ?? null,
+    relevance: named.linkedinUrl ? `Shown under "Meet the hiring team" on the ${app.title} job${title ? `, as ${title}` : ""}.` : `Named on the ${app.title} posting${title ? ` as ${title}` : ""}.`, linkedinUrl: match?.linkedinUrl ?? named.linkedinUrl ?? null, photoUrl: match?.photoUrl ?? null,
   };
   if (!poster.email && named.email && (await hunterVerify(userId, named.email))) {
     poster.email = named.email;

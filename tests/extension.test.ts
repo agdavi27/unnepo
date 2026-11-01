@@ -178,9 +178,9 @@ describe("extension API", () => {
     const stored = await applications.get(userId, logged.application.id);
     expect(stored?.confirmation?.receiptPath).toBeTruthy();
     expect((await readStoredResume(stored!.confirmation!.receiptPath!))?.byteLength).toBeGreaterThan(0);
-    // One credit covers this job; logging it again doesn't charge twice.
+    // Applications don't spend credits, however many times one is logged.
     await call("POST", "submissions", token, { applicationId: logged.application.id, confidence: "likely" });
-    expect((await repo.listLedger(userId)).filter((entry) => entry.entryType === "application_debit")).toHaveLength(1);
+    expect((await repo.listLedger(userId)).filter((entry) => entry.entryType === "application_debit")).toHaveLength(0);
 
     expect((await call("POST", "submissions", token, { url: "https://x.example/a", title: "A", company: "B", confidence: "maybe" })).status).toBe(400);
     const undone = await (await call("POST", "submissions/undo", token, { applicationId: logged.application.id })).json();

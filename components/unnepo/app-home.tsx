@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
 import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
-import { APPLICATIONS_PER_CREDIT, ENTERPRISE_PLAN, PUBLIC_PLANS, creditMath } from "@/lib/config";
+import { ENTERPRISE_PLAN, FREE_APPLICATIONS, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 import { ApplicationSettings, ApplyArea } from "@/components/unnepo/apply";
 
@@ -287,7 +287,7 @@ export function AppHome() {
                     You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {data.credits.balance} {data.credits.balance === 1 ? "credit" : "credits"} left.
                   </p>
                 </div>
-                <p className="text-xs text-faint">1 credit = {APPLICATIONS_PER_CREDIT} applications, each with up to 5 contacts</p>
+                <p className="text-xs text-faint">1 credit = 1 person with a verified email · Free covers {FREE_APPLICATIONS} applications</p>
               </div>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {PUBLIC_PLANS.map((plan) => {
@@ -303,8 +303,10 @@ export function AppHome() {
                         ) : null}
                       </div>
                       <p className="mt-3 text-3xl font-bold tabular-nums">{plan.priceLabel}<span className="text-sm font-normal text-muted">{plan.monthly ? " / month" : ""}</span></p>
+                      {plan.semesterLabel && <p className="mt-1 text-xs text-faint">{plan.semesterLabel}</p>}
                       <p className="mt-1 text-sm text-muted">{plan.blurb}</p>
-                      <p className="mt-4 text-sm font-medium">{creditMath(plan.credits)}{plan.monthly ? " each month" : " to start"}</p>
+                      <p className="mt-4 text-sm font-medium">{plan.applicationsLabel}</p>
+                      <p className="text-sm text-muted">{creditMath(plan.credits)}{plan.monthly ? " each month" : " to start"}</p>
                       <div className="mt-auto pt-5">
                         {current ? (
                           <p className="text-center text-sm text-muted">Your plan</p>
