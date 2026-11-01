@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { mapAnswers } from "@/lib/apply/fast/mapper";
 import { knownAnswers, mappingFromQuestions, questionsFromMapping } from "@/lib/apply/fast/pipeline";
 import { parseGreenhouse, type GreenhouseJobJson } from "@/lib/apply/fast/schema";
-import { askedLength, fitsLength, nameCase, planAnswers, plainWriting } from "@/lib/apply/questions";
+import { askedLength, fitsLength, fullUrl, nameCase, planAnswers, plainWriting } from "@/lib/apply/questions";
 import { degreeAnswer, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import type { ApplicationProfile } from "@/lib/apply/types";
 
@@ -165,5 +165,60 @@ describe("names", () => {
     expect(nameCase("MARY-JANE O'BRIEN")).toBe("Mary-Jane O'Brien");
     expect(nameCase("McKenzie")).toBe("McKenzie");
     expect(nameCase("de la Cruz")).toBe("de la Cruz");
+  });
+});
+
+describe("Workday's My Experience step", () => {
+  const resume = {
+    sourceHash: "x",
+    contact: { phone: "", email: "", addressLine1: "", city: "", state: "", postalCode: "", country: "", linkedin: "", github: "", website: "" },
+    education: [],
+    experience: [
+      { title: "Marketing Intern", company: "Acme", location: "", start: "May 2024", end: "Present", current: true, summary: "" },
+      { title: "Sales Associate", company: "Shop", location: "", start: "June 2022", end: "August 2023", current: false, summary: "" },
+    ],
+    skills: ["Microsoft Excel", "Python", "SQL"],
+  };
+  const ask = (label: string, section: string, format: string | null = null, kind = "text") => resumeFieldAnswer(resume, { label, section, kind, options: [], format });
+
+  it("fills each job's From and To month and year boxes from its own dates", () => {
+    expect(ask("From (Month)", "Work Experience 1", "MM")).toBe("05");
+    expect(ask("From (Year)", "Work Experience 1", "YYYY")).toBe("2024");
+    expect(ask("To (Month)", "Work Experience 1", "MM")).toBeNull();
+    expect(ask("From (Month)", "Work Experience 2", "MM")).toBe("06");
+    expect(ask("To (Month)", "Work Experience 2", "MM")).toBe("08");
+    expect(ask("To (Year)", "Work Experience 2", "YYYY")).toBe("2023");
+  });
+
+  it("ticks I currently work here only for the current job, and unticks it otherwise", () => {
+    expect(ask("I currently work here", "Work Experience 1", null, "checkbox")).toBe("Yes");
+    expect(ask("I currently work here", "Work Experience 2", null, "checkbox")).toBe("No");
+  });
+
+  it("adds the resume's skills one per line", () => {
+    expect(ask("Type to Add Skills", "Skills", null, "combobox")).toBe("Microsoft Excel\nPython\nSQL");
+  });
+
+  it("gives a web address its https://", () => {
+    expect(fullUrl("linkedin.com/in/drew-davis")).toBe("https://linkedin.com/in/drew-davis");
+    expect(fullUrl("www.linkedin.com/in/drew")).toBe("https://www.linkedin.com/in/drew");
+    expect(fullUrl("https://linkedin.com/in/drew")).toBe("https://linkedin.com/in/drew");
+    expect(fullUrl("")).toBe("");
+  });
+});
+
+describe("a single checkbox", () => {
+  it("takes the resume's No, so a box the site ticked gets unticked without asking the AI", async () => {
+    const schema = {
+      ats: "workday" as const, board: "", jobId: "", formUrl: "", title: "Marketing Associate", company: "Uline", description: "",
+      fields: [{ id: "u1", label: "I currently work here", type: "select" as const, required: false, options: [{ label: "Yes", value: "Yes" }], section: "question" as const, sensitive: false, sectionLabel: "Work Experience 2", format: null }],
+    };
+    let asked = 0;
+    const mapped = await mapAnswers({
+      schema, known: () => ({ value: "No", source: "profile" }), facts: "", sources: "", consent: true, resumeFileName: null,
+      ask: async () => { asked += 1; return "{\"answers\":[]}"; },
+    });
+    expect(mapped.answers.get("u1")?.values).toEqual(["No"]);
+    expect(asked).toBe(0);
   });
 });

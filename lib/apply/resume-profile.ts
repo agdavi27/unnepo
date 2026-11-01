@@ -119,6 +119,9 @@ export function formatDate(raw: string, format: string | null, options: string[]
   }
   if (/^YYYY$/.test(want)) return String(date.year);
   if (!mm) return null;
+  // A date split into boxes (Workday's From and To): just the month, or the first of it.
+  if (/^MM$/.test(want)) return mm;
+  if (/^DD$/.test(want)) return "01";
   if (/YYYY-MM/.test(want)) return `${date.year}-${mm}${/DD/.test(want) ? "-01" : ""}`;
   if (/MM.?DD.?YYYY/.test(want)) return `${mm}/01/${date.year}`;
   return `${mm}/${date.year}`;
@@ -142,6 +145,8 @@ const EDUCATION = /education|school|university|college|academic|degree/i;
 export function resumeFieldAnswer(resume: ResumeProfile | null | undefined, field: { label: string; section?: string; kind: string; options: string[]; format?: string | null }) {
   if (!resume) return null;
   const label = field.label.toLowerCase();
+  // A skills box (Workday's "Type to Add Skills"): the resume's skills, one per line, each added on its own.
+  if (/^(type to add )?skills?\b/i.test(field.label.trim()) && field.kind !== "textarea" && resume.skills.length) return resume.skills.slice(0, 15).join("\n");
   const section = field.section ?? "";
   const context = `${section} ${label}`;
   const isDate = /\b(start|from|begin|end|to|until|graduat|completion|date|month|year)\b|mm\/|yyyy/i.test(label);
@@ -160,7 +165,8 @@ export function resumeFieldAnswer(resume: ResumeProfile | null | undefined, fiel
   if (EXPERIENCE.test(context)) {
     const entry = resume.experience[index];
     if (!entry) return null;
-    if (/currently work|current(ly)? (employed|here|role|job|position)|i currently/i.test(label)) return entry.current ? "Yes" : field.kind === "checkbox" ? null : "No";
+    // "No" unticks a box the site ticked itself (Workday ticks it from its own read of the resume).
+    if (/currently work|current(ly)? (employed|here|role|job|position)|i currently/i.test(label)) return entry.current ? "Yes" : "No";
     if (/\b(job )?title\b|position|\brole\b/i.test(label) && !isDate) return entry.title || null;
     if (/company|employer|organi[sz]ation/i.test(label) && !isDate) return entry.company || null;
     if (/location|city/i.test(label)) return entry.location || null;

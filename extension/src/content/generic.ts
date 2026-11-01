@@ -100,9 +100,16 @@ function pressLabel(input: HTMLInputElement) {
   press(label ?? input);
 }
 
-/** The value a field gets: the number box next to a country code dropdown gets just the number. */
+const LINK_FIELD = /linked ?in|github|portfolio|website|\burl\b|web ?site|personal site|profile link/i;
+const SKILLS = /^(type to add )?skills?\b/i;
+
+/**
+ * The value a field gets: the number box next to a country code dropdown gets just the number, and a web
+ * address gets its https:// ("Invalid LinkedIn URL" on Workday when it's left off).
+ */
 function valueFor(field: PageField, answer: Answer) {
   const value = answer.values[0] ?? "";
+  if ((field.type === "url" || (field.type === "text" && LINK_FIELD.test(field.label))) && /^(www\.)?[\w-]+(\.[\w-]+)+(\/\S*)?$/i.test(value.trim())) return `https://${value.trim()}`;
   if (separateCountryCode && (field.type === "tel" || PHONE_NUMBER.test(field.label)) && !COUNTRY_CODE.test(field.label) && !/type|extension|\bext\b/i.test(field.label) && field.type !== "select" && field.type !== "combobox") {
     return nationalNumber(value) || value;
   }
@@ -154,6 +161,21 @@ async function fillOne(field: PageField, answer: Answer, files: { resume: FileDa
       chooseNativeSelect(el as HTMLSelectElement, value);
       return "select";
     case "combobox": {
+      // A skills box takes one skill at a time: each is searched for and added.
+      const skills = SKILLS.test(field.label.trim()) ? answer.values.flatMap((item) => item.split(/\n|,|;/)).map((item) => item.trim()).filter(Boolean) : [];
+      if (skills.length > 1) {
+        if (way > 0) return null;
+        const missing: string[] = [];
+        for (const skill of skills.slice(0, 15)) {
+          try {
+            await chooseCustom(el, skill, { type: el instanceof HTMLInputElement ? skill : undefined, ways: dropdownWays });
+          } catch {
+            missing.push(skill);
+          }
+        }
+        if (missing.length === skills.length) throw new FillError(`none of the skills were in the site's list (${missing.slice(0, 5).join(", ")})`, "no_option");
+        return missing.length ? `added ${skills.length - missing.length} of ${skills.length} skills` : "each skill";
+      }
       // The dropdown ladder (clicks, then the keyboard) runs inside and checks the box shows the choice.
       // A second go, for a choice the page cleared afterwards, starts with the other way.
       if (way > 1) return null;

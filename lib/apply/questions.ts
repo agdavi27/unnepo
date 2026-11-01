@@ -76,6 +76,13 @@ export function nameCase(value: string) {
   return value.toLowerCase().replace(/(^|[\s'’-])(\p{L})/gu, (_, before: string, letter: string) => before + letter.toUpperCase());
 }
 
+/** A web address as forms accept it: "linkedin.com/in/drew" becomes "https://linkedin.com/in/drew". */
+export function fullUrl(value: string) {
+  const trimmed = value.trim();
+  if (!/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(trimmed)) return trimmed;
+  return `https://${trimmed}`;
+}
+
 function standardAnswer(field: StandardField, context: AnswerContext): { answer: string; source: string } | null {
   const p = context.profile;
   const pick = (value: string, source = "profile") => (value.trim() ? { answer: value.trim(), source } : null);
@@ -85,9 +92,9 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
     case "fullName": return pick(nameCase([p.firstName, p.lastName].filter(Boolean).join(" ")));
     case "email": return pick(p.email);
     case "phone": return pick(p.phone);
-    case "linkedin": return pick(p.linkedin);
-    case "github": return pick(p.github);
-    case "website": return pick(p.website);
+    case "linkedin": return pick(fullUrl(p.linkedin));
+    case "github": return pick(fullUrl(p.github));
+    case "website": return pick(fullUrl(p.website));
     case "city": return pick(p.city);
     case "addressLine1": return pick(p.addressLine1 ?? "");
     case "state": return pick(p.state ?? "");

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: Workday My Experience</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  [data-automation-id^="formField"] { margin: 12px 0; }
+  label { display: block; font-weight: 600; }
+  input[type=text], input:not([type]) { font: inherit; padding: 6px 8px; min-width: 200px; }
+  .date input { min-width: 0; width: 60px; }
+  .pill { display: inline-block; background: #eef; border-radius: 12px; padding: 2px 10px; margin: 2px; }
+  [role=listbox] { border: 1px solid #999; }
+  [role=option] { padding: 4px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Practice: Workday My Experience</h1>
+<p>Built like Workday's step: each job's From and To dates are separate Month and Year boxes, labelled only by
+  "From" and "To"; "I currently work here" comes ticked on both jobs (Workday's own read of the resume); skills
+  are added one at a time from a search box.</p>
+<div data-automation-id="workExperienceSection" id="jobs"></div>
+<div data-automation-id="skillsSection">
+  <h3>Skills</h3>
+  <div data-automation-id="formField-skills">
+    <label for="skills">Type to Add Skills</label>
+    <div id="pills"></div>
+    <input id="skills" data-automation-id="searchBox" placeholder="Search" autocomplete="off">
+    <div id="results"></div>
+  </div>
+</div>
+<script>
+  const jobs = document.getElementById("jobs");
+  for (const n of [1, 2]) {
+    const date = (part) => `<div data-automation-id="formField-${part}Date" class="date"><label for="job${n}-${part}-month">${part === "start" ? "From" : "To"}</label>
+      <input id="job${n}-${part}-month" data-automation-id="dateSectionMonth-input" role="spinbutton" aria-label="Month">
+      <input id="job${n}-${part}-year" data-automation-id="dateSectionYear-input" role="spinbutton" aria-label="Year"></div>`;
+    jobs.insertAdjacentHTML("beforeend", `<div role="group" aria-labelledby="job${n}-head">
+      <div><h4 id="job${n}-head">Work Experience ${n}</h4></div>
+      <div data-automation-id="formField-jobTitle"><label for="job${n}-title">Job Title</label><input id="job${n}-title"></div>
+      <div data-automation-id="formField-companyName"><label for="job${n}-company">Company</label><input id="job${n}-company"></div>
+      <div data-automation-id="formField-currentlyWorkHere"><input type="checkbox" id="job${n}-current" checked><label for="job${n}-current">I currently work here</label></div>
+      ${date("start")}${date("end")}
+    </div>`);
+  }
+  // Skills: matches show as you type; picking one adds it and empties the box.
+  const SKILLS = ["Microsoft Excel", "Python", "SQL", "Adobe Photoshop", "Social Media Marketing", "Public Speaking"];
+  const box = document.getElementById("skills");
+  const results = document.getElementById("results");
+  const pills = document.getElementById("pills");
+  const show = () => {
+    const typed = box.value.trim().toLowerCase();
+    results.innerHTML = "";
+    if (!typed) return;
+    const list = document.createElement("div");
+    list.setAttribute("role", "listbox");
+    for (const name of SKILLS.filter((skill) => skill.toLowerCase().includes(typed))) {
+      const option = Object.assign(document.createElement("div"), { textContent: name });
+      option.setAttribute("role", "option");
+      option.setAttribute("data-automation-id", "promptOption");
+      option.addEventListener("click", () => {
+        pills.insertAdjacentHTML("beforeend", `<span class="pill" data-automation-id="selectedItem">${name}</span>`);
+        box.value = "";
+        results.innerHTML = "";
+      });
+      list.append(option);
+    }
+    results.append(list);
+  };
+  box.addEventListener("input", show);
+  box.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === "ArrowDown") show(); });
+  window.pageValues = () => {
+    const out = {};
+    for (const n of [1, 2]) {
+      out[`Job ${n} current`] = document.getElementById(`job${n}-current`).checked;
+      out[`Job ${n} from`] = `${document.getElementById(`job${n}-start-month`).value}/${document.getElementById(`job${n}-start-year`).value}`;
+      out[`Job ${n} to`] = `${document.getElementById(`job${n}-end-month`).value}/${document.getElementById(`job${n}-end-year`).value}`;
+    }
+    out.Skills = Array.from(pills.children, (pill) => pill.textContent).join(", ");
+    return out;
+  };
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

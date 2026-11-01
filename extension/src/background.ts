@@ -843,6 +843,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         return reply(await send<{ ok: boolean }>(Number(message.tabId), { type: "focus-field", label: String(message.label ?? "") }).catch(() => ({ ok: false })));
       // The spider on job pages: open the side panel for that tab. Chrome allows it right after a click.
+      case "panel-state":
+        return reply({ open: sender.tab ? panelWindows.has(sender.tab.windowId) : false });
       case "open-panel":
         if (tabId === undefined) return reply({ ok: false });
         try {
@@ -927,4 +929,22 @@ void jobs().then(async (all) => {
   for (const [tabId, job] of Object.entries(all)) if (job.running) await saveJob(Number(tabId), { running: false });
 });
 chrome.tabs.onActivated.addListener(() => void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined));
+
+// Windows with the side panel open. The spider hanging on job pages hides in those: the panel has its own.
+// The panel holds a connection open while it's showing, so closing it (or the window) ends it.
+const panelWindows = new Set<number>();
+async function tellLaunchers(windowId: number) {
+  const tabs = await chrome.tabs.query({ windowId }).catch(() => [] as chrome.tabs.Tab[]);
+  for (const tab of tabs) if (tab.id !== undefined) void chrome.tabs.sendMessage(tab.id, { type: "panel", open: panelWindows.has(windowId) }).catch(() => undefined);
+}
+chrome.runtime.onConnect.addListener((port) => {
+  const windowId = Number(port.name.match(/^panel:(\d+)$/)?.[1]);
+  if (!Number.isInteger(windowId)) return;
+  panelWindows.add(windowId);
+  void tellLaunchers(windowId);
+  port.onDisconnect.addListener(() => {
+    panelWindows.delete(windowId);
+    void tellLaunchers(windowId);
+  });
+});
 void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);

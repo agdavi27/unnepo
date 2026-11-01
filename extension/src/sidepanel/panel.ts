@@ -679,4 +679,15 @@ chrome.runtime.onMessage.addListener((message) => {
 chrome.tabs.onUpdated.addListener((_id, info) => {
   if (info.status === "complete") void render();
 });
+
+/** Tells the extension this panel is open, so the spider hanging on the page hides while it is. */
+function holdOpen() {
+  void chrome.windows.getCurrent().then((win) => {
+    if (win.id === undefined) return;
+    const port = chrome.runtime.connect({ name: `panel:${win.id}` });
+    // The background worker restarts now and then; connect again so the page spider stays hidden.
+    port.onDisconnect.addListener(() => setTimeout(holdOpen, 1000));
+  }).catch(() => undefined);
+}
+holdOpen();
 void render();

@@ -95,7 +95,10 @@ export async function mapAnswers(input: MapperInput) {
     }
     const known = input.known(field);
     if (known) {
-      const values = field.type === "multiselect" ? known.value.split("\n").map((value) => fitOptions(field, value)).filter((value): value is string => Boolean(value)) : [fitOptions(field, known.value)].filter((value): value is string => Boolean(value));
+      // A single checkbox's only choice is "Yes"; "No" from the resume ("I currently work here" on a past job)
+      // still counts, so the box gets unticked instead of left to the AI.
+      const untick = field.options.length === 1 && /^no$/i.test(known.value.trim());
+      const values = untick ? ["No"] : field.type === "multiselect" ? known.value.split("\n").map((value) => fitOptions(field, value)).filter((value): value is string => Boolean(value)) : [fitOptions(field, known.value)].filter((value): value is string => Boolean(value));
       // Education and phone-country options are only known on the page; their value is matched there.
       if (values.length || ["school", "degree", "phone_country", "location"].includes(field.type) || (field.ifPresent && !field.options.length)) {
         answers.set(field.id, { id: field.id, values: values.length ? values : [known.value], source: known.source, why: null });

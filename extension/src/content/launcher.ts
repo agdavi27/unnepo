@@ -71,6 +71,16 @@ function show() {
       say("Refresh this page to use Unnepo");
     }
   });
+  // Hidden while the Unnepo side panel is open in this window: the panel has its own spider.
+  const hideFor = (open: unknown) => { host.style.display = open ? "none" : ""; };
+  try {
+    chrome.runtime.onMessage.addListener((message) => {
+      if (message?.type === "panel") hideFor(message.open);
+    });
+    void chrome.runtime.sendMessage({ type: "panel-state" }).then((state: { open?: boolean } | undefined) => hideFor(state?.open), () => undefined);
+  } catch {
+    // The extension was reloaded; this copy of the script is cut off.
+  }
   root.querySelector(".close")!.addEventListener("click", () => {
     try { sessionStorage.setItem(DISMISSED, "1"); } catch { /* storage off: it just hides for now */ }
     host.remove();

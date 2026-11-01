@@ -84,7 +84,10 @@ export function labelOf(input: HTMLInputElement) {
 }
 
 function groupQuestion(el: HTMLInputElement) {
-  const group = el.closest("[role=radiogroup], fieldset, [role=group]");
+  let group = el.closest("[role=radiogroup], fieldset, [role=group]");
+  // A group holding text boxes too is a section ("Work Experience 1"), not the question: a box in it, like
+  // "I currently work here", asks its own.
+  if (group?.querySelector("input:not([type=radio]):not([type=checkbox]):not([type=hidden]), textarea, select")) group = null;
   const named = group && (clean(group.querySelector("legend")?.textContent) || (group.getAttribute("aria-labelledby") ? clean(byIds(group.getAttribute("aria-labelledby")!, rootOf(el))) : "") || clean(group.getAttribute("aria-label")));
   if (named) return named.slice(0, 300);
   const members = el.name ? Array.from(rootOf(el).querySelectorAll(`input[name="${CSS.escape(el.name)}"]`)) : [el];
@@ -198,6 +201,18 @@ export function openDialog(): HTMLElement | null {
     .pop() ?? null;
 }
 
+/**
+ * The part of a split date box ("Month", "Day", "Year"): Workday's From and To dates are separate month and
+ * year boxes, labelled only by the date they belong to. Null for an ordinary box.
+ */
+function dateSegment(el: Element) {
+  const words = `${el.getAttribute("data-automation-id") ?? ""} ${el.id}`;
+  const named = words.match(/dateSection(Month|Day|Year)/i)?.[1] ?? (el.getAttribute("role") === "spinbutton" ? el.getAttribute("aria-label")?.match(/^(month|day|year)$/i)?.[1] : null);
+  return named ? (named[0].toUpperCase() + named.slice(1).toLowerCase()) as "Month" | "Day" | "Year" : null;
+}
+
+const SEGMENT_FORMAT = { Month: "MM", Day: "DD", Year: "YYYY" } as const;
+
 /** Every answerable field on the page (or in the open popup), one per question. */
 export function scanFields(): PageField[] {
   const out: PageField[] = [];
@@ -258,14 +273,18 @@ export function scanFields(): PageField[] {
     const label = fieldType === "multiselect" ? (clean(target.querySelector("legend")?.textContent) || questionText(source)) : questionText(el);
     if (!label || pageControl(el, label, fieldType === "combobox" || fieldType === "select")) continue;
     const placeholder = el.getAttribute("placeholder") ?? "";
+    // "From (Month)" and "From (Year)": the date it belongs to, then the part.
+    const segment = dateSegment(el);
+    const dateOf = segment && /^(month|day|year)$/i.test(label) ? clean(el.closest("[data-automation-id^='formField'], fieldset, [role=group]")?.querySelector("label, legend")?.textContent) : "";
+    const asked = segment ? `${dateOf || label} (${segment})`.replace(/^(month|day|year) \((month|day|year)\)$/i, "$1") : label;
     out.push({
       id: mark(target),
-      label: label.slice(0, 300),
+      label: asked.slice(0, 300),
       type: fieldType,
       options: options.slice(0, 100),
       required,
       section: sectionOf(target),
-      format: /[my]{2}|dd/i.test(placeholder) ? placeholder : type === "date" ? "YYYY-MM-DD" : null,
+      format: segment ? SEGMENT_FORMAT[segment] : /[my]{2}|dd/i.test(placeholder) ? placeholder : type === "date" ? "YYYY-MM-DD" : null,
     });
   }
   return out;
