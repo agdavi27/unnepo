@@ -11,6 +11,7 @@ import { COLLEGE_SUGGESTIONS, brandsForInterests, rankSuggestions } from "@/lib/
 import { formatLocation, joinProfileList, parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import type { ResumeFact } from "@/lib/db/types";
+import { saveStudentProfile } from "@/lib/profile/service";
 import { useTempDb } from "./helpers";
 
 beforeEach(() => {
@@ -121,10 +122,10 @@ describe("structured profile", () => {
     expect((await repo.getAccount(a))?.balance).toBe(3);
   });
 
-  it("offers Free, Pro and Premium, monthly or by the semester, with 1 credit per person", () => {
+  it("offers Free, Pro and Premium, monthly or by the semester, with 1 credit per company", () => {
     expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 3], ["pro", "$24", "or $69 a semester", 40], ["premium", "$44", "or $119 a semester", 100]]);
-    expect(creditMath(1)).toBe("1 person with a verified email");
-    expect(creditMath(40)).toBe("40 people with verified emails");
+    expect(creditMath(1)).toBe("People at 1 company");
+    expect(creditMath(40)).toBe("People at 40 companies");
     const saved = process.env.SIGNUP_CREDITS;
     delete process.env.SIGNUP_CREDITS;
     expect(serverConfig().signupCredits).toBe(3);
@@ -145,9 +146,30 @@ describe("structured profile", () => {
     expect(scoreJob({ ...base, company: "Acme", location: "Denver", description: "", title: "Accountant", postedAt: "2026-10-25T00:00:00Z" }, prefs, now)).toBeNull();
   });
 
+  it("suggests jobs from the resume alone: past job titles and skills", async () => {
+    const userId = await verifiedStudent("resume-jobs@colby.edu", "Jobseeker");
+    await saveStudentProfile(userId, { profile: { experience: [{ company: "Colby", title: "Data Analyst Intern", startDate: "2025", current: false, bullets: [] }], skills: { technical: ["SQL", "Tableau"] } } });
+    const asked: string[] = [];
+    setJobFetcherForTests(async (url) => {
+      asked.push(url);
+      if (url.includes("remotive.com")) {
+        return Response.json({ jobs: [
+          { id: 1, title: "Data Analyst Intern", company_name: "Globex", candidate_required_location: "USA", publication_date: new Date().toISOString(), url: "https://remotive.com/jobs/1", description: "Write SQL and build Tableau dashboards." },
+          { id: 2, title: "Pastry Chef", company_name: "Bakery", candidate_required_location: "USA", publication_date: new Date().toISOString(), url: "https://remotive.com/jobs/2", description: "Bake." },
+        ] });
+      }
+      return new Response("not found", { status: 404 });
+    });
+    const result = await listRecommendedJobs(userId);
+    expect(asked.some((url) => url.includes("search=Data%20Analyst"))).toBe(true);
+    expect(result.jobs.map((job) => job.title)).toEqual(["Data Analyst Intern"]);
+    expect(result.jobs[0].reasons).toEqual(expect.arrayContaining(["Matches your role: Data Analyst", "Uses your skills: SQL, Tableau", "Internship"]));
+    expect(result.matchedOn).toEqual({ roles: ["Data Analyst"], skills: ["SQL", "Tableau"] });
+  });
+
   it("recommends jobs from dream company boards with posted dates", async () => {
     const userId = await verifiedStudent("jobs@colby.edu", "Jobseeker");
-    await expect(listRecommendedJobs(userId)).rejects.toThrow(/Save your profile/);
+    await expect(listRecommendedJobs(userId)).rejects.toThrow(/Add your resume first/);
     await saveStructuredProfile(userId, form, "Jobseeker");
     const urls: string[] = [];
     setJobFetcherForTests(async (url) => {

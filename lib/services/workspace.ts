@@ -132,21 +132,36 @@ async function profileInputs(userId: string) {
   return { roles, companies, locations };
 }
 
-/** Jobs from public job feeds, ranked against the student's roles, companies, cities, and interests. */
+/** "Marketing Intern, Social Media" is "Marketing": the words of a past job title that say what the work was. */
+function roleFromTitle(title: string) {
+  return title.split(/\s[-–|,(]\s?|,|\(/)[0].replace(/\b(senior|sr\.?|junior|jr\.?|lead|head|intern(ship)?|assistant|associate|summer|student|part[- ]time|volunteer|i{1,3})\b/gi, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Jobs from public job feeds, ranked against the student's resume and profile: the roles they want and
+ * have done (their past job titles), their skills, major, city, and dream companies.
+ */
 export async function listRecommendedJobs(userId: string, { refresh = false } = {}) {
-  const document = await repo.getProfileDocument(userId);
-  if (!document?.ready) throw new ServiceError("Save your profile first so jobs can match your interests.", "profile", 400);
-  const me = await profileInputs(userId);
-  const interests = document.form.interests;
+  const [document, state] = await Promise.all([repo.getProfileDocument(userId), profileState(userId)]);
+  const student = state.profile;
+  const me = document?.ready ? await profileInputs(userId) : { roles: [], companies: [], locations: [] };
+  const pastRoles = student.experience.map((job) => roleFromTitle(job.title)).filter((role) => role.length >= 3);
+  const roles = uniqueList([...student.preferences.roles, ...me.roles, ...pastRoles]).slice(0, 8);
+  const interests = uniqueList([...(document?.form.interests ?? []), ...student.preferences.industries, ...student.education.map((item) => item.major).filter(Boolean)]).slice(0, 8);
+  const locations = uniqueList([...student.preferences.locations, ...me.locations, student.contact.city ?? ""].filter((place) => place && !/^(remote|anywhere)/i.test(place))).slice(0, 6);
+  const skills = uniqueList([...student.skills.technical, ...(student.projects ?? []).flatMap((project) => project.tech ?? [])]).slice(0, 25);
+  if (!roles.length && !interests.length && !skills.length) throw new ServiceError("Add your resume first so Unnepo can match jobs to it.", "profile", 400);
   const suggestedCompanies = brandsForInterests(interests, me.companies, 8);
   const companies = uniqueList([...me.companies, ...suggestedCompanies]).slice(0, 12);
-  const prefs = { roles: me.roles, companies: me.companies, suggestedCompanies, locations: me.locations, interests, remoteOk: document.form.workPreference !== "onsite" };
+  const remoteOk = student.preferences.remote !== "no" && document?.form.workPreference !== "onsite";
+  const prefs = { roles, companies: me.companies, suggestedCompanies, locations, interests, remoteOk, skills };
   const key = `${userId}:${createHash("sha256").update(JSON.stringify(prefs)).digest("hex").slice(0, 16)}`;
   const result = await recommendJobs(key, prefs, { refresh });
   return {
     jobs: result.jobs.map((job) => ({ ...job, sourceLabel: SOURCE_LABEL[job.source] })),
     cachedAt: result.cachedAt,
     searchedCompanies: companies,
+    matchedOn: { roles: roles.slice(0, 4), skills: skills.slice(0, 6) },
   };
 }
 

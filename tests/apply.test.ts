@@ -526,7 +526,7 @@ describe("people after applying", () => {
   type Search = { q_organization_domains_list: string[]; person_titles?: string[]; q_keywords?: string; contact_email_status?: string[] };
 
   /** A student who applied to Acme's Greenhouse job, and an Apollo that answers searches with `people`. */
-  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { verified?: string[]; poster?: boolean; hunterValid?: string[] } = {}) {
+  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }> } = {}) {
     process.env.APOLLO_API_KEY = "apollo";
     delete process.env.HUNTER_API_KEY;
     process.env.ANTHROPIC_API_KEY = "anthropic";
@@ -540,7 +540,7 @@ describe("people after applying", () => {
     const searches: Search[] = [];
     setContactFetcher(async (input, init) => {
       const url = String(input);
-      if (url.includes("mixed_companies/search")) return Response.json({ organizations: [{ name: "Acme Dental", primary_domain: "acmedental.com" }, { name: "Acme Corp", primary_domain: "acme.com" }] });
+      if (url.includes("mixed_companies/search")) return Response.json({ organizations: options.companies ?? [{ name: "Acme Dental", primary_domain: "acmedental.com" }, { name: "Acme Corp", primary_domain: "acme.com" }] });
       if (url.includes("people/match")) return Response.json({ person: { title: "Recruiter", email: null } });
       if (url.includes("mixed_people/api_search")) {
         const search = JSON.parse(String(init?.body)) as Search;
@@ -556,7 +556,7 @@ describe("people after applying", () => {
       }
       if (url.includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
-        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@acme.com`, email_status: options.verified?.includes(item.id) ? "verified" : "guessed", photo_url: `https://img.example.com/${item.id}.jpg` })) });
+        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@acme.com`, email_status: options.verified?.includes(item.id) ? "verified" : "guessed", photo_url: `https://img.example.com/${item.id}.jpg`, ...(options.twitter?.includes(item.id) ? { twitter_url: `https://x.com/${item.id}` } : {}) })) });
       }
       return new Response("unexpected", { status: 500 });
     });
@@ -566,34 +566,49 @@ describe("people after applying", () => {
     return { userId, application: (await applications.get(userId, application.id))!, contacts: await applicationContacts.list(userId, [application.id]), searches };
   }
 
-  it("finds one person from the student's school first, on the company's real website", async () => {
+  it("lists up to 5 people, most relevant first, on the company's real website, with emails in the company's format", async () => {
     // An old wrong match for Acme is tried first and turns up no one; it's replaced by the site that does.
     await repo.setCompanyDomains("Acme Corp", ["acme.org"]);
     const { application, contacts, searches } = await appliedWith((search) => {
       if (search.q_organization_domains_list[0] !== "acme.com") return [];
       if (search.q_keywords === "Colby College") return [person("a1", "Casey", "Park", "Product Manager")];
-      return [person("r1", "Avery", "Kim", "Recruiter")];
+      if (search.person_titles?.includes("recruiter")) return [person("r1", "Avery", "Kim", "Senior Recruiter"), person("r2", "Sam", "Lee", "University Recruiter"), person("c1", "Pat", "Doe", "Chief People Officer")];
+      return [person("t1", "Riley", "Chen", "Product Lead"), person("t2", "Jo", "Ray", "Analyst")];
     }, { verified: ["a1"] });
-    expect(contacts.map((item) => [item.rank, item.role, item.name, item.email])).toEqual([[1, "alumni", "Casey Park", "a1@acme.com"]]);
-    expect(contacts[0].relevance).toContain("Colby College");
+    // The posting's recruiter first, then the school, campus recruiters, recruiters, the team; executives last. Five in all.
+    expect(contacts.map((item) => [item.rank, item.role, item.name, item.email, item.emailSource])).toEqual([
+      [1, "job_poster", "Jordan Smith", "jordan.smith@acme.com", "job_posting"],
+      [2, "alumni", "Casey Park", "a1@acme.com", "apollo"],
+      [3, "recruiter", "Sam Lee", "sam.lee@acme.com", "likely"],
+      [4, "recruiter", "Avery Kim", "avery.kim@acme.com", "likely"],
+      [5, "team_member", "Riley Chen", "riley.chen@acme.com", "likely"],
+    ]);
+    expect(contacts[1].relevance).toContain("Colby College");
+    expect(contacts[1].linkedinUrl).toBe("https://linkedin.com/in/a1");
     expect(contacts[0].emailBody).toContain("Product Analyst Intern");
+    // The format came from the posting's own recruiter's address, and is kept for every student.
+    expect(application.contactsMessage).toContain("usual format (first.last@acme.com)");
+    expect((await repo.getEmailFormat("acme.com"))?.pattern).toBe("{first}.{last}");
     expect(application).toMatchObject({ contactsStatus: "done", companyDomain: "acme.com" });
     expect((await repo.getCompanyDomains(["Acme Corp"]))["acme corp"]).toEqual(["acme.com"]);
-    // People are searched for whether or not Apollo has an email yet; emails are checked after.
     expect(searches.every((search) => !search.contact_email_status)).toBe(true);
-    expect(application.fillReport?.peopleSearch).toMatchObject({ domain: "acme.com", school: "Colby College", chosen: { name: "Casey Park", role: "alumni", email: true } });
-    expect(application.fillReport?.peopleSearch?.steps.slice(0, 3)).toEqual([
+    expect(application.fillReport?.peopleSearch?.steps.slice(0, 2)).toEqual([
       { step: "From Colby College", domain: "acme.org", found: 0 },
-      // The posting's recruiter has no verified email, so they don't count.
-      { step: "Named on the posting", domain: "acme.org", found: 0 },
       { step: "Recruiters", domain: "acme.org", found: 0 },
     ]);
   });
 
-  it("spends 1 credit when it finds a person, not again on a new search, and looks no one up without credits", async () => {
+  it("writes first.last as a best guess when the company's format is unknown, and keeps each person's links", async () => {
+    const { application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []), { poster: false, twitter: ["r1"] });
+    expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Avery Kim", "avery.kim@acme.com", "guess"]]);
+    expect(application.contactsMessage).toContain("best guess");
+    expect(application.fillReport?.peopleLinks?.["avery kim"]).toEqual([{ label: "LinkedIn", url: "https://linkedin.com/in/r1" }, { label: "X", url: "https://x.com/r1" }]);
+  });
+
+  it("spends 1 credit for a job's list, not again on a new search, and looks no one up without credits", async () => {
     const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
     const { userId, application, contacts, searches } = await appliedWith(found, { verified: ["a1"] });
-    expect(contacts).toHaveLength(1);
+    expect(contacts.length).toBeGreaterThan(0);
     const debits = async () => (await repo.listLedger(userId)).filter((entry) => entry.entryType === "unlock_debit").reduce((sum, entry) => sum - entry.amount, 0);
     expect(await debits()).toBe(1);
     await applications.update(userId, application.id, { contactsStatus: "idle" });
@@ -614,34 +629,19 @@ describe("people after applying", () => {
     expect((await applications.get(userId, app.id))?.contactsMessage).toMatch(/out of credits/);
   });
 
-  it("falls back to a campus recruiter when no one from the school turns up, even if a search fails", async () => {
+  it("keeps going when one search fails", async () => {
     const { application, contacts } = await appliedWith((search) => {
       if (search.q_keywords) return "fail";
-      if (search.person_titles?.includes("recruiter")) return [person("r1", "Avery", "Kim", "Senior Recruiter"), person("r2", "Sam", "Lee", "University Recruiter")];
+      if (search.person_titles?.includes("recruiter")) return [person("r2", "Sam", "Lee", "University Recruiter")];
       return [];
-    }, { verified: ["r1", "r2"] });
-    expect(contacts.map((item) => [item.role, item.name, item.email])).toEqual([["recruiter", "Sam Lee", "r2@acme.com"]]);
-    expect(application.contactsMessage).toContain("No one from Colby College with a verified email turned up");
+    }, { poster: false });
+    expect(contacts.map((item) => [item.role, item.name])).toEqual([["recruiter", "Sam Lee"]]);
     expect(application.fillReport?.peopleSearch?.steps[0]).toMatchObject({ step: "From Colby College", found: 0, error: expect.stringContaining("500") });
   });
 
-  it("only picks someone with a verified email, looking in the department last", async () => {
-    const team = (search: Search) => (search.person_titles?.includes("Product") ? [person("t1", "Riley", "Chen", "Product Lead")] : search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []);
-    const verified = await appliedWith(team, { poster: false, verified: ["t1"] });
-    expect(verified.contacts.map((item) => [item.role, item.name, item.email, item.linkedinUrl])).toEqual([["team_member", "Riley Chen", "t1@acme.com", "https://linkedin.com/in/t1"]]);
-  });
-
-  it("guesses a recruiter's email from the company's format when Apollo has none verified, checks it, and charges for it", async () => {
-    const { userId, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "University Recruiter")] : []), { poster: false, hunterValid: ["akim@acme.com"] });
-    expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Avery Kim", "akim@acme.com", "pattern"]]);
-    expect((await repo.listLedger(userId)).filter((entry) => entry.entryType === "unlock_debit")).not.toHaveLength(0);
-  });
-
-  it("says when people turned up but none has a verified email, and shows no one", async () => {
-    const { contacts, application } = await appliedWith((search) => (search.person_titles?.includes("Product") ? [person("t1", "Riley", "Chen", "Product Lead")] : []));
-    expect(contacts).toEqual([]);
-    expect(application.contactsMessage).toContain("none with a verified email");
-    expect(application.companyDomain).toBeNull();
+  it("never searches a website that doesn't fit the company's name", async () => {
+    const { application } = await appliedWith(() => [], { poster: false, companies: [{ name: "The Breadwinners Club", primary_domain: "thebreadwinners.club" }] });
+    expect(application.fillReport?.peopleSearch?.domains).not.toContain("thebreadwinners.club");
   });
 
   it("looks for people only when the student asks", async () => {

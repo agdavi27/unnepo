@@ -87,6 +87,8 @@ export type FillReport = {
   pending?: Array<{ label: string; kind: QuestionKind; options: string[] }>;
   /** The last search for people to email: every step and what it found. */
   peopleSearch?: PeopleSearch;
+  /** Social links for each listed person, by name: the contacts table keeps only LinkedIn. */
+  peopleLinks?: Record<string, Array<{ label: string; url: string }>>;
   /** The credit for this job's person was spent, so searching again is free. */
   personCharged?: boolean;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
@@ -154,7 +156,7 @@ export type ApplicationContact = {
   title: string;
   email: string | null;
   /** "pattern": built from the company's email format and verified; "website": found on its site and verified; "likely": built from the format but couldn't be checked. */
-  emailSource: "apollo" | "hunter" | "job_posting" | "pattern" | "website" | "likely" | null;
+  emailSource: "apollo" | "hunter" | "job_posting" | "pattern" | "website" | "likely" | "guess" | null;
   relevance: string;
   linkedinUrl: string | null;
   photoUrl: string | null;

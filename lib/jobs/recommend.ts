@@ -29,6 +29,8 @@ export type JobPreferences = {
   locations: string[];
   interests: string[];
   remoteOk: boolean;
+  /** Skills from the student's resume, matched against each posting's text. */
+  skills?: string[];
 };
 
 export const SOURCE_LABEL: Record<JobSource, string> = {
@@ -257,6 +259,11 @@ export function scoreJob(job: RawJob, prefs: JobPreferences, now = Date.now()): 
   if (interest) {
     score += 2;
     reasons.push(`Fits your interest in ${interest}`);
+  }
+  const skills = (prefs.skills ?? []).filter((skill) => skill.length > 1 && new RegExp(`(^|[^a-z0-9+#])${skill.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z0-9+#])`).test(text)).slice(0, 3);
+  if (skills.length) {
+    score += Math.min(3, skills.length);
+    reasons.push(`Uses your skills: ${skills.join(", ")}`);
   }
   const place = prefs.locations.find((item) => job.location.toLowerCase().includes(item.split(",")[0].trim().toLowerCase()));
   if (place) {

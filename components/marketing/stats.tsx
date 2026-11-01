@@ -7,7 +7,7 @@ import { FREE_APPLICATIONS } from "@/lib/config";
 
 const STATS: Array<{ value: string; label: string; source: string; href?: string }> = [
   { value: "3.4 sec", label: "to fill a 14-question application", source: "Timed in our own test on a live Greenhouse form" },
-  { value: "1", label: "real person at the company for each job, with a verified email and a drafted follow-up", source: "What Unnepo finds for each application" },
+  { value: "5", label: "real people at the company for each job, with their emails, links and a drafted follow-up", source: "What Unnepo finds for each application" },
   { value: `${FREE_APPLICATIONS}`, label: "applications free, then no limit on Pro", source: "Unnepo pricing" },
   { value: "4.5×", label: "more likely to be hired when someone at the company refers you", source: "Paradigm, from 2M+ candidates (via The Times, 2024)", href: "https://www.pressreader.com/usa/the-times-shreveport/20240505/281522231168846" },
 ];

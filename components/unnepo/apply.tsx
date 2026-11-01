@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AtsBadge, CompanyLogo } from "@/components/unnepo/company";
+import { PeopleSearching } from "@/components/unnepo/people-searching";
 import { StatsPage } from "@/components/unnepo/stats";
 import { stageOf, appliedOn, applicationStats, type Stage } from "@/lib/apply/stats";
 import type { ApplicationContact, ApplicationProfile, JobApplication, OutreachState } from "@/lib/apply/types";
@@ -38,7 +39,8 @@ const EMAIL_SOURCE: Record<NonNullable<ApplicationContact["emailSource"]>, strin
   job_posting: "Verified · from the posting",
   pattern: "Verified · built from the company's email format",
   website: "Verified · from the company's website",
-  likely: "Likely, not verified · the company's usual format",
+  likely: "Guessed from the company's email format · not checked",
+  guess: "Best guess (first.last) · not checked",
 };
 
 const OUTREACH: Array<[OutreachState, string]> = [["not_contacted", "Not contacted"], ["emailed", "Emailed"], ["replied", "Replied"], ["no_response", "No response"]];
@@ -86,7 +88,7 @@ export function ApplyArea({ view, refreshKey = 0 }: { view: TrackerView; refresh
   const busy = useMemo(() => (data?.applications ?? []).some((app) => app.contactsStatus === "finding" || app.contactsStatus === "writing"), [data]);
   useEffect(() => {
     if (!busy) return;
-    const timer = setInterval(() => void load(), 4000);
+    const timer = setInterval(() => void load(), 2000);
     return () => clearInterval(timer);
   }, [busy, load]);
 
@@ -380,7 +382,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                         <button type="button" className={secondary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
                       </div>
                     ) : (
-                      <ContactsPanel app={app} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} />
+                      <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} />
                     )}
                     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-faint">
                       <span className="min-w-0">
@@ -442,7 +444,7 @@ function PostedBy({ app }: { app: App }) {
   );
 }
 
-function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void }) {
+function ContactsPanel({ app, school, onStatus, onRetry }: { app: App; school: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void }) {
   const contacts = app.contacts ?? [];
   const [copied, setCopied] = useState("");
   const [website, setWebsite] = useState("");
@@ -463,17 +465,19 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
       <div className="space-y-3">
         <PostedBy app={app} />
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
-          <button type="button" className={primary} onClick={() => onRetry()}>Find me the best person to connect with</button>
-          <p>Someone from your school at {app.company}, else a recruiter, else someone on the team. Always with a verified email.</p>
+          <button type="button" className={primary} onClick={() => onRetry()}>Find relevant people</button>
+          <p>Up to 5 people at {app.company}: from your school, recruiters, and the team, with their emails and links.</p>
         </div>
       </div>
     );
   }
-  if (app.contactsStatus === "finding") return <div className="space-y-3"><PostedBy app={app} /><p className="text-sm text-muted">Finding the best person to connect with…</p></div>;
+  if (app.contactsStatus === "finding") return <PeopleSearching message={app.contactsMessage || `Searching for relevant people at ${app.company}…`} school={school} />;
+  if (app.contactsStatus === "writing" && contacts.length === 0) return <PeopleSearching message="Drafting your emails…" school={school} />;
+  const links = app.fillReport?.peopleLinks ?? {};
   return (
     <div className="space-y-3">
       <PostedBy app={app} />
-      {app.contactsStatus === "writing" && <p className="text-sm text-muted">Writing emails…</p>}
+      {app.contactsStatus === "writing" && <p className="text-sm text-muted">Drafting an email to each person…</p>}
       {app.contactsMessage && <p className="text-xs text-faint">{app.contactsMessage}</p>}
       {needsSite ? (
         <form className="flex flex-wrap items-center gap-2 text-sm" onSubmit={(event) => { event.preventDefault(); onRetry(website.trim()); }}>
@@ -485,7 +489,7 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
         <>
           {app.contactsStatus === "failed" && <button type="button" className={secondary} onClick={() => onRetry()}>Try again</button>}
           {contacts.length === 0 && app.contactsStatus === "done" && (
-            <div className="flex flex-wrap items-center gap-3 text-sm text-muted"><p>No one with a verified email yet.</p><button type="button" className={secondary} onClick={() => onRetry()}>Search again</button></div>
+            <div className="flex flex-wrap items-center gap-3 text-sm text-muted"><p>No one found yet.</p><button type="button" className={secondary} onClick={() => onRetry()}>Search again</button></div>
           )}
         </>
       )}
@@ -509,7 +513,7 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
             <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
               {contact.email ? (
                 <button type="button" className="text-ink underline-offset-4 hover:underline" onClick={() => void copy(`${contact.id}:email`, contact.email!)}>{copied === `${contact.id}:email` ? "Copied ✓" : contact.email}</button>
-              ) : <span className="text-muted">No verified email</span>}
+              ) : <span className="text-muted">No email yet</span>}
               {contact.emailSource && (
                 <span className={`text-[11px] ${contact.emailSource === "likely" ? "rounded-full border border-[#F5A524]/50 px-2 py-0.5 text-[#F5A524]" : "text-faint"}`}>
                   {EMAIL_SOURCE[contact.emailSource]}
@@ -521,6 +525,9 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
                   LinkedIn
                 </a>
               )}
+              {(links[contact.name.toLowerCase()] ?? []).filter((link) => link.label !== "LinkedIn").map((link) => (
+                <a key={link.url} className="inline-flex items-center rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-white/5" href={link.url} target="_blank" rel="noreferrer" aria-label={`${contact.name} on ${link.label}`}>{link.label}</a>
+              ))}
             </div>
             {email && (
               <div className="mt-3">

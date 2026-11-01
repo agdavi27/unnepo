@@ -14,7 +14,7 @@ export function Pricing() {
         <p className="m-0 font-mono text-xs uppercase tracking-[1.2px] text-[#8B8B94]">Pricing</p>
         <h2 id="pricing-title" className="m-0 mt-3 max-w-2xl text-[clamp(32px,4.6vw,46px)] font-bold leading-[1.05] tracking-[-1.4px]">Free to start. Upgrade when you&apos;re applying a lot.</h2>
         <p className="m-0 mt-4 max-w-xl text-[15px] leading-relaxed text-[#9A9AA3]">
-          Free covers {FREE_APPLICATIONS} applications. 1 credit finds 1 person at the company with a verified email, and you&apos;re only charged when one is found. Pay by the semester ({SEMESTER_MONTHS} months) and save. Some schools cover Pro for their students.
+          Free covers {FREE_APPLICATIONS} applications. 1 credit finds up to 5 people at a company, with their emails and links, and you&apos;re only charged when people are found. Pay by the semester ({SEMESTER_MONTHS} months) and save. Some schools cover Pro for their students.
         </p>
       </div>
 

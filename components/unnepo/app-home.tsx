@@ -23,11 +23,12 @@ type Workspace = {
   integrations: { apollo: boolean; anthropic: boolean };
 };
 
-// Applications are added by the Chrome extension. Recommended Jobs stays in the code but is hidden from the menu.
+// Applications are added by the Chrome extension. "Jobs for you" suggests postings that fit the resume.
 type View = "applied" | "stats" | "jobs" | "settings";
 const VIEWS: { id: View; label: string }[] = [
   { id: "applied", label: "Applied" },
   { id: "stats", label: "Stats" },
+  { id: "jobs", label: "Jobs for you" },
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
@@ -287,7 +288,7 @@ export function AppHome() {
                     You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {data.credits.balance} {data.credits.balance === 1 ? "credit" : "credits"} left.
                   </p>
                 </div>
-                <p className="text-xs text-faint">1 credit = 1 person with a verified email · Free covers {FREE_APPLICATIONS} applications</p>
+                <p className="text-xs text-faint">1 credit = up to 5 people at one company · Free covers {FREE_APPLICATIONS} applications</p>
               </div>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {PUBLIC_PLANS.map((plan) => {

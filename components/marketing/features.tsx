@@ -52,7 +52,7 @@ function TrackerPicture() {
       </ul>
       <div className={`rounded-xl border border-[#26262C] bg-[#070708] p-3 transition-all duration-500 ${t > 1500 ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"}`}>
         <p className="m-0 text-sm font-medium">Sam Patel <span className="ml-1 rounded-full border border-[#26262C] px-2 py-0.5 align-middle text-[10px] text-[#9A9AA3]">From your school</span></p>
-        <p className="m-0 mt-0.5 text-xs text-[#8B8B94]">Analytics Lead at Stripe · verified email</p>
+        <p className="m-0 mt-0.5 text-xs text-[#8B8B94]">Analytics Lead at Stripe · sam.patel@stripe.com</p>
         <p className="m-0 mt-2 text-xs leading-relaxed text-[#B4B4BC]">Hi Sam, I just applied to the Data Analyst Intern role and saw you&apos;re a Colby alum too…</p>
       </div>
     </div>
@@ -128,7 +128,7 @@ const FEATURES = [
   {
     kicker: "Tracker",
     title: "Every job you applied to, in one place.",
-    body: "Unnepo logs each application the moment it's submitted. Then it finds one real person there (someone from your school, a recruiter, or someone on the team) with a verified email, and drafts the follow-up.",
+    body: "Unnepo logs each application the moment it's submitted. Then it lists 5 real people there (from your school, recruiters, and the team) with their emails and links, and drafts the follow-up.",
     picture: <TrackerPicture />,
   },
   {

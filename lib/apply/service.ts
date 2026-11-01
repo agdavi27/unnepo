@@ -487,13 +487,17 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const paidKey = `person:${userId}:${app.id}`;
   const alreadyPaid = Boolean(app.fillReport?.personCharged);
   if (!alreadyPaid && ((await repo.getAccount(userId))?.balance ?? 0) < 1) {
-    await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds 1 person with a verified email." });
+    await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds the people at a company for one job." });
     return;
   }
   let found: Awaited<ReturnType<typeof findPeopleForApplication>>;
   const info = await student(userId);
   try {
-    found = await findPeopleForApplication(userId, app, { school: info.context.school });
+    // Each step is saved as the job's message, so the page's spider can say what it's doing.
+    found = await findPeopleForApplication(userId, app, {
+      school: info.context.school,
+      progress: async (text) => { await applications.update(userId, app.id, { contactsMessage: text }); },
+    });
   } catch (error) {
     // Apollo's own messages mention search credits, which don't apply here; the application credit covers this.
     const reason = error instanceof ServiceError ? error.message.replace(/\s*No credits were used\.?/i, "") : "Couldn't look up people right now.";
@@ -501,20 +505,21 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     return;
   }
   let charged = alreadyPaid;
-  // A "likely" email couldn't be checked, so it's free.
-  if (found.people.some((person) => person.email && person.emailSource !== "likely") && !charged) {
+  // 1 credit for the job's list of people, once; searching again is free.
+  if (found.people.length && !charged) {
     const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: paidKey, note: `A person at ${app.company.slice(0, 80)}`, entryType: "unlock_debit" });
     if (spent.insufficient) {
-      await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds 1 person with a verified email." });
+      await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds the people at a company for one job." });
       return;
     }
     charged = true;
   }
-  const rows = await applicationContacts.replace(userId, app.id, found.people.map((person) => ({ ...person, applicationId: app.id, userId, emailSubject: null, emailBody: null })));
+  const rows = await applicationContacts.replace(userId, app.id, found.people.map((person) => ({ rank: person.rank, role: person.role, name: person.name, title: person.title, email: person.email, emailSource: person.emailSource, relevance: person.relevance, linkedinUrl: person.linkedinUrl, photoUrl: person.photoUrl, applicationId: app.id, userId, emailSubject: null, emailBody: null })));
+  const peopleLinks = Object.fromEntries(found.people.filter((person) => person.links.length).map((person) => [person.name.toLowerCase(), person.links]));
   // What each search found is kept with the application, so "no one found" can be traced.
   const latest = (await applications.get(userId, app.id)) ?? app;
   const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: rows.length ? "writing" : "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleSearch: found.search, ...(charged ? { personCharged: true } : {}) } });
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: rows.length ? "writing" : "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleSearch: found.search, peopleLinks, ...(charged ? { personCharged: true } : {}) } });
   if (!rows.length) return;
   try {
     const emails = await writeOutreachEmails(userId, app, rows, { name: info.user.name, resumeText: info.resumeText, profile: info.profileText });

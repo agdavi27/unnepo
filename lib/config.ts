@@ -44,7 +44,7 @@ export function serverConfig() {
 /**
  * Pricing: autofill is cheap to run, so applications aren't metered by credits. Free covers
  * FREE_APPLICATIONS of them; Pro and Premium have no limit beyond a daily fair-use cap on AI. What costs
- * real money is finding a person with a verified email, so 1 credit = 1 person found, charged only when
+ * real money is finding people, so 1 credit = the list of people at the company for one job, charged only when
  * one is found.
  */
 export const FREE_APPLICATIONS = 25;
@@ -52,9 +52,9 @@ export const FREE_APPLICATIONS = 25;
 /** A semester plan: four months paid up front, with four months of credits at once. */
 export const SEMESTER_MONTHS = 4;
 
-/** "40 people with verified emails" */
+/** "40 jobs' people lists" */
 export function creditMath(credits: number) {
-  return credits === 1 ? "1 person with a verified email" : `${credits} people with verified emails`;
+  return credits === 1 ? "People at 1 company" : `People at ${credits} companies`;
 }
 
 export const PUBLIC_PLANS = [
@@ -70,7 +70,7 @@ export const PUBLIC_PLANS = [
     monthly: false,
     credits: 3,
     applicationsLabel: `${FREE_APPLICATIONS} applications`,
-    features: [`Autofill ${FREE_APPLICATIONS} applications`, "3 people to reach, with verified emails", "Cover letters and the tracker"],
+    features: [`Autofill ${FREE_APPLICATIONS} applications`, "People to reach at 3 companies", "Cover letters and the tracker"],
   },
   {
     id: "pro" as const,
@@ -84,7 +84,7 @@ export const PUBLIC_PLANS = [
     monthly: true,
     credits: 40,
     applicationsLabel: "Unlimited applications",
-    features: ["Unlimited autofill and cover letters", "40 people a month, with verified emails", "Everything in Free"],
+    features: ["Unlimited autofill and cover letters", "People to reach at 40 companies a month", "Everything in Free"],
   },
   {
     id: "premium" as const,
@@ -98,7 +98,7 @@ export const PUBLIC_PLANS = [
     monthly: true,
     credits: 100,
     applicationsLabel: "Unlimited applications",
-    features: ["100 people a month, with verified emails", "More people any time: 25 for $5", "Everything in Pro"],
+    features: ["People to reach at 100 companies a month", "More any time: 25 companies for $5", "Everything in Pro"],
   },
 ];
 

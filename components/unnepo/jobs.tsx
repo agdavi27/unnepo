@@ -42,6 +42,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [companies, setCompanies] = useState<string[]>([]);
+  const [matched, setMatched] = useState<{ roles: string[]; skills: string[] } | null>(null);
   const [now, setNow] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
   const [studentOnly, setStudentOnly] = useState(false);
@@ -55,6 +56,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
       if (!response.ok) throw new Error(payload.error || "Jobs could not be loaded.");
       setJobs(payload.jobs ?? []);
       setCompanies(payload.searchedCompanies ?? []);
+      setMatched(payload.matchedOn ?? null);
       setNow(Date.now());
     } catch (reason) {
       setError(reason instanceof Error && reason.name !== "TimeoutError" ? reason.message : "Job boards took too long to answer. Try again.");
@@ -73,8 +75,11 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Recommended Jobs</h1>
-          <p className="mt-1 text-sm text-muted">Matched to your roles, dream companies, cities, and interests.</p>
+          <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Jobs you may be interested in</h1>
+          <p className="mt-1 text-sm text-muted">
+            Open postings matched to your resume
+            {matched && (matched.roles.length || matched.skills.length) ? `: ${[...matched.roles.slice(0, 3), ...matched.skills.slice(0, 3)].join(", ")}` : ""}.
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={() => void load(true)} disabled={loading} className={secondary}>{loading ? "Searching…" : "Refresh"}</button>
@@ -93,7 +98,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
       {error && <p role="alert" className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</p>}
       {loading && !jobs && <p className="rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">Looking across job boards… this can take up to 20 seconds.</p>}
       {jobs && shown.length === 0 && !loading && (
-        <p className="rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">No matching openings right now. Add more roles or dream companies to your profile, or try Refresh later.</p>
+        <p className="rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">No matching openings right now. Add roles you want or more skills to your profile, or try Refresh later.</p>
       )}
 
       {shown.length > 0 && (

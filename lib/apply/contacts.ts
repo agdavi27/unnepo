@@ -1,10 +1,10 @@
 import { serverConfig } from "@/lib/config";
-import { id, nowIso, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file-store";
+import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import type { Contact } from "@/lib/db/types";
 import { contactFetch } from "@/lib/providers/contacts/http";
 import { ServiceError } from "@/lib/errors";
 import { safeGet } from "@/lib/apply/safe-fetch";
-import { HUNTER_CENTS, guessEmail, hunterCheck, hunterReady, learnFormat, type EmailFormat } from "@/lib/apply/email-guess";
+import { HUNTER_CENTS, buildEmail, hunterCheck, hunterReady, learnFormat, patternOf, type EmailFormat } from "@/lib/apply/email-guess";
 import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, searchCompanies, searchPeopleQuery } from "@/lib/providers/contacts/router";
 import { COMPANY_DOMAINS, RECRUITER_TITLES, type ApolloPeopleQuery } from "@/lib/providers/contacts/apollo";
 import type { ApplicationContact, ContactRole, JobApplication, PeopleSearch } from "@/lib/apply/types";
@@ -15,9 +15,6 @@ import type { ApplicationContact, ContactRole, JobApplication, PeopleSearch } fr
  * Apollo or the posting itself. Nobody is invented.
  */
 
-export const MAX_CONTACTS = 1;
-/** People in the chosen group checked for a verified email, so one without an email can be passed over. */
-const CHECK_PER_GROUP = 3;
 /** Company websites tried, best match first, until one turns up people. */
 const MAX_DOMAINS = 3;
 
@@ -65,34 +62,6 @@ export async function hunterFindEmail(userId: string, firstName: string, lastNam
 /** Hunter's verifier, for an email printed on the posting. */
 export async function hunterVerify(userId: string, email: string) {
   return (await hunterCheck(userId, email)) === "valid";
-}
-
-/** Apollo's match for one named person at a company. Costs one Apollo credit. */
-async function apolloMatchByName(userId: string, name: string, domain: string | null, company: string) {
-  const apolloKey = await readApolloKey();
-  if (!apolloKey) return null;
-  const [firstName, ...rest] = name.split(" ");
-  const lastName = rest.join(" ");
-  await assertSpendAllowed(userId, 8);
-  try {
-    const response = await contactFetch("https://api.apollo.io/api/v1/people/match", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-api-key": apolloKey },
-      body: JSON.stringify({ first_name: firstName, last_name: lastName, organization_name: company, domain: domain ?? undefined, reveal_personal_emails: false }),
-    });
-    if (!response.ok) return null;
-    const person = ((await response.json()) as { person?: Record<string, unknown> | null }).person;
-    if (!person) return null;
-    const email = typeof person.email === "string" && person.email_status === "verified" && isPersonalWorkEmail(person.email) ? person.email : null;
-    return {
-      title: typeof person.title === "string" ? person.title : null,
-      email,
-      linkedinUrl: typeof person.linkedin_url === "string" ? person.linkedin_url : null,
-      photoUrl: typeof person.photo_url === "string" ? person.photo_url : null,
-    };
-  } catch {
-    return null;
-  }
 }
 
 // Job boards: a posting on these says nothing about the company's own website.
@@ -240,8 +209,9 @@ async function companyDomains(userId: string, app: JobApplication) {
     if (fits.length) break;
   }
   fits.forEach(add);
-  // Apollo's top result counts only when nothing fit by name.
-  if (!fits.length) add(others[0]);
+  // Apollo's top result counts only when nothing fit by name, and only if its website fits the name
+  // ("thebreadwinners.club" is never Fillout's).
+  if (!fits.length && others[0] && domainFits(others[0], app.company)) add(others[0]);
   // Apollo didn't know the company: guess its website from the name, then ask Haiku, keeping only sites that check out.
   if (!found.length) {
     for (const guess of guessedDomains(app.company)) {
@@ -282,27 +252,46 @@ function found(contact: Contact, role: ContactRole, relevance: string): FoundPer
   return { rank: 1, role, name: contact.fullName, title: contact.title, email: null, emailSource: null, relevance, linkedinUrl: contact.profileUrl, photoUrl: contact.photoUrl ?? null };
 }
 
+/** How many people the list shows for a job. */
+export const LIST_SIZE = 5;
+
+/** Campus and university recruiters before the rest: they hire students. */
+const CAMPUS = /\b(campus|university|college|early (career|talent)|emerging talent|intern)/i;
+const TOO_SENIOR = /\b(chief|ceo|cfo|coo|cto|president|founder|owner|board|vp|vice president|svp|evp|partner)\b/i;
+
+/** A full name Unnepo can build an address from (Apollo hides last names until it enriches them: "Jane D."). */
+const fullName = (name: string) => /^\S{2,}( \S+)* [^\s*.]{2,}$/.test(name.trim()) && !name.includes("*");
+
+/** Who's most worth emailing first: the student's school, then recruiters (campus first), then the team; executives last. */
+export function relevance(person: Pick<FoundPerson, "role" | "title">) {
+  const base = person.role === "job_poster" ? 100 : person.role === "alumni" ? 80 : person.role === "recruiter" ? 60 + (CAMPUS.test(person.title) ? 10 : 0) : 40;
+  return base - (TOO_SENIOR.test(person.title) ? 30 : 0);
+}
+
+export type ListedPerson = FoundPerson & { links: Array<{ label: string; url: string }> };
+
+/** Progress the page shows in the spider's bubbles while the search runs. */
+type Progress = (text: string) => Promise<void> | void;
+
 /**
- * Finds the one best person to email after applying, in this order:
- * 1. someone from the student's school who works at the company,
- * 2. a recruiter there (the one named on the posting first, then campus recruiters),
- * 3. someone in the job's department.
- * Only someone with a verified email counts, so a group without one gives way to the next. Their LinkedIn
- * comes along when Apollo has it. Every person comes from Apollo or the posting itself. Nobody is invented.
- * Each search is recorded, so "no one found" says why.
+ * Lists up to LIST_SIZE people who work at the company, most relevant first: the person the posting names,
+ * people from the student's school, recruiters, then people on the job's team. Each gets an email built from
+ * the company's email format (or the one Apollo or Hunter already has for them) and their social links.
+ * Emails aren't checked yet: each says where it came from. Every person comes from the posting, Apollo or
+ * Hunter. Nobody is invented. Each search is recorded, so "no one found" says why.
  */
-export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string } = {}): Promise<{ people: FoundPerson[]; domain: string | null; notes: string[]; search: PeopleSearch }> {
+export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; progress?: Progress } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch }> {
   const school = (options.school ?? "").trim();
+  const say = async (text: string) => { await options.progress?.(text); };
+  await say(`Searching for ${app.company}'s website…`);
   const domains = await companyDomains(userId, app);
   const search: PeopleSearch = { at: nowIso(), company: app.company, domains, domain: null, school, steps: [], chosen: null };
   const team = departmentOf(app);
   const core = coreTitle(app.title);
-  let searches = 0;
   let failures: unknown = null;
 
-  /** One Apollo search; a failure is recorded and the next step runs anyway. */
+  /** One Apollo search (free); a failure is recorded and the next one runs anyway. */
   const look = async (step: string, domain: string, query: ApolloPeopleQuery) => {
-    searches += 1;
     try {
       const { people } = await searchPeopleQuery(userId, { ...query, q_organization_domains_list: [domain] }, 1, 10, { verifiedOnly: false });
       const kept = people.filter((person) => looksLikePerson(person.firstName, person.lastName, person.company || app.company));
@@ -315,159 +304,104 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
     }
   };
 
-  const ctx: SearchContext = { known: [], formats: new Map(), budget: { checks: MAX_CHECKS } };
-  // Someone whose address was guessed but couldn't be checked: used only if nobody verified turns up.
-  let likely: { person: FoundPerson; domain: string } | null = null;
-  const keep = (person: FoundPerson | null, domain: string) => {
-    if (person?.emailSource !== "likely") return person;
-    likely ??= { person, domain };
-    return null;
-  };
-  let chosen: FoundPerson | null = null;
+  let pool: Array<{ person: FoundPerson; source: Contact }> = [];
   let winner: string | null = null;
-  let poster: FoundPerson | null = null;
   for (const domain of domains) {
-    // 1. Someone from the student's school.
-    if (school) {
-      const alumni = await look(`From ${school}`, domain, { q_keywords: school });
-      chosen = keep(await best(userId, domain, alumni.map((person) => found(person, "alumni", `Apollo's profile for them mentions ${school}, and they work at ${app.company}${person.title ? ` as ${person.title}` : ""}.`)), alumni, ctx), domain);
-    }
-    // 2. A recruiter: the one the posting names first, when their email checks out.
-    if (!chosen && app.postedRecruiter) {
-      poster ??= await posterFor(userId, app, domain);
-      search.steps.push({ step: "Named on the posting", domain, found: poster.email ? 1 : 0 });
-      if (poster.email) chosen = poster;
-    }
-    if (!chosen) {
-      const recruiters = await look("Recruiters", domain, { person_titles: RECRUITER_TITLES });
-      chosen = keep(await best(userId, domain, recruiters.map((person) => found(person, "recruiter", recruiterWhy(app, person))), recruiters, ctx), domain);
-    }
-    // 3. Someone in the job's department.
-    if (!chosen) {
-      const titles = [...new Set([team, core].filter(Boolean))];
-      const teamPeople = titles.length ? await look(team ? `${team} department` : `${core} roles`, domain, { person_titles: titles }) : [];
-      chosen = keep(await best(userId, domain, teamPeople.map((person) => found(person, "team_member", `${person.title || "Works"} in ${team || "the same kind of role"} at ${app.company}, the team this job is in.`)), teamPeople, ctx), domain);
-    }
-    if (chosen) {
+    await say(`Searching for relevant people at ${app.company}…`);
+    const titles = [...new Set([team, core].filter(Boolean))];
+    const groups: Array<[ContactRole, Contact[], (person: Contact) => string]> = [
+      ["alumni", school ? await look(`From ${school}`, domain, { q_keywords: school }) : [], (person) => `From ${school}${person.title ? `, now ${person.title}` : ""}.`],
+      ["recruiter", await look("Recruiters", domain, { person_titles: RECRUITER_TITLES }), (person) => recruiterWhy(app, person)],
+      ["team_member", titles.length ? await look(team ? `${team} department` : `${core} roles`, domain, { person_titles: titles }) : [], (person) => `${person.title || "Works"} in ${team || "the same kind of role"}, the team this job is in.`],
+    ];
+    const seen = new Set<string>();
+    pool = groups.flatMap(([role, people, why]) => people.map((source) => ({ person: found(source, role, why(source)), source })))
+      .filter(({ source }) => (seen.has(source.id) ? false : (seen.add(source.id), true)));
+    if (pool.length) {
       winner = domain;
       break;
     }
   }
-  const fallback = likely as { person: FoundPerson; domain: string } | null;
-  if (!chosen && fallback) {
-    chosen = fallback.person;
-    winner = fallback.domain;
-  }
-
-  // Every search failed: say so, so the student can try again, instead of "no one found".
-  if (!chosen && searches > 0 && search.steps.every((step) => step.error)) {
+  if (!pool.length && domains.length && search.steps.length && search.steps.every((step) => step.error)) {
     throw failures instanceof ServiceError ? failures : new ServiceError("Couldn't look up people right now.", "provider_failed", 502);
   }
+
+  await say("Ranking people by how relevant they are to you…");
+  const top = pool.sort((a, b) => relevance(b.person) - relevance(a.person)).slice(0, LIST_SIZE - (app.postedRecruiter ? 1 : 0));
+  const domain = winner ?? domains[0] ?? null;
+
+  // Full names, LinkedIn and other links for the people shown (Apollo reveals them per person).
+  await say("Getting their names and profiles…");
+  const enriched = top.length ? await enrichPeopleBatch(top.map((item) => item.source), userId) : new Map();
+  const listed: Array<ListedPerson & { guess: string | null }> = top.map(({ person, source }) => {
+    const result = enriched.get(source.id);
+    const patch = result?.patch ?? {};
+    const links = [["LinkedIn", patch.profileUrl ?? source.profileUrl], ["X", patch.twitterUrl ?? source.twitterUrl], ["GitHub", patch.githubUrl ?? source.githubUrl], ["Facebook", patch.facebookUrl ?? source.facebookUrl]]
+      .filter((pair): pair is [string, string] => typeof pair[1] === "string" && /^https?:\/\//.test(pair[1]))
+      .map(([label, url]) => ({ label, url }));
+    const verified = result?.emailStatus === "verified" && result.email ? result.email : null;
+    return {
+      ...person,
+      name: patch.lastName ? `${source.firstName} ${patch.lastName}`.trim() : person.name,
+      photoUrl: patch.photoUrl ?? person.photoUrl,
+      linkedinUrl: patch.profileUrl ?? person.linkedinUrl,
+      email: verified,
+      emailSource: verified ? "apollo" as const : null,
+      links,
+      guess: result?.guess ?? null,
+    };
+  });
+  // The person the posting names goes first, as the posting gives them.
+  if (app.postedRecruiter) {
+    const named = app.postedRecruiter;
+    listed.unshift({
+      rank: 1, role: "job_poster", name: named.name, title: named.title ?? "", email: named.email, emailSource: named.email ? "job_posting" : null,
+      relevance: named.linkedinUrl ? "Shown under \"Meet the hiring team\" on this job." : "Named on the job posting.",
+      linkedinUrl: named.linkedinUrl ?? null, photoUrl: null, links: named.linkedinUrl ? [{ label: "LinkedIn", url: named.linkedinUrl }] : [], guess: null,
+    });
+  }
+
+  // Emails from the company's format, for everyone without one.
+  let format: EmailFormat | null = null;
+  if (domain && listed.some((person) => !person.email)) {
+    await say(`Searching for ${app.company}'s email format…`);
+    const known = listed.filter((person) => person.email).map((person) => ({ email: person.email!, name: person.name }));
+    format = await learnFormat(userId, domain, known, listed.map((person) => person.name)).catch(() => null);
+    await say("Writing out their emails…");
+    for (const person of listed) {
+      if (person.email || !fullName(person.name)) continue;
+      const hunter = format?.known.find((item) => item.name && plain(item.name) === plain(person.name))?.email;
+      const apollo = person.guess && patternOf(person.guess, person.name) ? person.guess : null;
+      const built = format?.pattern ? buildEmail(format.pattern, person.name, domain) : null;
+      const fallback = buildEmail("{first}.{last}", person.name, domain);
+      if (hunter) [person.email, person.emailSource] = [hunter, "hunter"];
+      else if (built) [person.email, person.emailSource] = [built, "likely"];
+      else if (apollo) [person.email, person.emailSource] = [apollo, "likely"];
+      else if (fallback) [person.email, person.emailSource] = [fallback, "guess"];
+    }
+  }
+
+  const people: ListedPerson[] = listed.map((person, index) => {
+    const { guess, ...rest } = person;
+    void guess;
+    return { ...rest, rank: index + 1 };
+  });
   // Only a search that turned people up proves the website: the posting's own name says nothing about it.
-  const proven = chosen && chosen.role !== "job_poster" ? winner : null;
+  const proven = top.length ? winner : null;
   search.domain = proven;
-  search.chosen = chosen ? { name: chosen.name, role: chosen.role, email: Boolean(chosen.email) } : null;
-  // Remember the website that found people, for this company on every student's search.
+  search.chosen = people[0] ? { name: people[0].name, role: people[0].role, email: Boolean(people[0].email) } : null;
   if (proven && proven !== app.companyDomain) await repo.setCompanyDomains(app.company, [proven]).catch(() => undefined);
 
   const notes: string[] = [];
-  const seen = search.steps.reduce((sum, step) => sum + step.found, 0);
-  if (!domains.length) notes.push(`Couldn't find ${app.company}'s website, so there was nowhere to look for people. Add it under the job and search again.`);
-  else if (!chosen && seen) notes.push(`Found ${seen} ${seen === 1 ? "person" : "people"} at ${app.company}, but none with a verified email yet.`);
-  else if (!chosen) notes.push(`Apollo found no one at ${app.company} (${domains.join(", ")})${school ? ` from ${school},` : ""} in recruiting, or in ${team || "this kind of role"}.`);
-  else if (chosen.emailSource === "likely") notes.push(`Couldn't confirm ${chosen.name}'s email, so it's ${app.company}'s usual format: likely right, not verified.`);
-  else if (chosen.role !== "alumni" && school) notes.push(`No one from ${school} with a verified email turned up at ${app.company}, so this is ${chosen.role === "team_member" ? `someone in ${team || "the team"}` : "a recruiter"}.`);
-  return { people: chosen ? [chosen] : [], domain: proven, notes, search };
+  if (!domains.length && !people.length) notes.push(`Couldn't find ${app.company}'s website, so there was nowhere to look for people. Add it under the job and search again.`);
+  else if (!people.length) notes.push(`Apollo found no one at ${app.company} (${domains.join(", ")})${school ? ` from ${school},` : ""} in recruiting, or in ${team || "this kind of role"}.`);
+  else if (people.some((person) => person.emailSource === "likely" || person.emailSource === "guess")) notes.push(format?.pattern ? `Emails follow ${app.company}'s usual format (${format.pattern.replace(/[{}]/g, "")}@${domain}). They aren't checked yet.` : `Couldn't learn ${app.company}'s email format, so emails are a best guess (first.last). They aren't checked yet.`);
+  return { people, domain: proven, notes, search };
 }
 
 function recruiterWhy(app: JobApplication, person: Contact) {
   const team = mainDepartment(app.department);
   return `${person.title || "Recruiter"} at ${app.company}${team ? `, which may include the ${team} team` : ""}.`;
-}
-
-/** The person the posting names, matched in Apollo for their title and email (one Apollo credit). */
-async function posterFor(userId: string, app: JobApplication, domain: string): Promise<FoundPerson> {
-  const named = app.postedRecruiter!;
-  const match = await apolloMatchByName(userId, named.name, domain, app.company);
-  const title = match?.title || named.title || "";
-  const poster: FoundPerson = {
-    rank: 1, role: "job_poster", name: named.name, title, email: match?.email ?? null, emailSource: match?.email ? "apollo" : null,
-    relevance: named.linkedinUrl ? `Shown under "Meet the hiring team" on the ${app.title} job${title ? `, as ${title}` : ""}.` : `Named on the ${app.title} posting${title ? ` as ${title}` : ""}.`, linkedinUrl: match?.linkedinUrl ?? named.linkedinUrl ?? null, photoUrl: match?.photoUrl ?? null,
-  };
-  if (!poster.email && named.email && (await hunterVerify(userId, named.email))) {
-    poster.email = named.email;
-    poster.emailSource = "job_posting";
-  }
-  return poster;
-}
-
-/** Campus and university recruiters before the rest: they hire students. */
-const CAMPUS = /\b(campus|university|college|early (career|talent)|emerging talent|intern)/i;
-
-/** What one search learns as it goes: addresses seen at the company, its email format, and checks left. */
-type SearchContext = { known: Array<{ email: string; name: string }>; formats: Map<string, EmailFormat>; budget: { checks: number } };
-
-/** Verifier checks one search may spend on guessed addresses (3¢ each). */
-const MAX_CHECKS = 6;
-
-/** A full name Unnepo can build an address from (Apollo hides last names until it enriches them: "Doe" vs "D."). */
-const fullName = (name: string) => /^\S{2,}( \S+)* [^\s*.]{2,}$/.test(name.trim()) && !name.includes("*");
-
-/**
- * The best of one group: its first few people are checked for a verified email (Apollo, then Hunter's
- * finder for the top one). Failing that, each one's address is guessed from the company's email format
- * and checked. A guess that couldn't be checked comes back marked "likely"; the caller prefers anyone
- * verified over it.
- */
-async function best(userId: string, domain: string, people: FoundPerson[], sources: Contact[], ctx: SearchContext): Promise<FoundPerson | null> {
-  if (!people.length) return null;
-  const order = people.map((person, index) => ({ person, source: sources[index], guess: null as string | null }))
-    .sort((a, b) => (a.person.role === "recruiter" ? Number(CAMPUS.test(b.person.title)) - Number(CAMPUS.test(a.person.title)) : 0))
-    .slice(0, CHECK_PER_GROUP);
-  const enriched = await enrichPeopleBatch(order.map((item) => item.source), userId);
-  for (const item of order) {
-    const result = enriched.get(item.source.id);
-    if (!result) continue;
-    // Photo, LinkedIn, and full last name are kept even when Apollo couldn't verify the email.
-    if (result.patch.lastName) item.person.name = `${item.source.firstName} ${result.patch.lastName}`.trim();
-    if (result.patch.photoUrl) item.person.photoUrl = result.patch.photoUrl;
-    if (result.patch.profileUrl) item.person.linkedinUrl = result.patch.profileUrl;
-    if (result.email && result.emailStatus === "verified" && isPersonalWorkEmail(result.email)) {
-      item.person.email = result.email;
-      item.person.emailSource = "apollo";
-      ctx.known.push({ email: result.email, name: item.person.name });
-    }
-    item.guess = result.guess ?? null;
-  }
-  const withEmail = order.find((item) => item.person.email);
-  if (withEmail) return withEmail.person;
-  // Hunter's finder for the top person.
-  const top = order[0].person;
-  if (hunterReady() && fullName(top.name)) {
-    const [first, ...rest] = top.name.split(" ");
-    const email = await hunterFindEmail(userId, first, rest.join(" "), domain).catch(() => null);
-    if (email) {
-      top.email = email;
-      top.emailSource = "hunter";
-      return top;
-    }
-  }
-  // Guess from the company's format and check each guess.
-  const named = order.filter((item) => fullName(item.person.name));
-  if (!named.length) return null;
-  let format = ctx.formats.get(domain);
-  if (!format) {
-    format = await learnFormat(userId, domain, ctx.known, named.map((item) => item.person.name)).catch(() => ({ pattern: null, acceptAll: false, source: "none", known: [] }));
-    ctx.formats.set(domain, format);
-  }
-  let likely: FoundPerson | null = null;
-  for (const item of named) {
-    const guess = await guessEmail(userId, item.person.name, domain, format, item.guess ? [item.guess] : [], ctx.budget).catch(() => null);
-    if (!guess) continue;
-    if (guess.verified) return { ...item.person, email: guess.email, emailSource: guess.source };
-    likely ??= { ...item.person, email: guess.email, emailSource: "likely" };
-  }
-  return likely;
 }
 
 export const OUTREACH_EMAIL_PROMPT = `You write short cold emails from a college student to people at a company where the student just applied.
