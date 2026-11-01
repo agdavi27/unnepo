@@ -501,7 +501,8 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     return;
   }
   let charged = alreadyPaid;
-  if (found.people.some((person) => person.email) && !charged) {
+  // A "likely" email couldn't be checked, so it's free.
+  if (found.people.some((person) => person.email && person.emailSource !== "likely") && !charged) {
     const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: paidKey, note: `A person at ${app.company.slice(0, 80)}`, entryType: "unlock_debit" });
     if (spent.insufficient) {
       await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds 1 person with a verified email." });

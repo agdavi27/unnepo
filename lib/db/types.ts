@@ -581,6 +581,8 @@ export type Database = {
   serverSecrets?: { apolloApiKey?: string; anthropicApiKey?: string };
   /** Company name (lowercase) to the domains Apollo knows it by, so each name is looked up once. */
   companyDomains?: Record<string, string[]>;
+  /** Company website to its email format ("{first}.{last}"), learned once and shared by every student. */
+  emailFormats?: Record<string, { pattern: string | null; acceptAll: boolean; source: string; at: string }>;
   /** V1 applications. Production keeps these in their own Supabase tables; local runs and tests keep them here. */
   jobApplications?: JobApplication[];
   applicationContacts?: ApplicationContact[];

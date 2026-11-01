@@ -153,7 +153,8 @@ export type ApplicationContact = {
   name: string;
   title: string;
   email: string | null;
-  emailSource: "apollo" | "hunter" | "job_posting" | null;
+  /** "pattern": built from the company's email format and verified; "website": found on its site and verified; "likely": built from the format but couldn't be checked. */
+  emailSource: "apollo" | "hunter" | "job_posting" | "pattern" | "website" | "likely" | null;
   relevance: string;
   linkedinUrl: string | null;
   photoUrl: string | null;

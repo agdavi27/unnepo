@@ -526,7 +526,7 @@ describe("people after applying", () => {
   type Search = { q_organization_domains_list: string[]; person_titles?: string[]; q_keywords?: string; contact_email_status?: string[] };
 
   /** A student who applied to Acme's Greenhouse job, and an Apollo that answers searches with `people`. */
-  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { verified?: string[]; poster?: boolean } = {}) {
+  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { verified?: string[]; poster?: boolean; hunterValid?: string[] } = {}) {
     process.env.APOLLO_API_KEY = "apollo";
     delete process.env.HUNTER_API_KEY;
     process.env.ANTHROPIC_API_KEY = "anthropic";
@@ -536,6 +536,7 @@ describe("people after applying", () => {
     model.replies.push("{}");
     const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
     if (options.poster === false) await applications.update(userId, application.id, { postedRecruiter: null });
+    if (options.hunterValid) process.env.HUNTER_API_KEY = "hunter";
     const searches: Search[] = [];
     setContactFetcher(async (input, init) => {
       const url = String(input);
@@ -546,6 +547,12 @@ describe("people after applying", () => {
         searches.push(search);
         const found = people(search);
         return found === "fail" ? new Response("busy", { status: 500 }) : Response.json({ people: found });
+      }
+      if (url.includes("api.hunter.io")) {
+        const asked = new URL(url);
+        if (asked.pathname.endsWith("/email-verifier")) return Response.json({ data: { status: options.hunterValid?.includes(asked.searchParams.get("email") ?? "") ? "valid" : "invalid" } });
+        if (asked.pathname.endsWith("/email-finder")) return Response.json({ data: { email: null } });
+        return Response.json({ data: { pattern: null, accept_all: false, emails: [] } });
       }
       if (url.includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
@@ -622,6 +629,12 @@ describe("people after applying", () => {
     const team = (search: Search) => (search.person_titles?.includes("Product") ? [person("t1", "Riley", "Chen", "Product Lead")] : search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []);
     const verified = await appliedWith(team, { poster: false, verified: ["t1"] });
     expect(verified.contacts.map((item) => [item.role, item.name, item.email, item.linkedinUrl])).toEqual([["team_member", "Riley Chen", "t1@acme.com", "https://linkedin.com/in/t1"]]);
+  });
+
+  it("guesses a recruiter's email from the company's format when Apollo has none verified, checks it, and charges for it", async () => {
+    const { userId, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "University Recruiter")] : []), { poster: false, hunterValid: ["akim@acme.com"] });
+    expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Avery Kim", "akim@acme.com", "pattern"]]);
+    expect((await repo.listLedger(userId)).filter((entry) => entry.entryType === "unlock_debit")).not.toHaveLength(0);
   });
 
   it("says when people turned up but none has a verified email, and shows no one", async () => {

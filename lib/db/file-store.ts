@@ -763,6 +763,15 @@ export const repo = {
       db.companyDomains[name.toLowerCase()] = domains;
     });
   },
+  async getEmailFormat(domain: string) {
+    return withLock((db) => db.emailFormats?.[domain.toLowerCase()] ?? null);
+  },
+  async setEmailFormat(domain: string, format: { pattern: string | null; acceptAll: boolean; source: string }) {
+    return withLock((db) => {
+      db.emailFormats ??= {};
+      db.emailFormats[domain.toLowerCase()] = { ...format, at: nowIso() };
+    });
+  },
   /** Removes contacts from one student's list. The shared contact record and ledger stay. */
   async deleteSaved(userId: string, contactIds: string[]) {
     return withLock((db) => {

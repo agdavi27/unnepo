@@ -31,6 +31,16 @@ const ROLE_LABEL: Record<ApplicationContact["role"], string> = {
   team_member: "Team",
 };
 
+/** Where each email came from, and whether it was checked. */
+const EMAIL_SOURCE: Record<NonNullable<ApplicationContact["emailSource"]>, string> = {
+  apollo: "Verified · via Apollo",
+  hunter: "Verified · via Hunter",
+  job_posting: "Verified · from the posting",
+  pattern: "Verified · built from the company's email format",
+  website: "Verified · from the company's website",
+  likely: "Likely, not verified · the company's usual format",
+};
+
 const OUTREACH: Array<[OutreachState, string]> = [["not_contacted", "Not contacted"], ["emailed", "Emailed"], ["replied", "Replied"], ["no_response", "No response"]];
 
 export const STAGE: Record<Stage, { label: string; color: string }> = {
@@ -500,7 +510,11 @@ function ContactsPanel({ app, onStatus, onRetry }: { app: App; onStatus: (contac
               {contact.email ? (
                 <button type="button" className="text-ink underline-offset-4 hover:underline" onClick={() => void copy(`${contact.id}:email`, contact.email!)}>{copied === `${contact.id}:email` ? "Copied ✓" : contact.email}</button>
               ) : <span className="text-muted">No verified email</span>}
-              {contact.emailSource && <span className="text-[11px] text-faint">via {contact.emailSource === "job_posting" ? "the posting, verified by Hunter" : contact.emailSource === "hunter" ? "Hunter" : "Apollo"}</span>}
+              {contact.emailSource && (
+                <span className={`text-[11px] ${contact.emailSource === "likely" ? "rounded-full border border-[#F5A524]/50 px-2 py-0.5 text-[#F5A524]" : "text-faint"}`}>
+                  {EMAIL_SOURCE[contact.emailSource]}
+                </span>
+              )}
               {contact.linkedinUrl && (
                 <a className="inline-flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-white/5" href={contact.linkedinUrl} target="_blank" rel="noreferrer" aria-label={`${contact.name} on LinkedIn`}>
                   <span aria-hidden className="flex h-4 w-4 items-center justify-center rounded-[3px] bg-[#0A66C2] text-[9px] font-bold text-white">in</span>

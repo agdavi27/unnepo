@@ -183,7 +183,8 @@ const APOLLO_BULK_SIZE = 10;
  * search, when Apollo errors or the daily spend limit is reached.
  */
 export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
-  const results = new Map<string, { email: string | null; emailStatus: Contact["emailStatus"]; patch: Partial<Contact> }>();
+  // `guess`: an address Apollo has but couldn't verify, worth checking another way.
+  const results = new Map<string, { email: string | null; emailStatus: Contact["emailStatus"]; patch: Partial<Contact>; guess?: string | null }>();
   const apolloKey = await readApolloKey();
   if (!apolloKey) return results;
   const perPerson = estimateRequestCost("enrich").cents;
@@ -220,7 +221,7 @@ export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
         const email = person && typeof person.email === "string" ? person.email : null;
         const verified = Boolean(email) && person?.email_status === "verified" && isPersonalWorkEmail(email ?? "");
         const patch = person ? personPatch(person, contact) : {};
-        results.set(contact.id, { email: verified ? email : null, emailStatus: verified ? "verified" : email ? "unverified" : "unavailable", patch });
+        results.set(contact.id, { email: verified ? email : null, emailStatus: verified ? "verified" : email ? "unverified" : "unavailable", patch, guess: !verified && email && isPersonalWorkEmail(email) ? email : null });
       });
       await recordUsage({ userId, provider: "apollo", operation: "enrich", success: true, latencyMs: Date.now() - started, costCents, estimated: true });
     } catch (error) {
