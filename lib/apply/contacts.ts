@@ -4,7 +4,7 @@ import type { Contact } from "@/lib/db/types";
 import { contactFetch } from "@/lib/providers/contacts/http";
 import { ServiceError } from "@/lib/errors";
 import { safeGet } from "@/lib/apply/safe-fetch";
-import { HUNTER_CENTS, buildEmail, hunterCheck, hunterReady, learnFormat, patternOf, type EmailFormat } from "@/lib/apply/email-guess";
+import { HUNTER_CENTS, buildEmail, hunterCheck, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, type EmailFormat } from "@/lib/apply/email-guess";
 import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, searchCompanies, searchPeopleQuery } from "@/lib/providers/contacts/router";
 import { COMPANY_DOMAINS, RECRUITER_TITLES, type ApolloPeopleQuery } from "@/lib/providers/contacts/apollo";
 import type { ApplicationContact, ContactRole, JobApplication, PeopleSearch } from "@/lib/apply/types";
@@ -332,7 +332,8 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
 
   // Full names, LinkedIn and other links for the people shown (Apollo reveals them per person).
   await say("Getting their names and profiles…");
-  const enriched = top.length ? await enrichPeopleBatch(top.map((item) => item.source), userId) : new Map();
+  const reveal: { error?: string } = {};
+  const enriched = top.length ? await enrichPeopleBatch(top.map((item) => item.source), userId, reveal) : new Map();
   const listed: Array<ListedPerson & { guess: string | null }> = top.map(({ person, source }) => {
     const result = enriched.get(source.id);
     const patch = result?.patch ?? {};
@@ -351,6 +352,27 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
       guess: result?.guess ?? null,
     };
   });
+  // Anyone Apollo didn't reveal still has a blurred last name ("Sm***h"): look for them among the people
+  // Hunter lists at the company, and otherwise show just the first name and initial, with no email.
+  let hunterKnown: Array<{ email: string; name: string }> = [];
+  const blurred = listed.filter((person) => person.name.includes("*"));
+  if (blurred.length && domain) {
+    hunterKnown = (await hunterDomain(userId, domain).catch(() => null))?.emails ?? [];
+    for (const person of blurred) {
+      const match = unblur(person.name, hunterKnown);
+      if (match) {
+        person.name = match.name;
+        person.email = match.email;
+        person.emailSource = "hunter";
+      } else {
+        person.name = person.name.replace(/\s(\S)\S*\*\S*$/, (_, initial: string) => ` ${initial.toUpperCase()}.`);
+        if (!person.linkedinUrl) person.links.push({ label: "Find on LinkedIn", url: `https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords: `${person.name.split(" ")[0]} ${app.company}` })}` });
+      }
+    }
+  }
+  const hidden = listed.filter((person) => / \S\.$/.test(person.name)).length;
+  search.steps.push({ step: "Full names", domain: domain ?? "", found: listed.length - hidden, ...(reveal.error ? { error: reveal.error.slice(0, 200) } : {}) });
+
   // The person the posting names goes first, as the posting gives them.
   if (app.postedRecruiter) {
     const named = app.postedRecruiter;
@@ -365,7 +387,7 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   let format: EmailFormat | null = null;
   if (domain && listed.some((person) => !person.email)) {
     await say(`Searching for ${app.company}'s email format…`);
-    const known = listed.filter((person) => person.email).map((person) => ({ email: person.email!, name: person.name }));
+    const known = [...listed.filter((person) => person.email).map((person) => ({ email: person.email!, name: person.name })), ...hunterKnown];
     format = await learnFormat(userId, domain, known, listed.map((person) => person.name)).catch(() => null);
     await say("Writing out their emails…");
     for (const person of listed) {
@@ -396,7 +418,20 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   if (!domains.length && !people.length) notes.push(`Couldn't find ${app.company}'s website, so there was nowhere to look for people. Add it under the job and search again.`);
   else if (!people.length) notes.push(`Apollo found no one at ${app.company} (${domains.join(", ")})${school ? ` from ${school},` : ""} in recruiting, or in ${team || "this kind of role"}.`);
   else if (people.some((person) => person.emailSource === "likely" || person.emailSource === "guess")) notes.push(format?.pattern ? `Emails follow ${app.company}'s usual format (${format.pattern.replace(/[{}]/g, "")}@${domain}). They aren't checked yet.` : `Couldn't learn ${app.company}'s email format, so emails are a best guess (first.last). They aren't checked yet.`);
+  if (hidden) notes.push(`Apollo didn't reveal ${hidden === 1 ? "1 person's last name" : `${hidden} people's last names`}, so they show by first name with no email. Find them on LinkedIn.${reveal.error ? ` Apollo said: ${reveal.error.replace(/^Apollo bulk match failed /, "").slice(0, 160)}` : ""}`);
   return { people, domain: proven, notes, search };
+}
+
+/** A blurred name ("Sam Le***e") matched to a real one Hunter lists at the company: same first name, and a last name that fits the letters shown. */
+export function unblur(name: string, known: Array<{ email: string; name: string }>) {
+  const [first, ...rest] = name.trim().split(/\s+/);
+  const blurred = rest.join(" ").toLowerCase();
+  const [start, end] = [blurred.split("*")[0].replace(/[^a-z]/g, ""), blurred.split("*").pop()!.replace(/[^a-z]/g, "")];
+  const matches = known.filter((item) => {
+    const parts = nameParts(item.name);
+    return parts.first === nameParts(first).first && parts.last.startsWith(start) && parts.last.endsWith(end) && parts.last.length > start.length + end.length;
+  });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function recruiterWhy(app: JobApplication, person: Contact) {

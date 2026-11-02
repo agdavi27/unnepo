@@ -13,7 +13,7 @@ import { companyFromUrl, extractJob, isJobSiteName } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { profileReady } from "@/lib/profile/service";
-import { EEO_OPTIONS, DECLINE } from "@/lib/profile/student";
+import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState } from "@/lib/apply/types";
 
 /** Background work runs after the response is sent. Tests run it inline. */
@@ -30,6 +30,7 @@ const OUTREACH_STATES: OutreachState[] = ["not_contacted", "emailed", "replied",
 
 /** Marks consent the student never changed: Settings shows it on, and turning it off saves null. */
 const CONSENT_BY_DEFAULT = "default";
+const US_STATE = /^(A[LKZR]|C[AOT]|DE|DC|FL|GA|HI|I[DLNA]|K[SY]|LA|M[EDAINSOT]|N[EVHJMYCD]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[TA]|W[AVIY]|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|District of Columbia|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)$/i;
 
 export async function student(userId: string) {
   const [user, document, resume, stored] = await Promise.all([repo.getUserById(userId), repo.getProfileDocument(userId), repo.getLatestResume(userId), applicationProfiles.get(userId)]);
@@ -53,7 +54,8 @@ export async function student(userId: string) {
     addressLine1: pick(stored?.addressLine1, fromParsed?.addressLine1),
     state: pick(stored?.state, fromParsed?.state),
     postalCode: pick(stored?.postalCode, fromParsed?.postalCode),
-    country: pick(stored?.country, fromParsed?.country, /^\d{5}(-\d{4})?$/.test(fromParsed?.postalCode ?? "") ? "United States" : ""),
+    // Resumes rarely say the country: a US ZIP code or state means the United States.
+    country: pick(stored?.country, fromParsed?.country, /^\d{5}(-\d{4})?$/.test(pick(stored?.postalCode, fromParsed?.postalCode)) || US_STATE.test(pick(stored?.state, fromParsed?.state)) ? "United States" : ""),
     resumeProfile: parsed,
     saved: stored?.saved ?? {},
     eligibility: stored?.eligibility ?? {},
@@ -78,6 +80,7 @@ export async function student(userId: string) {
     majors: school?.major ? splitProfileList(school.major) : splitProfileList(form?.major ?? ""),
     graduationYear: school?.gradDate?.match(/\b(19|20)\d{2}\b/)?.[0] || form?.graduationYear || "",
     resumeFileName: resume?.storagePath ? resume.fileName : null,
+    classYear: CLASS_YEARS.find(([value]) => value === classYearOf(school))?.[1] ?? "",
   };
   const profileText = (s
     ? [
@@ -417,7 +420,7 @@ export function runContext(userId: string, info: Awaited<ReturnType<typeof stude
     `First name: ${said(p.firstName)}`, `Last name: ${said(p.lastName)}`, `Email: ${said(p.email)}`, `Phone: ${said(p.phone)}`,
     `Street address: ${said(p.addressLine1)}`, `City: ${said(p.city)}`, `State: ${said(p.state)}`, `ZIP code: ${said(p.postalCode)}`, `Country: ${said(p.country)}`,
     `LinkedIn: ${said(p.linkedin)}`, `Website: ${said(p.website)}`, `GitHub: ${said(p.github)}`,
-    `School: ${said(info.context.school)}`, `Majors: ${said(info.context.majors.join(", "))}`, `Graduation year: ${said(info.context.graduationYear)}`,
+    `School: ${said(info.context.school)}`, `Majors: ${said(info.context.majors.join(", "))}`, `Graduation year: ${said(info.context.graduationYear)}`, `Class year: ${said(info.context.classYear)}`,
     `Authorized to work in the United States: ${said(p.eligibility?.workAuthorized)}`,
     `Will now or in the future need visa sponsorship: ${said(p.eligibility?.needsSponsorship)}`,
     `At least 18 years old: ${said(p.eligibility?.over18)}`,
@@ -514,22 +517,37 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     }
     charged = true;
   }
-  const rows = await applicationContacts.replace(userId, app.id, found.people.map((person) => ({ rank: person.rank, role: person.role, name: person.name, title: person.title, email: person.email, emailSource: person.emailSource, relevance: person.relevance, linkedinUrl: person.linkedinUrl, photoUrl: person.photoUrl, applicationId: app.id, userId, emailSubject: null, emailBody: null })));
+  await applicationContacts.replace(userId, app.id, found.people.map((person) => ({ rank: person.rank, role: person.role, name: person.name, title: person.title, email: person.email, emailSource: person.emailSource, relevance: person.relevance, linkedinUrl: person.linkedinUrl, photoUrl: person.photoUrl, applicationId: app.id, userId, emailSubject: null, emailBody: null })));
   const peopleLinks = Object.fromEntries(found.people.filter((person) => person.links.length).map((person) => [person.name.toLowerCase(), person.links]));
   // What each search found is kept with the application, so "no one found" can be traced.
   const latest = (await applications.get(userId, app.id)) ?? app;
   const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: rows.length ? "writing" : "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleSearch: found.search, peopleLinks, ...(charged ? { personCharged: true } : {}) } });
-  if (!rows.length) return;
-  try {
-    const emails = await writeOutreachEmails(userId, app, rows, { name: info.user.name, resumeText: info.resumeText, profile: info.profileText });
-    for (const [index, row] of rows.entries()) {
-      if (emails[index]?.body) await applicationContacts.update(userId, row.id, { emailSubject: emails[index].subject, emailBody: emails[index].body });
-    }
-    await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: found.notes.join(" ") });
-  } catch (error) {
-    await applications.update(userId, app.id, { contactsStatus: "failed", contactsMessage: `Found ${rows.length} people, but the emails couldn't be written. ${error instanceof Error ? error.message : ""} Try again.`.trim() });
+  // Emails are written only when the student asks, one person at a time.
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleSearch: found.search, peopleLinks, ...(charged ? { personCharged: true } : {}) } });
+}
+
+/**
+ * One person's email: written by AI when the student presses "Write email", or the student's own edits to it
+ * (`subject` and `body`), saved as typed.
+ */
+export async function writeContactEmail(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; contactId?: unknown; subject?: unknown; body?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  const contact = (await applicationContacts.list(userId, [app.id])).find((row) => row.id === String(body.contactId ?? ""));
+  if (!contact) throw new ServiceError("That contact wasn't found.", "not_found", 404);
+  if (typeof body.body === "string") {
+    const text = body.body.replace(/\r\n/g, "\n").trim().slice(0, 4000);
+    if (!text) throw new ServiceError("The email is empty.", "body", 400);
+    const row = await applicationContacts.update(userId, contact.id, { emailSubject: String(body.subject ?? contact.emailSubject ?? "").trim().slice(0, 200), emailBody: text });
+    return { contact: row };
   }
+  const info = await student(userId);
+  const [email] = await writeOutreachEmails(userId, app, [contact], { name: info.user.name, resumeText: info.resumeText, profile: info.profileText }).catch((error: unknown) => {
+    throw new ServiceError(`The email couldn't be written. ${error instanceof Error ? error.message : ""}`.trim(), "write_failed", 502);
+  });
+  if (!email?.body) throw new ServiceError("The email couldn't be written. Try again.", "write_failed", 502);
+  const row = await applicationContacts.update(userId, contact.id, { emailSubject: email.subject, emailBody: email.body });
+  return { contact: row };
 }
 
 /** "Find me the best person to connect with": starts the search, marked running right away so the page shows it. */

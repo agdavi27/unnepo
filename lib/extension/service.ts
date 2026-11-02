@@ -347,7 +347,7 @@ export async function extensionLearn(userId: string, raw: unknown) {
 
 /** A cover letter for this job, as text and as a PDF to upload. Written once per job. */
 export async function extensionCoverLetter(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown };
   // No job on the page: the student pasted the job description instead. Nothing is opened in the tracker.
   const pasted = !body.applicationId && typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
   if (!body.applicationId && pasted.length < 80) throw new ServiceError("Paste the whole job description (at least a few sentences).", "description", 400);
@@ -366,7 +366,10 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   // The student's choices (or edits) always mean a new letter; otherwise the one already written is reused.
   const asked = Boolean(style.length || style.tone || style.mention?.trim() || style.edit?.trim());
   const job = app ?? { title: "", company: "", department: null, description: pasted, requirements: [] };
-  const text = (!asked && app?.fillReport?.coverLetter) || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText }, style));
+  // The student edited the letter themselves: their text, as typed, with no AI.
+  const own = typeof body.text === "string" ? body.text.replace(/\r\n/g, "\n").trim().slice(0, 6000) : "";
+  if (typeof body.text === "string" && !own) throw new ServiceError("The cover letter is empty.", "text", 400);
+  const text = own || (!asked && app?.fillReport?.coverLetter) || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText }, style));
   if (!text) throw new ServiceError("Couldn't write a cover letter. Add your resume and profile first.", "cover_letter", 409);
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
   if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });

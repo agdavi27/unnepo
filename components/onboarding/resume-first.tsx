@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useState } from "react";
-import { EEO_OPTIONS, type Education, type Experience, type GapId, type Project, type StudentProfile } from "@/lib/profile/student";
+import { CLASS_YEARS, EEO_OPTIONS, classYearOf, type Education, type Experience, type GapId, type Project, type StudentProfile } from "@/lib/profile/student";
 
 /**
  * Resume-first onboarding: upload a resume, confirm what Unnepo read, then answer only what's missing,
@@ -163,6 +163,7 @@ function Sections({ profile, set }: { profile: StudentProfile; set: (next: Stude
             <Text title="Minor (optional)" value={item.minor} onChange={(value) => updateList("education", i, { minor: value })} tag={tag(`education.${i}.minor`)} />
             <Text title="Graduation (month and year)" value={item.gradDate} onChange={(value) => updateList("education", i, { gradDate: value })} placeholder="e.g. May 2027" tag={tag(`education.${i}.gradDate`)} />
             <Text title="GPA (optional)" value={item.gpa} onChange={(value) => updateList("education", i, { gpa: value })} tag={tag(`education.${i}.gpa`)} />
+            {i === 0 && <div className="sm:col-span-2"><Choice title="Year in school" value={classYearOf(item) ?? undefined} options={CLASS_YEARS} onChange={(value) => updateList("education", i, { classYear: value })} /></div>}
             <button type="button" className="justify-self-start text-xs text-[#8B8B94] hover:text-red-300" onClick={() => removeAt("education", i)}>Remove</button>
           </div>
         ))}
@@ -226,6 +227,7 @@ function GapFields({ id, profile, set }: { id: GapId; profile: StudentProfile; s
           {!school.school.trim() && <div className="sm:col-span-2"><Text title="School" value={school.school} onChange={(value) => setSchool({ school: value })} /></div>}
           <Text title="Graduation (month and year)" value={school.gradDate} onChange={(value) => setSchool({ gradDate: value })} placeholder="e.g. May 2027" />
           <Text title="GPA (optional)" value={school.gpa} onChange={(value) => setSchool({ gpa: value })} placeholder="e.g. 3.6" />
+          <div className="sm:col-span-2"><Choice title="Year in school" value={classYearOf(school) ?? undefined} options={CLASS_YEARS} onChange={(value) => setSchool({ classYear: value })} /></div>
         </div>
       );
     case "contact":

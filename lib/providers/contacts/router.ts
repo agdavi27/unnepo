@@ -182,7 +182,7 @@ const APOLLO_BULK_SIZE = 10;
  * Looks up work emails for people a search just returned. Stops early, without failing the
  * search, when Apollo errors or the daily spend limit is reached.
  */
-export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
+export async function enrichPeopleBatch(contacts: Contact[], userId: string, report: { error?: string } = {}) {
   // `guess`: an address Apollo has but couldn't verify, worth checking another way.
   const results = new Map<string, { email: string | null; emailStatus: Contact["emailStatus"]; patch: Partial<Contact>; guess?: string | null }>();
   const apolloKey = await readApolloKey();
@@ -194,7 +194,8 @@ export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
     const costCents = perPerson * batch.length;
     try {
       await assertSpendAllowed(userId, costCents);
-    } catch {
+    } catch (error) {
+      report.error = error instanceof Error ? error.message : "spend_limit";
       break;
     }
     const started = Date.now();
@@ -203,17 +204,27 @@ export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-api-key": apolloKey },
         body: JSON.stringify({
+          // Search gives the last name blurred ("Sm***h"); sending that would only stop Apollo matching the person.
           details: batch.map((contact) => ({
             id: contact.externalId,
             first_name: contact.firstName,
-            last_name: contact.lastName,
+            ...(contact.lastName && !contact.lastName.includes("*") ? { last_name: contact.lastName } : {}),
             organization_name: contact.company,
             domain: contact.companyDomain,
           })),
           reveal_personal_emails: false,
         }),
       });
-      if (!response.ok) throw new Error(`Apollo bulk match failed (${response.status})`);
+      if (!response.ok) {
+        const text = await response.text().catch(() => "");
+        let said = text;
+        try {
+          said = String((JSON.parse(text) as { error?: unknown; message?: unknown }).error ?? (JSON.parse(text) as { message?: unknown }).message ?? text);
+        } catch {
+          // Not JSON: Apollo's text as it came.
+        }
+        throw new Error(`Apollo bulk match failed (${response.status}): ${said.slice(0, 160)}`);
+      }
       const body = (await response.json()) as { matches?: Array<Record<string, unknown> | null> };
       const matches = body.matches ?? [];
       batch.forEach((contact, index) => {
@@ -235,6 +246,7 @@ export async function enrichPeopleBatch(contacts: Contact[], userId: string) {
         estimated: true,
         error: error instanceof Error ? error.message : "bulk_enrich_failed",
       });
+      report.error = error instanceof Error ? error.message : "bulk_enrich_failed";
       break;
     }
   }

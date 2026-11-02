@@ -3,7 +3,24 @@
  * autofill mapping sends to the model, what the extension fills forms from, and what job recommendations
  * score against. Stored inside application_profiles.data (the `student` key).
  */
-export type Education = { school: string; degree: string; major: string; minor?: string; gpa?: string; startDate?: string; gradDate: string; coursework?: string[] };
+export type Education = { school: string; degree: string; major: string; minor?: string; gpa?: string; startDate?: string; gradDate: string; coursework?: string[]; classYear?: ClassYear };
+export type ClassYear = "freshman" | "sophomore" | "junior" | "senior" | "graduate";
+
+export const CLASS_YEARS: Array<[ClassYear, string]> = [["freshman", "Freshman"], ["sophomore", "Sophomore"], ["junior", "Junior"], ["senior", "Senior"], ["graduate", "Graduate student"]];
+
+/**
+ * The student's year in school: the one they picked, or else counted from their graduation date. A school
+ * year runs August to July, so a May 2027 graduate is a junior in the fall of 2025 and a senior that August.
+ */
+export function classYearOf(school: Pick<Education, "gradDate" | "classYear"> | undefined, now = new Date()): ClassYear | null {
+  if (!school) return null;
+  if (school.classYear) return school.classYear;
+  const year = Number(school.gradDate?.match(/\b(19|20)\d{2}\b/)?.[0]);
+  if (!year) return null;
+  const left = year - (now.getMonth() >= 7 ? now.getFullYear() + 1 : now.getFullYear());
+  if (left < 0) return null;
+  return left === 0 ? "senior" : left === 1 ? "junior" : left === 2 ? "sophomore" : "freshman";
+}
 export type Experience = { company: string; title: string; location?: string; startDate: string; endDate?: string; current: boolean; bullets: string[] };
 export type Project = { name: string; role?: string; url?: string; bullets: string[]; tech?: string[] };
 export type YesNo = boolean | null;
@@ -151,6 +168,7 @@ export function cleanStudentProfile(raw: unknown, base: StudentProfile): Student
     education: entries(r.education, base.education, (item) => ({
       school: text(item.school, 160), degree: text(item.degree, 120), major: text(item.major, 120), minor: text(item.minor, 120) || undefined, gpa: text(item.gpa, 10) || undefined,
       startDate: text(item.startDate, 40) || undefined, gradDate: text(item.gradDate, 40), coursework: list(item.coursework, 20),
+      classYear: CLASS_YEARS.some(([value]) => value === item.classYear) ? (item.classYear as ClassYear) : undefined,
     }), (item) => Boolean(item.school || item.degree || item.major)),
     experience: entries(r.experience, base.experience, (item) => ({
       company: text(item.company, 160), title: text(item.title, 160), location: text(item.location, 120) || undefined, startDate: text(item.startDate, 40), endDate: text(item.endDate, 40) || undefined,

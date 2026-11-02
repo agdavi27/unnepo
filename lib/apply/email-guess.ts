@@ -148,7 +148,7 @@ export async function hunterCheck(userId: string, email: string): Promise<CheckS
 type HunterDomain = { pattern: string | null; acceptAll: boolean; emails: Array<{ email: string; name: string }> };
 
 /** Hunter's domain search: the company's format, whether it accepts every address, and people it knows there. */
-async function hunterDomain(userId: string, domain: string): Promise<HunterDomain | null> {
+export async function hunterDomain(userId: string, domain: string): Promise<HunterDomain | null> {
   const key = hunterKey();
   if (!key) return null;
   await assertSpendAllowed(userId, HUNTER_CENTS);

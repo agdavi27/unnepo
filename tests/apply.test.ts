@@ -8,14 +8,15 @@ import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJ
 import { acceptAiAnswer, classifyQuestion, headlineAnswer, missingAnswers, planAnswers, policyAnswer, RECRUITER_NOTE, toolExperienceAnswer } from "@/lib/apply/questions";
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
 import { companyNames, coreTitle, departmentOf, domainFits, guessedDomains, postingDomains, siteDomain, swapAnd } from "@/lib/apply/contacts";
-import { pagePoster } from "@/lib/extension/service";
+import { extensionCoverLetter, pagePoster } from "@/lib/extension/service";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { acceptFixes } from "@/lib/apply/fast/fields";
 import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import { supportedBy } from "@/lib/apply/questions";
 import { bestOption } from "@/lib/apply/options";
 import { checkSchool } from "@/lib/school-plans";
-import { applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers } from "@/lib/apply/service";
+import { classYearOf } from "@/lib/profile/student";
+import { applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, writeContactEmail } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -526,7 +527,7 @@ describe("people after applying", () => {
   type Search = { q_organization_domains_list: string[]; person_titles?: string[]; q_keywords?: string; contact_email_status?: string[] };
 
   /** A student who applied to Acme's Greenhouse job, and an Apollo that answers searches with `people`. */
-  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }> } = {}) {
+  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }>; revealFails?: boolean; hunterEmails?: Array<{ value: string; first_name: string; last_name: string }> } = {}) {
     process.env.APOLLO_API_KEY = "apollo";
     delete process.env.HUNTER_API_KEY;
     process.env.ANTHROPIC_API_KEY = "anthropic";
@@ -536,7 +537,7 @@ describe("people after applying", () => {
     model.replies.push("{}");
     const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
     if (options.poster === false) await applications.update(userId, application.id, { postedRecruiter: null });
-    if (options.hunterValid) process.env.HUNTER_API_KEY = "hunter";
+    if (options.hunterValid || options.hunterEmails) process.env.HUNTER_API_KEY = "hunter";
     const searches: Search[] = [];
     setContactFetcher(async (input, init) => {
       const url = String(input);
@@ -552,15 +553,15 @@ describe("people after applying", () => {
         const asked = new URL(url);
         if (asked.pathname.endsWith("/email-verifier")) return Response.json({ data: { status: options.hunterValid?.includes(asked.searchParams.get("email") ?? "") ? "valid" : "invalid" } });
         if (asked.pathname.endsWith("/email-finder")) return Response.json({ data: { email: null } });
-        return Response.json({ data: { pattern: null, accept_all: false, emails: [] } });
+        return Response.json({ data: { pattern: null, accept_all: false, emails: options.hunterEmails ?? [] } });
       }
+      if (url.includes("bulk_match") && options.revealFails) return Response.json({ error: "api/v1/people/bulk_match is not accessible with this api_key on a free plan." }, { status: 403 });
       if (url.includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
         return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@acme.com`, email_status: options.verified?.includes(item.id) ? "verified" : "guessed", photo_url: `https://img.example.com/${item.id}.jpg`, ...(options.twitter?.includes(item.id) ? { twitter_url: `https://x.com/${item.id}` } : {}) })) });
       }
       return new Response("unexpected", { status: 500 });
     });
-    model.replies.push(JSON.stringify({ emails: [{ index: 1, subject: "Hello", body: "Hi, I applied to the Product Analyst Intern role." }] }));
     await markApplied(userId, { applicationId: application.id });
     await runContactDiscovery(userId, application.id);
     return { userId, application: (await applications.get(userId, application.id))!, contacts: await applicationContacts.list(userId, [application.id]), searches };
@@ -569,7 +570,7 @@ describe("people after applying", () => {
   it("lists up to 5 people, most relevant first, on the company's real website, with emails in the company's format", async () => {
     // An old wrong match for Acme is tried first and turns up no one; it's replaced by the site that does.
     await repo.setCompanyDomains("Acme Corp", ["acme.org"]);
-    const { application, contacts, searches } = await appliedWith((search) => {
+    const { userId, application, contacts, searches } = await appliedWith((search) => {
       if (search.q_organization_domains_list[0] !== "acme.com") return [];
       if (search.q_keywords === "Colby College") return [person("a1", "Casey", "Park", "Product Manager")];
       if (search.person_titles?.includes("recruiter")) return [person("r1", "Avery", "Kim", "Senior Recruiter"), person("r2", "Sam", "Lee", "University Recruiter"), person("c1", "Pat", "Doe", "Chief People Officer")];
@@ -585,7 +586,13 @@ describe("people after applying", () => {
     ]);
     expect(contacts[1].relevance).toContain("Colby College");
     expect(contacts[1].linkedinUrl).toBe("https://linkedin.com/in/a1");
-    expect(contacts[0].emailBody).toContain("Product Analyst Intern");
+    // No email is written until the student asks, then just that person's, which they can edit.
+    expect(contacts.every((item) => item.emailBody === null)).toBe(true);
+    model.replies.push(JSON.stringify({ emails: [{ index: 1, subject: "Hello", body: "Hi Jordan, I applied to the Product Analyst Intern role." }] }));
+    const written = await writeContactEmail(userId, { applicationId: application.id, contactId: contacts[0].id });
+    expect(written.contact?.emailBody).toContain("Product Analyst Intern");
+    const edited = await writeContactEmail(userId, { applicationId: application.id, contactId: contacts[0].id, subject: "Hi", body: "My own words." });
+    expect(edited.contact).toMatchObject({ emailSubject: "Hi", emailBody: "My own words." });
     // The format came from the posting's own recruiter's address, and is kept for every student.
     expect(application.contactsMessage).toContain("usual format (first.last@acme.com)");
     expect((await repo.getEmailFormat("acme.com"))?.pattern).toBe("{first}.{last}");
@@ -603,6 +610,20 @@ describe("people after applying", () => {
     expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Avery Kim", "avery.kim@acme.com", "guess"]]);
     expect(application.contactsMessage).toContain("best guess");
     expect(application.fillReport?.peopleLinks?.["avery kim"]).toEqual([{ label: "LinkedIn", url: "https://linkedin.com/in/r1" }, { label: "X", url: "https://x.com/r1" }]);
+  });
+
+  it("shows blurred last names as an initial with no email, unless Hunter knows the person, and says why", async () => {
+    const blurred = (id: string, first: string, hidden: string, title: string) => ({ ...person(id, first, "", title), last_name_obfuscated: hidden });
+    const { application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [blurred("r1", "Avery", "Ki***l", "Recruiter"), blurred("r2", "Sam", "Le***e", "Recruiter")] : []), {
+      poster: false, revealFails: true, hunterEmails: [{ value: "avery.kimball@acme.com", first_name: "Avery", last_name: "Kimball" }],
+    });
+    expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([
+      ["Avery Kimball", "avery.kimball@acme.com", "hunter"],
+      ["Sam L.", null, null],
+    ]);
+    expect(application.contactsMessage).toBe("Apollo didn't reveal 1 person's last name, so they show by first name with no email. Find them on LinkedIn. Apollo said: (403): api/v1/people/bulk_match is not accessible with this api_key on a free plan.");
+    expect(application.fillReport?.peopleSearch?.steps.at(-1)).toMatchObject({ step: "Full names", found: 1, error: expect.stringContaining("free plan") });
+    expect(application.fillReport?.peopleLinks?.["sam l."]?.[0]?.label).toBe("LinkedIn");
   });
 
   it("spends 1 credit for a job's list, not again on a new search, and looks no one up without credits", async () => {
@@ -711,6 +732,55 @@ describe("questions from the latest round", () => {
     expect(classifyQuestion("Country").field).toBe("country");
     const [planned] = planAnswers([q("code", "Phone Country Code", "select", ["Canada (+1)", "United States of America (+1)"])], context);
     expect(planned.answer).toBe("United States of America (+1)");
+  });
+});
+
+describe("questions autofill used to miss", () => {
+  const chosen = { eeo: { gender: "decline", race: "white", hispanicLatino: "no", veteran: "decline", disability: "decline" }, standardAnswers: { salaryExpectation: "$22/hour" } } as unknown as ApplicationProfile["student"];
+  const withStudent = { ...context, profile: { ...profile, country: "United States", student: chosen }, classYear: "Junior" };
+  const answer = (label: string, kind: ApplicationQuestion["kind"] = "text", options: string[] = []) => planAnswers([q("x", label, kind, options)], withStudent)[0].answer;
+
+  it("answers Hispanic or Latino in the form's words, even under an Ethnicity label", () => {
+    expect(answer("Are you Hispanic/Latino?", "select", ["Hispanic or Latino", "Not Hispanic or Latino", "Decline to self-identify"])).toBe("Not Hispanic or Latino");
+    expect(answer("Ethnicity", "select", ["Hispanic or Latino", "Not Hispanic or Latino", "I don't wish to answer"])).toBe("Not Hispanic or Latino");
+    expect(answer("Are you Hispanic or Latino?", "select", ["Yes", "No", "Decline"])).toBe("No");
+  });
+
+  it("uses the student's own salary answer however the question is worded, and never invents one", () => {
+    expect(answer("Annual Salary Expectations:*")).toBe("$22/hour");
+    expect(answer("What is your desired pay?")).toBe("$22/hour");
+    expect(planAnswers([q("x", "Annual Salary Expectations", "text", [])], context)[0]).toMatchObject({ answer: null, sensitive: true });
+  });
+
+  it("fills the country however it's asked, but never citizenship", () => {
+    expect(answer("Country*", "select", ["Canada", "United States of America"])).toBe("United States of America");
+    expect(answer("Which country do you currently reside in?", "select", ["Canada", "United States of America"])).toBe("United States of America");
+    expect(answer("Country of residence")).toBe("United States");
+    expect(answer("Country of citizenship")).toBeNull();
+  });
+
+  it("answers the year in school, in the form's own words", () => {
+    expect(classifyQuestion("What year are you in school?").field).toBe("classYear");
+    expect(answer("What year are you in school?", "select", ["Freshman", "Sophomore", "Junior", "Senior"])).toBe("Junior");
+    expect(answer("Current year of study", "select", ["1st year", "2nd year", "3rd year", "4th year"])).toBe("3rd year");
+    expect(classYearOf({ gradDate: "May 2027" }, new Date("2025-10-01"))).toBe("junior");
+    expect(classYearOf({ gradDate: "May 2027" }, new Date("2026-09-01"))).toBe("senior");
+    expect(classYearOf({ gradDate: "May 2027", classYear: "graduate" })).toBe("graduate");
+  });
+});
+
+describe("editing the cover letter", () => {
+  it("keeps the student's own edits as typed, with no AI, and attaches that version", async () => {
+    const userId = await student();
+    model.replies.push("{}");
+    const { application } = await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
+    const asked = model.replies.length;
+    const saved = await extensionCoverLetter(userId, { applicationId: application.id, text: "Dear Acme,\r\n\r\nI fixed this line myself.  " });
+    expect(saved.text).toBe("Dear Acme,\n\nI fixed this line myself.");
+    expect(saved.pdfBase64.length).toBeGreaterThan(100);
+    expect(model.replies.length).toBe(asked);
+    expect((await applications.get(userId, application.id))?.fillReport?.coverLetter).toBe("Dear Acme,\n\nI fixed this line myself.");
+    await expect(extensionCoverLetter(userId, { applicationId: application.id, text: "  " })).rejects.toThrow(/empty/);
   });
 });
 

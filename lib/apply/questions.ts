@@ -7,7 +7,7 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "phoneCountry";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "phoneCountry" | "classYear";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
@@ -22,6 +22,8 @@ const STANDARD: Array<[RegExp, StandardField]> = [
   // "Phone Country Code" is a dropdown of countries with dialing codes ("United States of America (+1)").
   [/^(phone )?country (phone )?(dialing )?code$|^phone country( code)?$|^country code$|^(phone|dialing) code$/i, "phoneCountry"],
   [/^(country|country\/territory|country\/region)$/i, "country"],
+  // "Which country do you currently reside in?", "Country of residence". Never citizenship, which stays the student's.
+  [/^(?!.*citizen)((which|what) country\b.*\b(reside|live|located|based|residence|currently in)\b|country (of|where you) (residence|reside|live|currently reside)|(current )?country of residence|residence country|home country)/i, "country"],
   // Workday asks what kind of phone the number is before the number itself.
   [/\b(phone|device) (device )?type\b|type of (phone|device)|phone number type/i, "phoneType"],
   [/\b(phone )?extension\b|^ext\.?$/i, "phoneExtension"],
@@ -31,6 +33,8 @@ const STANDARD: Array<[RegExp, StandardField]> = [
   [/github/i, "github"],
   [/\b(website|portfolio|personal site|blog)\b/i, "website"],
   [/^(current )?(city|location)\b|where are you (currently )?(based|located)/i, "city"],
+  // "What year are you in school?", "Class standing", "Current year of study". Before school, which these mention.
+  [/\b(class (year|standing|level|status)|academic (year|standing|level|class)|year (in|of) (school|college|university|study|studies)|current (academic |school )?year|what year are you|grade level|(student|enrollment) (level|year|standing))\b/i, "classYear"],
   [/\b(school|university|college|institution)\b(?!.*(year|date|gpa))/i, "school"],
   [/\b(major|discipline|field of study|area of study|concentration)\b/i, "major"],
   [/\b(graduation|grad) (year|date)\b|expected graduation|when do you graduate/i, "graduationYear"],
@@ -39,7 +43,8 @@ const STANDARD: Array<[RegExp, StandardField]> = [
 ];
 
 export function classifyQuestion(label: string): { sensitive: boolean; field: StandardField | null } {
-  const text = label.trim();
+  // "Country*" and "Country:" are the same question as "Country".
+  const text = label.trim().replace(/[\s*:]+$/, "").trim();
   const field = STANDARD.find(([pattern]) => pattern.test(text))?.[1] ?? null;
   // A plain contact field is never sensitive, even when the label mentions "legal".
   const sensitive = field && field !== "city" ? false : SENSITIVE.test(text);
@@ -65,6 +70,8 @@ export type AnswerContext = {
   majors: string[];
   graduationYear: string;
   resumeFileName: string | null;
+  /** "Junior": picked in the profile or counted from the graduation date. */
+  classYear?: string;
 };
 
 /**
@@ -105,6 +112,7 @@ function standardAnswer(field: StandardField, context: AnswerContext): { answer:
     case "school": return pick(context.school);
     case "major": return pick(context.majors[0] ?? "");
     case "graduationYear": return pick(context.graduationYear);
+    case "classYear": return pick(context.classYear ?? "");
     case "resume": return context.resumeFileName ? { answer: context.resumeFileName, source: "resume_file" } : null;
     case "coverLetter": return null;
     // A student's application number is their own cell; they can change it in the live view.
@@ -127,18 +135,37 @@ const EEO_WORDS: Record<string, string[]> = {
   yes: ["Yes"], no: ["No"], not_protected: ["I am not a protected veteran", "Not a protected veteran"], protected: ["I identify as one or more of the classifications of a protected veteran", "Protected veteran"],
 };
 
+const HISPANIC = /hispanic|latin[oax]/i;
+const NOT_HISPANIC = /\b(not|non)[\s-]+(hispanic|latin)|^no\b.*(hispanic|latin)/i;
+
 function selfIdentified(label: string, options: string[], profile: ApplicationProfile) {
   const eeo = profile.student?.eeo;
   if (!eeo) return null;
-  const key = /veteran/i.test(label) ? "veteran" : /disabilit/i.test(label) ? "disability" : /hispanic|latin/i.test(label) ? "hispanicLatino" : /race|ethnic/i.test(label) ? "race" : /gender|\bsex\b/i.test(label) ? "gender" : null;
+  // "Ethnicity" with "Hispanic or Latino" and "Not Hispanic or Latino" is the Hispanic or Latino question, whatever its label.
+  const hispanicChoice = options.some((option) => HISPANIC.test(option) && !NOT_HISPANIC.test(option)) && options.some((option) => NOT_HISPANIC.test(option));
+  const key = /veteran/i.test(label) ? "veteran" : /disabilit/i.test(label) ? "disability" : /hispanic|latin/i.test(label) || hispanicChoice ? "hispanicLatino" : /race|ethnic/i.test(label) ? "race" : /gender|\bsex\b/i.test(label) ? "gender" : null;
   const value = key ? eeo[key as keyof typeof eeo] : "";
   if (!value || value === "decline") return null;
   if (key === "disability") return options.find((option) => (value === "yes" ? /^yes/i : /^no/i).test(option)) ?? null;
+  if (key === "hispanicLatino") {
+    const yes = value === "yes";
+    return options.find((option) => (yes ? HISPANIC.test(option) && !NOT_HISPANIC.test(option) : NOT_HISPANIC.test(option)))
+      ?? options.find((option) => (yes ? /^yes\b/i : /^no\b/i).test(option)) ?? null;
+  }
   for (const word of EEO_WORDS[value] ?? []) {
     const match = bestOption(word, options);
     if (match) return match;
   }
   return null;
+}
+
+const SALARY = /\b(salary|compensation|pay|wage|hourly rate|rate of pay)\b.*\b(expect\w*|requirements?|desired|range|looking for|target)\b|\b(expected|desired|target|requested)\b.*\b(salary|compensation|pay|wage|rate)\b|^(annual |base |desired |expected )?(salary|compensation)( expectations?)?$/i;
+
+/** The pay the student said they're after, from Common questions or a salary question they answered before. */
+export function salaryAnswer(profile: ApplicationProfile) {
+  const own = profile.student?.standardAnswers?.salaryExpectation?.trim();
+  if (own) return own;
+  return Object.values(profile.saved ?? {}).find((item) => SALARY.test(item.label) && item.answer.trim())?.answer.trim() ?? null;
 }
 
 /** Eligibility questions answered from what the student set once in their details. Nothing here is guessed. */
@@ -157,6 +184,8 @@ export function eligibilityAnswer(label: string, profile: ApplicationProfile) {
 /** Other names sites use for the same answer. */
 const SAME_ANSWER: Record<string, string[]> = {
   mobile: ["Cell", "Cell Phone", "Mobile Phone", "Cellular", "Personal Mobile"],
+  freshman: ["First year", "1st year", "Year 1", "First-year"], sophomore: ["Second year", "2nd year", "Year 2"], junior: ["Third year", "3rd year", "Year 3"], senior: ["Fourth year", "4th year", "Year 4"],
+  "graduate student": ["Graduate", "Masters", "Master's student", "Graduate Student"],
   "company website": ["Company Careers Site", "Company Career Site", "Careers Site", "Career Site", "Careers Page", "Career Website", "Corporate Website", "Website", "Company Web Site", "Job Board", "Online Job Board", "Internet", "Online", "Other"],
 };
 
@@ -280,6 +309,12 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
       if (chosen) return { ...question, answer: chosen, source: "student", evidence: null };
       const decline = question.options.find((option) => DECLINE.test(option));
       if (decline) return { ...question, answer: decline, source: "default", evidence: null };
+    }
+    // Pay, however it's worded ("Annual Salary Expectations"): only the student's own saved answer.
+    if (SALARY.test(question.label) && question.kind !== "file" && question.kind !== "checkbox") {
+      const own = salaryAnswer(context.profile);
+      const answer = own ? (question.options.length ? matchOption(own, question.options) : own) : null;
+      if (answer) return { ...question, answer, source: "saved", evidence: null };
     }
     if (sensitive || question.sensitive) return { ...question, sensitive: true, answer: null, source: null, evidence: null };
     const fileMatches = (field === "resume" || field === "coverLetter") === (question.kind === "file");

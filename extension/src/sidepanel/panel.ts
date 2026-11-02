@@ -169,7 +169,7 @@ function pageCard(state: PanelState) {
 let pasteText = "";
 
 function pasteCard(state: PanelState) {
-  const busy = letterStep === "writing" || letterStep === "revising";
+  const busy = letterStep === "writing" || letterStep === "revising" || letterStep === "saving";
   const linkedIn = onLinkedIn(state);
   return `
     <section class="page" aria-label="Cover letter">
@@ -192,8 +192,10 @@ function pasteCard(state: PanelState) {
  */
 type Letter = { text: string; fileName: string; pdfBase64: string };
 let letter: Letter | null = null;
-let letterStep: "closed" | "asking" | "writing" | "written" | "revising" = "closed";
+let letterStep: "closed" | "asking" | "writing" | "written" | "revising" | "saving" = "closed";
 let letterNote = "";
+/** The student typed into the letter since the PDF was made, so the PDF is remade from their text first. */
+let letterEdited = false;
 /** The tab and job the letter is for. */
 let letterFor = "";
 const letterChoices = { length: "standard", tone: "professional", mention: "", edit: "" };
@@ -204,7 +206,7 @@ const choice = (name: "length" | "tone", value: string, label: string) =>
   `<button type="button" class="choice${letterChoices[name] === value ? " on" : ""}" data-choice="${name}" data-value="${value}" aria-pressed="${letterChoices[name] === value}">${label}</button>`;
 
 function letterBlock() {
-  const busy = letterStep === "writing" || letterStep === "revising";
+  const busy = letterStep === "writing" || letterStep === "revising" || letterStep === "saving";
   if (letterStep === "closed") {
     return `<div class="cv"><button type="button" class="cv-button" id="letter-start">${SPARK}<span>Write cover letter</span></button></div>`;
   }
@@ -234,8 +236,9 @@ function writtenLetter(busy: boolean, forJob: boolean) {
   return `
     <div class="letter-form" id="letter-form">
       <span class="eyebrow">Your cover letter</span>
-      <textarea class="cv-text" readonly aria-label="Your cover letter">${escape(letter!.text)}</textarea>
+      <textarea class="cv-text" id="letter-text" aria-label="Your cover letter. Edit it right here." ${busy ? "readonly" : ""}>${escape(letter!.text)}</textarea>
       <div class="links">
+        <button type="button" class="solid" id="letter-save" ${letterEdited && !busy ? "" : "hidden"}>${letterStep === "saving" ? "Saving…" : "Save my edits"}</button>
         <button type="button" class="link" id="letter-copy">Copy</button>
         <button type="button" class="link" id="letter-download">Download PDF</button>
         <button type="button" class="link" id="letter-open">Open PDF</button>
@@ -247,7 +250,7 @@ function writtenLetter(busy: boolean, forJob: boolean) {
         <button type="button" class="solid" id="letter-revise" ${busy || !letterChoices.edit.trim() ? "disabled" : ""}>${letterStep === "revising" ? "Rewriting…" : "Make these edits"}</button>
         ${forJob ? `<button type="button" class="link" id="letter-restart" ${busy ? "disabled" : ""}>Start over</button>` : ""}
       </div>
-      <p class="small">Written from your profile and resume.${forJob ? " It's also what Unnepo attaches when this application asks for a cover letter." : ""}</p>
+      <p class="small">Written from your profile and resume. Click into it to change anything.${forJob ? " Your saved version is what Unnepo attaches when this application asks for a cover letter." : ""}</p>
     </div>`;
 }
 
@@ -256,19 +259,24 @@ const letterBlobUrl = () => {
   return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
 };
 
-async function writeLetter(tabId: number, revise: boolean, fromPaste = false) {
-  letterStep = revise ? "revising" : "writing";
+/** `save`: the student's own edits, made into the PDF as typed (no AI). */
+async function writeLetter(tabId: number, revise: boolean, fromPaste = false, save = false) {
+  letterStep = save ? "saving" : revise ? "revising" : "writing";
   letterNote = "";
   void render();
-  const options = revise
-    ? { previous: letter?.text ?? "", edit: letterChoices.edit }
-    : fromPaste ? {} : { length: letterChoices.length, tone: letterChoices.tone, mention: letterChoices.mention };
+  const options = save
+    ? { text: letter?.text ?? "" }
+    : revise
+      ? { previous: letter?.text ?? "", edit: letterChoices.edit }
+      : fromPaste ? {} : { length: letterChoices.length, tone: letterChoices.tone, mention: letterChoices.mention };
   type Result = { ok: boolean; doc?: Letter; error?: string };
   const result = await ask<Result>({ type: "generate-letter", tabId, options, ...(fromPaste ? { description: pasteText } : {}) }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
   if (result.ok && result.doc) {
     letter = result.doc;
     letterStep = "written";
+    letterEdited = false;
     if (revise) letterChoices.edit = "";
+    if (save) letterNote = "Saved. The PDF has your edits.";
   } else {
     letterStep = letter ? "written" : "asking";
     letterNote = result.error ?? "Couldn't write the cover letter.";
@@ -305,16 +313,32 @@ function wireLetter(tabId: number) {
     if (pasteWrite) pasteWrite.disabled = pasteText.trim().length < 80 || letterStep === "writing" || letterStep === "revising";
   });
   pasteWrite?.addEventListener("click", () => void writeLetter(tabId, false, true));
+  const typed = document.getElementById("letter-text") as HTMLTextAreaElement | null;
+  const save = document.getElementById("letter-save") as HTMLButtonElement | null;
+  typed?.addEventListener("input", () => {
+    letter!.text = typed.value;
+    letterEdited = true;
+    if (save) save.hidden = false;
+  });
+  save?.addEventListener("click", () => void writeLetter(tabId, false, fromPaste, true));
+  /** The PDF, remade from the student's edits first when they changed the text. */
+  const pdfReady = async () => {
+    if (letterEdited) await writeLetter(tabId, false, fromPaste, true);
+    return !letterEdited;
+  };
   document.getElementById("letter-copy")?.addEventListener("click", () => {
     void navigator.clipboard.writeText(letter!.text).then(() => { letterNote = "Copied."; void render(); }, () => { letterNote = "Couldn't copy. Select the text and copy it."; void render(); });
   });
-  document.getElementById("letter-download")?.addEventListener("click", () => {
+  document.getElementById("letter-download")?.addEventListener("click", async () => {
+    if (!(await pdfReady())) return;
     const link = document.createElement("a");
     link.href = letterBlobUrl();
     link.download = letter!.fileName;
     link.click();
   });
-  document.getElementById("letter-open")?.addEventListener("click", () => void chrome.tabs.create({ url: letterBlobUrl() }));
+  document.getElementById("letter-open")?.addEventListener("click", async () => {
+    if (await pdfReady()) void chrome.tabs.create({ url: letterBlobUrl() });
+  });
 }
 
 /** A question in the panel's lists: clicking it scrolls the page to it. */

@@ -16,7 +16,7 @@ import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
-import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setOutcome, updateAnswers, updateOutreach } from "@/lib/apply/service";
+import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
 export const maxDuration = 60;
@@ -190,6 +190,7 @@ async function handle(request: Request, slug: string[]) {
     if (action === "retry-contacts" && method === "POST") return json(await retryContacts(user.id, await request.json()));
     if (action === "outcome" && method === "PATCH") return json(await setOutcome(user.id, await request.json()));
     if (action === "contact" && method === "PATCH") return json(await updateOutreach(user.id, await request.json()));
+    if (action === "contact-email" && method === "POST") return json(await writeContactEmail(user.id, await request.json()));
   }
 
   if (root === "app" && action === "state" && request.method === "GET") {

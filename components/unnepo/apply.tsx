@@ -382,7 +382,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                         <button type="button" className={secondary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
                       </div>
                     ) : (
-                      <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} />
+                      <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} />
                     )}
                     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-faint">
                       <span className="min-w-0">
@@ -444,7 +444,69 @@ function PostedBy({ app }: { app: App }) {
   );
 }
 
-function ContactsPanel({ app, school, onStatus, onRetry }: { app: App; school: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void }) {
+/** Each step of the last people search: the websites tried, what every search found, and any error. */
+function HowWeSearched({ app }: { app: App }) {
+  const search = app.fillReport?.peopleSearch;
+  if (!search?.steps.length) return null;
+  return (
+    <details className="text-xs text-faint">
+      <summary className="cursor-pointer select-none hover:text-muted">How we searched</summary>
+      <p className="mt-1">Websites tried: {search.domains.length ? search.domains.join(", ") : "none found"}{search.domain ? `. People found on ${search.domain}.` : "."}</p>
+      <ul className="mt-1 list-disc space-y-0.5 pl-4">
+        {search.steps.map((step, index) => (
+          <li key={index}>{step.step}{step.domain ? ` (${step.domain})` : ""}: {step.step === "Full names" ? `${step.found} revealed` : `${step.found} found`}{step.error ? `. Error: ${step.error}` : ""}</li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+/** Links that open the email ready to send in Gmail, Outlook on the web, or the computer's own mail app. */
+function composeLinks(to: string, subject: string, body: string) {
+  const q = (pairs: Record<string, string>) => Object.entries(pairs).map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
+  return [
+    { label: "Gmail", url: `https://mail.google.com/mail/?${q({ view: "cm", fs: "1", to, su: subject, body })}` },
+    { label: "Outlook", url: `https://outlook.office.com/mail/deeplink/compose?${q({ to, subject, body })}` },
+    { label: "Mail app", url: `mailto:${encodeURIComponent(to).replace(/%40/g, "@")}?${q({ subject, body })}` },
+  ];
+}
+
+type EmailEdit = { subject?: string; body?: string };
+
+/** One person's email: nothing until the student presses Write email, then editable, with links to send it. */
+function EmailBox({ contact, onEmail }: { contact: NonNullable<App["contacts"]>[number]; onEmail: (contactId: string, edit?: EmailEdit) => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [subject, setSubject] = useState(contact.emailSubject ?? "");
+  const [body, setBody] = useState(contact.emailBody ?? "");
+  const [copied, setCopied] = useState(false);
+  const run = async (edit?: EmailEdit) => {
+    setBusy(true);
+    await onEmail(contact.id, edit);
+    setBusy(false);
+  };
+  if (!contact.emailBody) {
+    return <button type="button" className={`${secondary} mt-3`} disabled={busy} onClick={() => void run()}>{busy ? "Writing…" : "✦ Write email"}</button>;
+  }
+  const changed = subject !== (contact.emailSubject ?? "") || body !== contact.emailBody;
+  return (
+    <div className="mt-3 space-y-2">
+      <label className="sr-only" htmlFor={`subject-${contact.id}`}>Subject</label>
+      <input id={`subject-${contact.id}`} value={subject} onChange={(event) => setSubject(event.target.value)} className="w-full rounded-lg border border-line bg-card px-3 py-2 text-sm" />
+      <label className="sr-only" htmlFor={`body-${contact.id}`}>Email to {contact.name}</label>
+      <textarea id={`body-${contact.id}`} rows={8} value={body} onChange={(event) => setBody(event.target.value)} className="w-full rounded-lg border border-line bg-card p-3 text-sm leading-relaxed text-zinc-300" />
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {changed && <button type="button" className={primary} disabled={busy || !body.trim()} onClick={() => void run({ subject, body })}>{busy ? "Saving…" : "Save edits"}</button>}
+        {composeLinks(contact.email ?? "", subject, body).map((link) => (
+          <a key={link.label} className={secondary} href={link.url} target={link.url.startsWith("mailto:") ? undefined : "_blank"} rel="noreferrer">Open in {link.label}</a>
+        ))}
+        <button type="button" className={secondary} onClick={() => void navigator.clipboard.writeText(`Subject: ${subject}\n\n${body}`).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>{copied ? "Copied ✓" : "Copy"}</button>
+        <button type="button" className="text-xs text-muted hover:text-ink" disabled={busy} onClick={() => void run()}>Rewrite</button>
+      </div>
+    </div>
+  );
+}
+
+function ContactsPanel({ app, school, onStatus, onRetry, onEmail }: { app: App; school: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void; onEmail: (contactId: string, edit?: EmailEdit) => Promise<void> }) {
   const contacts = app.contacts ?? [];
   const [copied, setCopied] = useState("");
   const [website, setWebsite] = useState("");
@@ -472,13 +534,12 @@ function ContactsPanel({ app, school, onStatus, onRetry }: { app: App; school: s
     );
   }
   if (app.contactsStatus === "finding") return <PeopleSearching message={app.contactsMessage || `Searching for relevant people at ${app.company}…`} school={school} />;
-  if (app.contactsStatus === "writing" && contacts.length === 0) return <PeopleSearching message="Drafting your emails…" school={school} />;
   const links = app.fillReport?.peopleLinks ?? {};
   return (
     <div className="space-y-3">
       <PostedBy app={app} />
-      {app.contactsStatus === "writing" && <p className="text-sm text-muted">Drafting an email to each person…</p>}
       {app.contactsMessage && <p className="text-xs text-faint">{app.contactsMessage}</p>}
+      <HowWeSearched app={app} />
       {needsSite ? (
         <form className="flex flex-wrap items-center gap-2 text-sm" onSubmit={(event) => { event.preventDefault(); onRetry(website.trim()); }}>
           <label className="sr-only" htmlFor={`site-${app.id}`}>{app.company}&apos;s website</label>
@@ -494,7 +555,6 @@ function ContactsPanel({ app, school, onStatus, onRetry }: { app: App; school: s
         </>
       )}
       {contacts.map((contact) => {
-        const email = contact.emailBody ? `Subject: ${contact.emailSubject ?? ""}\n\n${contact.emailBody}` : "";
         return (
           <article key={contact.id} className="rounded-xl border border-line bg-panel p-4">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -529,12 +589,8 @@ function ContactsPanel({ app, school, onStatus, onRetry }: { app: App; school: s
                 <a key={link.url} className="inline-flex items-center rounded-lg border border-line px-2.5 py-1 text-xs text-ink hover:bg-white/5" href={link.url} target="_blank" rel="noreferrer" aria-label={`${contact.name} on ${link.label}`}>{link.label}</a>
               ))}
             </div>
-            {email && (
-              <div className="mt-3">
-                <pre className="max-h-56 overflow-auto whitespace-pre-wrap rounded-lg bg-card p-3 font-sans text-sm text-zinc-300">{email}</pre>
-                <button type="button" className={`${secondary} mt-2`} onClick={() => void copy(contact.id, email)}>{copied === contact.id ? "Copied ✓" : "Copy email"}</button>
-              </div>
-            )}
+            {/* Keyed on the saved email, so a newly written one replaces what's in the boxes. */}
+            <EmailBox key={`${contact.id}:${contact.emailSubject ?? ""}:${contact.emailBody ?? ""}`} contact={contact} onEmail={onEmail} />
           </article>
         );
       })}
