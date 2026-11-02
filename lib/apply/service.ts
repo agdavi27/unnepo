@@ -9,7 +9,7 @@ import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { findPeopleForApplication, hunterReady, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
-import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
+import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { hasUnlimitedCredits } from "@/lib/apply/limits";
@@ -268,19 +268,43 @@ export function keyFor(url: string) {
   try {
     return jobKeyFor(parseJobUrl(url));
   } catch {
+    // Job boards Unnepo doesn't fill (Indeed, LinkedIn) still keep the job's id from the address. Without
+    // one, the key stays as it always was, so jobs saved before still match.
     const parsed = new URL(url);
-    return `url:${parsed.hostname}${parsed.pathname}`.toLowerCase().slice(0, 300);
+    const named = new URL(plainJobKey(url).replace(/^url:/, "https://")).search;
+    return `url:${parsed.hostname}${parsed.pathname}`.toLowerCase().concat(named).slice(0, 300);
   }
 }
 
+const plainName = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const sameJobName = (app: Pick<JobApplication, "title" | "company">, named: { title: string; company?: string }) => {
+  if (plainName(app.title) !== plainName(named.title)) return false;
+  const [a, b] = [plainName(app.company), plainName(named.company ?? "")];
+  return !a || !b || a.startsWith(b) || b.startsWith(a);
+};
+
+/**
+ * The job already tracked at this link, and the key a new one gets. A job board's search page shows many jobs
+ * at one address (ZipRecruiter's jobs-search, Indeed's /jobs), so on a plain link the same address under another
+ * job's name is another job. Job systems' own links (Greenhouse, Lever, Workday) name the job themselves.
+ */
+export async function trackedAt(userId: string, url: string, named?: { title?: string; company?: string }) {
+  const base = keyFor(url);
+  const existing = await applications.findByKey(userId, base);
+  const title = named?.title?.trim() ?? "";
+  if (!existing || !title || !base.startsWith("url:") || sameJobName(existing, { title, company: named?.company })) return { app: existing, key: base };
+  const key = `${base}#${plainName(named?.company ?? "")}|${plainName(title)}`.slice(0, 400);
+  return { app: await applications.findByKey(userId, key), key };
+}
+
 /** A job tracked from what a page (or the student) says about it, without reading the posting. */
-export async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string; poster?: PostedRecruiter | null }) {
+export async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string; poster?: PostedRecruiter | null; key?: string }) {
   let ats: JobApplication["ats"] = "other";
   try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
   // A Workday page calls itself "Workday"; the link names the company.
   const company = isJobSiteName(input.company) ? companyFromUrl(input.url) || input.company : input.company;
   const { app } = await applications.insert({
-    userId, jobKey: keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: company.slice(0, 200), companyDomain: null,
+    userId, jobKey: input.key ?? keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: company.slice(0, 200), companyDomain: null,
     department: null, location: null, description: input.description ?? "", requirements: [], applicationUrl: input.url, postedRecruiter: input.poster ?? (input.description ? findPostedRecruiter(input.description) : null), status: "extracted",
     statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
     contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
@@ -309,8 +333,12 @@ export async function addJobByHand(userId: string, raw: unknown) {
   const description = typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
   // No link: a key of its own, so two jobs added by hand never count as the same one.
   const url = link || `https://unnepo.local/manual/${id()}`;
-  const app = await minimalApplication(userId, { url, title, company, description });
+  // Another job at a link already tracked (a job board's search page) is a job of its own.
+  const tracked = link ? await trackedAt(userId, url, { title, company }) : null;
+  const app = tracked?.app ?? await minimalApplication(userId, { url, title, company, description, key: tracked?.key });
   const applied = stage !== "in_progress";
+  // Saving for later a job already applied to leaves it applied.
+  if (!applied && tracked?.app && (app.status === "submitted" || app.status === "applied_manual")) return { application: summary(app) };
   const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
   const updated = await applications.update(userId, app.id, {
     ...(link ? {} : { jobUrl: "", applicationUrl: null }),
@@ -374,8 +402,9 @@ export async function answerMaybe(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { id?: unknown; applied?: unknown };
   const item = await dropMaybe(userId, { id: String(body.id ?? "") });
   if (!item || body.applied !== true) return { ok: true, application: null };
-  let app = item.applicationId ? await applications.get(userId, item.applicationId) : await applications.findByKey(userId, keyFor(item.url));
-  if (!app) app = await minimalApplication(userId, { url: item.url, title: item.title, company: item.company || item.site, description: item.description });
+  const tracked = item.applicationId ? null : await trackedAt(userId, item.url, { title: item.title, company: item.company });
+  let app = item.applicationId ? await applications.get(userId, item.applicationId) : tracked!.app;
+  if (!app) app = await minimalApplication(userId, { url: item.url, title: item.title, company: item.company || item.site, description: item.description, key: tracked?.key });
   if (app.status !== "submitted" && app.status !== "applied_manual") {
     await applications.update(userId, app.id, { status: "applied_manual", submittedAt: nowIso(), statusMessage: "You said you applied." });
   }

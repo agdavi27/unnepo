@@ -1,6 +1,7 @@
 import { stepText, wentBack, type Step } from "./shared/steps";
 import { generatePassword, unmetRules } from "./shared/password";
 import { NEVER_READ, type Answer, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type PanelState, type Scan } from "./shared/types";
+import { QUICK_BOARDS } from "./content/quick-apply";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -270,11 +271,16 @@ function sameJobPage(a: string, b: string) {
   }
 }
 
+/** The same job by its name: a job board's search page keeps one address for every job it opens. */
+const sameJobTitle = (job: { title: string; company: string }, seen: { title: string; company: string }) =>
+  job.title.trim().toLowerCase() === seen.title.trim().toLowerCase() && (!job.company || !seen.company || sameCompany(job.company, seen.company));
+
 async function recordSeen(tabId: number, text: string, how: AppliedHow = "page_said") {
   const job = (await jobs())[tabId];
   let seen = (await seenJobs())[tabId];
   // The job this tab is already tracking (Fill was pressed here, or this same job was saved a moment ago).
-  if (job?.applicationId && (!seen || !job.url || sameJobPage(job.url, seen.url) || (!job.submission && sameApplication(job.url, seen.url)))) return record(tabId, "likely", text, how);
+  // Another job opened on the same search page isn't it.
+  if (job?.applicationId && (!seen || ((!job.url || sameJobPage(job.url, seen.url) || (!job.submission && sameApplication(job.url, seen.url))) && (!job.submission || sameJobTitle(job, seen))))) return record(tabId, "likely", text, how);
   if (!seen) {
     // Only a real posting on the page (Handshake's pane, schema.org data), never a bare "Thank you" page.
     const scan = await look(tabId).catch(() => null);
@@ -314,9 +320,11 @@ async function state(): Promise<PanelState> {
   if (me?.spider) void chrome.storage.local.set({ spider: me.spider });
   const saved = tab?.id !== undefined ? (await jobs())[tab.id] ?? null : null;
   // A job from earlier on this tab stops showing once the student opens a different job on the same site.
-  const job = saved && !saved.running && !saved.submission && saved.url && tab?.url && sameHost(saved.url, tab.url) && !sameApplication(saved.url, tab.url) ? null : saved;
+  let job = saved && !saved.running && !saved.submission && saved.url && tab?.url && sameHost(saved.url, tab.url) && !sameApplication(saved.url, tab.url) ? null : saved;
   // While Unnepo is working on the tab, the job itself says what's there.
   const page = me && tab?.id !== undefined && !job?.running ? await peek(tab.id, tab.url ?? "").catch(() => null) : null;
+  // On a job board's search page, a job applied to earlier stops showing once another one is open there.
+  if (job?.submission && job.url && tab?.url && sameHost(job.url, tab.url) && QUICK_BOARDS.test(new URL(tab.url).hostname) && page?.title && page.company && !sameJobTitle(job, page)) job = null;
   // Asked about two minutes after Apply was pressed, when a confirmation would have shown by then.
   const maybe = (me?.maybe ?? []).filter((item) => Date.now() - Date.parse(item.at) > 120_000);
   return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase, maybe };
@@ -1288,6 +1296,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             await chrome.storage.session.set({ seen: all });
           }
           await rememberSeen(tabId, scan);
+          // A job saved earlier in this tab (the last one applied to from this search) isn't this one.
+          const tracked = (await jobs())[tabId];
+          if (tracked?.submission && !sameJobTitle(tracked, scan)) await saveJob(tabId, null);
           const seen = await seenJobs();
           if (seen[tabId]) {
             seen[tabId].pressed = true;

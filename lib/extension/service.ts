@@ -5,7 +5,7 @@ import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimi
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { answerMaybe, createApplication, findPeopleOnApply, keyFor, minimalApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { answerMaybe, createApplication, findPeopleOnApply, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
 import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
@@ -165,7 +165,8 @@ async function openJob(userId: string, raw: unknown) {
   // The posting's text as the page shows it (Handshake, which Unnepo can't read on its own).
   const pageDescription = typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
   const poster = pagePoster(body.poster);
-  const existing = await applications.findByKey(userId, keyFor(url));
+  const tracked = await trackedAt(userId, url, { title: String(body.title ?? ""), company: String(body.company ?? "") });
+  const existing = tracked.app;
   if (existing) {
     if (poster && !existing.postedRecruiter) return { application: summary((await applications.update(userId, existing.id, { postedRecruiter: poster, ...(pageDescription && !existing.description ? { description: pageDescription } : {}) }))!), created: false };
     if (pageDescription && !existing.description) return { application: summary((await applications.update(userId, existing.id, { description: pageDescription, postedRecruiter: existing.postedRecruiter ?? findPostedRecruiter(pageDescription) }))!), created: false };
@@ -177,7 +178,7 @@ async function openJob(userId: string, raw: unknown) {
   const pageCompany = String(body.company ?? "").trim();
   if (pageTitle && pageCompany) {
     if (!(await profileReady(userId))) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
-    const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany, description: pageDescription, poster });
+    const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany, description: pageDescription, poster, key: tracked.key });
     runLater(async () => {
       if (!pageDescription) await enrichFromPosting(userId, app.id, url);
       await preWriteLetter(userId, app.id);
@@ -193,7 +194,7 @@ async function openJob(userId: string, raw: unknown) {
     const company = String(body.company ?? "").trim();
     if (error instanceof ServiceError && (error.code === "credits" || error.code === "profile" || error.code === "job_url")) throw error;
     if (!title || !company) throw error;
-    return { application: summary(await minimalApplication(userId, { url, title, company, description: pageDescription, poster })), created: true };
+    return { application: summary(await minimalApplication(userId, { url, title, company, description: pageDescription, poster, key: tracked.key })), created: true };
   }
 }
 
@@ -493,14 +494,16 @@ export async function extensionSubmission(userId: string, raw: unknown) {
   if (!confidence) throw new ServiceError("Say whether the submission was confirmed or likely.", "confidence", 400);
   const url = String(body.url ?? "").trim().slice(0, 2000);
   let app = body.applicationId ? await applications.get(userId, String(body.applicationId).slice(0, 80)) : null;
-  if (!app && url) app = await applications.findByKey(userId, keyFor(url));
+  const title = String(body.title ?? "").trim();
+  const company = String(body.company ?? "").trim();
+  // One job per link, except a job board's search page, where each job named there is its own.
+  const tracked = !app && /^https:\/\//i.test(url) ? await trackedAt(userId, url, { title, company }) : null;
+  if (!app) app = tracked?.app ?? null;
   if (!app) {
-    const title = String(body.title ?? "").trim();
-    const company = String(body.company ?? "").trim();
     if (!/^https:\/\//i.test(url) || !title || !company) throw new ServiceError("Couldn't tell which job this was.", "job", 400);
     // Applied on a job board (Handshake, ZipRecruiter) without Unnepo: the posting as the page showed it.
     const description = typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
-    app = await minimalApplication(userId, { url, title: title.slice(0, 200), company: company.slice(0, 200), description, poster: pagePoster(body.poster) });
+    app = await minimalApplication(userId, { url, title: title.slice(0, 200), company: company.slice(0, 200), description, poster: pagePoster(body.poster), key: tracked?.key });
     if (!description) runLater(() => enrichFromPosting(userId, app!.id, url));
   }
   await ensureCharged(userId, app);

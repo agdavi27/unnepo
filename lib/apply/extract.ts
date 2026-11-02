@@ -184,9 +184,15 @@ export function jobKeyFor(parsed: ParsedUrl) {
     return `workday:${parsed.board.split("|")[1]}:${req.toLowerCase()}`;
   }
   if (parsed.ats !== "other") return `${parsed.ats}:${parsed.board.toLowerCase()}:${parsed.jobId.toLowerCase()}`;
-  const url = new URL(parsed.url.toString());
+  return plainJobKey(parsed.url.toString());
+}
+
+/** A key for a link no job system names: the address, keeping only the query parts that name a job. */
+export function plainJobKey(link: string) {
+  const url = new URL(link);
   url.hash = "";
-  const keep = ["gh_jid", "jobId", "jobid", "job_id", "id", "lever-source"];
+  // Job boards name the job in the query: ZipRecruiter's jid and lvk, Indeed's jk and vjk, Glassdoor's jl, LinkedIn's currentJobId.
+  const keep = ["gh_jid", "jobId", "jobid", "job_id", "id", "lever-source", "jid", "lvk", "jk", "vjk", "jl", "jobListingId", "currentJobId"];
   for (const key of [...url.searchParams.keys()]) if (!keep.includes(key)) url.searchParams.delete(key);
   const ghJid = url.searchParams.get("gh_jid");
   if (ghJid) return `gh_jid:${url.hostname.replace(/^www\./, "")}:${ghJid}`;

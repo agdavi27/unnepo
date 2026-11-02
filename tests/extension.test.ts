@@ -201,6 +201,29 @@ describe("applying on a job board without Fill", () => {
     expect((await applications.get(userId, logged.application.id))?.description).toBe(description);
   });
 
+  it("saves each job applied to from one search page as its own job, and the same job only once", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const search = "https://www.ziprecruiter.com/jobs-search?search=marketing+intern&location=Boston";
+    const first = await (await call("POST", "submissions", token, { url: search, title: "Growth Intern", company: "MealPal", confidence: "likely", how: "button_changed" })).json();
+    const second = await (await call("POST", "submissions", token, { url: search, title: "Brand Intern", company: "Acme", confidence: "likely", how: "button_changed" })).json();
+    const again = await (await call("POST", "submissions", token, { url: search, title: "Growth Intern", company: "MealPal", confidence: "likely", how: "button_changed" })).json();
+    expect(second.application.id).not.toBe(first.application.id);
+    expect(again.application.id).toBe(first.application.id);
+    // Indeed's search keeps the open job in vjk: two jobs, two keys.
+    const one = await (await call("POST", "submissions", token, { url: "https://www.indeed.com/jobs?q=intern&vjk=aaa111", title: "Sales Intern", company: "Globex", confidence: "likely" })).json();
+    const two = await (await call("POST", "submissions", token, { url: "https://www.indeed.com/jobs?q=intern&vjk=bbb222", title: "Sales Intern", company: "Globex", confidence: "likely" })).json();
+    expect(two.application.id).not.toBe(one.application.id);
+    const list = await applications.list(userId);
+    expect(list.filter((app) => app.status === "submitted").map((app) => app.title).sort()).toEqual(["Brand Intern", "Growth Intern", "Sales Intern", "Sales Intern"]);
+    // Saving for later from the same search page adds a job, and never turns an applied one back.
+    await call("POST", "add-job", token, { title: "Data Intern", company: "Initech", url: search, stage: "in_progress" });
+    await call("POST", "add-job", token, { title: "Growth Intern", company: "MealPal", url: search, stage: "in_progress" });
+    const after = await applications.list(userId);
+    expect(after.find((app) => app.title === "Data Intern")?.status).toBe("extracted");
+    expect(after.find((app) => app.id === first.application.id)?.status).toBe("submitted");
+  });
+
   it("keeps the job board posting as the job's link when the student applied on the company's site", async () => {
     const userId = await readyStudent();
     const { token } = await issueExtensionToken(userId);
