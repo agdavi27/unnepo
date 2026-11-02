@@ -1,4 +1,5 @@
 import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
+import { QUICK_BOARDS, watchApplyPresses } from "./quick-apply";
 import { watchEdits } from "./edits";
 
 /**
@@ -154,6 +155,15 @@ function watchForReceived() {
 watchEdits();
 
 if (window.top === window && !/(^|\.)linkedin\.com$|unneponew\.vercel\.app$|^localhost$/.test(location.hostname)) watchForReceived();
+if (window.top === window && QUICK_BOARDS.test(location.hostname)) {
+  watchApplyPresses((message) => {
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined);
+    } catch {
+      // The extension was reloaded; this copy of the script is cut off.
+    }
+  });
+}
 
 // Job sites build their pages after loading, so it checks a few times over the first half minute.
 if (window.top === window && !/(^|\.)linkedin\.com$|unneponew\.vercel\.app$|^localhost$/.test(location.hostname) && !dismissed()) {

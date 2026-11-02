@@ -219,10 +219,22 @@ chrome.tabs.onRemoved.addListener((tabId) => {
  * The page says the student applied, and Unnepo wasn't tracking a job in this tab: save the job it last saw
  * here (reading the page now if it saw none), as applied.
  */
+/** The same job page: same address and path, and the same job id in the query (ZipRecruiter's jid, LinkedIn's currentJobId). */
+function sameJobPage(a: string, b: string) {
+  try {
+    const [x, y] = [new URL(a), new URL(b)];
+    if (x.hostname !== y.hostname || x.pathname.replace(/\/$/, "") !== y.pathname.replace(/\/$/, "")) return false;
+    return ["jid", "currentJobId", "jobId", "job_id", "id", "lvk"].every((key) => x.searchParams.get(key) === y.searchParams.get(key));
+  } catch {
+    return false;
+  }
+}
+
 async function recordSeen(tabId: number, text: string) {
   const job = (await jobs())[tabId];
-  if (job?.applicationId) return record(tabId, "likely", text);
   let seen = (await seenJobs())[tabId];
+  // The job this tab is already tracking (Fill was pressed here, or this same job was saved a moment ago).
+  if (job?.applicationId && (!seen || !job.url || sameJobPage(job.url, seen.url) || (!job.submission && sameApplication(job.url, seen.url)))) return record(tabId, "likely", text);
   if (!seen) {
     // Only a real posting on the page (Handshake's pane, schema.org data), never a bare "Thank you" page.
     const scan = await look(tabId).catch(() => null);
@@ -818,8 +830,56 @@ async function record(tabId: number, confidence: "confirmed" | "likely", text: s
 // A POST that succeeds right after a Submit click, on the job site itself, is the application going through.
 const SUBMIT_REQUEST = /(application|apply|submit|candidate|jobs\/\d+)/i;
 const NOT_SUBMIT = /(analytics|collect|track|log|metrics|beacon|sentry|segment|recaptcha|hcaptcha|captcha)/i;
+/**
+ * LinkedIn Easy Apply, which Unnepo never reads: only the address of the request LinkedIn's own page sends when
+ * the student submits (never what's in it, or the page). The job comes from the tab's address and its name
+ * ("Growth Intern | MealPal | LinkedIn"); with no name, it's saved under "Missing the company" to fill in.
+ */
+const LINKEDIN_APPLY = /\/voyager\/api\/[^?]*(onsiteapply|easyapply|jobapplication|applyapplication)|[?&]action=(submit|apply)[a-z]*application|\/jobs-apply\/|\/apply\/submit/i;
+async function recordLinkedIn(tabId: number, requestUrl: string) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab?.url) return;
+  const address = new URL(tab.url);
+  const jobId = decodeURIComponent(requestUrl).match(/jobPosting[:(]+(\d{6,})/i)?.[1] ?? address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId");
+  if (!jobId) return;
+  // Once per job: Easy Apply sends more than one request.
+  const done = ((await chrome.storage.session.get("linkedinApplied")).linkedinApplied as string[] | undefined) ?? [];
+  if (done.includes(jobId)) return;
+  await chrome.storage.session.set({ linkedinApplied: [...done, jobId].slice(-200) });
+  const parts = (tab.title ?? "").replace(/^\(\d+\)\s*/, "").split(" | ").map((part) => part.trim());
+  const named = parts.length >= 3 && /linkedin/i.test(parts.at(-1)!);
+  const url = `https://www.linkedin.com/jobs/view/${jobId}/`;
+  try {
+    const saved = await api<{ application: { id: string; title: string; company: string; companyMissing?: boolean } }>("POST", "submissions", {
+      url, title: named ? parts[0] : "LinkedIn Easy Apply job", company: named ? parts[1] : "LinkedIn", confidence: "likely", text: "Easy Apply on LinkedIn.",
+    });
+    const name = saved.application.companyMissing ? "a LinkedIn job (add the company in your tracker)" : `${saved.application.title} at ${saved.application.company}`;
+    await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url, host: "www.linkedin.com", submission: "likely", step: `Saved your Easy Apply: ${name}.` });
+  } catch (error) {
+    await saveJob(tabId, { error: error instanceof Error ? `Couldn't save your Easy Apply: ${error.message}` : "Couldn't save your Easy Apply." });
+  }
+}
+
+/** Tabs where a job board's 1-Click Apply or Submit was just pressed, and when. */
+const applyClicks = new Map<number, number>();
+// The job board saving an application, after one of those presses: an apply or application address, never a page view.
+const BOARD_APPLY = /\/(apply|applications?|quick[-_]?apply|one[-_]?click)(\/|\?|$)|[?&](action|op)=apply\b/i;
+const BOARD_NOT_APPLY = /(view|impression|track|analytics|log|metric|beacon|event|recommend|save[-_]?job|bookmark)/i;
 chrome.webRequest.onCompleted.addListener((details) => {
   if (details.method !== "POST" || details.tabId < 0 || details.statusCode < 200 || details.statusCode >= 300) return;
+  try {
+    if (NEVER_READ.test(new URL(details.url).hostname) && LINKEDIN_APPLY.test(details.url)) {
+      void recordLinkedIn(details.tabId, details.url).catch(() => undefined);
+      return;
+    }
+  } catch {
+    return;
+  }
+  const clicked = applyClicks.get(details.tabId);
+  if (clicked && Date.now() - clicked < 60_000 && BOARD_APPLY.test(details.url) && !BOARD_NOT_APPLY.test(details.url)) {
+    applyClicks.delete(details.tabId);
+    void recordSeen(details.tabId, "The job site saved your application.").catch(() => undefined);
+  }
   void jobs().then((all) => {
     const job = all[details.tabId];
     if (!job?.clickedAt || Date.now() - job.clickedAt > 60_000) return;
@@ -1007,6 +1067,26 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ error: error instanceof Error ? error.message : "Couldn't write this one." });
         }
       }
+      // "+ Add job" in My jobs.
+      case "add-job": {
+        if (sender.tab) return reply({ ok: false });
+        try {
+          const job = (message.job ?? {}) as Record<string, unknown>;
+          let url = String(job.url ?? "").trim();
+          // A LinkedIn search page holds the job in its address; keep one address per job.
+          try {
+            const address = new URL(url);
+            const jobId = NEVER_READ.test(address.hostname) ? address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId") : null;
+            if (jobId) url = `https://www.linkedin.com/jobs/view/${jobId}/`;
+          } catch {
+            url = "";
+          }
+          await api("POST", "add-job", { title: job.title, company: job.company, url, stage: job.stage });
+          return reply({ ok: true });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't add it." });
+        }
+      }
       // LinkedIn, never read: the student says they applied and names the job; only the tab's address is used.
       case "track-linkedin": {
         if (sender.tab) return reply({ ok: false });
@@ -1025,6 +1105,29 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't add it." });
         }
       }
+      // A job board's Apply button was pressed (Handshake, ZipRecruiter): the job on the page is the one being
+      // applied to. `final`: a button that sends the application itself (1-Click Apply, Submit application).
+      case "apply-clicked": {
+        if (tabId === undefined) return reply({ ok: false });
+        const scan = await look(tabId).catch(() => null);
+        if (scan?.title.trim() && scan.company.trim()) {
+          const all = await seenJobs();
+          const before = all[tabId];
+          // A different job than the one seen before in this tab: start from this one.
+          if (before && !sameJobPage(before.url, scan.url) && !sameCompany(before.company, scan.company)) {
+            delete all[tabId];
+            await chrome.storage.session.set({ seen: all });
+          }
+          await rememberSeen(tabId, scan);
+        }
+        if (message.final) applyClicks.set(tabId, Date.now());
+        return reply({ ok: true });
+      }
+      // The page changed to say so right after an Apply press ("Applied", "Application sent").
+      case "applied-detected":
+        if (tabId === undefined) return reply({ ok: false });
+        void recordSeen(tabId, String(message.text ?? "The job site shows you applied.")).catch(() => undefined);
+        return reply({ ok: true });
       case "received-page": {
         // The page says the application went through, whoever filled it: the spiders come out and dance.
         if (tabId === undefined) return reply({ ok: false });
@@ -1056,6 +1159,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
 chrome.runtime.onInstalled.addListener(() => void jobSitePassword());
 chrome.tabs.onRemoved.addListener((tabId) => {
   runs.delete(tabId);
+  applyClicks.delete(tabId);
   formFrame.delete(tabId);
   void saveJob(tabId, null);
 });

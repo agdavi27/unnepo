@@ -37,15 +37,27 @@ const ROTATE_MS = 7000;
 
 type FollowApp = { id: string; company: string; contacts?: Array<{ outreachStatus: string }> };
 
+const HIDDEN_KEY = "unnepo-follow-up-hidden";
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** A small card for the corner of the Applied page. The × folds it down to the spider for the rest of the day. */
 export function FollowUpFacts({ applied, school, onOpen }: { applied: FollowApp[]; school: string; onOpen: (appId: string) => void }) {
   const [index, setIndex] = useState(0);
   const [talking, setTalking] = useState(false);
   const [still, setStill] = useState(false);
+  const [folded, setFolded] = useState(false);
 
   useEffect(() => {
     const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let hidden = false;
+    try {
+      hidden = localStorage.getItem(HIDDEN_KEY) === today();
+    } catch {
+      hidden = false;
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect -- read once, after the page is in the browser
     setStill(reduce);
+    setFolded(hidden);
     if (reduce) return;
     const facts = setInterval(() => setIndex((at) => (at + 1) % FOLLOW_UP_FACTS.length), ROTATE_MS);
     const mouth = setInterval(() => setTalking((open) => !open), 450);
@@ -55,38 +67,53 @@ export function FollowUpFacts({ applied, school, onOpen }: { applied: FollowApp[
     };
   }, []);
 
+  const fold = (value: boolean) => {
+    setFolded(value);
+    try {
+      if (value) localStorage.setItem(HIDDEN_KEY, today());
+      else localStorage.removeItem(HIDDEN_KEY);
+    } catch {
+      // Remembering it is a nicety; the card still folds.
+    }
+  };
+
   const followed = applied.filter((app) => (app.contacts ?? []).some((contact) => contact.outreachStatus !== "not_contacted")).length;
   const next = applied.find((app) => !(app.contacts ?? []).some((contact) => contact.outreachStatus !== "not_contacted"));
-  const spider = useMemo(() => ({ open: spiderSvg({ skin: "school", school }, { open: true, size: 64 }), shut: spiderSvg({ skin: "school", school }, { size: 64 }) }), [school]);
+  const spider = useMemo(() => ({ open: spiderSvg({ skin: "school", school }, { open: true, size: 34 }), shut: spiderSvg({ skin: "school", school }, { size: 34 }) }), [school]);
   const fact = FOLLOW_UP_FACTS[index];
+  const face = <span aria-hidden className={`flex-none ${still ? "" : "spider-hang"}`} dangerouslySetInnerHTML={{ __html: talking && !still && !folded ? spider.open : spider.shut }} />;
+  const motion = (
+    <style>{`
+      @keyframes fact-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+      .fact-in { animation: fact-in .4s ease-out both; }
+      @keyframes spider-hang { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(2px); } }
+      .spider-hang { animation: spider-hang 2.4s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) { .fact-in, .spider-hang { animation: none; } }
+    `}</style>
+  );
 
+  if (folded) {
+    return (
+      <button type="button" onClick={() => fold(false)} className="inline-flex items-center gap-2 self-start rounded-full border border-line bg-panel py-1 pl-1 pr-3 text-xs text-muted hover:text-white sm:self-auto" aria-label="Show why following up helps">
+        {motion}{face}<span className="tabular-nums">{followed}/{applied.length} followed up</span>
+      </button>
+    );
+  }
   return (
-    <section aria-label="Why following up helps" className="flex flex-col gap-4 rounded-2xl border border-line bg-panel p-4 sm:flex-row sm:items-center sm:p-5">
-      <style>{`
-        @keyframes fact-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-        .fact-in { animation: fact-in .45s ease-out both; }
-        @keyframes spider-hang { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
-        .spider-hang { animation: spider-hang 2.4s ease-in-out infinite; }
-        @media (prefers-reduced-motion: reduce) { .fact-in, .spider-hang { animation: none; } }
-      `}</style>
-      <span aria-hidden className={`flex-none self-center ${still ? "" : "spider-hang"}`} dangerouslySetInnerHTML={{ __html: talking && !still ? spider.open : spider.shut }} />
+    <aside aria-label="Why following up helps" className="relative flex w-full items-start gap-2.5 rounded-xl border border-line bg-panel p-2.5 pr-7 sm:w-72">
+      {motion}
+      {face}
       <div className="min-w-0 flex-1">
-        <div key={index} className="fact-in relative rounded-xl bg-[#F7F7F8] px-4 py-3 text-[#0A0A0B] shadow-[3px_3px_0_#3D8BFF]" aria-live="polite">
-          <p className="m-0 text-sm font-semibold leading-snug">{fact.text}</p>
-          <a href={fact.url} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[11px] text-[#55555E] underline-offset-2 hover:underline">{fact.source}</a>
-        </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-          <p className="m-0 text-muted">
-            {applied.length ? <>You&apos;ve followed up on <strong className="text-ink tabular-nums">{followed} of {applied.length}</strong> {applied.length === 1 ? "application" : "applications"}.</> : "Once you apply, follow up with someone at the company."}
-          </p>
-          {next && <button type="button" onClick={() => onOpen(next.id)} className="text-sm font-medium text-ink underline-offset-4 hover:underline">Find people at {next.company} →</button>}
-          <span className="ml-auto flex items-center gap-1.5" aria-label={`Fact ${index + 1} of ${FOLLOW_UP_FACTS.length}`}>
-            {FOLLOW_UP_FACTS.map((_, dot) => (
-              <button key={dot} type="button" aria-label={`Fact ${dot + 1}`} aria-current={dot === index} onClick={() => setIndex(dot)} className={`h-1.5 rounded-full transition-all ${dot === index ? "w-4 bg-white" : "w-1.5 bg-zinc-600 hover:bg-zinc-400"}`} />
-            ))}
-          </span>
-        </div>
+        <p key={index} className="fact-in m-0 text-xs font-medium leading-snug text-ink" aria-live="polite">
+          {fact.text}{" "}
+          <a href={fact.url} target="_blank" rel="noreferrer" title={fact.source} className="text-[10px] font-normal text-faint underline-offset-2 hover:text-muted hover:underline">Source</a>
+        </p>
+        <p className="m-0 mt-1.5 flex flex-wrap items-center gap-x-2 text-[11px] text-muted">
+          <span className="tabular-nums">{applied.length ? `${followed} of ${applied.length} followed up` : "Follow up after you apply"}</span>
+          {next && <button type="button" onClick={() => onOpen(next.id)} className="font-medium text-ink underline-offset-2 hover:underline">Find people at {next.company} →</button>}
+        </p>
       </div>
-    </section>
+      <button type="button" onClick={() => fold(true)} aria-label="Fold this card for today" className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded text-faint hover:text-white">×</button>
+    </aside>
   );
 }

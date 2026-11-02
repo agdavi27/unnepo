@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Practice: a job board's 1-Click Apply</title>
+<style>body{font:15px system-ui;margin:24px;max-width:900px} .list{display:flex;flex-direction:column;gap:6px;margin-bottom:18px} .card{border:1px solid #ccc;border-radius:8px;padding:8px} .badge{color:green;font-weight:600} button{font:inherit;padding:8px 14px}</style>
+</head>
+<body data-quick-apply>
+<h1>Practice: a job board's 1-Click Apply</h1>
+<p>Like ZipRecruiter: results with "Applied" badges, and the job's 1-Click Apply turns into "Applied" with no thank-you page. A second job's Apply opens a form first, whose Submit shows "Application sent".</p>
+<div class="list" id="list"></div>
+<section id="job1"><h2>Growth Marketing Intern</h2><p>MealPal · New York</p><button id="quick">1-Click Apply</button></section>
+<section id="job2"><h2>Data Intern</h2><p>Globex</p><button id="open">Apply</button><div id="form" hidden><input aria-label="Why us"><button id="submit">Submit application</button></div><p id="note"></p></section>
+<script>
+  const list = document.getElementById("list");
+  const draw = () => { list.innerHTML = ["Brand Intern · Acme", "Analyst · Initech"].map((job) => `<div class="card">${job} <span class="badge">Applied</span></div>`).join(""); };
+  draw();
+  // Pressing anything redraws the results list, like job boards do.
+  document.addEventListener("click", () => setTimeout(draw, 100));
+  document.getElementById("quick").addEventListener("click", (event) => setTimeout(() => { event.target.textContent = "Applied"; }, 1200));
+  document.getElementById("open").addEventListener("click", () => { document.getElementById("form").hidden = false; });
+  document.getElementById("submit").addEventListener("click", () => setTimeout(() => { document.getElementById("form").hidden = true; document.getElementById("note").textContent = "Application sent!"; }, 900));
+  window.pageValues = () => ({});
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

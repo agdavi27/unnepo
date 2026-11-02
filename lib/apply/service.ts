@@ -9,12 +9,12 @@ import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { findPeopleForApplication, hunterReady, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
-import { companyFromUrl, extractJob, isJobSiteName } from "@/lib/apply/extract";
+import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { profileReady } from "@/lib/profile/service";
 import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
-import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState } from "@/lib/apply/types";
+import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState, PostedRecruiter } from "@/lib/apply/types";
 
 /** Background work runs after the response is sent. Tests run it inline. */
 let defer: (task: () => Promise<void>) => void = (task) => after(task);
@@ -224,7 +224,95 @@ export async function learnAnswers(userId: string, info: Awaited<ReturnType<type
 
 export function summary(app: JobApplication) {
   const missing = missingAnswers(app.questions);
-  return { ...app, description: app.description.slice(0, 4000), missing: missing.map((question) => question.key) };
+  return { ...app, description: app.description.slice(0, 4000), missing: missing.map((question) => question.key), companyMissing: companyMissing(app) };
+}
+
+// What a page calls itself when it isn't the employer: job boards, and the first part of a site address.
+const BOARD_NAME = /^(handshake|joinhandshake|ziprecruiter|zip recruiter|linkedin|indeed|glassdoor|simplyhired|monster|wellfound|angellist|builtin|built in|app|www|careers?|jobs?|unknown|n\/a|company|employer|\?)$/i;
+
+/** Whether the job was saved without a real company: blank, a job site's name, or a website address. */
+export function companyMissing(app: Pick<JobApplication, "company" | "jobUrl">) {
+  const name = app.company.replace(/\s+/g, " ").trim();
+  if (isJobSiteName(name) || BOARD_NAME.test(name)) return true;
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(name)) return true;
+  // The scanner's last resort is the site address's first part ("mealpal" from mealpal.applytojob.com is fine,
+  // "jobs" from jobs.example.com isn't): a lowercase single word that's only the host.
+  try {
+    const host = new URL(app.jobUrl).hostname.replace(/^www\./, "");
+    return name === name.toLowerCase() && name === host.split(".")[0] && BOARD_NAME.test(host.split(".")[0]);
+  } catch {
+    return false;
+  }
+}
+
+/** The student names the company for a job saved without one. */
+export async function setCompany(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; company?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  const company = String(body.company ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (company.length < 2) throw new ServiceError("Type the company's name.", "company", 400);
+  // A new company means a new search for its website and people.
+  const updated = await applications.update(userId, app.id, { company, companyDomain: null });
+  return { application: summary(updated!) };
+}
+
+/** One key per job link, for links Unnepo can't parse too. */
+export function keyFor(url: string) {
+  try {
+    return jobKeyFor(parseJobUrl(url));
+  } catch {
+    const parsed = new URL(url);
+    return `url:${parsed.hostname}${parsed.pathname}`.toLowerCase().slice(0, 300);
+  }
+}
+
+/** A job tracked from what a page (or the student) says about it, without reading the posting. */
+export async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string; poster?: PostedRecruiter | null }) {
+  let ats: JobApplication["ats"] = "other";
+  try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
+  // A Workday page calls itself "Workday"; the link names the company.
+  const company = isJobSiteName(input.company) ? companyFromUrl(input.url) || input.company : input.company;
+  const { app } = await applications.insert({
+    userId, jobKey: keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: company.slice(0, 200), companyDomain: null,
+    department: null, location: null, description: input.description ?? "", requirements: [], applicationUrl: input.url, postedRecruiter: input.poster ?? (input.description ? findPostedRecruiter(input.description) : null), status: "extracted",
+    statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
+    contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
+  });
+  await ensureCharged(userId, app);
+  return (await applications.get(userId, app.id))!;
+}
+
+const MANUAL_STAGES = ["applied", "in_progress", "interviewing", "offer", "rejected"] as const;
+
+/**
+ * A job the student adds to the tracker by hand: applied somewhere Unnepo didn't see, or one to keep track of.
+ * Only a title and company are needed; a link, the date, the posting's text and how it's going are optional.
+ */
+export async function addJobByHand(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { title?: unknown; company?: unknown; url?: unknown; stage?: unknown; appliedOn?: unknown; description?: unknown };
+  const title = String(body.title ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  const company = String(body.company ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (title.length < 2) throw new ServiceError("Type the job title.", "title", 400);
+  if (company.length < 2) throw new ServiceError("Type the company's name.", "company", 400);
+  const link = String(body.url ?? "").trim().slice(0, 2000);
+  if (link && !/^https:\/\/[^\s]+\.[^\s]+/i.test(link)) throw new ServiceError("The link should start with https://.", "url", 400);
+  const stage = MANUAL_STAGES.find((item) => item === body.stage) ?? "applied";
+  const day = String(body.appliedOn ?? "").trim();
+  const when = /^\d{4}-\d{2}-\d{2}$/.test(day) && !Number.isNaN(Date.parse(`${day}T12:00:00Z`)) && Date.parse(`${day}T12:00:00Z`) <= Date.now() + 86_400_000 ? new Date(`${day}T12:00:00Z`).toISOString() : nowIso();
+  const description = typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
+  // No link: a key of its own, so two jobs added by hand never count as the same one.
+  const url = link || `https://unnepo.local/manual/${id()}`;
+  const app = await minimalApplication(userId, { url, title, company, description });
+  const applied = stage !== "in_progress";
+  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  const updated = await applications.update(userId, app.id, {
+    ...(link ? {} : { jobUrl: "", applicationUrl: null }),
+    status: applied ? "applied_manual" : "extracted",
+    submittedAt: applied ? when : null,
+    statusMessage: applied ? "Added by you." : "Added by you. Not applied yet.",
+    ...(stage === "interviewing" || stage === "offer" || stage === "rejected" ? { fillReport: { ...report, outcome: stage } } : {}),
+  });
+  return { application: summary(updated!) };
 }
 
 // Jobs whose company couldn't be found, so a page load doesn't read their posting again.

@@ -1,0 +1,49 @@
+/** Job boards where applying is often one press, with no confirmation page: Handshake, ZipRecruiter, Indeed… */
+export const QUICK_BOARDS = /(^|\.)(joinhandshake|ziprecruiter|indeed|simplyhired|wellfound|glassdoor)\.com$/;
+// An Apply press. `FINAL` ones send the application right away; plain "Apply" may open a form first.
+const APPLY_PRESS = /^(1-click apply|one-click apply|quick apply|easy apply|instant apply|apply|apply now|submit( my)? application|send( my)? application|submit|apply with (my )?(profile|resume))$/i;
+const FINAL_PRESS = /1-click|one-click|quick apply|instant apply|submit|send|apply with/i;
+// Apply buttons that go to the company's own site: that site's page is where the applying happens.
+const ELSEWHERE = /externally|company('|’)?s? (site|website)|employer('|’)?s? (site|website)|on company site/i;
+// What a job board shows once it's done: the button now says Applied, or a note says the application went.
+const APPLIED_NOW = /^(✓\s*)?(applied|application (sent|submitted)|you applied|you(?:'|’| ha)ve applied|already applied|applied on .{0,30})[!.]?$/i;
+
+const shortText = (el: Element) => ((el as HTMLElement).innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+const shown = (el: Element) => (el as HTMLElement).getBoundingClientRect().height > 0;
+
+/** "Applied" labels showing now: buttons, badges and notes with nothing else in them. */
+function appliedLabels() {
+  return Array.from(document.querySelectorAll("button, a, [role=button], [role=status], [role=alert], span, p, div, h2, h3"))
+    .filter((el) => el.childElementCount <= 2 && shown(el) && APPLIED_NOW.test(shortText(el)));
+}
+
+/**
+ * On job boards, watches the Apply press itself, since 1-click and quick applies often show no thank-you page:
+ * the extension notes the job on the page, then the press counts once, within a minute and a half, the button
+ * turns into "Applied" or a new "Applied" label shows up. Each press is its own job.
+ */
+export function watchApplyPresses(tell: (message: Record<string, unknown>) => void) {
+  let watching = 0;
+  document.addEventListener("click", (event) => {
+    const button = (event.target as Element | null)?.closest<HTMLElement>("button, a, [role=button], input[type=submit]");
+    const label = button ? shortText(button) || (button as HTMLInputElement).value || "" : "";
+    if (!button || !APPLY_PRESS.test(label) || ELSEWHERE.test(label)) return;
+    tell({ type: "apply-clicked", url: location.href, label, final: FINAL_PRESS.test(label) });
+    // Counted, not compared one by one: job boards redraw their lists, so the same badges come back as new elements.
+    const before = appliedLabels().length;
+    const run = ++watching;
+    const started = Date.now();
+    const check = () => {
+      if (run !== watching) return;
+      const changed = button.isConnected && APPLIED_NOW.test(shortText(button));
+      const now = appliedLabels();
+      if (changed || now.length > before) {
+        tell({ type: "applied-detected", text: shortText(changed ? button : now[now.length - 1]).slice(0, 120), url: location.href });
+        return;
+      }
+      if (Date.now() - started < 90_000) setTimeout(check, 700);
+    };
+    setTimeout(check, 700);
+  }, true);
+}
+

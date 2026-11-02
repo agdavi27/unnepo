@@ -155,6 +155,8 @@ function pageCard(state: PanelState) {
         ${title ? `<span class="job-company">${escape(title)}</span>` : ""}
       </div>
       ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
+      <span class="eyebrow">Resume Unnepo attaches</span>
+      ${resumeRow(state)}
       ${fill}
       ${report?.needsYou.length ? `<p class="note warn">Still needs you <span class="small">(orange on the page)</span>:</p><ul class="needs">${report.needsYou.map((label) => needsLink(label)).join("")}</ul>` : ""}
       ${couldnt.length ? `<p class="note">Couldn't fill:</p><ul class="needs">${couldnt.map((item) => needsLink(item.label, item.reason)).join("")}</ul>` : ""}
@@ -179,10 +181,29 @@ function linkedInCard(state: PanelState) {
     Object.assign(linkedInJob, { key, title: named ? parts[0] : "", company: named ? parts[1] : "", description: "", note: "", saving: false });
   }
   const ready = linkedInJob.title.trim() && linkedInJob.company.trim();
+  // Easy Apply was noticed and saved: say so, with a way to take it back.
+  const jobIdOf = (raw: string) => {
+    try {
+      const address = new URL(raw);
+      return address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId") ?? "";
+    } catch {
+      return "";
+    }
+  };
+  const savedUrl = (state.job as { url?: string } | null)?.url ?? "";
+  const thisJob = jobIdOf(key);
+  if (state.job?.submission && state.job.applicationId && (!thisJob || jobIdOf(savedUrl) === thisJob)) {
+    return `
+    <section class="page" aria-label="LinkedIn job saved">
+      <span class="eyebrow">Applied on LinkedIn</span>
+      <p class="note ok">${escape(state.job.step || "Saved to your tracker.")}</p>
+      <div class="links"><button type="button" class="link" id="not-applied">I didn't apply</button></div>
+    </section>`;
+  }
   return `
     <section class="page" aria-label="Add a LinkedIn job">
       <span class="eyebrow">Applied on LinkedIn?</span>
-      <p class="note">Unnepo doesn't read LinkedIn pages. If you applied here, add the job to your tracker.</p>
+      <p class="note">Unnepo doesn't read LinkedIn pages. Easy Apply is saved by itself; if you applied another way, add the job here.</p>
       <div class="letter-form">
         <label class="question"><span class="q-label">Job title</span><input class="field" id="li-title" value="${escape(linkedInJob.title)}" maxlength="200" placeholder="Growth Marketing Intern"></label>
         <label class="question"><span class="q-label">Company</span><input class="field" id="li-company" value="${escape(linkedInJob.company)}" maxlength="200" placeholder="MealPal"></label>
@@ -643,6 +664,70 @@ async function loadJobs() {
   void render();
 }
 
+/**
+ * "+ Add job" in My jobs: a job applied to somewhere Unnepo didn't see. It starts from the tab (its link and
+ * its name, "Growth Intern | MealPal | …"), so most of the time it's one click.
+ */
+const manualJob = { open: false, key: "", title: "", company: "", url: "", stage: "applied", note: "", saving: false };
+function startManualJob(state: PanelState) {
+  const key = state.tab?.url ?? "";
+  if (manualJob.key === key) return;
+  const parts = (state.tab?.title ?? "").replace(/^\(\d+\)\s*/, "").split(/ [|\-–] /).map((part) => part.trim()).filter(Boolean);
+  const url = /^https:\/\//.test(key) ? key : "";
+  Object.assign(manualJob, { key, title: parts.length >= 2 ? parts[0] : "", company: parts.length >= 3 ? parts[1] : "", url, note: "", saving: false });
+}
+function manualJobForm() {
+  if (!manualJob.open) return `<button type="button" class="outline" id="add-job-open">+ Add a job I applied to</button>${manualJob.note ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}`;
+  const ready = manualJob.title.trim().length >= 2 && manualJob.company.trim().length >= 2;
+  const stage = (value: string, label: string) => `<option value="${value}"${manualJob.stage === value ? " selected" : ""}>${label}</option>`;
+  return `
+    <div class="letter-form" id="add-job-form">
+      <span class="eyebrow">Add a job</span>
+      <label class="question"><span class="q-label">Job title</span><input class="field" id="mj-title" value="${escape(manualJob.title)}" maxlength="200" placeholder="Growth Marketing Intern"></label>
+      <label class="question"><span class="q-label">Company</span><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="MealPal"></label>
+      <label class="question"><span class="q-label">Job link (optional)</span><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="https://…"></label>
+      <label class="question"><span class="q-label">Status</span><select class="field" id="mj-stage">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("interviewing", "Interviewing")}${stage("offer", "Offer")}${stage("rejected", "Rejected")}</select></label>
+      <div class="links">
+        <button type="button" class="solid" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add to tracker"}</button>
+        <button type="button" class="link" id="mj-cancel">Cancel</button>
+      </div>
+      ${manualJob.note ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
+    </div>`;
+}
+function wireManualJob(state: PanelState) {
+  document.getElementById("add-job-open")?.addEventListener("click", () => {
+    startManualJob(state);
+    manualJob.open = true;
+    manualJob.note = "";
+    void render();
+  });
+  document.getElementById("mj-cancel")?.addEventListener("click", () => { manualJob.open = false; void render(); });
+  for (const [id, key] of [["mj-title", "title"], ["mj-company", "company"], ["mj-url", "url"], ["mj-stage", "stage"]] as const) {
+    const box = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
+    box?.addEventListener(box instanceof HTMLSelectElement ? "change" : "input", () => {
+      manualJob[key] = box.value;
+      const save = document.getElementById("mj-save") as HTMLButtonElement | null;
+      if (save) save.disabled = manualJob.title.trim().length < 2 || manualJob.company.trim().length < 2 || manualJob.saving;
+    });
+  }
+  document.getElementById("mj-save")?.addEventListener("click", async () => {
+    manualJob.saving = true;
+    manualJob.note = "";
+    void render();
+    type Added = { ok: boolean; error?: string };
+    const result = await ask<Added>({ type: "add-job", job: { title: manualJob.title, company: manualJob.company, url: manualJob.url.trim(), stage: manualJob.stage } }).catch((): Added => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    manualJob.saving = false;
+    if (result.ok) {
+      manualJob.note = `Added: ${manualJob.title} at ${manualJob.company}.`;
+      manualJob.open = false;
+      manualJob.key = "";
+      jobsList = null;
+    } else manualJob.note = result.error ?? "Couldn't add it.";
+    if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
+    void render();
+  });
+}
+
 function jobsView(state: PanelState) {
   if (!jobsList || Date.now() - jobsList.loadedAt > 30_000) void loadJobs();
   const rows = jobsList?.rows ?? [];
@@ -660,6 +745,7 @@ function jobsView(state: PanelState) {
   return `
     <section class="view" aria-label="My jobs">
       <div class="row"><span class="heading">My jobs</span>${jobsList && !jobsList.error ? `<span class="mono">${jobsList.total} IN ALL</span>` : ""}</div>
+      ${manualJobForm()}
       ${body}
       <a class="outline" href="${escape(state.apiBase)}/home" target="_blank" rel="noreferrer">Open my tracker on Unnepo</a>
     </section>`;
@@ -755,6 +841,7 @@ async function render() {
   document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
   document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));
   if (view === "profile") wireIssues();
+  if (view === "jobs") wireManualJob(state);
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
 }
 

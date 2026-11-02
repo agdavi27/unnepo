@@ -1,8 +1,8 @@
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { createApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
-import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
+import { createApplication, keyFor, minimalApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
 import { WRITING_STYLE, classifyQuestion, normalizeLabel, plainWriting, shortAnswer } from "@/lib/apply/questions";
@@ -64,31 +64,7 @@ export async function extensionResume(userId: string) {
   return { bytes, fileName: resume.fileName, mime: resume.mime || "application/pdf" };
 }
 
-function keyFor(url: string) {
-  try {
-    return jobKeyFor(parseJobUrl(url));
-  } catch {
-    const parsed = new URL(url);
-    return `url:${parsed.hostname}${parsed.pathname}`.toLowerCase().slice(0, 300);
-  }
-}
-
 /** A job the extension is on. Unnepo reads it when it can; otherwise it keeps what the page showed. */
-async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string; poster?: PostedRecruiter | null }) {
-  let ats: JobApplication["ats"] = "other";
-  try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
-  // A Workday page calls itself "Workday"; the link names the company.
-  const company = isJobSiteName(input.company) ? companyFromUrl(input.url) || input.company : input.company;
-  const { app } = await applications.insert({
-    userId, jobKey: keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: company.slice(0, 200), companyDomain: null,
-    department: null, location: null, description: input.description ?? "", requirements: [], applicationUrl: input.url, postedRecruiter: input.poster ?? (input.description ? findPostedRecruiter(input.description) : null), status: "extracted",
-    statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
-    contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
-  });
-  await ensureCharged(userId, app);
-  return (await applications.get(userId, app.id))!;
-}
-
 /** LinkedIn's "Meet the hiring team" person as the extension read it, checked. */
 export function pagePoster(raw: unknown): PostedRecruiter | null {
   const poster = (raw ?? {}) as { name?: unknown; title?: unknown; profileUrl?: unknown };

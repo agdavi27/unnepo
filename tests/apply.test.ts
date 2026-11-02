@@ -16,7 +16,7 @@ import { supportedBy } from "@/lib/apply/questions";
 import { bestOption } from "@/lib/apply/options";
 import { checkSchool } from "@/lib/school-plans";
 import { classYearOf } from "@/lib/profile/student";
-import { applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, writeContactEmail } from "@/lib/apply/service";
+import { applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -766,6 +766,35 @@ describe("questions autofill used to miss", () => {
     expect(classYearOf({ gradDate: "May 2027" }, new Date("2025-10-01"))).toBe("junior");
     expect(classYearOf({ gradDate: "May 2027" }, new Date("2026-09-01"))).toBe("senior");
     expect(classYearOf({ gradDate: "May 2027", classYear: "graduate" })).toBe("graduate");
+  });
+});
+
+describe("jobs added by hand, and jobs missing the company", () => {
+  it("adds a job with just a title and company, or with a link, date and stage", async () => {
+    const userId = await student();
+    const plain = (await addJobByHand(userId, { title: "Growth Intern", company: "MealPal" })).application;
+    expect(plain).toMatchObject({ title: "Growth Intern", company: "MealPal", status: "applied_manual", jobUrl: "", companyMissing: false });
+    const second = (await addJobByHand(userId, { title: "Growth Intern", company: "MealPal" })).application;
+    expect(second.id).not.toBe(plain.id);
+    const full = (await addJobByHand(userId, { title: "Analyst", company: "Stripe", url: "https://stripe.com/jobs/123", stage: "interviewing", appliedOn: "2026-10-20" })).application;
+    expect(full).toMatchObject({ jobUrl: "https://stripe.com/jobs/123", status: "applied_manual", submittedAt: "2026-10-20T12:00:00.000Z", fillReport: { outcome: "interviewing" } });
+    const later = (await addJobByHand(userId, { title: "Designer", company: "Figma", stage: "in_progress" })).application;
+    expect(later).toMatchObject({ status: "extracted", submittedAt: null });
+    await expect(addJobByHand(userId, { title: "", company: "Acme" })).rejects.toThrow(/job title/);
+    await expect(addJobByHand(userId, { title: "Intern", company: "Acme", url: "javascript:alert(1)" })).rejects.toThrow(/https/);
+  });
+
+  it("knows a job saved under a job site's name, and takes the company the student types", async () => {
+    expect(companyMissing({ company: "Workday", jobUrl: "https://x.wd5.myworkdayjobs.com/a" })).toBe(true);
+    expect(companyMissing({ company: "Handshake", jobUrl: "https://app.joinhandshake.com/stu/jobs/1" })).toBe(true);
+    expect(companyMissing({ company: "jobs.lever.co", jobUrl: "https://jobs.lever.co/x" })).toBe(true);
+    expect(companyMissing({ company: "", jobUrl: "" })).toBe(true);
+    expect(companyMissing({ company: "MealPal", jobUrl: "https://mealpal.applytojob.com/apply/1" })).toBe(false);
+    const userId = await student();
+    const app = (await addJobByHand(userId, { title: "Intern", company: "ZipRecruiter" })).application;
+    expect(app.companyMissing).toBe(true);
+    const fixed = (await setCompany(userId, { applicationId: app.id, company: "  Acme   Corp " })).application;
+    expect(fixed).toMatchObject({ company: "Acme Corp", companyMissing: false });
   });
 });
 

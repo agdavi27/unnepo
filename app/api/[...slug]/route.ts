@@ -16,7 +16,7 @@ import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
-import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
+import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, addJobByHand, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
 export const maxDuration = 60;
@@ -191,6 +191,11 @@ async function handle(request: Request, slug: string[]) {
     if (action === "outcome" && method === "PATCH") return json(await setOutcome(user.id, await request.json()));
     if (action === "contact" && method === "PATCH") return json(await updateOutreach(user.id, await request.json()));
     if (action === "contact-email" && method === "POST") return json(await writeContactEmail(user.id, await request.json()));
+    if (action === "company" && method === "PATCH") return json(await setCompany(user.id, await request.json()));
+    if (action === "add-job" && method === "POST") {
+      if (!rateLimit(`add-job:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of jobs in an hour. Try again a bit later.", "rate_limited", 429);
+      return json(await addJobByHand(user.id, await request.json()));
+    }
   }
 
   if (root === "app" && action === "state" && request.method === "GET") {
@@ -350,6 +355,10 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
     return json(await extensionJob(user.id, await request.json()));
   }
   if (action === "jobs" && method === "GET") return json(await extensionJobs(user.id));
+  if (action === "add-job" && method === "POST") {
+    if (!rateLimit(`add-job:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of jobs in an hour. Try again a bit later.", "rate_limited", 429);
+    return json(await addJobByHand(user.id, await request.json()));
+  }
   if (action === "map" && method === "POST") return json(await extensionMap(user.id, await request.json()));
   if (action === "answers" && method === "POST") return json(await extensionLearn(user.id, await request.json()));
   if (action === "write" && method === "POST") {
