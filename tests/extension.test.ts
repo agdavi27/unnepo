@@ -3,7 +3,7 @@ import { repo } from "@/lib/db/file-store";
 import { applications } from "@/lib/apply/store";
 import { setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { readStoredResume } from "@/lib/services/resume";
-import { setDeferForTests } from "@/lib/apply/service";
+import { setCompany, setDeferForTests } from "@/lib/apply/service";
 import { issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { saveStudentProfile } from "@/lib/profile/service";
 import { login, signUp, userFromSessionToken, verifyEmail } from "@/lib/services/auth";
@@ -14,6 +14,7 @@ import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
 import { jobLink, titleParts } from "@/extension/src/content/scan";
 import { arrange, postingLink, siteFor, sitesIn } from "@/lib/apply/applied-list";
+import { notJobTitle } from "@/lib/apply/job-title";
 import { appliedSince, bySite, secondsToApply } from "@/lib/apply/activity-stats";
 import { autofillProblems, siteName } from "@/lib/services/admin";
 
@@ -235,6 +236,26 @@ describe("applying on a job board without Fill", () => {
     // Not a link: ignored.
     const other = await (await call("POST", "submissions", token, { url: "https://jobs.lever.co/globex/x", postingUrl: "javascript:alert(1)", title: "Data Intern", company: "Globex", confidence: "likely" })).json();
     expect((await applications.get(userId, other.application.id))?.fillReport?.postingUrl).toBeUndefined();
+  });
+});
+
+describe("status lines aren't job titles", () => {
+  it("knows Applied on a date and similar lines from real titles", () => {
+    for (const line of ["Applied on November 2, 2026", "Applied", "✓ Applied 2 days ago", "Applied Nov 2", "Application submitted", "You've applied", "Posted 3 days ago", "Nov 2, 2026", "Saved"]) expect(notJobTitle(line)).toBe(true);
+    for (const title of ["Applied Scientist Intern", "Application Engineer", "Growth Intern", "Savings Analyst", "Postdoctoral Fellow"]) expect(notJobTitle(title)).toBe(false);
+  });
+
+  it("never saves one as the title, lists the job as missing its title, and fills it in from the link or by hand", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const saved = await (await call("POST", "submissions", token, { url: "https://app.joinhandshake.com/jobs/1234567", title: "Applied on November 2, 2026", company: "Initech", confidence: "likely" })).json();
+    expect(saved.application).toMatchObject({ title: "Job title missing", titleMissing: true, companyMissing: false });
+    const filled = await (await call("POST", "job-info", token, { applicationId: saved.application.id, info: { title: "Growth Intern", company: "Initech", location: "", description: "" } })).json();
+    expect(filled.application).toMatchObject({ title: "Growth Intern", titleMissing: false });
+    // An old job saved with the status line as its title is listed as missing it, and can be named by hand.
+    await applications.update(userId, saved.application.id, { title: "Applied on November 2, 2026" });
+    const fixed = await setCompany(userId, { applicationId: saved.application.id, title: "Brand Intern" });
+    expect(fixed.application).toMatchObject({ title: "Brand Intern", titleMissing: false, company: "Initech" });
   });
 });
 

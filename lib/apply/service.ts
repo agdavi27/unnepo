@@ -9,6 +9,7 @@ import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { findPeopleForApplication, hunterReady, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
+import { notJobTitle } from "@/lib/apply/job-title";
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
@@ -231,7 +232,17 @@ export async function learnAnswers(userId: string, info: Awaited<ReturnType<type
 
 export function summary(app: JobApplication) {
   const missing = missingAnswers(app.questions);
-  return { ...app, description: app.description.slice(0, 4000), missing: missing.map((question) => question.key), companyMissing: companyMissing(app) };
+  return { ...app, description: app.description.slice(0, 4000), missing: missing.map((question) => question.key), companyMissing: companyMissing(app), titleMissing: titleMissing(app.title) };
+}
+
+/** What a job is saved as when the page didn't say its name. */
+export const NO_TITLE = "Job title missing";
+// Titles saved when nothing better was known: LinkedIn's stand-in, and page names.
+const STAND_IN_TITLE = /^(job title missing|linkedin easy apply job|a job|job|untitled|job application|apply|thank you.*)$/i;
+
+/** Whether the saved title isn't the job's name: a stand-in, or a status line like "Applied on November 2, 2026". */
+export function titleMissing(title: string) {
+  return notJobTitle(title) || STAND_IN_TITLE.test(title.trim());
 }
 
 // What a page calls itself when it isn't the employer: job boards, and the first part of a site address.
@@ -252,14 +263,17 @@ export function companyMissing(app: Pick<JobApplication, "company" | "jobUrl">) 
   }
 }
 
-/** The student names the company for a job saved without one. */
+/** The student names the company, or the job title, for a job saved without one. */
 export async function setCompany(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; company?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; company?: unknown; title?: unknown };
   const app = await requireApp(userId, body.applicationId);
   const company = String(body.company ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
-  if (company.length < 2) throw new ServiceError("Type the company's name.", "company", 400);
+  const title = String(body.title ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
+  if (body.company !== undefined && company.length < 2) throw new ServiceError("Type the company's name.", "company", 400);
+  if (body.title !== undefined && (title.length < 2 || notJobTitle(title))) throw new ServiceError("Type the job title.", "title", 400);
+  if (!company && !title) throw new ServiceError("Type the company's name.", "company", 400);
   // A new company means a new search for its website and people.
-  const updated = await applications.update(userId, app.id, { company, companyDomain: null });
+  const updated = await applications.update(userId, app.id, { ...(company ? { company, companyDomain: null } : {}), ...(title ? { title } : {}) });
   return { application: summary(updated!) };
 }
 
@@ -303,8 +317,10 @@ export async function minimalApplication(userId: string, input: { url: string; t
   try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
   // A Workday page calls itself "Workday"; the link names the company.
   const company = isJobSiteName(input.company) ? companyFromUrl(input.url) || input.company : input.company;
+  // "Applied on November 2, 2026" is what the page said after applying, not the job.
+  const title = notJobTitle(input.title) ? NO_TITLE : input.title;
   const { app } = await applications.insert({
-    userId, jobKey: input.key ?? keyFor(input.url), jobUrl: input.url, ats, title: input.title.slice(0, 200), company: company.slice(0, 200), companyDomain: null,
+    userId, jobKey: input.key ?? keyFor(input.url), jobUrl: input.url, ats, title: title.slice(0, 200), company: company.slice(0, 200), companyDomain: null,
     department: null, location: null, description: input.description ?? "", requirements: [], applicationUrl: input.url, postedRecruiter: input.poster ?? (input.description ? findPostedRecruiter(input.description) : null), status: "extracted",
     statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
     contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,

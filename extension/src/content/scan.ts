@@ -1,3 +1,4 @@
+import { notJobTitle } from "@/lib/apply/job-title";
 import { QUICK_BOARDS } from "./quick-apply";
 import type { FieldType, PageField, Scan } from "../shared/types";
 
@@ -328,7 +329,8 @@ export function handshakeJob(where: { hostname: string; pathname: string } = win
   let pane: HTMLElement = start;
   while (pane.parentElement && pane.parentElement !== document.body && jobLinks(pane.parentElement) <= 1) pane = pane.parentElement;
   // The job's name is the pane's top heading: an h1 if it has one, else an h2, else an h3.
-  const heading = ["h1", "h2", "h3"].map((tag) => Array.from(pane.querySelectorAll<HTMLElement>(tag)).find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150)).find(Boolean);
+  // Never a status line Handshake shows once you've applied ("Applied on November 2, 2026").
+  const heading = ["h1", "h2", "h3"].map((tag) => Array.from(pane.querySelectorAll<HTMLElement>(tag)).find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !notJobTitle(clean(el.textContent)))).find(Boolean);
   const title = clean(heading?.textContent);
   // The employer is a link to its Handshake page, or failing that the logo's alt text.
   const employer = Array.from(pane.querySelectorAll<HTMLAnchorElement>("a[href*='/e/'], a[href*='/employers/']")).map((a) => clean(a.textContent)).find((text) => text.length >= 2 && text.length <= 120);
@@ -454,7 +456,9 @@ export function scanPage(): Scan {
   const poster = hiringTeam();
   // On a job board without posting data, the tab's title names the job and company better than the page does.
   const fromTitle = posting || !QUICK_BOARDS.test(host) ? null : titleParts(document.title) ?? titleParts(meta("og:title"));
-  const title = (posting?.title || greenhouseTitle?.[1] || fromTitle?.title || heading || meta("og:title") || document.title).slice(0, 200);
+  const named = (text: string | undefined) => (text && !notJobTitle(text) ? text : "");
+  const firstHeading = Array.from(document.querySelectorAll("h1")).map((el) => clean(el.textContent)).find((text) => text && !notJobTitle(text)) ?? "";
+  const title = (named(posting?.title) || greenhouseTitle?.[1] || named(fromTitle?.title) || named(heading) || firstHeading || named(meta("og:title")) || document.title).slice(0, 200);
   const siteName = meta("og:site_name");
   const company = (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "")
     || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || host.replace(/^(www|jobs|careers|boards|apply)\./, "").split(".")[0]).slice(0, 200);
@@ -571,7 +575,7 @@ function findOpenedJob(given?: Element | null): OpenedJob | null {
   // A pane with little in it counts only around the button the student pressed.
   if (pane && (pressed || (pane.innerText || "").length > 200)) {
     const heading = ["h1", "h2", "h3"].map((tag) => Array.from(pane.querySelectorAll<HTMLElement>(tag))
-      .find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !NOT_JOB_NAME.test(clean(el.textContent)))).find(Boolean);
+      .find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !NOT_JOB_NAME.test(clean(el.textContent)) && !notJobTitle(clean(el.textContent)))).find(Boolean);
     const title = clean(heading?.textContent);
     if (title) {
       const matching = postings.find((posting) => sameName(posting.title, title));
@@ -593,7 +597,7 @@ function findOpenedJob(given?: Element | null): OpenedJob | null {
   const selected = Array.from(document.querySelectorAll<HTMLElement>("[aria-selected='true'], [aria-current='true'], [aria-current='page'], [class*='selected' i], [class*='active' i]"))
     .find((el) => visible(el) && distinctJobLinks(el) === 1 && (el.innerText || "").length < 600);
   if (selected) {
-    const lines = (selected.innerText || "").split("\n").map((line) => clean(line)).filter((line) => line.length >= 2 && !/^(new|applied|easy apply|promoted|sponsored|urgently hiring|\d+ ?[dh]|\d+ days? ago|today|just posted)$/i.test(line));
+    const lines = (selected.innerText || "").split("\n").map((line) => clean(line)).filter((line) => line.length >= 2 && !notJobTitle(line) && !/^(new|applied|easy apply|promoted|sponsored|urgently hiring|\d+ ?[dh]|\d+ days? ago|today|just posted)$/i.test(line));
     const link = selected.matches("a[href]") ? selected as HTMLAnchorElement : selected.querySelector<HTMLAnchorElement>("a[href]");
     if (lines.length >= 2) return { title: lines[0].slice(0, 200), company: lines[1].slice(0, 200), description: "", url: link && JOB_HREF.test(link.href) ? jobLink(link.href) : address, from: "selected result" };
   }

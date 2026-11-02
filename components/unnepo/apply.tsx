@@ -18,7 +18,7 @@ const primary = `${btn} bg-white text-black hover:bg-zinc-200`;
 const secondary = `${btn} border border-line bg-transparent text-ink hover:bg-white/5`;
 const card = "rounded-2xl border border-line bg-panel p-5 sm:p-6";
 
-export type App = JobApplication & { missing: string[]; contacts?: ApplicationContact[]; companyMissing?: boolean };
+export type App = JobApplication & { missing: string[]; contacts?: ApplicationContact[]; companyMissing?: boolean; titleMissing?: boolean };
 export type PublicProfile = Omit<ApplicationProfile, "jobSitePasswordEncrypted"> & { hasJobSitePassword: boolean };
 export type ApplyData = {
   applications: App[];
@@ -391,8 +391,8 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
     }
   }
 
-  const named = shown.filter((app) => !app.companyMissing);
-  const unnamed = shown.filter((app) => app.companyMissing);
+  const named = shown.filter((app) => !app.companyMissing && !app.titleMissing);
+  const unnamed = shown.filter((app) => app.companyMissing || app.titleMissing);
   const row = (app: App) => {
             const expanded = open === app.id;
             const stage = stageOf(app);
@@ -407,7 +407,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                     <span className="min-w-0">
                       <span className="block truncate font-medium">{app.companyMissing ? <span className="text-faint">{app.company || "No company"}</span> : app.company}</span>
                       <span className="flex min-w-0 items-center gap-2 text-sm text-muted">
-                        <span className="truncate">{app.title}</span>
+                        <span className="truncate">{app.titleMissing ? <span className="text-faint">No job title</span> : app.title}</span>
                         <span aria-hidden className="hidden text-faint sm:inline">·</span>
                         <span className="hidden sm:inline-flex"><AtsBadge ats={app.ats} /></span>
                       </span>
@@ -433,7 +433,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                     <svg aria-hidden viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 4h11M6.5 4V2.75h3V4M4 4l.7 9.25h6.6L12 4M6.75 6.75v4M9.25 6.75v4" /></svg>
                   </button>
                 </div>
-                {app.companyMissing && <AddCompany app={app} onSaved={onReplace} />}
+                {(app.companyMissing || app.titleMissing) && <AddCompany app={app} onSaved={onReplace} />}
                 {expanded && (
                   <div className="mb-4 space-y-4 rounded-xl border border-line bg-panel p-4">
                     <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={() => void readLinks([app], app.id)} />
@@ -578,8 +578,8 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
             <section aria-labelledby="no-company" className="flex flex-col gap-2 pt-2">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h2 id="no-company" className="text-base font-semibold">Missing the company <span className="text-sm font-normal text-faint tabular-nums">{unnamed.length}</span></h2>
-                  <p className="text-sm text-muted">These were saved without the company&apos;s name. Unnepo can read each job&apos;s link for it, or type it in.</p>
+                  <h2 id="no-company" className="text-base font-semibold">Missing the company or job title <span className="text-sm font-normal text-faint tabular-nums">{unnamed.length}</span></h2>
+                  <p className="text-sm text-muted">These were saved without the company&apos;s name or the job&apos;s title. Unnepo can read each job&apos;s link for them, or type them in.</p>
                 </div>
                 <button type="button" className={secondary} disabled={reading !== null} onClick={() => void readLinks(unnamed, "unnamed")}>{reading === "unnamed" ? "Reading their links…" : "Fill in from their links"}</button>
               </div>
@@ -654,8 +654,12 @@ function FollowUpsDue({ apps, onOpen, onWrite, onSent }: { apps: App[]; onOpen: 
 /** A job saved without its company: the student types it in, and the job moves up to the main list. */
 function AddCompany({ app, onSaved }: { app: App; onSaved: (app: App) => void }) {
   const [company, setCompany] = useState("");
+  const [title, setTitle] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
+  const needsCompany = Boolean(app.companyMissing);
+  const needsTitle = Boolean(app.titleMissing);
+  const ready = (!needsCompany || company.trim().length >= 2) && (!needsTitle || title.trim().length >= 2);
   return (
     <form
       className="mb-3 flex flex-wrap items-center gap-2 text-sm"
@@ -664,7 +668,7 @@ function AddCompany({ app, onSaved }: { app: App; onSaved: (app: App) => void })
         setBusy(true);
         setProblem("");
         try {
-          const result = await call<{ application: App }>("/company", "PATCH", { applicationId: app.id, company });
+          const result = await call<{ application: App }>("/company", "PATCH", { applicationId: app.id, ...(needsCompany ? { company } : {}), ...(needsTitle ? { title } : {}) });
           onSaved({ ...app, ...result.application, contacts: app.contacts });
         } catch (reason) {
           setProblem(reason instanceof Error ? reason.message : "Couldn't save it.");
@@ -673,9 +677,19 @@ function AddCompany({ app, onSaved }: { app: App; onSaved: (app: App) => void })
         }
       }}
     >
-      <label className="sr-only" htmlFor={`company-${app.id}`}>Company for {app.title}</label>
-      <input id={`company-${app.id}`} value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Company name, like MealPal" maxLength={200} className="min-w-0 flex-1 rounded-lg border border-line bg-card px-3 py-2 text-sm sm:max-w-xs" />
-      <button type="submit" className={secondary} disabled={busy || company.trim().length < 2}>{busy ? "Saving…" : "Add company"}</button>
+      {needsTitle && (
+        <>
+          <label className="sr-only" htmlFor={`title-${app.id}`}>Job title</label>
+          <input id={`title-${app.id}`} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Job title, like Growth Intern" maxLength={200} className="min-w-0 flex-1 rounded-lg border border-line bg-card px-3 py-2 text-sm sm:max-w-xs" />
+        </>
+      )}
+      {needsCompany && (
+        <>
+          <label className="sr-only" htmlFor={`company-${app.id}`}>Company for {app.title}</label>
+          <input id={`company-${app.id}`} value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Company name, like MealPal" maxLength={200} className="min-w-0 flex-1 rounded-lg border border-line bg-card px-3 py-2 text-sm sm:max-w-xs" />
+        </>
+      )}
+      <button type="submit" className={secondary} disabled={busy || !ready}>{busy ? "Saving…" : needsCompany && needsTitle ? "Save" : needsTitle ? "Add job title" : "Add company"}</button>
       {problem && <span role="alert" className="text-xs text-red-300">{problem}</span>}
     </form>
   );
@@ -773,7 +787,7 @@ function JobInfo({ app, reading, disabled, note, onRead }: { app: App; reading: 
   const link = posting || app.applicationUrl || "";
   const rows: Array<[string, React.ReactNode]> = [
     ["Company", app.companyMissing ? <span className="text-[#F5A524]">Missing</span> : app.company],
-    ["Job", app.title],
+    ["Job", app.titleMissing ? <span key="title" className="text-[#F5A524]">Missing</span> : app.title],
     ["Location", app.location || <span className="text-faint">Not known</span>],
     ["Found on", siteFor(app)],
     ["Applied", app.submittedAt ? `${new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${applied?.how ? ` · ${HOW_LABEL[applied.how]}` : ""}` : "Not yet"],

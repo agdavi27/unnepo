@@ -3,7 +3,8 @@ import { ServiceError } from "@/lib/errors";
 import { extractJob, isJobSiteName } from "@/lib/apply/extract";
 import { postingLink } from "@/lib/apply/applied-list";
 import { applications } from "@/lib/apply/store";
-import { companyMissing, requireApp, summary } from "@/lib/apply/service";
+import { companyMissing, requireApp, summary, titleMissing } from "@/lib/apply/service";
+import { notJobTitle } from "@/lib/apply/job-title";
 import type { JobApplication } from "@/lib/apply/types";
 
 /**
@@ -48,9 +49,6 @@ export function cleanInfo(raw: unknown, url: string): LinkInfo {
   return { title: text("title", 200), company: text("company", 200), location: text("location", 200), description: text("description", 8000), url };
 }
 
-// Titles saved when nothing better was known: LinkedIn's stand-in, and page names.
-const STAND_IN_TITLE = /^(linkedin easy apply job|a job|job|untitled|job application|apply|thank you.*|application (submitted|received|sent).*)$/i;
-
 /**
  * Fills in a saved job from its link: the company when it was saved without one, the title when it was only a
  * stand-in, the place and the description when they're empty. Never replaces what the student typed or a real
@@ -70,7 +68,7 @@ export async function fillFromLink(userId: string, raw: unknown) {
     patch.companyDomain = null;
     changed.push("company");
   }
-  if (info.title.length >= 2 && (STAND_IN_TITLE.test(app.title.trim()) || app.title.trim().length < 2)) {
+  if (info.title.length >= 2 && !notJobTitle(info.title) && titleMissing(app.title)) {
     patch.title = info.title;
     changed.push("title");
   }

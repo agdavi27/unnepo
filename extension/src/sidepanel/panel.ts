@@ -325,6 +325,25 @@ function wireSetup(state: PanelState) {
  * "I applied to this job": reads the job that's open on the tab (the details pane, not the results listed
  * beside it), shows what it read for the student to fix, then saves it as applied or for later.
  */
+/**
+ * "Fill in the job information", next to a job link: reads the link (Unnepo reads company sites; job boards are
+ * read in a background tab, never LinkedIn) and fills in the title, company and description. A box the student
+ * already typed in is kept, unless it holds a job board's name or a status line instead of the job.
+ */
+let linkReading = false;
+type LinkRead = { info: { title: string; company: string; description: string } | null; error?: string };
+async function readJobLink(url: string): Promise<LinkRead> {
+  if (!/^https:\/\/\S+\.\S+/.test(url.trim())) return { info: null, error: "Put in the job's link first (it starts with https://)." };
+  linkReading = true;
+  void render();
+  const result = await ask<LinkRead>({ type: "read-link", url: url.trim() }).catch((): LinkRead => ({ info: null, error: "Couldn't reach Unnepo." }));
+  linkReading = false;
+  return result;
+}
+const keepTyped = (typed: string, read: string) => (typed.trim() && !BOARD_COMPANY.test(typed.trim()) && !STATUS_TITLE.test(typed.trim()) ? typed : read || typed);
+// A status line a page shows after applying, never a job's name.
+const STATUS_TITLE = /^(applied( on .+| \d+ \w+ ago| today| yesterday)?|application (sent|submitted|received).*|job title missing)$/i;
+
 // What a job board calls itself, which isn't the employer.
 const BOARD_COMPANY = /^(handshake|joinhandshake|ziprecruiter|indeed|glassdoor|linkedin|wellfound|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|localhost|jobs?|careers?)$/i;
 type OpenedRead = { title: string; company: string; description: string; url: string; link: string; from: string };
@@ -344,6 +363,7 @@ function openedCard(state: PanelState) {
         <label class="question"><span class="q-label">Job title</span><input class="field" id="here-title" value="${escape(job.title)}" maxlength="200"></label>
         <label class="question"><span class="q-label">Company</span><input class="field" id="here-company" value="${escape(job.company)}" maxlength="200" placeholder="Type the company"></label>
         <label class="question"><span class="q-label">Job posting link</span><input class="field" id="here-link" value="${escape(job.link)}" maxlength="2000"></label>
+        <div class="links"><button type="button" class="link" id="here-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading the link…" : "Fill in the job information"}</button></div>
         ${job.description ? `<p class="small">With the job description (${job.description.length.toLocaleString()} characters), for cover letters and finding people.</p>` : `<p class="small">No job description on this page.</p>`}
         <div class="links">
           <button type="button" class="solid" id="here-save" ${ready ? "" : "disabled"}>${here.step === "saving" ? "Saving…" : here.applied ? "Save as applied" : "Save for later"}</button>
@@ -410,6 +430,17 @@ function wireOpened(state: PanelState) {
     });
   }
   document.getElementById("here-save")?.addEventListener("click", () => void save());
+  document.getElementById("here-fill")?.addEventListener("click", async () => {
+    if (!here.job) return;
+    const result = await readJobLink(here.job.link);
+    if (result.info && here.job) {
+      here.job.title = keepTyped(here.job.title, result.info.title);
+      here.job.company = keepTyped(here.job.company, result.info.company);
+      if (result.info.description.length > here.job.description.length) here.job.description = result.info.description;
+      here.note = here.job.company.trim() ? "Filled in from the link. Check it, then save it." : "Filled in from the link. Type the company: the page didn't say.";
+    } else here.note = result.error ?? "Couldn't read the link.";
+    void render();
+  });
 }
 
 /** The bottom of the Apply view: an applying session, and "It missed one" for a job Unnepo didn't save. */
@@ -957,7 +988,8 @@ function manualJobForm() {
       <span class="eyebrow">Add a job</span>
       <label class="question"><span class="q-label">Job title</span><input class="field" id="mj-title" value="${escape(manualJob.title)}" maxlength="200" placeholder="Growth Marketing Intern"></label>
       <label class="question"><span class="q-label">Company</span><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="MealPal"></label>
-      <label class="question"><span class="q-label">Job link (fills in the rest)</span><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="https://…"></label>
+      <label class="question"><span class="q-label">Job link</span><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="https://…"></label>
+      <div class="links"><button type="button" class="link" id="mj-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading the link…" : "Fill in the job information"}</button></div>
       <label class="question"><span class="q-label">Status</span><select class="field" id="mj-stage">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("interviewing", "Interviewing")}${stage("offer", "Offer")}${stage("rejected", "Rejected")}</select></label>
       <div class="links">
         <button type="button" class="solid" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add to tracker"}</button>
@@ -983,22 +1015,24 @@ function wireManualJob(state: PanelState) {
     });
   }
   // A job link fills in the empty boxes: read by Unnepo (company sites) or in a background tab (job boards).
-  document.getElementById("mj-url")?.addEventListener("change", async () => {
+  const fillManual = async (force: boolean) => {
     const url = manualJob.url.trim();
-    if (!/^https:\/\/\S+\.\S+/.test(url) || url === manualJob.readFor) return;
+    if (linkReading) return;
+    if (!force && (!/^https:\/\/\S+\.\S+/.test(url) || url === manualJob.readFor)) return;
     manualJob.readFor = url;
-    manualJob.note = "Reading the link…";
-    void render();
-    type Read = { info: { title: string; company: string; description: string } | null; error?: string };
-    const result = await ask<Read>({ type: "read-link", url }).catch((): Read => ({ info: null, error: "Couldn't reach Unnepo." }));
+    manualJob.note = "";
+    const result = await readJobLink(url);
     if (result.info) {
-      manualJob.title ||= result.info.title;
-      manualJob.company ||= result.info.company;
+      manualJob.title = keepTyped(manualJob.title, result.info.title);
+      manualJob.company = keepTyped(manualJob.company, result.info.company);
       manualJob.description ||= result.info.description;
-      manualJob.note = result.info.company ? "Filled in from the link. Check it, then add it." : "Filled in from the link. Type the company: the page didn't say.";
+      manualJob.note = manualJob.company.trim() ? "Filled in from the link. Check it, then add it." : "Filled in from the link. Type the company: the page didn't say.";
     } else manualJob.note = result.error ?? "Couldn't read the link. Type the details.";
     void render();
-  });
+  };
+  // Pasting a link fills in the rest by itself; the button reads it again.
+  document.getElementById("mj-url")?.addEventListener("change", () => void fillManual(false));
+  document.getElementById("mj-fill")?.addEventListener("click", () => void fillManual(true));
   document.getElementById("mj-save")?.addEventListener("click", async () => {
     manualJob.saving = true;
     manualJob.note = "";
