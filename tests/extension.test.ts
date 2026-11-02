@@ -12,7 +12,8 @@ import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
-import { titleParts } from "@/extension/src/content/scan";
+import { jobLink, titleParts } from "@/extension/src/content/scan";
+import { arrange, postingLink, siteFor, sitesIn } from "@/lib/apply/applied-list";
 import { appliedSince, bySite, secondsToApply } from "@/lib/apply/activity-stats";
 import { autofillProblems, siteName } from "@/lib/services/admin";
 
@@ -198,6 +199,49 @@ describe("applying on a job board without Fill", () => {
     const logged = await (await call("POST", "submissions", token, { url: "https://app.joinhandshake.com/stu/jobs/9876543", title: "Growth Marketing Intern", company: "MealPal", description, confidence: "likely", text: "Application submitted!" })).json();
     expect(logged.application).toMatchObject({ status: "submitted", title: "Growth Marketing Intern", company: "MealPal" });
     expect((await applications.get(userId, logged.application.id))?.description).toBe(description);
+  });
+
+  it("keeps the job board posting as the job's link when the student applied on the company's site", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const logged = await (await call("POST", "submissions", token, { url: "https://jobs.lever.co/mealpal/abc/apply", postingUrl: "https://www.indeed.com/viewjob?jk=1a2b3c", title: "Growth Intern", company: "MealPal", confidence: "likely", how: "you_marked" })).json();
+    const stored = await applications.get(userId, logged.application.id);
+    expect(stored?.fillReport?.postingUrl).toBe("https://www.indeed.com/viewjob?jk=1a2b3c");
+    expect(postingLink(stored!)).toBe("https://www.indeed.com/viewjob?jk=1a2b3c");
+    expect(siteFor(stored!)).toBe("Indeed");
+    // Not a link: ignored.
+    const other = await (await call("POST", "submissions", token, { url: "https://jobs.lever.co/globex/x", postingUrl: "javascript:alert(1)", title: "Data Intern", company: "Globex", confidence: "likely" })).json();
+    expect((await applications.get(userId, other.application.id))?.fillReport?.postingUrl).toBeUndefined();
+  });
+});
+
+describe("sorting and filtering the Applied list", () => {
+  const app = (company: string, submittedAt: string | null, extra: Record<string, unknown> = {}) => ({
+    company, jobUrl: "https://boards.greenhouse.io/x/jobs/1", applicationUrl: null, status: submittedAt ? "submitted" as const : "extracted" as const,
+    createdAt: "2026-10-01T12:00:00.000Z", submittedAt, fillReport: null, contacts: [], ...extra,
+  });
+  const apps = [
+    app("Acme", "2026-10-28T12:00:00.000Z"),
+    app("globex", "2026-11-02T09:00:00.000Z", { jobUrl: "https://www.ziprecruiter.com/c/Globex/Job/Intern?jid=1" }),
+    app("Initech", "2026-10-05T12:00:00.000Z", { contacts: [{ outreachStatus: "emailed" }] }),
+    app("Hooli", null, { createdAt: "2026-11-01T12:00:00.000Z" }),
+  ];
+  const now = new Date("2026-11-02T15:00:00.000Z");
+  const names = (list: Array<{ company: string }>) => list.map((item) => item.company);
+
+  it("sorts newest first, oldest first, by company, and by who's waiting on a follow-up", () => {
+    expect(names(arrange(apps, { sort: "recent", site: "", when: "all", notFollowed: false, now }))).toEqual(["globex", "Hooli", "Acme", "Initech"]);
+    expect(names(arrange(apps, { sort: "oldest", site: "", when: "all", notFollowed: false, now }))).toEqual(["Initech", "Acme", "Hooli", "globex"]);
+    expect(names(arrange(apps, { sort: "company", site: "", when: "all", notFollowed: false, now }))).toEqual(["Acme", "globex", "Hooli", "Initech"]);
+    expect(names(arrange(apps, { sort: "follow_up", site: "", when: "all", notFollowed: false, now }))).toEqual(["Acme", "globex", "Hooli", "Initech"]);
+  });
+
+  it("filters by site, by when, and to jobs nobody has been emailed about", () => {
+    expect(names(arrange(apps, { sort: "recent", site: "ZipRecruiter", when: "all", notFollowed: false, now }))).toEqual(["globex"]);
+    expect(names(arrange(apps, { sort: "recent", site: "", when: "today", notFollowed: false, now }))).toEqual(["globex"]);
+    expect(names(arrange(apps, { sort: "recent", site: "", when: "month", notFollowed: false, now }))).toEqual(["globex", "Hooli"]);
+    expect(names(arrange(apps, { sort: "recent", site: "", when: "all", notFollowed: true, now }))).toEqual(["globex", "Acme"]);
+    expect(sitesIn(apps)[0]).toEqual({ site: "Greenhouse", count: 3 });
   });
 });
 
@@ -448,6 +492,14 @@ describe("applying activity", () => {
     expect(started.session).toMatchObject({ active: true });
     expect((await (await call("GET", "me", token)).json()).session.active).toBe(true);
     expect((await (await call("POST", "session", token, { start: false })).json()).session).toBeNull();
+  });
+});
+
+describe("one link per job", () => {
+  it("turns Indeed's search with a job open into that job's own page, and leaves other links alone", () => {
+    expect(jobLink("https://www.indeed.com/jobs?q=intern&l=Boston&vjk=9f8e7d6c5b4a3210")).toBe("https://www.indeed.com/viewjob?jk=9f8e7d6c5b4a3210");
+    expect(jobLink("https://www.indeed.com/viewjob?jk=abc123&from=serp")).toBe("https://www.indeed.com/viewjob?jk=abc123");
+    expect(jobLink("https://www.ziprecruiter.com/c/MealPal/Job/Intern?jid=1a2b")).toBe("https://www.ziprecruiter.com/c/MealPal/Job/Intern?jid=1a2b");
   });
 });
 

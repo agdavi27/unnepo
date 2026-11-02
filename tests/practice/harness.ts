@@ -3,7 +3,7 @@ import { watchEdits } from "@/extension/src/content/edits";
 import { fillGeneric } from "@/extension/src/content/generic";
 import { keptByStudent } from "@/extension/src/content/kept";
 import { celebrateSpiders } from "@/extension/src/content/spiders";
-import { scanFields, structuredJob } from "@/extension/src/content/scan";
+import { openedJob, scanFields, structuredJob } from "@/extension/src/content/scan";
 import { markNeeds, reviewLeft, type CheckItem } from "@/extension/src/content/needs";
 import { watchApplyPresses } from "@/extension/src/content/quick-apply";
 import type { Answer, DropdownMethod, PageField } from "@/extension/src/shared/types";
@@ -26,6 +26,8 @@ declare global {
     review: (needs: string[], check: CheckItem[]) => { marked: string[]; left: number };
     /** The job as the page's schema.org data describes it. */
     postingData: () => unknown;
+    /** The job open on the page, as "I applied" reads it: the details pane, not the results beside it. */
+    openedJob: () => unknown;
     /** What the job-board Apply watcher told the extension, in order. */
     quickMessages: Array<Record<string, unknown>>;
   }
@@ -54,6 +56,7 @@ window.next = async () => {
 };
 window.review = (needs, check) => ({ marked: markNeeds(needs, check), left: reviewLeft() });
 window.postingData = structuredJob;
+window.openedJob = openedJob;
 window.quickMessages = [];
 if (document.body.dataset.quickApply !== undefined) watchApplyPresses((message) => window.quickMessages.push(message));
 watchEdits();

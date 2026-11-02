@@ -194,7 +194,7 @@ async function rememberSeen(tabId: number, scan: Scan) {
   const before = all[tabId];
   // The company's application form knows less than the posting it came from: keep the posting's details.
   if (before?.description && !scan.description && sameCompany(before.company, scan.company)) return;
-  all[tabId] = { url: scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now(), pressed: before?.pressed && sameCompany(before.company, scan.company) };
+  all[tabId] = { url: scan.jobUrl || scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now(), pressed: before?.pressed && sameCompany(before.company, scan.company) };
   await chrome.storage.session.set({ seen: all });
 }
 chrome.tabs.onCreated.addListener((tab) => {
@@ -281,7 +281,12 @@ async function recordSeen(tabId: number, text: string, how: AppliedHow = "page_s
     if (scan?.description) await rememberSeen(tabId, scan);
     seen = (await seenJobs())[tabId];
   }
-  if (!seen) return;
+  // Nothing says which job it was: on the "Did you apply?" list under the page's name, for the student to name.
+  if (!seen) {
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab?.url && /^https:/.test(tab.url)) await addMaybe({ url: tab.url, title: (tab.title || "A job").slice(0, 200), company: "" });
+    return;
+  }
   let screenshot: string | undefined;
   try {
     const tab = await chrome.tabs.get(tabId);
@@ -290,11 +295,13 @@ async function recordSeen(tabId: number, text: string, how: AppliedHow = "page_s
     // A screenshot is a bonus.
   }
   try {
-    const saved = await api<{ application: { id: string; title: string; company: string } }>("POST", "submissions", { url: seen.url, title: seen.title, company: seen.company, description: seen.description, poster: seen.poster, confidence: "likely", text, screenshot, how });
+    const saved = await saveSubmission({ url: seen.url, title: seen.title, company: seen.company, description: seen.description, poster: seen.poster, confidence: "likely", text, screenshot, how });
+    celebrate(tabId);
     await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url: seen.url, host: new URL(seen.url).hostname, submission: "likely", clickedAt: Date.now(), step: `Saved to your tracker: ${saved.application.title} at ${saved.application.company}.` });
     void log(`Saved: ${saved.application.title} at ${saved.application.company} (${HOW_SAID[how]}).`);
   } catch (error) {
     await saveJob(tabId, { error: error instanceof Error ? `Couldn't save this application: ${error.message}` : "Couldn't save this application." });
+    await addMaybe({ url: seen.url, title: seen.title, company: seen.company, description: seen.description });
   }
 }
 
@@ -868,14 +875,39 @@ async function record(tabId: number, confidence: "confirmed" | "likely", text: s
   } catch {
     // A screenshot is a bonus; the submission is still recorded.
   }
-  // It went through: any spiders still out dance, then leave. After the screenshot, so the receipt is clean.
-  void send(tabId, { type: "spiders", celebrate: true }, 0).catch(() => undefined);
+  // The job board posting this application came from (its Apply opened this tab), kept as the job's link.
+  const seen = (await seenJobs())[tabId];
+  const postingUrl = seen?.url && !sameJobPage(seen.url, job.url) && sameCompany(seen.company, job.company) ? seen.url : undefined;
   try {
-    await api("POST", "submissions", { applicationId: job.applicationId, url: job.url, confidence, text, screenshot, how });
+    await saveSubmission({ applicationId: job.applicationId, url: job.url, postingUrl, confidence, text, screenshot, how });
     void log(`Saved: ${job.title} at ${job.company} (${HOW_SAID[how]}).`);
+    // It went through and it's saved: any spiders still out dance, then leave. After the screenshot, so the receipt is clean.
+    celebrate(tabId);
     await saveJob(tabId, { step: confidence === "confirmed" ? "Submitted. The site accepted your application, and it's in your Unnepo tracker." : "Looks submitted. It's in your Unnepo tracker; check your email for the site's confirmation." });
   } catch (error) {
-    await saveJob(tabId, { error: error instanceof Error ? `Couldn't save the submission: ${error.message}` : "Couldn't save the submission." });
+    // Not saved: it can be caught again, and it's on the "Did you apply?" list meanwhile.
+    await saveJob(tabId, { submission: null, error: error instanceof Error ? `Couldn't save the submission: ${error.message}` : "Couldn't save the submission." });
+    await addMaybe({ url: job.url, title: job.title, company: job.company, applicationId: job.applicationId });
+    void log(`Couldn't save ${job.title} at ${job.company}: ${error instanceof Error ? error.message : "no answer from Unnepo"}.`);
+  }
+}
+
+/** The dancing spiders, only ever once the application is saved in the tracker. */
+function celebrate(tabId: number) {
+  void chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["content/fill.js"] })
+    .catch(() => undefined)
+    .then(() => send(tabId, { type: "spiders", celebrate: true }, 0))
+    .catch(() => undefined);
+}
+
+/** Saves an application as submitted, trying again once: a lost save is a job missing from the tracker. */
+async function saveSubmission(body: Record<string, unknown>) {
+  try {
+    return await api<{ application: { id: string; title: string; company: string; companyMissing?: boolean } }>("POST", "submissions", body);
+  } catch (error) {
+    if (error instanceof Error && /couldn't tell which job/i.test(error.message)) throw error;
+    await new Promise((done) => setTimeout(done, 2000));
+    return api<{ application: { id: string; title: string; company: string; companyMissing?: boolean } }>("POST", "submissions", body);
   }
 }
 
@@ -1181,6 +1213,49 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't add it." });
         }
       }
+      // "I applied" in the panel: the job open on this tab (not the results beside it), for the student to check.
+      case "read-opened-job": {
+        if (sender.tab) return reply({ ok: false });
+        const tab = await chrome.tabs.get(Number(message.tabId)).catch(() => null);
+        if (!tab?.id || !tab.url || !/^https:/.test(tab.url)) return reply({ ok: false, error: "Open the job's page first." });
+        if (NEVER_READ.test(new URL(tab.url).hostname)) return reply({ ok: false, error: "Unnepo doesn't read LinkedIn." });
+        await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ["content/fill.js"] }).catch(() => undefined);
+        const job = await send<{ title: string; company: string; description: string; url: string; from: string }>(tab.id, { type: "opened-job" }, 0).catch(() => null);
+        if (!job) return reply({ ok: false, error: "Couldn't read this page. Reload it and try again." });
+        // A company's tab opened from a job board's Apply: the board's posting is the job's link.
+        const seen = (await seenJobs())[tab.id];
+        const posting = seen && sameCompany(seen.company, job.company) && !sameJobPage(seen.url, job.url) ? seen.url : "";
+        return reply({ ok: true, job: { ...job, link: posting || job.url } });
+      }
+      // The student checked the job and saves it: as applied, or for later.
+      case "save-opened-job": {
+        if (sender.tab) return reply({ ok: false });
+        const tabId = Number(message.tabId);
+        const job = (message.job ?? {}) as Record<string, unknown>;
+        const title = String(job.title ?? "").trim();
+        const company = String(job.company ?? "").trim();
+        // `url` is the page this tab is on (an application already tracked is found by it); `link` is the
+        // posting the student checked, kept as the job's link in the tracker.
+        const link = String(job.link ?? "").trim();
+        const url = String(job.url ?? "").trim() || link;
+        const description = String(job.description ?? "").trim() || undefined;
+        if (title.length < 2 || company.length < 2) return reply({ ok: false, error: "Type the job title and company." });
+        if (!/^https:\/\/\S+\.\S+/.test(link || url)) return reply({ ok: false, error: "The job link should start with https://." });
+        try {
+          if (message.applied) {
+            const saved = await saveSubmission({ url, postingUrl: link && link !== url ? link : undefined, title, company, description, confidence: "likely", text: "Marked applied in the Unnepo panel.", how: "you_marked" });
+            await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url, host: new URL(url).hostname, submission: "likely", clickedAt: Date.now(), step: `Saved to your tracker: ${saved.application.title} at ${saved.application.company}.` });
+            void log(`Saved: ${saved.application.title} at ${saved.application.company} (you marked it).`);
+            celebrate(tabId);
+            return reply({ ok: true, title: saved.application.title, company: saved.application.company });
+          }
+          await api("POST", "add-job", { title, company, url: link || url, stage: "in_progress", description });
+          void log(`Saved for later: ${title} at ${company}.`);
+          return reply({ ok: true, title, company });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't save it." });
+        }
+      }
       // LinkedIn, never read: the student says they applied and names the job; only the tab's address is used.
       case "track-linkedin": {
         if (sender.tab) return reply({ ok: false });
@@ -1239,25 +1314,27 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         void recordSeen(tabId, String(message.text ?? "The job site shows you applied."), "button_changed").catch(() => undefined);
         return reply({ ok: true });
       case "received-page": {
-        // The page says the application went through, whoever filled it: the spiders come out and dance.
+        // The page says the application went through, whoever filled it. It's saved first; the spiders dance
+        // once it's in the tracker, never before.
         if (tabId === undefined) return reply({ ok: false });
-        await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["content/fill.js"] }).catch(() => undefined);
-        void send(tabId, { type: "spiders", celebrate: true }, 0).catch(() => undefined);
+        void log(`The page says "${String(message.text ?? "").replace(/\s+/g, " ").trim().slice(0, 60)}".`);
         // A job Unnepo is tracking in this tab, on this same site, is saved as applied if the network didn't
         // already confirm it.
         const job = (await jobs())[tabId];
         const site = (host: string) => host.split(".").slice(-2).join(".");
         let here = "";
         try { here = new URL(String(message.url ?? sender.tab?.url ?? "")).hostname; } catch { /* no page address */ }
-        if (job?.applicationId && job.host && here && site(here) === site(job.host)) setTimeout(() => void record(tabId, "likely", String(message.text ?? "")), 6000);
-        // Applied without Unnepo filling it (Handshake, ZipRecruiter, the company's own site): save the job seen here.
-        else if (!job?.applicationId) setTimeout(() => void recordSeen(tabId, String(message.text ?? "")), 1500);
+        if (job?.submission) celebrate(tabId);
+        else if (job?.applicationId && job.host && here && site(here) === site(job.host)) setTimeout(() => void record(tabId, "likely", String(message.text ?? "")), 6000);
+        // Applied without Unnepo filling it (Handshake, ZipRecruiter, the company's own site), or on another
+        // site than the job tracked here: save the job seen here.
+        else setTimeout(() => void recordSeen(tabId, String(message.text ?? "")), 1500);
         return reply({ ok: true });
       }
       case "submitted-page":
         if (tabId === undefined) return reply({ ok: false });
-        // Give the network a moment to confirm first.
-        setTimeout(() => void record(tabId, "likely", String(message.text ?? "")), 6000);
+        // Give the network a moment to confirm first. A tab with no job tracked saves the one seen here.
+        setTimeout(() => void jobs().then((all) => (all[tabId]?.applicationId ? record(tabId, "likely", String(message.text ?? "")) : recordSeen(tabId, String(message.text ?? "")))), 6000);
         return reply({ ok: true });
       default:
         return reply({ ok: false });

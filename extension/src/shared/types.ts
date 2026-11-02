@@ -15,6 +15,8 @@ export type PageField = { id: string; label: string; type: FieldType; options: s
 
 export type Scan = {
   url: string;
+  /** On a job board, the open job's own address (Indeed's search becomes /viewjob?jk=…). */
+  jobUrl?: string;
   title: string;
   company: string;
   /** The posting's text, when the page shows it and Unnepo can't read it on its own (Handshake, signed in). */

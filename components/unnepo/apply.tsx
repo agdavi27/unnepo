@@ -8,6 +8,7 @@ import { followUpsDue } from "@/lib/apply/follow-ups";
 import { PeopleSearching } from "@/components/unnepo/people-searching";
 import { StatsPage } from "@/components/unnepo/stats";
 import { stageOf, appliedOn, applicationStats, type Stage } from "@/lib/apply/stats";
+import { SORTS, WHENS, arrange, postingLink, siteFor, sitesIn, type SortBy, type When } from "@/lib/apply/applied-list";
 import type { ApplicationContact, ApplicationProfile, JobApplication, OutreachState } from "@/lib/apply/types";
 
 const btn = "inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
@@ -240,6 +241,11 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
   }, [apps]);
   const [filter, setFilter] = useState<"all" | Stage>("all");
   const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortBy>("recent");
+  const [site, setSite] = useState("");
+  const [period, setPeriod] = useState<When>("all");
+  const [notFollowed, setNotFollowed] = useState(false);
+  const sites = useMemo(() => sitesIn(apps), [apps]);
   const [problem, setProblem] = useState("");
   const [adding, setAdding] = useState(false);
   // List: every job. Activity: applying as it happens, reloaded every few seconds while it's open.
@@ -257,11 +263,19 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
   }, [apps]);
   const shown = useMemo(() => {
     const words = query.trim().toLowerCase();
-    return apps
+    const matching = apps
       .filter((app) => filter === "all" || stageOf(app) === filter)
-      .filter((app) => !words || `${app.company} ${app.title} ${app.location ?? ""}`.toLowerCase().includes(words))
-      .sort((a, b) => appliedOn(b).getTime() - appliedOn(a).getTime());
-  }, [apps, filter, query]);
+      .filter((app) => !words || `${app.company} ${app.title} ${app.location ?? ""}`.toLowerCase().includes(words));
+    return arrange(matching, { sort, site, when: period, notFollowed });
+  }, [apps, filter, query, sort, site, period, notFollowed]);
+  const narrowed = Boolean(site || period !== "all" || notFollowed);
+  const clearFilters = () => {
+    setFilter("all");
+    setQuery("");
+    setSite("");
+    setPeriod("all");
+    setNotFollowed(false);
+  };
 
   function remove(app: App) {
     onApps((list) => list.filter((item) => item.id !== app.id));
@@ -330,10 +344,11 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
             const expanded = open === app.id;
             const stage = stageOf(app);
             const people = app.contacts?.length ?? 0;
+            const posting = postingLink(app);
             const toggle = () => setOpen(expanded ? null : app.id);
             return (
               <li key={app.id} id={`job-${app.id}`} className="group border-b border-line">
-                <div className="flex items-center gap-3 py-3.5 sm:grid sm:grid-cols-[minmax(0,1fr)_5.5rem_9rem_6.5rem_2rem] sm:gap-4">
+                <div className="flex items-center gap-3 py-3.5 sm:grid sm:grid-cols-[minmax(0,1fr)_7rem_9rem_6.5rem_2rem] sm:gap-4">
                   <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={toggle} aria-expanded={expanded}>
                     <CompanyLogo app={app} />
                     <span className="min-w-0">
@@ -347,10 +362,15 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                         <AtsBadge ats={app.ats} label />
                         <span aria-hidden>·</span>
                         <span>{when(appliedOn(app))}</span>
+                        <span aria-hidden>·</span>
+                        <span>{siteFor(app)}</span>
                       </span>
                     </span>
                   </button>
-                  <span className="hidden text-sm text-muted tabular-nums sm:block">{when(appliedOn(app))}</span>
+                  <span className="hidden min-w-0 text-sm text-muted tabular-nums sm:block">
+                    <span className="block">{when(appliedOn(app))}</span>
+                    {posting ? <a href={posting} target="_blank" rel="noreferrer" className="block truncate text-xs text-faint hover:text-white hover:underline" title={`Open the job posting on ${siteFor(app)}`}>{siteFor(app)} ↗</a> : <span className="block truncate text-xs text-faint">{siteFor(app)}</span>}
+                  </span>
                   <StageControl app={app} onChange={(next) => void setStage(app, next)} />
                   <button type="button" onClick={toggle} aria-expanded={expanded} className="hidden items-center justify-end gap-1 text-sm text-muted hover:text-white sm:inline-flex">
                     {stage === "in_progress" ? "Details" : `${people} ${people === 1 ? "person" : "people"}`}
@@ -380,7 +400,8 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                       </span>
                       <span className="flex flex-wrap gap-4">
                         {app.confirmation?.receiptPath && <a className="hover:text-white" href={`/api/apply/receipt?applicationId=${encodeURIComponent(app.id)}`} target="_blank" rel="noreferrer">Receipt ↗</a>}
-                        {app.jobUrl && <a className="hover:text-white" href={app.jobUrl} target="_blank" rel="noreferrer">Job posting ↗</a>}
+                        {posting && <a className="hover:text-white" href={posting} target="_blank" rel="noreferrer">Job posting ↗</a>}
+                        {app.applicationUrl && app.applicationUrl !== posting && <a className="hover:text-white" href={app.applicationUrl} target="_blank" rel="noreferrer">Application ↗</a>}
                         <button type="button" className="hover:text-red-300" onClick={() => remove(app)}>Remove</button>
                       </span>
                     </div>
@@ -466,6 +487,34 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
           ))}
         </div>
       )}
+      {apps.length > 1 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+          <label className="flex items-center gap-2 text-muted">Sort
+            <select value={sort} onChange={(event) => setSort(event.target.value as SortBy)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
+              {SORTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-muted">Applied
+            <select value={period} onChange={(event) => setPeriod(event.target.value as When)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
+              {WHENS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+            </select>
+          </label>
+          {sites.length > 1 && (
+            <label className="flex items-center gap-2 text-muted">Site
+              <select value={site} onChange={(event) => setSite(event.target.value)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
+                <option value="">All sites</option>
+                {sites.map((item) => <option key={item.site} value={item.site}>{item.site} ({item.count})</option>)}
+              </select>
+            </label>
+          )}
+          <label className="flex items-center gap-2 text-muted">
+            <input type="checkbox" checked={notFollowed} onChange={(event) => setNotFollowed(event.target.checked)} className="h-4 w-4 accent-white" />
+            Not followed up yet
+          </label>
+          <span className="text-faint tabular-nums">{shown.length} shown</span>
+          {(narrowed || filter !== "all" || query) && <button type="button" onClick={clearFilters} className="text-ink underline-offset-4 hover:underline">Clear filters</button>}
+        </div>
+      )}
 
       <FollowUpsDue
         apps={apps}
@@ -488,7 +537,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
           <a href="/extension/connect" className={primary}>Connect the extension</a>
         </div>
       ) : shown.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted">Nothing matches.</p>
+        <p className="py-10 text-center text-sm text-muted">Nothing matches. <button type="button" onClick={clearFilters} className="text-ink underline underline-offset-4">Clear filters</button></p>
       ) : (
         <>
           {named.length > 0 && <ul className="border-t border-line">{named.map(row)}</ul>}

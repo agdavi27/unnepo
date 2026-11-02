@@ -372,6 +372,11 @@ export function hiringTeam(): { name: string; title: string; profileUrl: string 
  * company career pages carry one. Its title, employer, and the posting's text.
  */
 export function structuredJob(): { title: string; company: string; description: string } | null {
+  return structuredJobs()[0] ?? null;
+}
+
+/** Every JobPosting on the page: a search page can carry one for each result. */
+export function structuredJobs(): Array<{ title: string; company: string; description: string }> {
   const postings: Array<Record<string, unknown>> = [];
   const collect = (value: unknown) => {
     if (Array.isArray(value)) value.forEach(collect);
@@ -389,17 +394,17 @@ export function structuredJob(): { title: string; company: string; description: 
       // Not valid JSON: skip it.
     }
   }
-  const job = postings[0];
-  if (!job) return null;
-  const org = job.hiringOrganization as Record<string, unknown> | string | undefined;
-  const company = clean(typeof org === "string" ? org : String(org?.name ?? ""));
-  const title = clean(String(job.title ?? ""));
-  // The description is HTML; its text is what the student reads. Parsed inertly: nothing in it loads or runs.
-  // Block ends become line breaks first, so paragraphs and list items don't run together.
-  const html = String(job.description ?? "").replace(/<br\s*\/?>|<\/(p|li|div|h[1-6]|ul|ol|tr)>/gi, (tag) => `${tag}\n`);
-  const text = new DOMParser().parseFromString(html, "text/html").body.textContent || "";
-  const description = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
-  return title ? { title: title.slice(0, 200), company: company.slice(0, 200), description } : null;
+  return postings.map((job) => {
+    const org = job.hiringOrganization as Record<string, unknown> | string | undefined;
+    const company = clean(typeof org === "string" ? org : String(org?.name ?? ""));
+    const title = clean(String(job.title ?? ""));
+    // The description is HTML; its text is what the student reads. Parsed inertly: nothing in it loads or runs.
+    // Block ends become line breaks first, so paragraphs and list items don't run together.
+    const html = String(job.description ?? "").replace(/<br\s*\/?>|<\/(p|li|div|h[1-6]|ul|ol|tr)>/gi, (tag) => `${tag}\n`);
+    const text = new DOMParser().parseFromString(html, "text/html").body.textContent || "";
+    const description = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
+    return { title: title.slice(0, 200), company: company.slice(0, 200), description };
+  }).filter((job) => job.title);
 }
 
 // What job sites call themselves, which isn't the company's name.
@@ -443,7 +448,9 @@ export function scanPage(): Scan {
   // Greenhouse titles read "Job Application for Product Analyst at Acme".
   const greenhouseTitle = document.title.match(/^Job Application for (.+) at (.+)$/);
   // The job a job board shows (Handshake's details pane, or a posting's schema.org data).
-  const posting = handshakeJob() ?? (host.endsWith("linkedin.com") ? null : structuredJob());
+  // On a job board, the job that's open, not the results listed beside it.
+  const opened = QUICK_BOARDS.test(host) ? findOpenedJob() : null;
+  const posting = handshakeJob() ?? opened ?? (host.endsWith("linkedin.com") ? null : structuredJob());
   const poster = hiringTeam();
   // On a job board without posting data, the tab's title names the job and company better than the page does.
   const fromTitle = posting || !QUICK_BOARDS.test(host) ? null : titleParts(document.title) ?? titleParts(meta("og:title"));
@@ -455,6 +462,7 @@ export function scanPage(): Scan {
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);
   return {
     url: window.location.href,
+    ...(opened ? { jobUrl: opened.url } : {}),
     title,
     company,
     ...(posting?.description ? { description: posting.description } : {}),
@@ -467,4 +475,127 @@ export function scanPage(): Scan {
     passwordBoxes: deepAll<HTMLInputElement>("input[type=password]").filter(visible).length,
     mentionsCv: /\bCV\b|curriculum vitae/.test(document.body.innerText || ""),
   };
+}
+
+// A link to one job: the board's job pages, or a results list's link that opens a job beside it.
+const JOB_HREF = /\/(jobs?|job-search|stu\/jobs|viewjob|job-listing|job-detail|jobs\/view|rc\/clk|partner\/joblisting\.htm|c\/[^/]+\/job)(\/|\?|$|\.htm)|[?&](jk|vjk|jid|jl|joblistingid|currentjobid|jobid|job_id)=/i;
+const APPLY_LABEL = /^(1-click apply|one-click apply|quick apply|easy apply|instant apply|apply|apply now|apply externally|apply on company (site|website)|apply on employer site|apply with (my )?(profile|resume)|i'?m interested)$/i;
+// Section headings in a job's pane that aren't the job's name.
+const NOT_JOB_NAME = /^(job details|about the job|about (the |this )?(company|role|position)|description|job description|overview|qualifications|requirements|benefits|similar jobs|more jobs|recommended( jobs)?|people also viewed|jobs you may like|salary|location|full job description|apply|share|report)$/i;
+// Where boards put the employer: its own page, or an element named for it.
+const COMPANY_LINK = "a[href*='/company/'], a[href*='/cmp/'], a[href*='/companies/'], a[href*='/e/'], a[href*='/employers/'], a[href*='/Overview/'], a[href*='/c/']";
+const COMPANY_NAMED = "[data-testid*='company' i], [data-test*='employer' i], [data-test*='company' i], [class*='companyName' i], [class*='company-name' i], [class*='employer-name' i], [class*='employerName' i], [itemprop='hiringOrganization']";
+
+const distinctJobLinks = (root: Element) => {
+  const seen = new Set<string>();
+  const links = [...(root.matches("a[href]") ? [root as HTMLAnchorElement] : []), ...Array.from(root.querySelectorAll<HTMLAnchorElement>("a[href]"))];
+  for (const a of links) {
+    try {
+      const url = new URL(a.href);
+      if (JOB_HREF.test(`${url.pathname}${url.search}`)) seen.add(`${url.pathname}?${["jk", "vjk", "jid", "jl", "jobListingId", "currentJobId", "jobId"].map((key) => url.searchParams.get(key) ?? "").join("|")}`);
+    } catch {
+      // Not a link Unnepo can read.
+    }
+  }
+  return seen.size;
+};
+const sameName = (a: string, b: string) => {
+  const word = (text: string) => text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const [x, y] = [word(a), word(b)];
+  return Boolean(x && y) && (x === y || x.startsWith(y) || y.startsWith(x));
+};
+
+/**
+ * One address per job, where the board has one: Indeed's search keeps the open job in `vjk`, its page in `jk`.
+ * Otherwise the address as it is.
+ */
+export function jobLink(href: string) {
+  try {
+    const url = new URL(href);
+    const indeedJob = /(^|\.)indeed\.com$/.test(url.hostname) ? url.searchParams.get("jk") ?? url.searchParams.get("vjk") : null;
+    if (indeedJob) return `${url.origin}/viewjob?jk=${indeedJob}`;
+    return url.href;
+  } catch {
+    return href;
+  }
+}
+
+// Words that make a line a place, a pay or a date, not an employer.
+const NOT_EMPLOYER = /^(remote|hybrid|on-?site|in person|full[- ]time|part[- ]time|internship|contract|\$|\d|posted|new|today|easy apply|apply)/i;
+/** The short line right under a job's heading, which boards use for the employer ("MealPal · New York"). */
+function lineUnder(heading: HTMLElement) {
+  const next = heading.nextElementSibling as HTMLElement | null;
+  const first = clean(next?.innerText || next?.textContent).split(/\s+[·|•–—-]\s+|,\s/)[0]?.trim() ?? "";
+  return first.length >= 2 && first.length <= 60 && !NOT_EMPLOYER.test(first) ? first : "";
+}
+
+/** How Unnepo read the job: shown in the panel, so a wrong read can be traced. */
+export type OpenedJob = { title: string; company: string; description: string; url: string; from: "details pane" | "posting data" | "selected result" | "page title" | "page" };
+
+/**
+ * The job the student has open, not the ones listed beside it. Job boards show a results list next to the
+ * open job (Indeed, Glassdoor, Handshake, LinkedIn-style searches), so the page's first heading or first
+ * posting can be any of them. From the Apply button (the one pressed, when there is one), up to the largest
+ * box that still holds at most one job link: that's the job's pane. Its top heading is the job, the employer
+ * link or label in it the company. Posting data counts when it names that same job, or when the page has only one.
+ */
+export function openedJob(pressed?: Element | null): OpenedJob {
+  const found = findOpenedJob(pressed);
+  if (found) return found;
+  const address = jobLink(window.location.href);
+  const fromTitle = titleParts(document.title);
+  if (fromTitle) return { ...fromTitle, description: "", url: address, from: "page title" };
+  const page = scanPage();
+  return { title: page.title, company: page.company, description: page.description ?? "", url: address, from: "page" };
+}
+
+/** The open job from its pane, posting data or the selected result; null when the page doesn't show which. */
+function findOpenedJob(given?: Element | null): OpenedJob | null {
+  // The Apply button the student pressed in the last few minutes, marked by the page watcher.
+  const marked = document.querySelector<HTMLElement>("[data-unnepo-pressed]");
+  const pressed = given ?? (marked && visible(marked) && Date.now() - Number(marked.dataset.unnepoPressed) < 5 * 60_000 ? marked : null);
+  const handshake = handshakeJob();
+  const address = jobLink(window.location.href);
+  if (handshake?.title) return { ...handshake, url: address, from: "details pane" };
+  const postings = structuredJobs();
+  const buttons = pressed ? [pressed as HTMLElement] : Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button], input[type=submit]"))
+    .filter((el) => visible(el) && APPLY_LABEL.test(clean(el.textContent || (el as HTMLInputElement).value || el.getAttribute("aria-label"))));
+  // The pane around each Apply button; the one with the most to read is the open job (a results card's
+  // Apply sits in a small box of its own).
+  const panes = buttons.map((button) => {
+    let pane: HTMLElement = button;
+    while (pane.parentElement && pane.parentElement !== document.body && distinctJobLinks(pane.parentElement) <= 1) pane = pane.parentElement;
+    return pane;
+  });
+  const pane = panes.sort((a, b) => (b.innerText || "").length - (a.innerText || "").length)[0];
+  // A pane with little in it counts only around the button the student pressed.
+  if (pane && (pressed || (pane.innerText || "").length > 200)) {
+    const heading = ["h1", "h2", "h3"].map((tag) => Array.from(pane.querySelectorAll<HTMLElement>(tag))
+      .find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !NOT_JOB_NAME.test(clean(el.textContent)))).find(Boolean);
+    const title = clean(heading?.textContent);
+    if (title) {
+      const matching = postings.find((posting) => sameName(posting.title, title));
+      const company = matching?.company
+        || Array.from(pane.querySelectorAll<HTMLElement>(`${COMPANY_NAMED}, ${COMPANY_LINK}`)).map((el) => clean(el.innerText || el.textContent).split(/\s{2,}|\n/)[0]).find((text) => text.length >= 2 && text.length <= 100 && !sameName(text, title) && !/^\d/.test(text))
+        || titleParts(document.title)?.company
+        || Array.from(pane.querySelectorAll<HTMLImageElement>("img[alt]")).map((img) => clean(img.alt.replace(/\s*(company )?logo$/i, ""))).find((text) => text.length >= 2 && text.length <= 100 && !sameName(text, title))
+        || lineUnder(heading!)
+        || "";
+      // The job's own link in the pane, when it names this job: a lasting address on a search page.
+      const own = Array.from(pane.querySelectorAll<HTMLAnchorElement>("a[href]")).find((a) => JOB_HREF.test(a.href) && sameName(clean(a.textContent), title));
+      const description = matching?.description || (pane.innerText || "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
+      return { title: title.slice(0, 200), company: company.slice(0, 200), description, url: own ? jobLink(own.href) : address, from: matching ? "posting data" : "details pane" };
+    }
+  }
+  // Posting data, when the page carries just the one job.
+  if (postings.length === 1 && distinctJobLinks(document.body) < 3) return { ...postings[0], url: address, from: "posting data" };
+  // The result the board marks as selected, when it says which.
+  const selected = Array.from(document.querySelectorAll<HTMLElement>("[aria-selected='true'], [aria-current='true'], [aria-current='page'], [class*='selected' i], [class*='active' i]"))
+    .find((el) => visible(el) && distinctJobLinks(el) === 1 && (el.innerText || "").length < 600);
+  if (selected) {
+    const lines = (selected.innerText || "").split("\n").map((line) => clean(line)).filter((line) => line.length >= 2 && !/^(new|applied|easy apply|promoted|sponsored|urgently hiring|\d+ ?[dh]|\d+ days? ago|today|just posted)$/i.test(line));
+    const link = selected.matches("a[href]") ? selected as HTMLAnchorElement : selected.querySelector<HTMLAnchorElement>("a[href]");
+    if (lines.length >= 2) return { title: lines[0].slice(0, 200), company: lines[1].slice(0, 200), description: "", url: link && JOB_HREF.test(link.href) ? jobLink(link.href) : address, from: "selected result" };
+  }
+  return null;
 }

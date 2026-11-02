@@ -321,6 +321,81 @@ function wireSetup(state: PanelState) {
   });
 }
 
+/**
+ * "I applied to this job": reads the job that's open on the tab (the details pane, not the results listed
+ * beside it), shows what it read for the student to fix, then saves it as applied or for later.
+ */
+type OpenedRead = { title: string; company: string; description: string; url: string; link: string; from: string };
+const here = { key: "", step: "idle" as "idle" | "reading" | "check" | "saving" | "saved", applied: true, job: null as OpenedRead | null, note: "" };
+function openedCard(state: PanelState) {
+  const key = state.tab ? `${state.tab.id}|${state.tab.url}` : "";
+  if (here.key !== key && here.step !== "saving") Object.assign(here, { key, step: "idle", job: null, note: "" });
+  if (!state.tab || !/^https:\/\//.test(state.tab.url) || onLinkedIn(state) || state.job?.running || state.job?.submission) return "";
+  if (here.step === "saved") return `<section class="page" aria-label="Saved"><p class="note ok" role="status">${escape(here.note)}</p></section>`;
+  if (here.step === "check" || here.step === "saving") {
+    const job = here.job!;
+    const ready = job.title.trim().length >= 2 && job.company.trim().length >= 2 && here.step !== "saving";
+    return `
+    <section class="page" aria-label="Check the job">
+      <span class="eyebrow">${here.applied ? "I applied" : "Save for later"} · read from the ${escape(job.from)}</span>
+      <div class="letter-form" id="here-form">
+        <label class="question"><span class="q-label">Job title</span><input class="field" id="here-title" value="${escape(job.title)}" maxlength="200"></label>
+        <label class="question"><span class="q-label">Company</span><input class="field" id="here-company" value="${escape(job.company)}" maxlength="200" placeholder="Type the company"></label>
+        <label class="question"><span class="q-label">Job posting link</span><input class="field" id="here-link" value="${escape(job.link)}" maxlength="2000"></label>
+        ${job.description ? `<p class="small">With the job description (${job.description.length.toLocaleString()} characters), for cover letters and finding people.</p>` : `<p class="small">No job description on this page.</p>`}
+        <div class="links">
+          <button type="button" class="solid" id="here-save" ${ready ? "" : "disabled"}>${here.step === "saving" ? "Saving…" : here.applied ? "Save as applied" : "Save for later"}</button>
+          <button type="button" class="link" id="here-cancel">Cancel</button>
+        </div>
+      </div>
+      ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
+    </section>`;
+  }
+  return `
+    <section class="page" aria-label="Applied to this job?">
+      <button type="button" class="outline" id="here-applied" ${here.step === "reading" ? "disabled" : ""}>${here.step === "reading" ? "Reading the job…" : "✓ I applied to this job"}</button>
+      <div class="links"><button type="button" class="link" id="here-later" ${here.step === "reading" ? "disabled" : ""}>Save it for later</button></div>
+      ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
+    </section>`;
+}
+function wireOpened(state: PanelState) {
+  if (!state.tab) return;
+  const tabId = state.tab.id;
+  const read = async (applied: boolean) => {
+    Object.assign(here, { step: "reading", applied, note: "" });
+    void render();
+    type Read = { ok: boolean; error?: string; job?: OpenedRead };
+    const result = await ask<Read>({ type: "read-opened-job", tabId }).catch((): Read => ({ ok: false, error: "Couldn't reach the page." }));
+    if (result.ok && result.job) Object.assign(here, { step: "check", job: result.job });
+    else Object.assign(here, { step: "idle", note: result.error ?? "Couldn't read this page." });
+    void render();
+  };
+  document.getElementById("here-applied")?.addEventListener("click", () => void read(true));
+  document.getElementById("here-later")?.addEventListener("click", () => void read(false));
+  document.getElementById("here-cancel")?.addEventListener("click", () => { Object.assign(here, { step: "idle", job: null, note: "" }); void render(); });
+  for (const [id, key] of [["here-title", "title"], ["here-company", "company"], ["here-link", "link"]] as const) {
+    const box = document.getElementById(id) as HTMLInputElement | null;
+    box?.addEventListener("input", () => {
+      if (!here.job) return;
+      here.job[key] = box.value;
+      const save = document.getElementById("here-save") as HTMLButtonElement | null;
+      if (save) save.disabled = here.job.title.trim().length < 2 || here.job.company.trim().length < 2;
+    });
+  }
+  document.getElementById("here-save")?.addEventListener("click", async () => {
+    if (!here.job) return;
+    here.step = "saving";
+    here.note = "";
+    if (document.activeElement?.closest("#here-form")) (document.activeElement as HTMLElement).blur();
+    void render();
+    type Saved = { ok: boolean; error?: string; title?: string; company?: string };
+    const result = await ask<Saved>({ type: "save-opened-job", tabId, applied: here.applied, job: here.job }).catch((): Saved => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    if (result.ok) Object.assign(here, { step: "saved", note: here.applied ? `Saved as applied: ${result.title} at ${result.company}. It's in your Applied jobs.` : `Saved for later: ${result.title} at ${result.company}.` });
+    else Object.assign(here, { step: "check", note: result.error ?? "Couldn't save it." });
+    void render();
+  });
+}
+
 /** The bottom of the Apply view: an applying session, and "It missed one" for a job Unnepo didn't save. */
 let missedNote = "";
 function sessionAndMissed(state: PanelState) {
@@ -1000,9 +1075,11 @@ async function render() {
   // Don't wipe what's being typed in the cover letter questions or edits box when the page changes.
   // The same for a problem being reported.
   if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea")) return;
+  // Nor the job being checked before "I applied" saves it.
+  if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return;
   // While a form is being filled (or was just filled), its card comes first; the other cards wait below.
   const active = Boolean(state.job?.running || state.job?.report);
-  const views: Record<View, () => string> = { home: () => (active ? pageCard(state) + maybeCard(state) : maybeCard(state) + pageCard(state)) + sessionAndMissed(state), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
+  const views: Record<View, () => string> = { home: () => (active ? pageCard(state) + maybeCard(state) : maybeCard(state) + pageCard(state)) + openedCard(state) + sessionAndMissed(state), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
   app.innerHTML = state.connected ? views[view]() : connectView(state);
   // A job opens on its own page in Unnepo, the tracker with its details open.
   app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
@@ -1021,6 +1098,7 @@ async function render() {
   wireSetup(state);
   wireMaybe();
   wireSessionAndMissed(state);
+  wireOpened(state);
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));

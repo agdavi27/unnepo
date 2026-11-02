@@ -95,6 +95,8 @@ export type FillReport = {
   personCharged?: boolean;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
   attempts?: FillAttempt[];
+  /** The job board posting the student applied from, when they applied on another page (the company's site). */
+  postingUrl?: string;
   /** What happened with this job, oldest first: opened, filled, applied (and how that was caught). */
   activity?: ActivityEvent[];
 };

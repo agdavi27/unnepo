@@ -80,3 +80,19 @@ export function feed<T extends WithActivity>(apps: T[], limit = 60) {
     .sort((a, b) => b.event.at.localeCompare(a.event.at))
     .slice(0, limit);
 }
+
+/** The site a job is on, as people say it: "Workday", "ZipRecruiter", "Handshake", or the company's own site. */
+export function siteOf(url: string) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    const named: Array<[RegExp, string]> = [
+      [/myworkday(jobs|site)\.com$/, "Workday"], [/greenhouse\.io$/, "Greenhouse"], [/lever\.co$/, "Lever"], [/ashbyhq\.com$/, "Ashby"],
+      [/joinhandshake\.com$/, "Handshake"], [/ziprecruiter\.com$/, "ZipRecruiter"], [/linkedin\.com$/, "LinkedIn"], [/indeed\.com$/, "Indeed"],
+      [/glassdoor\.com$/, "Glassdoor"], [/wellfound\.com$/, "Wellfound"], [/icims\.com$/, "iCIMS"], [/smartrecruiters\.com$/, "SmartRecruiters"],
+      [/workable\.com$/, "Workable"], [/jobvite\.com$/, "Jobvite"], [/taleo\.net$/, "Taleo"], [/dice\.com$/, "Dice"], [/simplify\.jobs$/, "Simplify"], [/builtin\.com$/, "Built In"], [/monster\.com$/, "Monster"], [/simplyhired\.com$/, "SimplyHired"], [/unnepo\.local$/, "Added by you"],
+    ];
+    return named.find(([pattern]) => pattern.test(host))?.[1] ?? host.split(".").slice(-2, -1)[0]?.replace(/^\w/, (c) => c.toUpperCase()) ?? "";
+  } catch {
+    return "";
+  }
+}

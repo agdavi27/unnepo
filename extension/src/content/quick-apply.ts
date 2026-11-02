@@ -30,12 +30,19 @@ export function watchApplyPresses(tell: (message: Record<string, unknown>) => vo
     const button = (event.target as Element | null)?.closest<HTMLElement>("button, a, [role=button], input[type=submit]");
     const label = button ? shortText(button) || (button as HTMLInputElement).value || "" : "";
     if (!button) return;
+    // Marked on the page, so reading the job later starts from the pane this button is in, not a result beside it.
+    const mark = () => {
+      document.querySelectorAll("[data-unnepo-pressed]").forEach((el) => el.removeAttribute("data-unnepo-pressed"));
+      button.setAttribute("data-unnepo-pressed", String(Date.now()));
+    };
     // "Apply on company site": the job is kept, so the company's tab that opens knows which job it is.
     if (ELSEWHERE.test(label) || /^apply( now)? (on|at) /i.test(label)) {
+      mark();
       tell({ type: "apply-clicked", url: location.href, label, final: false, elsewhere: true });
       return;
     }
     if (!APPLY_PRESS.test(label)) return;
+    mark();
     tell({ type: "apply-clicked", url: location.href, label, final: FINAL_PRESS.test(label) });
     // Counted, not compared one by one: job boards redraw their lists, so the same badges come back as new elements.
     const before = appliedLabels().length;

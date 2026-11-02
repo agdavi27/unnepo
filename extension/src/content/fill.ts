@@ -3,7 +3,7 @@ import { buttonUnder, findAction, findApply, pageNotes, pressAction, SUBMIT, wor
 import { leave, press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
 import { fillGeneric } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
-import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, scanFields, scanPage } from "./scan";
+import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, openedJob, scanFields, scanPage } from "./scan";
 import { watchEdits } from "./edits";
 import { keptByStudent } from "./kept";
 import { fieldControl, markNeeds, reviewLeft, type CheckItem } from "./needs";
@@ -185,6 +185,11 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type === "scan") {
       reply(scanPage());
+      return false;
+    }
+    // "I applied": the job that's open on the page, for the student to check before it's saved.
+    if (message?.type === "opened-job") {
+      reply(openedJob());
       return false;
     }
     if (message?.type === "spiders") {

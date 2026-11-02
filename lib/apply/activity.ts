@@ -2,7 +2,8 @@ import { id, nowIso } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { applicationProfiles, applications } from "@/lib/apply/store";
 import type { ActivityEvent, AppliedHow, MaybeApplied } from "@/lib/apply/types";
-export { secondsToApply } from "@/lib/apply/activity-stats";
+import { siteOf } from "@/lib/apply/activity-stats";
+export { secondsToApply, siteOf } from "@/lib/apply/activity-stats";
 
 /**
  * What the student's applying looks like as it happens: each job's events (opened, filled, applied and how
@@ -17,22 +18,6 @@ const MAYBE_DAYS = 7;
 export const SESSION_IDLE_MS = 15 * 60 * 1000;
 
 export const APPLIED_HOW: AppliedHow[] = ["site_confirmed", "page_said", "button_changed", "board_saved", "linkedin_easy_apply", "you_marked", "added_by_hand"];
-
-/** The site a job is on, as people say it: "Workday", "ZipRecruiter", "Handshake", or the company's own site. */
-export function siteOf(url: string) {
-  try {
-    const host = new URL(url).hostname.replace(/^www\./, "");
-    const named: Array<[RegExp, string]> = [
-      [/myworkday(jobs|site)\.com$/, "Workday"], [/greenhouse\.io$/, "Greenhouse"], [/lever\.co$/, "Lever"], [/ashbyhq\.com$/, "Ashby"],
-      [/joinhandshake\.com$/, "Handshake"], [/ziprecruiter\.com$/, "ZipRecruiter"], [/linkedin\.com$/, "LinkedIn"], [/indeed\.com$/, "Indeed"],
-      [/glassdoor\.com$/, "Glassdoor"], [/wellfound\.com$/, "Wellfound"], [/icims\.com$/, "iCIMS"], [/smartrecruiters\.com$/, "SmartRecruiters"],
-      [/workable\.com$/, "Workable"], [/jobvite\.com$/, "Jobvite"], [/taleo\.net$/, "Taleo"], [/dice\.com$/, "Dice"], [/unnepo\.local$/, "Added by you"],
-    ];
-    return named.find(([pattern]) => pattern.test(host))?.[1] ?? host.split(".").slice(-2, -1)[0]?.replace(/^\w/, (c) => c.toUpperCase()) ?? "";
-  } catch {
-    return "";
-  }
-}
 
 /** Adds one event to a job, reading the job fresh so nothing saved meanwhile is lost. */
 export async function addActivity(userId: string, applicationId: string, event: Omit<ActivityEvent, "at" | "site"> & { site?: string }) {
