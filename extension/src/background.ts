@@ -169,7 +169,80 @@ async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
     mentionsCv: scan.mentionsCv,
   };
   peeks.set(tabId, { url, at: Date.now(), page });
+  void rememberSeen(tabId, scan);
   return page;
+}
+
+/**
+ * The job last seen in each tab (Handshake's details pane, a ZipRecruiter posting, any page with a title and
+ * company), so applying there without pressing Fill still saves it, with its description. A tab opened from
+ * that page (Apply sends you to the company's site) starts with it.
+ */
+type Seen = { url: string; title: string; company: string; description?: string; poster?: Scan["poster"]; at: number };
+async function seenJobs(): Promise<Record<string, Seen>> {
+  return ((await chrome.storage.session.get("seen")).seen as Record<string, Seen> | undefined) ?? {};
+}
+/** "MealPal" and "mealpal" (Lever's name for it) are the same company. */
+const sameCompany = (a: string, b: string) => {
+  const word = (name: string) => name.toLowerCase().replace(/[^a-z0-9 ]/g, "").split(" ").find((part) => part.length >= 3) ?? "";
+  const [x, y] = [word(a), word(b)];
+  return Boolean(x && y) && (x.startsWith(y) || y.startsWith(x));
+};
+async function rememberSeen(tabId: number, scan: Scan) {
+  if (!scan.title.trim() || !scan.company.trim()) return;
+  const all = await seenJobs();
+  const before = all[tabId];
+  // The company's application form knows less than the posting it came from: keep the posting's details.
+  if (before?.description && !scan.description && sameCompany(before.company, scan.company)) return;
+  all[tabId] = { url: scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now() };
+  await chrome.storage.session.set({ seen: all });
+}
+chrome.tabs.onCreated.addListener((tab) => {
+  if (tab.id === undefined || tab.openerTabId === undefined) return;
+  void seenJobs().then(async (all) => {
+    const from = all[tab.openerTabId!];
+    if (from && Date.now() - from.at < 60 * 60 * 1000) {
+      all[tab.id!] = { ...from, at: Date.now() };
+      await chrome.storage.session.set({ seen: all });
+    }
+  });
+});
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void seenJobs().then((all) => {
+    if (!all[tabId]) return;
+    delete all[tabId];
+    return chrome.storage.session.set({ seen: all });
+  });
+});
+
+/**
+ * The page says the student applied, and Unnepo wasn't tracking a job in this tab: save the job it last saw
+ * here (reading the page now if it saw none), as applied.
+ */
+async function recordSeen(tabId: number, text: string) {
+  const job = (await jobs())[tabId];
+  if (job?.applicationId) return record(tabId, "likely", text);
+  let seen = (await seenJobs())[tabId];
+  if (!seen) {
+    // Only a real posting on the page (Handshake's pane, schema.org data), never a bare "Thank you" page.
+    const scan = await look(tabId).catch(() => null);
+    if (scan?.description) await rememberSeen(tabId, scan);
+    seen = (await seenJobs())[tabId];
+  }
+  if (!seen) return;
+  let screenshot: string | undefined;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab.active) screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "jpeg", quality: 60 });
+  } catch {
+    // A screenshot is a bonus.
+  }
+  try {
+    const saved = await api<{ application: { id: string; title: string; company: string } }>("POST", "submissions", { url: seen.url, title: seen.title, company: seen.company, description: seen.description, poster: seen.poster, confidence: "likely", text, screenshot });
+    await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url: seen.url, host: new URL(seen.url).hostname, submission: "likely", step: `Saved to your tracker: ${saved.application.title} at ${saved.application.company}.` });
+  } catch (error) {
+    await saveJob(tabId, { error: error instanceof Error ? `Couldn't save this application: ${error.message}` : "Couldn't save this application." });
+  }
 }
 
 async function state(): Promise<PanelState> {
@@ -218,7 +291,16 @@ function sameHost(a: string, b: string) {
 
 const signature = (scan: Scan) => `${scan.url}|${scan.passwordBoxes}|${scan.fields.map((field) => field.label).join("|")}`;
 const hasForm = (scan: Scan) => scan.useServerSchema || scan.fields.length > 0 || scan.passwordBoxes > 0;
-type Status = { step: Step | null; apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; accountExists: boolean; signInFailed: boolean; verifyEmail: boolean; confirmed: boolean; formErrors: string[]; flagged: string[]; valuesKey: string };
+/**
+ * Where an answer came from, for the ones worth checking, and how the checklist says it. Answers from the
+ * student's own details and Unnepo's standard answers ("Company website") are left off, so the list stays short.
+ */
+const REVIEW_SOURCES: Record<string, string> = {
+  ai: "Written by AI.",
+  cache: "Written by AI for a question like this before.",
+};
+
+type Status = { step: Step | null; apply: string | null; needsYou: string[]; action: { kind: "apply" | "create_account" | "sign_in" | "next" | "submit"; label: string } | null; captcha: boolean; reviewLeft?: number; accountExists: boolean; signInFailed: boolean; verifyEmail: boolean; confirmed: boolean; formErrors: string[]; flagged: string[]; valuesKey: string };
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -311,6 +393,14 @@ async function run(tabId: number) {
   const earlier = (await jobs())[tabId];
   await saveJob(tabId, { running: true, step: "Reading the page…", report: null, submission: null, error: null, clickedAt: null, llmCalls: 0, cv: false });
   const filledAll: string[] = [];
+  // Answers to look over before moving on: the ones AI wrote. Label to why.
+  const toCheck = new Map<string, string>();
+  const noteCheck = (answers: Answer[]) => {
+    for (const answer of answers) {
+      if (!answer.values.length || answer.type === "file" || !REVIEW_SOURCES[answer.source ?? ""]) continue;
+      toCheck.set(answer.label, answer.why?.trim() ? `${REVIEW_SOURCES[answer.source!]} ${answer.why.trim()}`.slice(0, 220) : REVIEW_SOURCES[answer.source!]);
+    }
+  };
   let applicationId = "";
   let posting: { url: string; title: string; company: string; description?: string; poster?: Scan["poster"] } | null = null;
   let filledKey = "";
@@ -517,6 +607,7 @@ async function run(tabId: number) {
           resumeError = got.error;
         }
         if (!stillRunning(tabId, runId)) break;
+        noteCheck(known.answers);
         let report = await fillWith(known.answers, { resume: wantsResume ? resume ?? null : null });
         for (const attempt of report?.attempts ?? []) {
           if (attempt.type !== "file" || !attempt.ok) continue;
@@ -532,6 +623,7 @@ async function run(tabId: number) {
           const more = await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : left }).catch(() => null);
           llmCalls += more?.llmCalls ?? 0;
           const fresh = (more?.answers ?? []).filter((answer) => answer.values.length && !answered.has(answer.id) && answer.type !== "file");
+          noteCheck(fresh);
           if (fresh.length) report = merge(report, await fillWith(fresh));
         }
 
@@ -547,6 +639,7 @@ async function run(tabId: number) {
           llmCalls += picked?.llmCalls ?? 0;
           // Only a different answer is worth another go.
           const again = (picked?.answers ?? []).filter((answer) => answer.values.length && !tried.get(answer.id)?.includes(`"${answer.values[0]}"`));
+          noteCheck(again);
           if (again.length) report = merge(report, await fillWith(again));
         }
 
@@ -557,6 +650,7 @@ async function run(tabId: number) {
             const leftovers = await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: extra.fields }).catch(() => null);
             if (leftovers?.answers.length) {
               llmCalls += leftovers.llmCalls;
+              noteCheck(leftovers.answers);
               report = merge(report, await fillWith(leftovers.answers, {}, false));
             }
           }
@@ -577,7 +671,9 @@ async function run(tabId: number) {
         if (report && wantsResume && !resume && resumeError) report = { ...report, failed: [...report.failed, { label: "Resume", reason: resumeError }] };
         if (report) {
           filledAll.push(...report.filled);
-          await saveJob(tabId, { report: { ...report, filled: [...filledAll] }, llmCalls });
+          const filledSet = new Set(filledAll);
+          const check = [...toCheck].filter(([label]) => filledSet.has(label)).map(([label, why]) => ({ label, why }));
+          await saveJob(tabId, { report: { ...report, filled: [...filledAll], check }, llmCalls });
           void addIssues(scan.url, report.failed.map((item) => ({ kind: "fill" as const, question: item.label, what: `Couldn't fill: ${item.reason}` }))).catch(() => undefined);
           // The record of every question tried, for fixing what fails; the page's fill never waits on it.
           if (report.attempts?.length) {
@@ -592,7 +688,7 @@ async function run(tabId: number) {
       // Every question still unanswered on this page (required, flagged by the site, or one Unnepo couldn't
       // fill) gets marked on the page, with a button that jumps to each. Answered ones drop off by themselves.
       const unanswered = [...status.flagged, ...status.needsYou, ...((await jobs())[tabId]?.report?.failed ?? []).map((item) => item.label)];
-      void send(tabId, { type: "mark-needs", labels: unanswered }).catch(() => undefined);
+      void send(tabId, { type: "mark-needs", labels: unanswered, check: (await jobs())[tabId]?.report?.check ?? [] }).catch(() => undefined);
 
       // The site says something's wrong ("Error: Invalid Data", "Please check all information"): never press
       // Next or Submit over it. List what it flagged and wait; once the student changes something, try once more.
@@ -630,6 +726,12 @@ async function run(tabId: number) {
       }
       if (!action) {
         await step(status.confirmed ? "Looks submitted. Saving it to your tracker…" : `Filled ${filledAll.length} fields. Watching the page; press Stop when you're done.`);
+        await wait(1000);
+        continue;
+      }
+      // Answers on the review checklist come first: Next waits until the student has looked them over.
+      if ((action.kind === "next" || action.kind === "submit") && status.reviewLeft) {
+        await step(`Check ${status.reviewLeft} ${status.reviewLeft === 1 ? "answer" : "answers"} outlined in blue (the checklist is in the corner). Unnepo goes on when you're done.`);
         await wait(1000);
         continue;
       }
@@ -905,6 +1007,24 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ error: error instanceof Error ? error.message : "Couldn't write this one." });
         }
       }
+      // LinkedIn, never read: the student says they applied and names the job; only the tab's address is used.
+      case "track-linkedin": {
+        if (sender.tab) return reply({ ok: false });
+        try {
+          const tab = await chrome.tabs.get(Number(message.tabId));
+          const address = new URL(tab.url ?? "");
+          if (!NEVER_READ.test(address.hostname)) return reply({ ok: false, error: "This isn't a LinkedIn page." });
+          // One address per job: /jobs/view/<id>, from the page or the search's selected job.
+          const jobId = address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId");
+          const url = jobId ? `https://www.linkedin.com/jobs/view/${jobId}/` : `${address.origin}${address.pathname}`;
+          const saved = await api<{ application: { id: string; title: string; company: string } }>("POST", "submissions", {
+            url, title: String(message.title ?? "").trim(), company: String(message.company ?? "").trim(), description: String(message.description ?? "").trim() || undefined, confidence: "likely", text: "Applied on LinkedIn (added from the Unnepo panel).",
+          });
+          return reply({ ok: true, title: saved.application.title, company: saved.application.company });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't add it." });
+        }
+      }
       case "received-page": {
         // The page says the application went through, whoever filled it: the spiders come out and dance.
         if (tabId === undefined) return reply({ ok: false });
@@ -916,7 +1036,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const site = (host: string) => host.split(".").slice(-2).join(".");
         let here = "";
         try { here = new URL(String(message.url ?? sender.tab?.url ?? "")).hostname; } catch { /* no page address */ }
-        if (job?.host && here && site(here) === site(job.host)) setTimeout(() => void record(tabId, "likely", String(message.text ?? "")), 6000);
+        if (job?.applicationId && job.host && here && site(here) === site(job.host)) setTimeout(() => void record(tabId, "likely", String(message.text ?? "")), 6000);
+        // Applied without Unnepo filling it (Handshake, ZipRecruiter, the company's own site): save the job seen here.
+        else if (!job?.applicationId) setTimeout(() => void recordSeen(tabId, String(message.text ?? "")), 1500);
         return reply({ ok: true });
       }
       case "submitted-page":

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AtsBadge, CompanyLogo } from "@/components/unnepo/company";
+import { FollowUpFacts } from "@/components/unnepo/follow-up-facts";
 import { PeopleSearching } from "@/components/unnepo/people-searching";
 import { StatsPage } from "@/components/unnepo/stats";
 import { stageOf, appliedOn, applicationStats, type Stage } from "@/lib/apply/stats";
@@ -308,6 +309,19 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
           </label>
         )}
       </div>
+
+      {apps.length > 0 && (
+        <FollowUpFacts
+          applied={apps.filter((app) => app.status === "submitted" || app.status === "applied_manual")}
+          school={data.school}
+          onOpen={(appId) => {
+            setFilter("all");
+            setQuery("");
+            setOpen(appId);
+            requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+          }}
+        />
+      )}
 
       {apps.length > 0 && (
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Filter by status">

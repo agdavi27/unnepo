@@ -85,7 +85,7 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
   if (job?.error) return { lines: [job.error], alert: true };
   if (job?.step && (job.running || job.submission || job.report)) return { lines: [job.step] };
   if (!me!.profileReady) return { lines: ["Finish your profile on Unnepo first, so I have something to fill with."] };
-  if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Press Apply on LinkedIn to go to the company's own application, then press Autofill there."] };
+  if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Applied with Easy Apply? Add it to your tracker below. Otherwise press Apply to go to the company's own application, then Autofill there."] };
   if (!jobFound(state) || !page) return { lines: ["I don't see a job on this page.", "Open a job posting, or paste a job description below and I'll write you a cover letter."] };
   const found = `${page.company || page.site} job found.${page.title ? ` ${short(page.title)}.` : ""}`;
   if (page.posting) return { lines: [found, "Press Autofill. I'll press Apply and crawl the whole thing for you."] };
@@ -156,13 +156,67 @@ function pageCard(state: PanelState) {
       </div>
       ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
       ${fill}
-      ${report?.needsYou.length ? `<p class="note warn">Still needs you <span class="small">(outlined in orange on the page)</span>:</p><ul class="needs">${report.needsYou.map((label) => needsLink(label)).join("")}</ul>` : ""}
+      ${report?.needsYou.length ? `<p class="note warn">Still needs you <span class="small">(orange on the page)</span>:</p><ul class="needs">${report.needsYou.map((label) => needsLink(label)).join("")}</ul>` : ""}
       ${couldnt.length ? `<p class="note">Couldn't fill:</p><ul class="needs">${couldnt.map((item) => needsLink(item.label, item.reason)).join("")}</ul>` : ""}
-      ${(report?.needsYou.length || couldnt.length) && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
+      ${report?.check?.length ? `<p class="note">Double-check <span class="small">(dashed blue on the page; the checklist in the corner walks you through)</span>:</p><ul class="needs">${report.check.map((item) => needsLink(item.label, item.why)).join("")}</ul>` : ""}
+      ${(report?.needsYou.length || couldnt.length || report?.check?.length) && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
       ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
       ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
       ${letterBlock()}
     </section>`;
+}
+
+/**
+ * LinkedIn, which Unnepo never reads: after applying there (Easy Apply), the student adds the job to their
+ * tracker themselves. The title and company start from the tab's name ("Growth Intern | MealPal | LinkedIn").
+ */
+const linkedInJob = { key: "", title: "", company: "", description: "", note: "", saving: false };
+function linkedInCard(state: PanelState) {
+  const key = state.tab?.url ?? "";
+  if (linkedInJob.key !== key) {
+    const parts = (state.tab?.title ?? "").replace(/^\(\d+\)\s*/, "").split(" | ").map((part) => part.trim());
+    const named = parts.length >= 3 && /linkedin/i.test(parts.at(-1)!);
+    Object.assign(linkedInJob, { key, title: named ? parts[0] : "", company: named ? parts[1] : "", description: "", note: "", saving: false });
+  }
+  const ready = linkedInJob.title.trim() && linkedInJob.company.trim();
+  return `
+    <section class="page" aria-label="Add a LinkedIn job">
+      <span class="eyebrow">Applied on LinkedIn?</span>
+      <p class="note">Unnepo doesn't read LinkedIn pages. If you applied here, add the job to your tracker.</p>
+      <div class="letter-form">
+        <label class="question"><span class="q-label">Job title</span><input class="field" id="li-title" value="${escape(linkedInJob.title)}" maxlength="200" placeholder="Growth Marketing Intern"></label>
+        <label class="question"><span class="q-label">Company</span><input class="field" id="li-company" value="${escape(linkedInJob.company)}" maxlength="200" placeholder="MealPal"></label>
+        <label class="question"><span class="q-label">Job description (optional)</span><textarea class="field letter-input" id="li-description" rows="3" maxlength="8000" placeholder="Paste it to keep it with the job, for cover letters and finding people">${escape(linkedInJob.description)}</textarea></label>
+        <button type="button" class="solid" id="li-save" ${ready && !linkedInJob.saving ? "" : "disabled"}>${linkedInJob.saving ? "Adding…" : "I applied: add to tracker"}</button>
+      </div>
+      ${linkedInJob.note ? `<p class="small" role="status">${escape(linkedInJob.note)}</p>` : ""}
+    </section>`;
+}
+
+function wireLinkedIn(tabId: number) {
+  const input = (id: string, key: "title" | "company" | "description") => {
+    const box = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | null;
+    box?.addEventListener("input", () => {
+      linkedInJob[key] = box.value;
+      const save = document.getElementById("li-save") as HTMLButtonElement | null;
+      if (save) save.disabled = !linkedInJob.title.trim() || !linkedInJob.company.trim() || linkedInJob.saving;
+    });
+  };
+  input("li-title", "title");
+  input("li-company", "company");
+  input("li-description", "description");
+  document.getElementById("li-save")?.addEventListener("click", async () => {
+    linkedInJob.saving = true;
+    linkedInJob.note = "";
+    void render();
+    type Tracked = { ok: boolean; error?: string; title?: string; company?: string };
+    const result = await ask<Tracked>({ type: "track-linkedin", tabId, title: linkedInJob.title, company: linkedInJob.company, description: linkedInJob.description })
+      .catch((): Tracked => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    linkedInJob.saving = false;
+    linkedInJob.note = result.ok ? `Added: ${result.title} at ${result.company}. It's in your Applied jobs.` : result.error ?? "Couldn't add it.";
+    if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
+    void render();
+  });
 }
 
 /** No job on the tab: paste a job description and get a cover letter for it. */
@@ -171,7 +225,7 @@ let pasteText = "";
 function pasteCard(state: PanelState) {
   const busy = letterStep === "writing" || letterStep === "revising" || letterStep === "saving";
   const linkedIn = onLinkedIn(state);
-  return `
+  return `${linkedIn ? linkedInCard(state) : ""}
     <section class="page" aria-label="Cover letter">
       <span class="eyebrow">No job found on this page</span>
       <p class="note">${linkedIn ? "Unnepo doesn't read LinkedIn. Press Apply there to go to the company's own application, or paste the job description here." : "Open a job posting and Unnepo finds it. Or paste a job description here for a cover letter."}</p>
@@ -693,6 +747,7 @@ async function render() {
   document.getElementById("fill")?.addEventListener("click", () => void ask({ type: "fill", tabId: state.tab!.id }));
   document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
   if (state.tab) wireLetter(state.tab.id);
+  if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));

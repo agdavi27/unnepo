@@ -6,7 +6,7 @@ import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, scanFields, scanPage } from "./scan";
 import { watchEdits } from "./edits";
 import { keptByStudent } from "./kept";
-import { fieldControl, markNeeds } from "./needs";
+import { fieldControl, markNeeds, reviewLeft, type CheckItem } from "./needs";
 import { celebrateSpiders, startSpiders, stopSpiders } from "./spiders";
 
 /**
@@ -199,7 +199,7 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       const fields = scanFields();
       const action = findAction(Boolean(message.knownAccount), fields.length);
       const apply = findApply();
-      reply({ needsYou: emptyRequired(fields).map((field) => field.label), action: action ? { kind: action.kind, label: action.label } : null, apply: apply ? (apply.textContent ?? "").trim() || "Apply" : null, captcha: scanPage().captcha, step: workdayStep(), ...pageNotes() });
+      reply({ needsYou: emptyRequired(fields).map((field) => field.label), action: action ? { kind: action.kind, label: action.label } : null, apply: apply ? (apply.textContent ?? "").trim() || "Apply" : null, captcha: scanPage().captcha, step: workdayStep(), reviewLeft: reviewLeft(), ...pageNotes() });
       return false;
     }
     if (message?.type === "leftovers") {
@@ -216,7 +216,8 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       return true;
     }
     if (message?.type === "mark-needs") {
-      reply({ marked: markNeeds(Array.isArray(message.labels) ? message.labels.map(String) : []) });
+      const check = (Array.isArray(message.check) ? message.check : []).map((item: Partial<CheckItem>) => ({ label: String(item?.label ?? ""), why: String(item?.why ?? "") }));
+      reply({ marked: markNeeds(Array.isArray(message.labels) ? message.labels.map(String) : [], check) });
       return false;
     }
     if (message?.type === "focus-field") {

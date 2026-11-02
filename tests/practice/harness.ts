@@ -3,7 +3,8 @@ import { watchEdits } from "@/extension/src/content/edits";
 import { fillGeneric } from "@/extension/src/content/generic";
 import { keptByStudent } from "@/extension/src/content/kept";
 import { celebrateSpiders } from "@/extension/src/content/spiders";
-import { scanFields } from "@/extension/src/content/scan";
+import { scanFields, structuredJob } from "@/extension/src/content/scan";
+import { markNeeds, reviewLeft, type CheckItem } from "@/extension/src/content/needs";
 import type { Answer, DropdownMethod, PageField } from "@/extension/src/shared/types";
 
 /**
@@ -20,6 +21,10 @@ declare global {
     pageValues: () => Record<string, string>;
     celebrate: () => void;
     next: () => Promise<unknown>;
+    /** The review checklist: questions that need the student, and filled answers to check. */
+    review: (needs: string[], check: CheckItem[]) => { marked: string[]; left: number };
+    /** The job as the page's schema.org data describes it. */
+    postingData: () => unknown;
   }
 }
 
@@ -44,4 +49,6 @@ window.next = async () => {
   await new Promise((resolve) => setTimeout(resolve, 100));
   return { before, action: action && { kind: action.kind, label: action.label }, pressed, after: workdayStep(), apply: Boolean(findApply()) };
 };
+window.review = (needs, check) => ({ marked: markNeeds(needs, check), left: reviewLeft() });
+window.postingData = structuredJob;
 watchEdits();

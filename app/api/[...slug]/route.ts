@@ -9,7 +9,7 @@ import { ServiceError } from "@/lib/errors";
 import { nowIso } from "@/lib/db/file-store";
 import { usingDefaultSecret } from "@/lib/security";
 import { integrations } from "@/lib/integrations/flags";
-import { generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
+import { dismissRecommendedJob, generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
 import { generateCv } from "@/lib/apply/cv";
@@ -207,6 +207,9 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "app" && action === "jobs" && request.method === "GET") {
     return json(await listRecommendedJobs(user.id, { refresh: new URL(request.url).searchParams.get("refresh") === "1" }));
+  }
+  if (root === "app" && action === "jobs" && request.method === "POST" && slug[2] === "dismiss") {
+    return json(await dismissRecommendedJob(user.id, await request.json()));
   }
   if (root === "app" && action === "cover-letter" && request.method === "POST") {
     return json(await generateWorkspaceCoverLetter(user.id, await request.json()));

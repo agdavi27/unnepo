@@ -9,6 +9,7 @@ import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligenc
 import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
 import { highlightProfileWithModel, organizeQuizWithModel, quizSourceText } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
+import { applicationProfiles, applications } from "@/lib/apply/store";
 import { profileState } from "@/lib/profile/service";
 
 function asForm(value: unknown): FormProfile {
@@ -151,18 +152,53 @@ export async function listRecommendedJobs(userId: string, { refresh = false } = 
   const locations = uniqueList([...student.preferences.locations, ...me.locations, student.contact.city ?? ""].filter((place) => place && !/^(remote|anywhere)/i.test(place))).slice(0, 6);
   const skills = uniqueList([...student.skills.technical, ...(student.projects ?? []).flatMap((project) => project.tech ?? [])]).slice(0, 25);
   if (!roles.length && !interests.length && !skills.length) throw new ServiceError("Add your resume first so Unnepo can match jobs to it.", "profile", 400);
-  const suggestedCompanies = brandsForInterests(interests, me.companies, 8);
-  const companies = uniqueList([...me.companies, ...suggestedCompanies]).slice(0, 12);
+  const suggestedCompanies = brandsForInterests(interests, me.companies, 32);
   const remoteOk = student.preferences.remote !== "no" && document?.form.workPreference !== "onsite";
   const prefs = { roles, companies: me.companies, suggestedCompanies, locations, interests, remoteOk, skills };
   const key = `${userId}:${createHash("sha256").update(JSON.stringify(prefs)).digest("hex").slice(0, 16)}`;
-  const result = await recommendJobs(key, prefs, { refresh });
+  const stored = await applicationProfiles.get(userId);
+  const feed = stored?.jobFeed ?? { seen: {}, dismissed: [], round: 0 };
+  const round = refresh ? feed.round + 1 : feed.round;
+  const result = await recommendJobs(key, prefs, { refresh, round });
+  // Jobs the student hid or already applied to don't come back; ones they've never been shown go first.
+  const applied = new Set((await applications.list(userId)).flatMap((app) => [jobKey(app.company, app.title), app.jobUrl]));
+  const hidden = new Set(feed.dismissed);
+  const now = nowIso();
+  const jobs = result.jobs
+    .filter((job) => !hidden.has(job.id) && !applied.has(jobKey(job.company, job.title)) && !applied.has(job.url))
+    .map((job) => ({ ...job, sourceLabel: SOURCE_LABEL[job.source], isNew: !feed.seen[job.id] }))
+    .sort((a, b) => Number(b.isNew) - Number(a.isNew));
+  // The first job list a student ever sees isn't "new": everything would be.
+  const firstLook = !Object.keys(feed.seen).length;
+  const seen = { ...feed.seen };
+  for (const job of jobs) seen[job.id] ??= now;
+  const day = Date.now() - 86_400_000;
+  const newToday = Object.values(seen).filter((at) => Date.parse(at) > day).length;
+  // Read again just before saving: the job search takes a while, and the profile may have changed meanwhile.
+  const latest = await applicationProfiles.get(userId);
+  if (latest) await applicationProfiles.put(userId, { ...latest, jobFeed: { seen: Object.fromEntries(Object.entries(seen).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 800)), dismissed: latest.jobFeed?.dismissed ?? feed.dismissed, round } });
+  const companies = uniqueList([...me.companies, ...suggestedCompanies]).slice(0, 12);
   return {
-    jobs: result.jobs.map((job) => ({ ...job, sourceLabel: SOURCE_LABEL[job.source] })),
+    jobs: firstLook ? jobs.map((job) => ({ ...job, isNew: false })) : jobs,
     cachedAt: result.cachedAt,
+    newCount: firstLook ? 0 : jobs.filter((job) => job.isNew).length,
+    newToday: firstLook ? 0 : newToday,
     searchedCompanies: companies,
     matchedOn: { roles: roles.slice(0, 4), skills: skills.slice(0, 6) },
   };
+}
+
+const jobKey = (company: string, title: string) => `${company.trim().toLowerCase()}|${title.trim().toLowerCase()}`;
+
+/** "Not for me": the job leaves the student's list for good. */
+export async function dismissRecommendedJob(userId: string, raw: unknown) {
+  const jobId = String((raw as { jobId?: unknown } | null)?.jobId ?? "").trim().slice(0, 300);
+  if (!jobId) throw new ServiceError("Say which job to hide.", "job", 400);
+  const stored = await applicationProfiles.get(userId);
+  if (!stored) throw new ServiceError("Finish your profile first.", "profile", 400);
+  const feed = stored.jobFeed ?? { seen: {}, dismissed: [], round: 0 };
+  await applicationProfiles.put(userId, { ...stored, jobFeed: { ...feed, dismissed: [jobId, ...feed.dismissed.filter((item) => item !== jobId)].slice(0, 400) } });
+  return { ok: true };
 }
 
 const LETTER_TONES: Record<string, string> = {

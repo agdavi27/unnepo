@@ -66,7 +66,9 @@
         "https://*.teamtailor.com/*",
         "https://ats.rippling.com/*",
         "https://*.applytojob.com/*",
-        "https://*.dayforcehcm.com/*"
+        "https://*.dayforcehcm.com/*",
+        "https://*.joinhandshake.com/*",
+        "https://*.ziprecruiter.com/*"
       ],
       "js": [
         "content/launcher.js"

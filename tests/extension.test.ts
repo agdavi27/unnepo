@@ -188,6 +188,17 @@ describe("extension API", () => {
   });
 });
 
+describe("applying on a job board without Fill", () => {
+  it("saves the job the student applied to on Handshake as applied, with the posting's text", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const description = "MealPal is hiring a Growth Marketing Intern. You will run campaigns, analyze funnel data, and work with the brand team. Requirements: strong writing, Excel, curiosity.";
+    const logged = await (await call("POST", "submissions", token, { url: "https://app.joinhandshake.com/stu/jobs/9876543", title: "Growth Marketing Intern", company: "MealPal", description, confidence: "likely", text: "Application submitted!" })).json();
+    expect(logged.application).toMatchObject({ status: "submitted", title: "Growth Marketing Intern", company: "MealPal" });
+    expect((await applications.get(userId, logged.application.id))?.description).toBe(description);
+  });
+});
+
 describe("job-site password", () => {
   it("makes passwords that meet every rule job sites ask for, and never the same one twice", () => {
     const made = new Set<string>();

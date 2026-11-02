@@ -187,6 +187,8 @@ export type ApplicationProfile = {
   resumeProfile?: ResumeProfile | null;
   /** Applications per week the student is aiming for. */
   weeklyGoal?: number;
+  /** The Jobs for you list: when each job was first shown, jobs the student hid, and how many refreshes. */
+  jobFeed?: { seen: Record<string, string>; dismissed: string[]; round: number };
   /** The spider the student picked on the Stats page (lib/spiders.ts); worn once it's unlocked. */
   spiderSkin?: string;
   /** CVs Unnepo has written for the student; 1 credit covers CVS_PER_CREDIT of them. */

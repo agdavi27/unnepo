@@ -187,8 +187,10 @@ async function remotive(query: string): Promise<RawJob[]> {
   }));
 }
 
-async function theMuse(location: string | null): Promise<RawJob[]> {
-  const pages = await Promise.all([1, 2, 3].map((page) => {
+async function theMuse(location: string | null, round = 0): Promise<RawJob[]> {
+  // Each refresh reads the next three pages, wrapping after twelve.
+  const first = (round % 4) * 3 + 1;
+  const pages = await Promise.all([first, first + 1, first + 2].map((page) => {
     const url = new URL("https://www.themuse.com/api/public/jobs");
     url.searchParams.set("page", String(page));
     url.searchParams.append("level", "Internship");
@@ -209,9 +211,9 @@ async function theMuse(location: string | null): Promise<RawJob[]> {
   }));
 }
 
-async function adzuna(query: string, location: string | null): Promise<RawJob[]> {
+async function adzuna(query: string, location: string | null, round = 0): Promise<RawJob[]> {
   if (!process.env.ADZUNA_APP_ID || !process.env.ADZUNA_APP_KEY) return [];
-  const url = new URL("https://api.adzuna.com/v1/api/jobs/us/search/1");
+  const url = new URL(`https://api.adzuna.com/v1/api/jobs/us/search/${(round % 3) + 1}`);
   url.searchParams.set("app_id", process.env.ADZUNA_APP_ID);
   url.searchParams.set("app_key", process.env.ADZUNA_APP_KEY);
   url.searchParams.set("results_per_page", "30");
@@ -283,17 +285,25 @@ export function scoreJob(job: RawJob, prefs: JobPreferences, now = Date.now()): 
   return { ...job, reasons, score };
 }
 
-export async function recommendJobs(cacheKey: string, prefs: JobPreferences, { refresh = false } = {}) {
-  const hit = cache.get(cacheKey);
+/**
+ * `round` counts the student's refreshes: each one searches with the next of their roles and locations, the
+ * next pages of the big feeds, and the next suggested brands' career pages, so a refresh finds other openings.
+ */
+export async function recommendJobs(cacheKey: string, prefs: JobPreferences, { refresh = false, round = 0 } = {}) {
+  const hit = cache.get(`${cacheKey}:${round}`);
   if (hit && !refresh && Date.now() - hit.at < CACHE_MS) return { jobs: hit.jobs, cachedAt: new Date(hit.at).toISOString() };
-  const query = prefs.roles[0] ?? prefs.interests[0] ?? "internship";
-  const location = prefs.locations[0] ?? null;
-  const companies = [...prefs.companies, ...(prefs.suggestedCompanies ?? [])].slice(0, 12);
+  const pick = <T,>(items: T[]) => (items.length ? items[round % items.length] : undefined);
+  const query = pick(prefs.roles) ?? pick(prefs.interests) ?? "internship";
+  const location = pick(prefs.locations) ?? null;
+  const brands = prefs.suggestedCompanies ?? [];
+  const start = brands.length > 8 ? (round * 8) % brands.length : 0;
+  const rotated = [...brands.slice(start), ...brands.slice(0, start)];
+  const companies = [...new Set([...prefs.companies, ...rotated])].slice(0, 12);
   const settled = await Promise.allSettled([
     ...companies.flatMap((company) => [greenhouse(company), lever(company), ashby(company)]),
     remotive(query),
-    theMuse(location),
-    adzuna(query, location),
+    theMuse(location, round),
+    adzuna(query, location, round),
   ]);
   const seen = new Set<string>();
   const jobs = settled
@@ -310,6 +320,6 @@ export async function recommendJobs(cacheKey: string, prefs: JobPreferences, { r
     // At most three openings per company, so one large employer can't fill the page.
     .filter((job, _index, all) => all.filter((other) => other.company === job.company).indexOf(job) < 3)
     .slice(0, 60);
-  cache.set(cacheKey, { at: Date.now(), jobs });
+  cache.set(`${cacheKey}:${round}`, { at: Date.now(), jobs });
   return { jobs, cachedAt: new Date().toISOString() };
 }

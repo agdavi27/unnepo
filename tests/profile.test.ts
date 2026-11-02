@@ -3,7 +3,7 @@ import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
-import { resetStructuredProfile, saveStructuredProfile, generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
+import { dismissRecommendedJob, resetStructuredProfile, saveStructuredProfile, generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
 import { PUBLIC_PLANS, creditMath, serverConfig } from "@/lib/config";
 import { scoreJob, setJobFetcherForTests } from "@/lib/jobs/recommend";
 import { isPersonalWorkEmail, looksLikePerson } from "@/lib/providers/contacts/router";
@@ -165,6 +165,30 @@ describe("structured profile", () => {
     expect(result.jobs.map((job) => job.title)).toEqual(["Data Analyst Intern"]);
     expect(result.jobs[0].reasons).toEqual(expect.arrayContaining(["Matches your role: Data Analyst", "Uses your skills: SQL, Tableau", "Internship"]));
     expect(result.matchedOn).toEqual({ roles: ["Data Analyst"], skills: ["SQL", "Tableau"] });
+  });
+
+  it("finds new jobs on refresh: other searches, new ones first, hidden ones gone", async () => {
+    const userId = await verifiedStudent("refresh-jobs@colby.edu", "Jobseeker");
+    await saveStudentProfile(userId, { profile: { experience: [{ company: "Colby", title: "Data Analyst Intern", startDate: "2025", current: false, bullets: [] }, { company: "Bank", title: "Finance Intern", startDate: "2024", current: false, bullets: [] }], skills: { technical: ["SQL"] } } });
+    const asked: string[] = [];
+    const posting = (id: number, title: string) => ({ id, title, company_name: `Co${id}`, candidate_required_location: "USA", publication_date: new Date().toISOString(), url: `https://remotive.com/jobs/${id}`, description: "SQL" });
+    setJobFetcherForTests(async (url) => {
+      asked.push(url);
+      if (url.includes("remotive.com")) return Response.json({ jobs: url.includes("Finance") ? [posting(3, "Finance Analyst Intern"), posting(1, "Data Analyst Intern")] : [posting(1, "Data Analyst Intern"), posting(2, "Data Analyst Intern II")] });
+      return new Response("not found", { status: 404 });
+    });
+    const first = await listRecommendedJobs(userId);
+    // The first list a student sees isn't marked new.
+    expect(first.jobs.every((job) => !job.isNew)).toBe(true);
+    expect(first.newCount).toBe(0);
+    const again = await listRecommendedJobs(userId, { refresh: true });
+    // The refresh searched the student's next role, and its new job comes first.
+    expect(asked.some((url) => url.includes("search=Finance"))).toBe(true);
+    expect(again.jobs[0]).toMatchObject({ title: "Finance Analyst Intern", isNew: true });
+    expect(again.newCount).toBe(1);
+    await dismissRecommendedJob(userId, { jobId: again.jobs[0].id });
+    const later = await listRecommendedJobs(userId);
+    expect(later.jobs.map((job) => job.title)).not.toContain("Finance Analyst Intern");
   });
 
   it("recommends jobs from dream company boards with posted dates", async () => {

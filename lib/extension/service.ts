@@ -391,7 +391,7 @@ async function saveScreenshot(userId: string, applicationId: string, dataUrl: un
  * said so after a submit click ("likely"). Records it and keeps the screenshot.
  */
 export async function extensionSubmission(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; url?: unknown; title?: unknown; company?: unknown; confidence?: unknown; screenshot?: unknown; text?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; url?: unknown; title?: unknown; company?: unknown; description?: unknown; poster?: unknown; confidence?: unknown; screenshot?: unknown; text?: unknown };
   const confidence = body.confidence === "confirmed" ? "confirmed" : body.confidence === "likely" ? "likely" : null;
   if (!confidence) throw new ServiceError("Say whether the submission was confirmed or likely.", "confidence", 400);
   const url = String(body.url ?? "").trim().slice(0, 2000);
@@ -401,7 +401,10 @@ export async function extensionSubmission(userId: string, raw: unknown) {
     const title = String(body.title ?? "").trim();
     const company = String(body.company ?? "").trim();
     if (!/^https:\/\//i.test(url) || !title || !company) throw new ServiceError("Couldn't tell which job this was.", "job", 400);
-    app = await minimalApplication(userId, { url, title, company });
+    // Applied on a job board (Handshake, ZipRecruiter) without Unnepo: the posting as the page showed it.
+    const description = typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
+    app = await minimalApplication(userId, { url, title: title.slice(0, 200), company: company.slice(0, 200), description, poster: pagePoster(body.poster) });
+    if (!description) runLater(() => enrichFromPosting(userId, app!.id, url));
   }
   await ensureCharged(userId, app);
   const receiptPath = await saveScreenshot(userId, app.id, body.screenshot);

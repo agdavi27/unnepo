@@ -54,6 +54,8 @@ export type FillReport = {
   attempts?: FillAttempt[];
   /** Required fields still empty after filling: the student's turn. */
   needsYou: string[];
+  /** Filled answers worth a second look (written by AI, or a default like "Decline to answer"), with why. */
+  check?: Array<{ label: string; why: string }>;
   captcha: boolean;
   submitted: boolean;
   ms: number;

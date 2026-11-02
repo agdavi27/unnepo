@@ -98,31 +98,49 @@ function dismissed() {
 
 // What a page says once an application went through. Stricter than the filler's check, since this runs on
 // every job page: "Thank you for your interest" also opens many postings.
-const RECEIVED = /(application (has been |was )?(successfully )?(submitted|received)|we(?:'|’| ha)?ve received your application|thank(s| you) for (applying|submitting your application)|successfully (submitted|applied)|your application is (in|complete))/i;
+const RECEIVED = /(application (has been |was )?(successfully )?(submitted|received|sent)|your application (was |has been )?sent to|you(?:'|’| ha)?ve (successfully )?applied (to|for) this|we(?:'|’| ha)?ve received your application|thank(s| you) for (applying|submitting your application)|successfully (submitted|applied)|your application is (in|complete))/i;
 
 /**
  * Watches for the page saying the application was received or submitted, however it got there (Unnepo
- * filling it, or the student doing it all), and tells the extension once, so the spiders come out and dance.
+ * filling it, or the student doing it all), and tells the extension once per job, so the spiders come out and
+ * dance and the job is saved as applied. Job boards (Handshake) show one job after another without loading a
+ * new page, so it watches again on each new address, but only for the message appearing there.
  */
 function watchForReceived() {
-  let told = false;
+  let toldFor = "";
+  let pageAt = location.href;
+  // Whether the message was already showing when the address changed: then it belongs to the job before.
+  let showingBefore = false;
   let pending = 0;
-  const check = () => {
-    pending = 0;
-    if (told || !document.body) return;
+  const found = () => {
     // A page still showing a form isn't the confirmation, whatever its small print says.
     const boxes = Array.from(document.querySelectorAll<HTMLElement>("input:not([type=hidden]):not([type=search]), textarea, select")).filter((el) => el.getBoundingClientRect().height > 0);
-    if (boxes.length > 4) return;
+    if (boxes.length > 4) return null;
     const text = (document.body.innerText || "").replace(/\s+/g, " ");
     const match = text.match(RECEIVED);
-    if (!match) return;
-    told = true;
-    observer.disconnect();
-    const start = Math.max(0, (match.index ?? 0) - 40);
+    return match ? text.slice(Math.max(0, (match.index ?? 0) - 40), Math.max(0, (match.index ?? 0) - 40) + 200) : null;
+  };
+  const check = () => {
+    pending = 0;
+    if (!document.body) return;
+    if (location.href !== pageAt) {
+      pageAt = location.href;
+      showingBefore = Boolean(found());
+      return;
+    }
+    if (toldFor === pageAt) return;
+    const text = found();
+    if (!text) {
+      showingBefore = false;
+      return;
+    }
+    if (showingBefore) return;
+    toldFor = pageAt;
     try {
-      void chrome.runtime.sendMessage({ type: "received-page", text: text.slice(start, start + 200), url: location.href }).catch(() => undefined);
+      void chrome.runtime.sendMessage({ type: "received-page", text, url: location.href }).catch(() => undefined);
     } catch {
       // The extension was reloaded; this copy of the script is cut off.
+      observer.disconnect();
     }
   };
   const observer = new MutationObserver(() => {

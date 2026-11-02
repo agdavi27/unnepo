@@ -366,6 +366,41 @@ export function hiringTeam(): { name: string; title: string; profileUrl: string 
   return { name, title, profileUrl };
 }
 
+/**
+ * The job as the page describes it for search engines (schema.org JobPosting): ZipRecruiter, Indeed and most
+ * company career pages carry one. Its title, employer, and the posting's text.
+ */
+export function structuredJob(): { title: string; company: string; description: string } | null {
+  const postings: Array<Record<string, unknown>> = [];
+  const collect = (value: unknown) => {
+    if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === "object") {
+      const item = value as Record<string, unknown>;
+      const type = item["@type"];
+      if (type === "JobPosting" || (Array.isArray(type) && type.includes("JobPosting"))) postings.push(item);
+      if (item["@graph"]) collect(item["@graph"]);
+    }
+  };
+  for (const script of Array.from(document.querySelectorAll<HTMLScriptElement>('script[type="application/ld+json"]'))) {
+    try {
+      collect(JSON.parse(script.textContent || ""));
+    } catch {
+      // Not valid JSON: skip it.
+    }
+  }
+  const job = postings[0];
+  if (!job) return null;
+  const org = job.hiringOrganization as Record<string, unknown> | string | undefined;
+  const company = clean(typeof org === "string" ? org : String(org?.name ?? ""));
+  const title = clean(String(job.title ?? ""));
+  // The description is HTML; its text is what the student reads. Parsed inertly: nothing in it loads or runs.
+  // Block ends become line breaks first, so paragraphs and list items don't run together.
+  const html = String(job.description ?? "").replace(/<br\s*\/?>|<\/(p|li|div|h[1-6]|ul|ol|tr)>/gi, (tag) => `${tag}\n`);
+  const text = new DOMParser().parseFromString(html, "text/html").body.textContent || "";
+  const description = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
+  return title ? { title: title.slice(0, 200), company: company.slice(0, 200), description } : null;
+}
+
 // What job sites call themselves, which isn't the company's name.
 const JOB_SITE_NAME = /^(workday|greenhouse|lever|ashby|icims|smartrecruiters|jobvite|taleo|workable|careers?|jobs?|job application)$/i;
 
@@ -387,11 +422,12 @@ export function scanPage(): Scan {
   const heading = clean(document.querySelector("h1")?.textContent);
   // Greenhouse titles read "Job Application for Product Analyst at Acme".
   const greenhouseTitle = document.title.match(/^Job Application for (.+) at (.+)$/);
-  const handshake = handshakeJob();
+  // The job a job board shows (Handshake's details pane, or a posting's schema.org data).
+  const posting = handshakeJob() ?? (host.endsWith("linkedin.com") ? null : structuredJob());
   const poster = hiringTeam();
-  const title = (handshake?.title || greenhouseTitle?.[1] || heading || meta("og:title") || document.title).slice(0, 200);
+  const title = (posting?.title || greenhouseTitle?.[1] || heading || meta("og:title") || document.title).slice(0, 200);
   const siteName = meta("og:site_name");
-  const company = (handshake?.company || greenhouseTitle?.[2] || (ats === "workday" ? workdayCompany() : "")
+  const company = (posting?.company || greenhouseTitle?.[2] || (ats === "workday" ? workdayCompany() : "")
     || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || host.replace(/^(www|jobs|careers|boards|apply)\./, "").split(".")[0]).slice(0, 200);
   const frame = document.querySelector<HTMLIFrameElement>("iframe#grnhse_iframe, iframe[src*='greenhouse.io/embed'], iframe[src*='jobs.lever.co'], iframe[src*='ashbyhq.com']");
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);
@@ -399,7 +435,7 @@ export function scanPage(): Scan {
     url: window.location.href,
     title,
     company,
-    ...(handshake?.description ? { description: handshake.description } : {}),
+    ...(posting?.description ? { description: posting.description } : {}),
     ...(poster ? { poster } : {}),
     ats,
     useServerSchema: ats === "greenhouse" && Boolean(document.getElementById("first_name")),

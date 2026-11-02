@@ -15,6 +15,8 @@ export type Job = {
   sourceLabel: string;
   description: string;
   reasons: string[];
+  /** Not shown to the student before this load. */
+  isNew?: boolean;
 };
 
 type LetterInput = { job: { title: string; company: string; description: string; url?: string }; studentFactIds: string[]; detailFactIds: string[]; tone: string; length: string; notes: string };
@@ -46,6 +48,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
   const [now, setNow] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
   const [studentOnly, setStudentOnly] = useState(false);
+  const [fresh, setFresh] = useState<{ newCount: number; newToday: number; cachedAt: string } | null>(null);
 
   const load = useCallback(async (refresh: boolean) => {
     setLoading(true);
@@ -57,6 +60,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
       setJobs(payload.jobs ?? []);
       setCompanies(payload.searchedCompanies ?? []);
       setMatched(payload.matchedOn ?? null);
+      setFresh({ newCount: payload.newCount ?? 0, newToday: payload.newToday ?? 0, cachedAt: payload.cachedAt ?? new Date().toISOString() });
       setNow(Date.now());
     } catch (reason) {
       setError(reason instanceof Error && reason.name !== "TimeoutError" ? reason.message : "Job boards took too long to answer. Try again.");
@@ -68,6 +72,13 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
   useEffect(() => {
     queueMicrotask(() => void load(false));
   }, [load]);
+
+  /** "Not for me": gone from the list now, and for good. */
+  async function hide(job: Job) {
+    setJobs((list) => (list ?? []).filter((item) => item.id !== job.id));
+    await fetch("/api/app/jobs/dismiss", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: job.id }) }).catch(() => undefined);
+  }
+  const updated = fresh && now ? Math.max(0, Math.round((now - Date.parse(fresh.cachedAt)) / 60000)) : null;
 
   const shown = (jobs ?? []).filter((job) => !studentOnly || job.reasons.some((reason) => reason === "Internship" || reason === "Early-career role"));
 
@@ -82,7 +93,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void load(true)} disabled={loading} className={secondary}>{loading ? "Searching…" : "Refresh"}</button>
+          <button type="button" onClick={() => void load(true)} disabled={loading} className={secondary}>{loading ? "Searching…" : "Find new jobs"}</button>
           <button type="button" onClick={() => onCoverLetter(null, jobs ?? [])} className={primary}>✦ Write me a cover letter</button>
         </div>
       </div>
@@ -92,6 +103,12 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
           <input type="checkbox" checked={studentOnly} onChange={(event) => setStudentOnly(event.target.checked)} />
           Internships and early-career only
         </label>
+        {fresh && (
+          <span className="text-sm text-zinc-300">
+            {fresh.newCount ? <><strong className="text-ink">{fresh.newCount} new</strong> this time · </> : fresh.newToday ? <>{fresh.newToday} new today · </> : null}
+            updated {updated === null || updated < 1 ? "just now" : `${updated} min ago`}
+          </span>
+        )}
         <span>From company career pages (Greenhouse, Lever, Ashby), Remotive, and The Muse.{companies.length ? ` Checked: ${companies.slice(0, 6).join(", ")}${companies.length > 6 ? "…" : ""}` : ""}</span>
       </div>
 
@@ -107,7 +124,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
             <li key={job.id} className="flex flex-col rounded-2xl border border-line bg-panel p-5">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <h2 className="font-semibold leading-snug">{job.title}</h2>
+                  <h2 className="font-semibold leading-snug">{job.isNew && <span className="mr-2 rounded-full bg-[#3D8BFF] px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white">New</span>}{job.title}</h2>
                   <p className="mt-0.5 truncate text-sm text-muted">{job.company}{job.location ? ` · ${job.location}` : ""}</p>
                 </div>
                 <span className="shrink-0 rounded-full border border-line px-2.5 py-0.5 text-[11px] text-zinc-300">{postedLabel(job, now)}</span>
@@ -123,6 +140,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
                 <button type="button" onClick={() => onCoverLetter(job, jobs ?? [])} className={secondary}>Cover letter</button>
                 {job.description && <button type="button" onClick={() => setOpen(open === job.id ? null : job.id)} className="text-xs text-muted hover:text-white">{open === job.id ? "Hide details" : "Details"}</button>}
                 <span className="ml-auto text-[11px] text-faint">{job.sourceLabel}</span>
+                <button type="button" onClick={() => void hide(job)} className="text-xs text-muted hover:text-white" aria-label={`Not for me: hide ${job.title} at ${job.company}`}>✕ Not for me</button>
               </div>
             </li>
           ))}
