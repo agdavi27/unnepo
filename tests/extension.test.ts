@@ -14,7 +14,7 @@ import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
 import { jobLink, titleParts } from "@/extension/src/content/scan";
 import { arrange, postingLink, siteFor, sitesIn } from "@/lib/apply/applied-list";
-import { notJobTitle } from "@/lib/apply/job-title";
+import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromDescription } from "@/lib/apply/extract";
 import { fillFromLink } from "@/lib/apply/job-link";
 import { appliedSince, bySite, secondsToApply } from "@/lib/apply/activity-stats";
@@ -279,6 +279,36 @@ describe("the company named in a job's description", () => {
     expect(saved.application.companyMissing).toBe(true);
     const fixed = await fillFromLink(userId, { applicationId: saved.application.id });
     expect(fixed.application).toMatchObject({ company: "MealPal", companyMissing: false });
+  });
+});
+
+describe("company names without the words around them", () => {
+  it("cuts link and label words off the name, and leaves real names alone", () => {
+    const cases: Array<[string, string]> = [
+      ["See more jobs at Anderson Equipment Company", "Anderson Equipment Company"],
+      ["View all jobs at MealPal", "MealPal"],
+      ["More jobs from Initech →", "Initech"],
+      ["Jobs at Globex", "Globex"],
+      ["MealPal · Follow", "MealPal"],
+      ["Acme 4.2 ★ 1,203 reviews", "Acme"],
+      ["Initech's logo", "Initech"],
+      ["Company logo for Hooli", "Hooli"],
+      ["Learn more about Stark Industries", "Stark Industries"],
+      ["Anderson Equipment Company", "Anderson Equipment Company"],
+      ["Jobs for the Future", "Jobs for the Future"],
+      ["Bank of America", "Bank of America"],
+    ];
+    for (const [raw, name] of cases) expect(cleanCompanyName(raw)).toBe(name);
+  });
+
+  it("saves new jobs with just the name, and fixes ones saved before", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const saved = await (await call("POST", "submissions", token, { url: "https://jobs.lever.co/anderson/123", title: "Sales Intern", company: "See more jobs at Anderson Equipment Company", confidence: "likely", how: "you_marked" })).json();
+    expect(saved.application.company).toBe("Anderson Equipment Company");
+    await applications.update(userId, saved.application.id, { company: "View all jobs at Anderson Equipment Company" });
+    const list = await (await call("GET", "jobs", token)).json();
+    expect(list.jobs.find((job: { id: string }) => job.id === saved.application.id).company).toBe("Anderson Equipment Company");
   });
 });
 

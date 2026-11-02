@@ -32,21 +32,28 @@ button { font: inherit; color: inherit; }
 .dash[hidden] { display: none; }
 
 /* The spider and his speech bubble */
-.speech { position: relative; padding: 0 20px 22px; display: flex; align-items: flex-end; gap: 14px; }
-.spider { position: relative; width: 80px; height: 60px; flex: none; margin-top: 40px; }
-.spider .thread { position: absolute; left: 39px; bottom: calc(100% - 6px); width: 2px; height: 46px; background: #3A3A44; }
-.spider svg { position: relative; display: block; }
+/* The spider hangs in the middle, a little bigger; what he says sits in a small bubble under him. */
+.speech { position: relative; padding: 0 20px 14px; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.spider { position: relative; width: 112px; height: 84px; flex: none; margin-top: 34px; }
+.spider .thread { position: absolute; left: 55px; bottom: calc(100% - 8px); width: 2px; height: 40px; background: #3A3A44; }
+.spider svg { position: relative; display: block; width: 112px; height: 84px; }
 .spider .mouth-open { display: none; }
 .spider.talking .mouth-open { display: inline; }
 .spider.talking .mouth-shut { display: none; }
-.bubble-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; margin-top: 22px; }
-.nametag { align-self: flex-start; margin-left: 10px; position: relative; z-index: 1; background: var(--accent); color: #fff; font-family: var(--pixel); font-size: 8px; padding: 6px 8px 5px; border: 3px solid var(--bg); box-shadow: 0 0 0 3px var(--fg); margin-bottom: -6px; }
-.bubble { position: relative; text-align: left; cursor: pointer; background: var(--fg); color: var(--bg); border: 3px solid var(--bg); box-shadow: 0 0 0 3px var(--fg), 7px 7px 0 3px #1E1E26; padding: 16px 14px 20px; min-height: 104px; font-family: var(--pixel); font-size: 9px; line-height: 1.9; overflow-wrap: anywhere; }
+.bubble-wrap { width: 100%; max-width: 300px; display: flex; flex-direction: column; }
+.bubble { position: relative; text-align: center; cursor: pointer; background: var(--fg); color: var(--bg); border: 2px solid var(--bg); box-shadow: 0 0 0 2px var(--fg), 4px 4px 0 2px #1E1E26; padding: 9px 12px 13px; font-family: var(--pixel); font-size: 8px; line-height: 1.7; overflow-wrap: anywhere; }
+/* The bubble's point, up toward the spider. */
+.bubble::before { content: ""; position: absolute; left: 50%; top: -9px; transform: translateX(-50%); border-left: 7px solid transparent; border-right: 7px solid transparent; border-bottom: 7px solid var(--fg); }
 .bubble.alert { color: #B42318; }
-.more { position: absolute; right: 10px; bottom: 8px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--bg); }
+.more { position: absolute; right: 8px; bottom: 5px; width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 7px solid var(--bg); }
 
 /* "On this page" card */
-.page { margin: 6px 20px 0; padding: 18px; border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); display: flex; flex-direction: column; gap: 14px; }
+.page { margin: 10px 20px 0; padding: 18px; border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); display: flex; flex-direction: column; gap: 14px; }
+/* A job is on this page: the card that stands out. */
+.page.found { border: 2px solid var(--accent); box-shadow: 0 0 0 4px rgba(61, 139, 255, .14); background: linear-gradient(180deg, rgba(61, 139, 255, .10), var(--surface) 70%); }
+.found-tag { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 4px 9px; border-radius: 999px; background: var(--accent); color: #fff; font: 600 11px var(--mono); letter-spacing: 1px; text-transform: uppercase; }
+.page.found .job-title { font-size: 19px; }
+.page.plain { gap: 10px; padding: 14px 18px; }
 .job { display: flex; flex-direction: column; gap: 4px; }
 .job-title { font-size: 17px; font-weight: 600; line-height: 1.3; letter-spacing: -0.3px; overflow-wrap: anywhere; }
 .job-company { font-size: 13px; color: var(--muted); }

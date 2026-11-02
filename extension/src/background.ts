@@ -281,6 +281,8 @@ const sameJobTitle = (job: { title: string; company: string }, seen: { title: st
   job.title.trim().toLowerCase() === seen.title.trim().toLowerCase() && (!job.company || !seen.company || sameCompany(job.company, seen.company));
 
 async function recordSeen(tabId: number, text: string, how: AppliedHow = "page_said") {
+  // Jobs are only saved when the student presses ✓ I applied; what the page said goes in the Activity log.
+  if (how !== "you_marked") return void log(`The page looks applied (${HOW_SAID[how]}). Press ✓ I applied to add it to your tracker.`);
   const job = (await jobs())[tabId];
   let seen = (await seenJobs())[tabId];
   // The job this tab is already tracking (Fill was pressed here, or this same job was saved a moment ago).
@@ -808,7 +810,7 @@ async function run(tabId: number) {
         throw new Error("The site went back to the job posting after Unnepo had filled the application, so Unnepo stopped instead of starting over. What happened is on your issues list (Profile).");
       }
       if (!action) {
-        await step(status.confirmed ? "Looks submitted. Saving it to your tracker…" : `Filled ${filledAll.length} fields. Watching the page; press Stop when you're done.`);
+        await step(status.confirmed ? "Looks submitted. Press ✓ I applied in the panel to add it to your tracker." : `Filled ${filledAll.length} fields. Watching the page; press Stop when you're done.`);
         await wait(1000);
         continue;
       }
@@ -933,6 +935,8 @@ async function readLink(url: string): Promise<{ info: LinkInfo | null; error?: s
 
 /** Saves the submission in Unnepo with a screenshot of the confirmation. */
 async function record(tabId: number, confidence: "confirmed" | "likely", text: string, how: AppliedHow = confidence === "confirmed" ? "site_confirmed" : "page_said") {
+  // Only the student's own ✓ I applied saves a job.
+  if (how !== "you_marked") return void log(`The page looks applied (${HOW_SAID[how]}). Press ✓ I applied to add it to your tracker.`);
   const job = (await jobs())[tabId];
   if (!job?.applicationId || job.submission === "confirmed" || (job.submission === "likely" && confidence === "likely")) return;
   await saveJob(tabId, { submission: confidence });
@@ -984,32 +988,13 @@ const SUBMIT_REQUEST = /(application|apply|submit|candidate|jobs\/\d+)/i;
 const NOT_SUBMIT = /(analytics|collect|track|log|metrics|beacon|sentry|segment|recaptcha|hcaptcha|captcha)/i;
 /**
  * LinkedIn Easy Apply, which Unnepo never reads: only the address of the request LinkedIn's own page sends when
- * the student submits (never what's in it, or the page). The job comes from the tab's address and its name
- * ("Growth Intern | MealPal | LinkedIn"); with no name, it's saved under "Missing the company" to fill in.
+ * the student submits (never what's in it, or the page). It's only noted in the Activity log; the student adds
+ * the job with the LinkedIn card.
  */
 const LINKEDIN_APPLY = /\/voyager\/api\/[^?]*(onsiteapply|easyapply|jobapplication|applyapplication)|[?&]action=(submit|apply)[a-z]*application|\/jobs-apply\/|\/apply\/submit/i;
-async function recordLinkedIn(tabId: number, requestUrl: string) {
-  const tab = await chrome.tabs.get(tabId).catch(() => null);
-  if (!tab?.url) return;
-  const address = new URL(tab.url);
-  const jobId = decodeURIComponent(requestUrl).match(/jobPosting[:(]+(\d{6,})/i)?.[1] ?? address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId");
-  if (!jobId) return;
-  // Once per job: Easy Apply sends more than one request.
-  const done = ((await chrome.storage.session.get("linkedinApplied")).linkedinApplied as string[] | undefined) ?? [];
-  if (done.includes(jobId)) return;
-  await chrome.storage.session.set({ linkedinApplied: [...done, jobId].slice(-200) });
-  const parts = (tab.title ?? "").replace(/^\(\d+\)\s*/, "").split(" | ").map((part) => part.trim());
-  const named = parts.length >= 3 && /linkedin/i.test(parts.at(-1)!);
-  const url = `https://www.linkedin.com/jobs/view/${jobId}/`;
-  try {
-    const saved = await api<{ application: { id: string; title: string; company: string; companyMissing?: boolean } }>("POST", "submissions", {
-      url, title: named ? parts[0] : "LinkedIn Easy Apply job", company: named ? parts[1] : "LinkedIn", confidence: "likely", text: "Easy Apply on LinkedIn.", how: "linkedin_easy_apply",
-    });
-    const name = saved.application.companyMissing ? "a LinkedIn job (add the company in your tracker)" : `${saved.application.title} at ${saved.application.company}`;
-    await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url, host: "www.linkedin.com", submission: "likely", step: `Saved your Easy Apply: ${name}.` });
-  } catch (error) {
-    await saveJob(tabId, { error: error instanceof Error ? `Couldn't save your Easy Apply: ${error.message}` : "Couldn't save your Easy Apply." });
-  }
+async function recordLinkedIn() {
+  // Easy Apply is no longer saved by itself: the student adds the job with the LinkedIn card.
+  void log("Saw an Easy Apply on LinkedIn. Add the job with the panel's LinkedIn card if you applied.");
 }
 
 /** Tabs where a job board's 1-Click Apply or Submit was just pressed, and when. */
@@ -1021,7 +1006,7 @@ chrome.webRequest.onCompleted.addListener((details) => {
   if (details.method !== "POST" || details.tabId < 0 || details.statusCode < 200 || details.statusCode >= 300) return;
   try {
     if (NEVER_READ.test(new URL(details.url).hostname) && LINKEDIN_APPLY.test(details.url)) {
-      void recordLinkedIn(details.tabId, details.url).catch(() => undefined);
+      void recordLinkedIn().catch(() => undefined);
       return;
     }
   } catch {

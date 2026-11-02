@@ -1,4 +1,5 @@
 import { ServiceError } from "@/lib/errors";
+import { cleanCompanyName } from "@/lib/apply/job-title";
 import { safeGet, safeGetJson } from "@/lib/apply/safe-fetch";
 import { classifyQuestion } from "@/lib/apply/questions";
 import type { ApplicationQuestion, Ats, JobDetails, PostedRecruiter, QuestionKind } from "@/lib/apply/types";
@@ -505,7 +506,7 @@ export async function companyFromDescription(title: string, text: string): Promi
   const body = text.slice(0, 8000);
   if (body.trim().length < 80) return "";
   const usable = (name: string | null | undefined) => {
-    const value = (name ?? "").replace(/\s+/g, " ").trim().replace(/[.,!]$/, "");
+    const value = cleanCompanyName((name ?? "").replace(/\s+/g, " ").trim().replace(/[.,!]$/, ""));
     return value.length >= 2 && value.length <= 80 && !isJobSiteName(value) && !/^(we|our|the|this|us|you|your|a|an|about|join)\b/i.test(value) && !/^(company|team|role|position|job|us)$/i.test(value)
       && value.toLowerCase() !== title.trim().toLowerCase() && body.includes(value) ? value : "";
   };

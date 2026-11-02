@@ -146,7 +146,7 @@ function pageCard(state: PanelState) {
   if (report?.filled.length) chips.push(`${report.filled.length} filled`);
   if (report?.needsYou.length) chips.push(`${report.needsYou.length} need you`);
   if (report?.check?.length) chips.push(`${report.check.length} to check`);
-  else if (page?.posting) chips.push("Job posting");
+  else if (page?.posting && !foundCardShowing(state)) chips.push("Job posting");
   else if (page?.fields) chips.push(`${page.fields} ${page.fields === 1 ? "field" : "fields"}`);
   if (page?.account === "new") chips.push("New account");
   if (page?.account === "sign_in") chips.push("Sign in");
@@ -154,10 +154,6 @@ function pageCard(state: PanelState) {
   const fill = job?.running
     ? `<button type="button" class="px stop" id="stop">STOP</button>`
     : `<button type="button" class="px" id="fill" ${me!.profileReady ? "" : "disabled"}>${report ? "FILL AGAIN" : "AUTOFILL"}</button>`;
-  const links = [
-    job?.applicationId && !job.submission && !job.running ? `<button type="button" class="link" id="applied">I applied</button>` : "",
-    job?.submission ? `<button type="button" class="link" id="not-applied">I didn't apply</button>` : "",
-  ].filter(Boolean);
   // What Unnepo couldn't fill that isn't already listed as needing the student. Each one goes to the question.
   const couldnt = (report?.failed ?? []).filter((item) => !report!.needsYou.includes(item.label));
   // One list of what's left, most urgent first: empty required questions, ones Unnepo couldn't fill, answers to check.
@@ -166,13 +162,15 @@ function pageCard(state: PanelState) {
     ...couldnt.map((item) => ({ kind: "failed", label: item.label, why: item.reason })),
     ...(report?.check ?? []).map((item) => ({ kind: "check", label: item.label, why: item.why })),
   ];
+  // The job found card above already names the job: this one is just for filling the application.
+  const named = !foundCardShowing(state);
   return `${setupCard(state)}
-    <section class="page" aria-label="This page">
-      <span class="eyebrow">Job found${site ? ` · ${escape(site)}` : ""}</span>
+    <section class="page" aria-label="${named ? "This page" : "Autofill"}">
+      ${named ? `<span class="eyebrow">Job found${site ? ` · ${escape(site)}` : ""}</span>
       <div class="job">
         <span class="job-title">${escape(company || site || "This")} job found</span>
         ${title ? `<span class="job-company">${escape(title)}</span>` : ""}
-      </div>
+      </div>` : `<span class="eyebrow">Autofill the application</span>`}
       ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
       ${job?.running || report
         ? `<p class="small resume-line">Resume: ${escape(me!.resume?.fileName ?? "none yet")}${me!.resume?.file ? " ✓" : ""}</p>`
@@ -182,7 +180,6 @@ function pageCard(state: PanelState) {
         <ul class="needs todo">${todo.map((item) => `<li class="todo-row"><span class="tag ${item.kind}">${item.kind === "needs" ? "Needs you" : item.kind === "failed" ? "Couldn't fill" : "Check"}</span>${needsLink(item.label, item.why).replace(/^<li>|<\/li>$/g, "")}</li>`).join("")}</ul>` : ""}
       ${todo.length && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
       ${job?.submission && here.step !== "saved" ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
-      ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
       ${letterBlock()}
     </section>`;
 }
@@ -216,13 +213,12 @@ function linkedInCard(state: PanelState) {
     <section class="page" aria-label="LinkedIn job saved">
       <span class="eyebrow">Applied on LinkedIn</span>
       <p class="note ok">${escape(state.job.step || "Saved to your tracker.")}</p>
-      <div class="links"><button type="button" class="link" id="not-applied">I didn't apply</button></div>
     </section>`;
   }
   return `
     <section class="page" aria-label="Add a LinkedIn job">
       <span class="eyebrow">Applied on LinkedIn?</span>
-      <p class="note">Unnepo doesn't read LinkedIn pages. Easy Apply is saved by itself; if you applied another way, add the job here.</p>
+      <p class="note">Unnepo doesn't read LinkedIn pages. If you applied, add the job here: the title and company come from the tab.</p>
       <div class="letter-form">
         <label class="question"><span class="q-label">Job title</span><input class="field" id="li-title" value="${escape(linkedInJob.title)}" maxlength="200" placeholder="Growth Marketing Intern"></label>
         <label class="question"><span class="q-label">Company</span><input class="field" id="li-company" value="${escape(linkedInJob.company)}" maxlength="200" placeholder="MealPal"></label>
@@ -386,15 +382,34 @@ function openedCard(state: PanelState) {
       ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
     </section>`;
   }
-  // What the panel sees on the page right now, so the student knows which job one press saves.
-  const seen = state.page?.title && state.page.company ? `${state.page.title} · ${state.page.company}` : "";
-  return `
-    <section class="page" aria-label="Applied to this job?">
-      ${seen ? `<p class="small">On this page: <strong>${escape(seen)}</strong></p>` : ""}
+  const button = `
       <button type="button" class="px" id="here-applied" ${here.step === "reading" || here.step === "saving" ? "disabled" : ""}>${here.step === "reading" ? "READING THE JOB…" : here.step === "saving" ? "SAVING…" : "✓ I APPLIED: ADD TO TRACKER"}</button>
       <div class="links"><button type="button" class="link" id="here-later" ${here.step === "reading" ? "disabled" : ""}>Save it for later</button></div>
-      ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
+      ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`;
+  // A job on this page stands out: what the panel sees, so the student knows which job one press saves.
+  if (foundCardShowing(state)) {
+    const site = state.page?.site ? ` · ${escape(state.page.site)}` : "";
+    return `
+    <section class="page found" aria-label="Job found">
+      <span class="found-tag">✓ Job found${site}</span>
+      <div class="job">
+        <span class="job-title">${escape(state.page!.title)}</span>
+        ${state.page!.company ? `<span class="job-company">${escape(state.page!.company)}</span>` : ""}
+      </div>
+      ${button}
     </section>`;
+  }
+  return `
+    <section class="page plain" aria-label="Applied to a job here?">
+      ${button}
+    </section>`;
+}
+
+/** Whether the job found card shows: a job on this page, the student not filling it right now. */
+function foundCardShowing(state: PanelState) {
+  if (!state.tab || !/^https:\/\//.test(state.tab.url) || onLinkedIn(state) || onUnnepo(state) || state.job?.running || state.job?.report || state.job?.submission) return false;
+  if (here.step === "saved" || here.step === "check" || (here.step === "saving" && !here.auto)) return false;
+  return Boolean(state.page?.title && (state.page.posting || state.page.fields || state.page.company));
 }
 function wireOpened(state: PanelState) {
   if (!state.tab) return;
@@ -453,35 +468,6 @@ function wireOpened(state: PanelState) {
   });
 }
 
-/** The bottom of the Apply view: an applying session, and "It missed one" for a job Unnepo didn't save. */
-let missedNote = "";
-function sessionAndMissed(state: PanelState) {
-  const session = state.me?.session;
-  const minutes = session?.active ? Math.max(1, Math.round((Date.now() - Date.parse(session.startedAt)) / 60000)) : 0;
-  return `
-    <section class="page quiet" aria-label="Session">
-      <div class="links">
-        ${session?.active ? `<span class="small">Session going · ${minutes} min</span><button type="button" class="link" id="session-stop">End session</button>` : `<button type="button" class="link" id="session-start">Start an applying session</button>`}
-        <button type="button" class="link" id="missed-one">It missed an application</button>
-      </div>
-      ${missedNote ? `<p class="small" role="status">${escape(missedNote)}</p>` : ""}
-    </section>`;
-}
-function wireSessionAndMissed(state: PanelState) {
-  for (const [id, start] of [["session-start", true], ["session-stop", false]] as const) {
-    document.getElementById(id)?.addEventListener("click", async () => {
-      await ask({ type: "session", start }).catch(() => undefined);
-      void render();
-    });
-  }
-  document.getElementById("missed-one")?.addEventListener("click", async () => {
-    if (!state.tab) return;
-    const result = await ask<{ ok: boolean; error?: string }>({ type: "missed-one", tabId: state.tab.id }).catch(() => ({ ok: false, error: "Couldn't reach the page." }));
-    missedNote = result.ok ? "Saved a report of this page to your issues list (Profile). Add the job with + Add a job in My jobs." : result.error ?? "Couldn't save the report.";
-    void render();
-  });
-}
-
 /** What the extension noticed on job pages lately, newest first: for tracing a missed application. */
 let activityLog: Array<{ at: number; text: string }> | null = null;
 function activityCard() {
@@ -505,8 +491,8 @@ function pasteCard(state: PanelState) {
   const linkedIn = onLinkedIn(state);
   return `${linkedIn ? linkedInCard(state) : ""}
     <section class="page" aria-label="Cover letter">
-      <span class="eyebrow">No job found on this page</span>
-      <p class="note">${linkedIn ? "Unnepo doesn't read LinkedIn. Press Apply there to go to the company's own application, or paste the job description here." : "Open a job posting and Unnepo finds it. Or paste a job description here for a cover letter."}</p>
+      <span class="eyebrow">${foundCardShowing(state) ? "Cover letter" : "No job found on this page"}</span>
+      <p class="note">${foundCardShowing(state) ? "Paste the job description for a cover letter for this job." : linkedIn ? "Unnepo doesn't read LinkedIn. Press Apply there to go to the company's own application, or paste the job description here." : "Open a job posting and Unnepo finds it. Or paste a job description here for a cover letter."}</p>
       <div class="letter-form">
         <label class="question"><span class="q-label">Job description</span>
           <textarea class="field letter-input paste" id="paste-desc" rows="7" maxlength="8000" placeholder="Paste the whole job posting: the role, the company, what they're looking for…">${escape(pasteText)}</textarea>
@@ -1131,7 +1117,7 @@ async function render() {
   if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return;
   // While a form is being filled (or was just filled), its card comes first; the other cards wait below.
   const active = Boolean(state.job?.running || state.job?.report);
-  const views: Record<View, () => string> = { home: () => (onUnnepo(state) ? unnepoCard() : active ? pageCard(state) + openedCard(state) : openedCard(state) + pageCard(state)) + sessionAndMissed(state), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
+  const views: Record<View, () => string> = { home: () => (onUnnepo(state) ? unnepoCard() : active ? pageCard(state) + openedCard(state) : openedCard(state) + pageCard(state)), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
   app.innerHTML = state.connected ? views[view]() : connectView(state);
   // A job opens on its own page in Unnepo, the tracker with its details open.
   app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
@@ -1148,14 +1134,11 @@ async function render() {
   if (state.tab) wireLetter(state.tab.id);
   if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
   wireSetup(state);
-  wireSessionAndMissed(state);
   wireOpened(state);
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
-  document.getElementById("applied")?.addEventListener("click", () => void ask({ type: "applied", tabId: state.tab!.id }));
-  document.getElementById("not-applied")?.addEventListener("click", () => void ask({ type: "not-applied", tabId: state.tab!.id }));
   if (view === "profile") wireIssues();
   if (view === "jobs") wireManualJob(state);
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));

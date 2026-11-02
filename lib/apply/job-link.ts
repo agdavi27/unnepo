@@ -4,7 +4,7 @@ import { companyFromDescription, extractJob, isJobSiteName } from "@/lib/apply/e
 import { postingLink } from "@/lib/apply/applied-list";
 import { applications } from "@/lib/apply/store";
 import { companyMissing, requireApp, summary, titleMissing } from "@/lib/apply/service";
-import { notJobTitle } from "@/lib/apply/job-title";
+import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
 import type { JobApplication } from "@/lib/apply/types";
 
 /**
@@ -82,6 +82,7 @@ export async function fillFromLink(userId: string, raw: unknown) {
   if (companyMissing(app) && (info.company.length < 2 || companyMissing({ company: info.company, jobUrl: link }))) {
     info.company = await companyFromDescription(info.title || app.title, info.description.length > app.description.length ? info.description : app.description);
   }
+  info.company = cleanCompanyName(info.company);
   const goodCompany = info.company.length >= 2 && !companyMissing({ company: info.company, jobUrl: link });
   if (companyMissing(app) && goodCompany) {
     patch.company = info.company;

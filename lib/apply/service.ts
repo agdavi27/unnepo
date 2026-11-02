@@ -9,7 +9,7 @@ import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { findPeopleForApplication, hunterReady, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
-import { notJobTitle } from "@/lib/apply/job-title";
+import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
@@ -343,7 +343,9 @@ export async function minimalApplication(userId: string, input: { url: string; t
   let ats: JobApplication["ats"] = "other";
   try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
   // A Workday page calls itself "Workday"; the link names the company.
-  const company = isJobSiteName(input.company) ? companyFromUrl(input.url) || input.company : input.company;
+  // "See more jobs at Anderson Equipment Company" is "Anderson Equipment Company".
+  const named = cleanCompanyName(input.company) || input.company;
+  const company = isJobSiteName(named) ? companyFromUrl(input.url) || named : named;
   // "Applied on November 2, 2026" is what the page said after applying, not the job.
   const title = notJobTitle(input.title) ? NO_TITLE : input.title;
   const { app } = await applications.insert({
@@ -405,6 +407,9 @@ const companyTries = new Set<string>();
  */
 export async function repairCompanies(userId: string, apps: JobApplication[]) {
   return Promise.all(apps.map(async (app) => {
+    // Saved with the words around the name ("See more jobs at Anderson Equipment Company"): just the name.
+    const cleaned = cleanCompanyName(app.company);
+    if (cleaned !== app.company && cleaned.length >= 2) return (await applications.update(userId, app.id, { company: cleaned.slice(0, 200) })) ?? app;
     if (!isJobSiteName(app.company) || companyTries.has(app.id)) return app;
     companyTries.add(app.id);
     let company = "";

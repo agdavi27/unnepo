@@ -1,4 +1,4 @@
-import { notJobTitle } from "@/lib/apply/job-title";
+import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
 import { QUICK_BOARDS } from "./quick-apply";
 import type { FieldType, PageField, Scan } from "../shared/types";
 
@@ -396,7 +396,7 @@ export function structuredJobs(): Array<{ title: string; company: string; descri
   }
   return postings.map((job) => {
     const org = job.hiringOrganization as Record<string, unknown> | string | undefined;
-    const company = clean(typeof org === "string" ? org : String(org?.name ?? ""));
+    const company = cleanCompanyName(clean(typeof org === "string" ? org : String(org?.name ?? "")));
     const title = clean(String(job.title ?? ""));
     // The description is HTML; its text is what the student reads. Parsed inertly: nothing in it loads or runs.
     // Block ends become line breaks first, so paragraphs and list items don't run together.
@@ -542,7 +542,7 @@ function goodEmployer(raw: string, title: string) {
   return text.length >= 2 && text.length <= 80 && !sameName(text, title) && !notJobTitle(text) && !NOT_EMPLOYER.test(text)
     && !NOT_COMPANY.test(text) && !JOB_SITE_NAME.test(text) && !LOCATION.test(text) && !/^https?:|\.(com|org|io|net)$/i.test(text) && /[a-z]/i.test(text);
 }
-const firstPart = (text: string) => clean(text).split(/\s+[·|•–—]\s+|\s-\s|\n/)[0].replace(/(['’]s)?\s*(company )?logo$/i, "").replace(/^(logo|image|avatar)( of| for)?\s+/i, "").trim();
+const firstPart = (text: string) => cleanCompanyName(cleanCompanyName(clean(text)).split(/\s+[·|•–—]\s+|\s-\s|\n/)[0]);
 
 /**
  * The employer of the job in `pane`, from the most to the least telling: an element the board marks as the
