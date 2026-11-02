@@ -37,7 +37,9 @@
     {
       "matches": [
         "https://unneponew.vercel.app/extension/connect*",
-        "http://localhost/extension/connect*"
+        "https://unneponew.vercel.app/home*",
+        "http://localhost/extension/connect*",
+        "http://localhost/home*"
       ],
       "js": [
         "content/connect.js"

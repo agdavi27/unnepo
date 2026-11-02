@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AtsBadge, CompanyLogo } from "@/components/unnepo/company";
 import { FollowUpFacts } from "@/components/unnepo/follow-up-facts";
-import { ActivityView, type Maybe, type Session } from "@/components/unnepo/activity";
+import { DidYouApply, SessionBar, type Maybe, type Session } from "@/components/unnepo/activity";
+import { extensionHere, readLinksInBrowser } from "@/lib/extension-bridge";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { PeopleSearching } from "@/components/unnepo/people-searching";
 import { StatsPage } from "@/components/unnepo/stats";
 import { stageOf, appliedOn, applicationStats, type Stage } from "@/lib/apply/stats";
+import { HOW_LABEL } from "@/lib/apply/activity-stats";
 import { SORTS, WHENS, arrange, postingLink, siteFor, sitesIn, type SortBy, type When } from "@/lib/apply/applied-list";
 import type { ApplicationContact, ApplicationProfile, JobApplication, OutreachState } from "@/lib/apply/types";
 
@@ -60,11 +62,49 @@ export const STAGE: Record<Stage, { label: string; color: string }> = {
   rejected: { label: "Rejected", color: "#8B8B94" },
 };
 
+/** An error from Unnepo's API, with its code ("in_browser": a job board the extension has to read). */
+class CallError extends Error {
+  constructor(message: string, readonly code: string) {
+    super(message);
+  }
+}
+
 async function call<T>(path: string, method: string, body?: unknown): Promise<T> {
   const response = await fetch(`/api/apply${path}`, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
   const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(payload.error || `Something went wrong (${response.status}).`);
+  if (!response.ok) throw new CallError(payload.error || `Something went wrong (${response.status}).`, payload.code ?? "");
   return payload as T;
+}
+
+/**
+ * Fills saved jobs in from their links: the server reads company sites; job boards go to the extension, which
+ * reads them in this browser. What's left over says why.
+ */
+async function fillJobsFromLinks(apps: App[]) {
+  const inBrowser: Array<{ id: string; url: string }> = [];
+  let filled = 0;
+  let failed = 0;
+  for (const app of apps) {
+    const url = postingLink(app) || app.applicationUrl || "";
+    if (!url) { failed += 1; continue; }
+    try {
+      const result = await call<{ changed: string[] }>("/fill-from-link", "POST", { applicationId: app.id });
+      if (result.changed.length) filled += 1;
+    } catch (reason) {
+      if (reason instanceof CallError && reason.code === "in_browser") inBrowser.push({ id: app.id, url });
+      else failed += 1;
+    }
+  }
+  let noExtension = 0;
+  if (inBrowser.length) {
+    if (await extensionHere()) {
+      for (const result of await readLinksInBrowser(inBrowser)) {
+        if (result.ok && result.changed?.length) filled += 1;
+        else if (!result.ok) failed += 1;
+      }
+    } else noExtension = inBrowser.length;
+  }
+  return { filled, failed, noExtension };
 }
 
 function when(date: Date) {
@@ -248,13 +288,26 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
   const sites = useMemo(() => sitesIn(apps), [apps]);
   const [problem, setProblem] = useState("");
   const [adding, setAdding] = useState(false);
-  // List: every job. Activity: applying as it happens, reloaded every few seconds while it's open.
-  const [mode, setMode] = useState<"list" | "activity">("list");
+  const [reading, setReading] = useState<string | null>(null);
+  const [readNote, setReadNote] = useState({ key: "", text: "" });
+  // Jobs saved by the extension show up without reloading: the list is read again every few seconds while a session runs.
   useEffect(() => {
-    if (mode !== "activity") return;
-    const id = setInterval(() => void onReload().catch(() => undefined), 5000);
+    if (!data.session?.active) return;
+    const id = setInterval(() => void onReload().catch(() => undefined), 8000);
     return () => clearInterval(id);
-  }, [mode, onReload]);
+  }, [data.session?.active, onReload]);
+  async function readLinks(list: App[], key: string) {
+    setReading(key);
+    setReadNote({ key, text: "" });
+    const { filled, failed, noExtension } = await fillJobsFromLinks(list);
+    await onReload().catch(() => undefined);
+    setReading(null);
+    setReadNote({ key, text: [
+      `Filled in ${filled} of ${list.length} from ${list.length === 1 ? "its link" : "their links"}.`,
+      failed ? `${failed} couldn't be read: type the company for ${failed === 1 ? "it" : "those"}.` : "",
+      noExtension ? `${noExtension} ${noExtension === 1 ? "is a job board link" : "are job board links"}, which the Unnepo extension reads in Chrome. Open this page in Chrome with the extension connected.` : "",
+    ].filter(Boolean).join(" ") });
+  }
   const stats = useMemo(() => applicationStats(apps), [apps]);
   const counts = useMemo(() => {
     const result: Record<string, number> = { all: apps.length };
@@ -383,6 +436,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                 {app.companyMissing && <AddCompany app={app} onSaved={onReplace} />}
                 {expanded && (
                   <div className="mb-4 space-y-4 rounded-xl border border-line bg-panel p-4">
+                    <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={() => void readLinks([app], app.id)} />
                     {stage === "in_progress" && <PostedBy app={app} />}
                     {stage === "in_progress" ? (
                       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
@@ -436,12 +490,8 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex rounded-xl border border-line p-0.5" role="group" aria-label="View">
-            {(["list", "activity"] as const).map((item) => (
-              <button key={item} type="button" aria-pressed={mode === item} onClick={() => setMode(item)} className={`rounded-lg px-3 py-1 text-sm ${mode === item ? "bg-white text-black" : "text-muted hover:text-white"}`}>{item === "list" ? "List" : "Activity"}{item === "activity" && (data.maybe?.length ?? 0) > 0 ? ` · ${data.maybe!.length}` : ""}</button>
-            ))}
-          </span>
           <button type="button" className={secondary} onClick={() => setAdding((on) => !on)} aria-expanded={adding}>+ Add job</button>
+          <SessionBar apps={apps} session={data.session ?? null} onSession={(start) => act("/session", "POST", { start })} />
         </span>
         {apps.length > 0 && (
           <label className="relative w-full sm:w-64">
@@ -452,24 +502,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
         )}
       </div>
 
-      {mode === "activity" ? (
-        <ActivityView
-          apps={apps}
-          maybe={data.maybe ?? []}
-          session={data.session ?? null}
-          onMaybe={(id, applied) => act("/maybe", "POST", { id, applied })}
-          onSession={(start) => act("/session", "POST", { start })}
-          onCompany={(appId, company) => act("/company", "PATCH", { applicationId: appId, company })}
-          onOpen={(appId) => {
-            setMode("list");
-            setFilter("all");
-            setQuery("");
-            setOpen(appId);
-            requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
-          }}
-        />
-      ) : (
-        <>
+      <DidYouApply maybe={data.maybe ?? []} onMaybe={(id, applied) => act("/maybe", "POST", { id, applied })} />
       {apps.length > 0 && (
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Filter by status">
           {FILTERS.filter(([id]) => id === "all" || counts[id]).map(([id, label]) => (
@@ -543,15 +576,17 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
           {named.length > 0 && <ul className="border-t border-line">{named.map(row)}</ul>}
           {unnamed.length > 0 && (
             <section aria-labelledby="no-company" className="flex flex-col gap-2 pt-2">
-              <div>
-                <h2 id="no-company" className="text-base font-semibold">Missing the company <span className="text-sm font-normal text-faint tabular-nums">{unnamed.length}</span></h2>
-                <p className="text-sm text-muted">These were saved without the company&apos;s name. Add it to find people there and keep your stats right.</p>
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 id="no-company" className="text-base font-semibold">Missing the company <span className="text-sm font-normal text-faint tabular-nums">{unnamed.length}</span></h2>
+                  <p className="text-sm text-muted">These were saved without the company&apos;s name. Unnepo can read each job&apos;s link for it, or type it in.</p>
+                </div>
+                <button type="button" className={secondary} disabled={reading !== null} onClick={() => void readLinks(unnamed, "unnamed")}>{reading === "unnamed" ? "Reading their links…" : "Fill in from their links"}</button>
               </div>
+              {readNote.key === "unnamed" && readNote.text && reading === null && <p role="status" className="text-sm text-muted">{readNote.text}</p>}
               <ul className="border-t border-line">{unnamed.map(row)}</ul>
             </section>
           )}
-        </>
-      )}
         </>
       )}
 
@@ -648,10 +683,39 @@ function AddCompany({ app, onSaved }: { app: App; onSaved: (app: App) => void })
 
 /** "+ Add job": a job applied to somewhere Unnepo didn't see, or one to keep track of. Title and company are enough. */
 function AddJobForm({ onDone }: { onDone: (added: boolean) => void | Promise<void> }) {
-  const [job, setJob] = useState({ title: "", company: "", url: "", stage: "applied", appliedOn: new Date().toISOString().slice(0, 10), description: "" });
+  const [job, setJob] = useState({ title: "", company: "", url: "", location: "", stage: "applied", appliedOn: new Date().toISOString().slice(0, 10), description: "" });
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
+  const [linkNote, setLinkNote] = useState("");
+  const [readFor, setReadFor] = useState("");
   const set = (patch: Partial<typeof job>) => setJob((before) => ({ ...before, ...patch }));
+  // A job link fills in the rest: read on the server (company sites) or by the extension (job boards).
+  // Only empty boxes are filled, so nothing typed is replaced.
+  async function readLink(url: string) {
+    const link = url.trim();
+    if (!/^https:\/\/\S+\.\S+/i.test(link) || link === readFor) return;
+    setReadFor(link);
+    setLinkNote("Reading the link…");
+    let info: { title: string; company: string; location: string; description: string } | null = null;
+    let note = "";
+    try {
+      info = (await call<{ info: typeof info }>("/read-link", "POST", { url: link })).info;
+    } catch (reason) {
+      if (reason instanceof CallError && reason.code === "in_browser") {
+        if (await extensionHere()) {
+          const [result] = await readLinksInBrowser([{ id: "", url: link }]);
+          info = result?.info ?? null;
+          if (!info) note = result?.error ?? "Couldn't find the job on that page. Type the details instead.";
+        } else note = "Job boards only show their jobs in your browser. Open this page in Chrome with the Unnepo extension connected to fill it in, or type the details.";
+      } else note = reason instanceof Error ? reason.message : "Couldn't read the link.";
+    }
+    if (info) {
+      const found = info;
+      setJob((before) => ({ ...before, title: before.title || found.title, company: before.company || found.company, location: before.location || found.location, description: before.description || found.description }));
+      note = `Filled in from the link${found.company ? "" : ". Type the company: the page didn't say"}.`;
+    }
+    setLinkNote(note);
+  }
   const input = "w-full rounded-lg border border-line bg-card px-3 py-2 text-sm";
   const label = "mb-1 block text-xs font-medium text-muted";
   return (
@@ -672,9 +736,14 @@ function AddJobForm({ onDone }: { onDone: (added: boolean) => void | Promise<voi
         }
       }}
     >
+      <div className="sm:col-span-2">
+        <label className={label} htmlFor="add-url">Job link (fills in the rest)</label>
+        <input id="add-url" type="url" className={input} value={job.url} onChange={(event) => set({ url: event.target.value })} onBlur={(event) => void readLink(event.target.value)} onPaste={(event) => { const pasted = event.clipboardData.getData("text"); setTimeout(() => void readLink(pasted), 0); }} placeholder="https://… (optional)" />
+        {linkNote && <p role="status" className="mt-1 text-xs text-muted">{linkNote}</p>}
+      </div>
       <div><label className={label} htmlFor="add-title">Job title</label><input id="add-title" className={input} value={job.title} onChange={(event) => set({ title: event.target.value })} placeholder="Growth Marketing Intern" maxLength={200} required /></div>
       <div><label className={label} htmlFor="add-company">Company</label><input id="add-company" className={input} value={job.company} onChange={(event) => set({ company: event.target.value })} placeholder="MealPal" maxLength={200} required /></div>
-      <div><label className={label} htmlFor="add-url">Job link (optional)</label><input id="add-url" type="url" className={input} value={job.url} onChange={(event) => set({ url: event.target.value })} placeholder="https://…" /></div>
+      <div><label className={label} htmlFor="add-location">Location (optional)</label><input id="add-location" className={input} value={job.location} onChange={(event) => set({ location: event.target.value })} placeholder="Boston, MA" maxLength={200} /></div>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className={label} htmlFor="add-stage">Status</label>
@@ -691,6 +760,45 @@ function AddJobForm({ onDone }: { onDone: (added: boolean) => void | Promise<voi
         {problem && <span role="alert" className="text-sm text-red-300">{problem}</span>}
       </div>
     </form>
+  );
+}
+
+/**
+ * A job's info: what Unnepo knows about it, from the page it was saved from or its link. "Fill in from the
+ * link" reads the link again for a missing company, place or description.
+ */
+function JobInfo({ app, reading, disabled, note, onRead }: { app: App; reading: boolean; disabled: boolean; note: string; onRead: () => void }) {
+  const posting = postingLink(app);
+  const applied = app.fillReport?.activity?.find((event) => event.kind === "applied");
+  const link = posting || app.applicationUrl || "";
+  const rows: Array<[string, React.ReactNode]> = [
+    ["Company", app.companyMissing ? <span className="text-[#F5A524]">Missing</span> : app.company],
+    ["Job", app.title],
+    ["Location", app.location || <span className="text-faint">Not known</span>],
+    ["Found on", siteFor(app)],
+    ["Applied", app.submittedAt ? `${new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${applied?.how ? ` · ${HOW_LABEL[applied.how]}` : ""}` : "Not yet"],
+  ];
+  if (posting) rows.push(["Job posting", <a key="posting" href={posting} target="_blank" rel="noreferrer" className="break-all text-ink underline-offset-4 hover:underline">{posting}</a>]);
+  if (app.applicationUrl && app.applicationUrl !== posting) rows.push(["Application", <a key="application" href={app.applicationUrl} target="_blank" rel="noreferrer" className="break-all text-ink underline-offset-4 hover:underline">{app.applicationUrl}</a>]);
+  return (
+    <section aria-label={`Info for ${app.title}`} className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">Info</h3>
+        {link && <button type="button" className="text-xs text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-40" disabled={disabled} onClick={onRead}>{reading ? "Reading the link…" : "Fill in from the link"}</button>}
+      </div>
+      <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+        {rows.map(([term, value]) => (
+          <div key={term} className="contents"><dt className="text-faint">{term}</dt><dd className="min-w-0">{value}</dd></div>
+        ))}
+      </dl>
+      {app.description.trim() ? (
+        <details className="text-sm">
+          <summary className="cursor-pointer select-none text-muted hover:text-white">Job description</summary>
+          <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-line text-muted">{app.description}</p>
+        </details>
+      ) : <p className="text-xs text-faint">No job description saved{link ? ". Fill in from the link to add it." : "."}</p>}
+      {note && <p role="status" className="text-xs text-muted">{note}</p>}
+    </section>
   );
 }
 

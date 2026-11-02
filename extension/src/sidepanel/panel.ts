@@ -924,13 +924,13 @@ async function loadJobs() {
  * "+ Add job" in My jobs: a job applied to somewhere Unnepo didn't see. It starts from the tab (its link and
  * its name, "Growth Intern | MealPal | …"), so most of the time it's one click.
  */
-const manualJob = { open: false, key: "", title: "", company: "", url: "", stage: "applied", note: "", saving: false };
+const manualJob = { open: false, key: "", title: "", company: "", url: "", stage: "applied", note: "", saving: false, readFor: "", description: "" };
 function startManualJob(state: PanelState) {
   const key = state.tab?.url ?? "";
   if (manualJob.key === key) return;
   const parts = (state.tab?.title ?? "").replace(/^\(\d+\)\s*/, "").split(/ [|\-–] /).map((part) => part.trim()).filter(Boolean);
   const url = /^https:\/\//.test(key) ? key : "";
-  Object.assign(manualJob, { key, title: parts.length >= 2 ? parts[0] : "", company: parts.length >= 3 ? parts[1] : "", url, note: "", saving: false });
+  Object.assign(manualJob, { key, title: parts.length >= 2 ? parts[0] : "", company: parts.length >= 3 ? parts[1] : "", url, note: "", saving: false, readFor: "", description: "" });
 }
 function manualJobForm() {
   if (!manualJob.open) return `<button type="button" class="outline" id="add-job-open">+ Add a job I applied to</button>${manualJob.note ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}`;
@@ -941,7 +941,7 @@ function manualJobForm() {
       <span class="eyebrow">Add a job</span>
       <label class="question"><span class="q-label">Job title</span><input class="field" id="mj-title" value="${escape(manualJob.title)}" maxlength="200" placeholder="Growth Marketing Intern"></label>
       <label class="question"><span class="q-label">Company</span><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="MealPal"></label>
-      <label class="question"><span class="q-label">Job link (optional)</span><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="https://…"></label>
+      <label class="question"><span class="q-label">Job link (fills in the rest)</span><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="https://…"></label>
       <label class="question"><span class="q-label">Status</span><select class="field" id="mj-stage">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("interviewing", "Interviewing")}${stage("offer", "Offer")}${stage("rejected", "Rejected")}</select></label>
       <div class="links">
         <button type="button" class="solid" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add to tracker"}</button>
@@ -966,12 +966,29 @@ function wireManualJob(state: PanelState) {
       if (save) save.disabled = manualJob.title.trim().length < 2 || manualJob.company.trim().length < 2 || manualJob.saving;
     });
   }
+  // A job link fills in the empty boxes: read by Unnepo (company sites) or in a background tab (job boards).
+  document.getElementById("mj-url")?.addEventListener("change", async () => {
+    const url = manualJob.url.trim();
+    if (!/^https:\/\/\S+\.\S+/.test(url) || url === manualJob.readFor) return;
+    manualJob.readFor = url;
+    manualJob.note = "Reading the link…";
+    void render();
+    type Read = { info: { title: string; company: string; description: string } | null; error?: string };
+    const result = await ask<Read>({ type: "read-link", url }).catch((): Read => ({ info: null, error: "Couldn't reach Unnepo." }));
+    if (result.info) {
+      manualJob.title ||= result.info.title;
+      manualJob.company ||= result.info.company;
+      manualJob.description ||= result.info.description;
+      manualJob.note = result.info.company ? "Filled in from the link. Check it, then add it." : "Filled in from the link. Type the company: the page didn't say.";
+    } else manualJob.note = result.error ?? "Couldn't read the link. Type the details.";
+    void render();
+  });
   document.getElementById("mj-save")?.addEventListener("click", async () => {
     manualJob.saving = true;
     manualJob.note = "";
     void render();
     type Added = { ok: boolean; error?: string };
-    const result = await ask<Added>({ type: "add-job", job: { title: manualJob.title, company: manualJob.company, url: manualJob.url.trim(), stage: manualJob.stage } }).catch((): Added => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    const result = await ask<Added>({ type: "add-job", job: { title: manualJob.title, company: manualJob.company, url: manualJob.url.trim(), stage: manualJob.stage, description: manualJob.description } }).catch((): Added => ({ ok: false, error: "Couldn't reach Unnepo." }));
     manualJob.saving = false;
     if (result.ok) {
       manualJob.note = `Added: ${manualJob.title} at ${manualJob.company}.`;

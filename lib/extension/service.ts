@@ -5,7 +5,7 @@ import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimi
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { answerMaybe, createApplication, findPeopleOnApply, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { answerMaybe, companyMissing, createApplication, findPeopleOnApply, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
 import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
@@ -504,7 +504,8 @@ export async function extensionSubmission(userId: string, raw: unknown) {
     // Applied on a job board (Handshake, ZipRecruiter) without Unnepo: the posting as the page showed it.
     const description = typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
     app = await minimalApplication(userId, { url, title: title.slice(0, 200), company: company.slice(0, 200), description, poster: pagePoster(body.poster), key: tracked?.key });
-    if (!description) runLater(() => enrichFromPosting(userId, app!.id, url));
+    // No description, or no company: the link is read for them (company sites; job boards wait for the extension).
+    if (!description || companyMissing(app)) runLater(() => enrichFromPosting(userId, app!.id, url));
   }
   await ensureCharged(userId, app);
   const receiptPath = await saveScreenshot(userId, app.id, body.screenshot);

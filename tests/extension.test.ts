@@ -238,6 +238,35 @@ describe("applying on a job board without Fill", () => {
   });
 });
 
+describe("filling in a job from its link", () => {
+  it("fills a missing company from what the extension read, and never replaces a real one", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const saved = await (await call("POST", "submissions", token, { url: "https://www.linkedin.com/jobs/view/4455667788/", title: "LinkedIn Easy Apply job", company: "LinkedIn", confidence: "likely", how: "linkedin_easy_apply" })).json();
+    expect(saved.application.companyMissing).toBe(true);
+    const description = "Initech's growth intern runs experiments on the funnel and reports to the head of growth. ".repeat(4);
+    const filled = await (await call("POST", "job-info", token, { applicationId: saved.application.id, info: { title: "Growth Intern", company: "Initech", location: "Boston, MA", description } })).json();
+    expect(filled.changed.sort()).toEqual(["company", "description", "location", "title"]);
+    expect(filled.application).toMatchObject({ company: "Initech", title: "Growth Intern", location: "Boston, MA", companyMissing: false });
+    // A real company stays.
+    const again = await (await call("POST", "job-info", token, { applicationId: saved.application.id, info: { title: "Other", company: "Globex", location: "", description: "" } })).json();
+    expect(again.changed).toEqual([]);
+    expect(again.application.company).toBe("Initech");
+  });
+
+  it("reads company sites on the server, and sends job boards to the extension and LinkedIn nowhere", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const linkedin = await call("POST", "read-link", token, { url: "https://www.linkedin.com/jobs/view/123/" });
+    expect([linkedin.status, (await linkedin.json()).code]).toEqual([422, "linkedin"]);
+    const board = await call("POST", "read-link", token, { url: "https://www.ziprecruiter.com/c/MealPal/Job/Intern?jid=1a2b" });
+    expect([board.status, (await board.json()).code]).toEqual([422, "in_browser"]);
+    setJobPageFetcherForTests(async () => new Response(`<html><head><script type="application/ld+json">{"@type":"JobPosting","title":"Data Intern","hiringOrganization":{"name":"Globex"},"jobLocation":{"address":{"addressLocality":"Austin","addressRegion":"TX"}},"description":"<p>Globex data team.</p>"}</script></head><body></body></html>`, { status: 200, headers: { "content-type": "text/html" } }));
+    const site = await (await call("POST", "read-link", token, { url: "https://careers.globex.example/jobs/data-intern" })).json();
+    expect(site.info).toMatchObject({ title: "Data Intern", company: "Globex", location: "Austin, TX" });
+  });
+});
+
 describe("sorting and filtering the Applied list", () => {
   const app = (company: string, submittedAt: string | null, extra: Record<string, unknown> = {}) => ({
     company, jobUrl: "https://boards.greenhouse.io/x/jobs/1", applicationUrl: null, status: submittedAt ? "submitted" as const : "extracted" as const,

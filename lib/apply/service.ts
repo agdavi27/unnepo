@@ -320,7 +320,7 @@ const MANUAL_STAGES = ["applied", "in_progress", "interviewing", "offer", "rejec
  * Only a title and company are needed; a link, the date, the posting's text and how it's going are optional.
  */
 export async function addJobByHand(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { title?: unknown; company?: unknown; url?: unknown; stage?: unknown; appliedOn?: unknown; description?: unknown };
+  const body = (raw ?? {}) as { title?: unknown; company?: unknown; url?: unknown; stage?: unknown; appliedOn?: unknown; description?: unknown; location?: unknown };
   const title = String(body.title ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
   const company = String(body.company ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
   if (title.length < 2) throw new ServiceError("Type the job title.", "title", 400);
@@ -345,6 +345,7 @@ export async function addJobByHand(userId: string, raw: unknown) {
     status: applied ? "applied_manual" : "extracted",
     submittedAt: applied ? when : null,
     statusMessage: applied ? "Added by you." : "Added by you. Not applied yet.",
+    ...(typeof body.location === "string" && body.location.trim() && !app.location ? { location: body.location.trim().slice(0, 200) } : {}),
     ...(stage === "interviewing" || stage === "offer" || stage === "rejected" ? { fillReport: { ...report, outcome: stage } } : {}),
   });
   if (applied) await addActivity(userId, app.id, { kind: "applied", how: "added_by_hand", site: link ? undefined : "Added by you" });

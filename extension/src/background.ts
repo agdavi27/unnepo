@@ -99,7 +99,7 @@ async function saveJob(tabId: number, patch: Partial<Job> | null) {
 }
 
 class ApiError extends Error {
-  constructor(message: string, readonly status: number) {
+  constructor(message: string, readonly status: number, readonly code = "") {
     super(message);
   }
 }
@@ -114,7 +114,7 @@ async function api<T>(method: "GET" | "POST" | "DELETE", path: string, body?: un
   });
   const payload = await response.json().catch(() => ({}));
   if (response.status === 401) await chrome.storage.local.remove("token");
-  if (!response.ok) throw new ApiError((payload as { error?: string }).error || `Unnepo answered ${response.status}.`, response.status);
+  if (!response.ok) throw new ApiError((payload as { error?: string }).error || `Unnepo answered ${response.status}.`, response.status, (payload as { code?: string }).code ?? "");
   return payload as T;
 }
 
@@ -871,6 +871,61 @@ async function run(tabId: number) {
   }
 }
 
+/** A job's details as read from its link: the title, company, place, description, and the address read. */
+type LinkInfo = { title: string; company: string; location: string; description: string; url: string };
+
+/**
+ * Reads a job board link in the student's own browser: opens it in a background tab (signed in as they are, so
+ * Handshake shows the job), waits for the page to draw, reads the job that's open, and closes the tab. LinkedIn
+ * is never opened. Null when the page didn't show a job.
+ */
+async function readLinkInTab(url: string): Promise<LinkInfo | null> {
+  let host = "";
+  try { host = new URL(url).hostname; } catch { return null; }
+  if (!/^https:\/\//.test(url) || NEVER_READ.test(host)) return null;
+  const tab = await chrome.tabs.create({ url, active: false }).catch(() => null);
+  if (!tab?.id) return null;
+  const tabId = tab.id;
+  try {
+    await new Promise<void>((done) => {
+      const timer = setTimeout(finish, 20_000);
+      function finish() {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listen);
+        done();
+      }
+      function listen(id: number, info: { status?: string }) {
+        if (id === tabId && info.status === "complete") finish();
+      }
+      chrome.tabs.onUpdated.addListener(listen);
+    });
+    // Job boards draw the job after the page loads; it reads a few times until a title shows.
+    for (let tries = 0; tries < 6; tries += 1) {
+      await new Promise((done) => setTimeout(done, 1500));
+      await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["content/fill.js"] }).catch(() => undefined);
+      const job = await send<{ title: string; company: string; description: string; url: string; from: string }>(tabId, { type: "opened-job" }, 0).catch(() => null);
+      if (job?.title && job.from !== "page") {
+        const place = job.description.match(/\b([A-Z][a-zA-Z .'-]+, (?:[A-Z]{2}|[A-Z][a-z]+))\b/)?.[1] ?? "";
+        return { title: job.title, company: job.company, location: place, description: job.description, url };
+      }
+    }
+    return null;
+  } finally {
+    await chrome.tabs.remove(tabId).catch(() => undefined);
+  }
+}
+
+/** A link's job: read by the server when it can (company sites), else in the browser (job boards). */
+async function readLink(url: string): Promise<{ info: LinkInfo | null; error?: string }> {
+  try {
+    return await api<{ info: LinkInfo }>("POST", "read-link", { url });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.code !== "in_browser") return { info: null, error: error instanceof Error ? error.message : "Couldn't read the link." };
+  }
+  const info = await readLinkInTab(url);
+  return info ? { info } : { info: null, error: "Couldn't find the job on that page. Sign in to the job board in Chrome, then try again." };
+}
+
 /** Saves the submission in Unnepo with a screenshot of the confirmation. */
 async function record(tabId: number, confidence: "confirmed" | "likely", text: string, how: AppliedHow = confidence === "confirmed" ? "site_confirmed" : "page_said") {
   const job = (await jobs())[tabId];
@@ -1215,11 +1270,45 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           } catch {
             url = "";
           }
-          await api("POST", "add-job", { title: job.title, company: job.company, url, stage: job.stage });
+          await api("POST", "add-job", { title: job.title, company: job.company, url, stage: job.stage, description: typeof job.description === "string" ? job.description : undefined });
           return reply({ ok: true });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't add it." });
         }
+      }
+      // The add-a-job form's link: the job's details to fill in the rest.
+      case "read-link": {
+        if (sender.tab) return reply({ ok: false });
+        return reply(await readLink(String(message.url ?? "").trim()));
+      }
+      // From Unnepo's Applied page (through the page bridge): saved jobs to fill in from their links. Each
+      // job board link is read in a background tab, one at a time, and what it showed is sent to Unnepo.
+      case "read-links": {
+        const { apiBase } = await settings();
+        if (!sender.tab?.url || new URL(sender.tab.url).origin !== new URL(apiBase).origin) return reply({ ok: false });
+        const list = (Array.isArray(message.jobs) ? message.jobs : []).slice(0, 25) as Array<{ id?: unknown; url?: unknown }>;
+        const results: Array<{ id: string; ok: boolean; error?: string; changed?: string[]; info?: LinkInfo }> = [];
+        for (const item of list) {
+          const id = String(item.id ?? "");
+          const info = await readLinkInTab(String(item.url ?? "")).catch(() => null);
+          if (!info) {
+            results.push({ id, ok: false, error: "Couldn't read the job on that page." });
+            continue;
+          }
+          // No saved job: the add form wants what the page showed.
+          if (!id) {
+            results.push({ id, ok: true, info });
+            continue;
+          }
+          try {
+            const saved = await api<{ changed: string[] }>("POST", "job-info", { applicationId: id, info });
+            results.push({ id, ok: true, changed: saved.changed });
+          } catch (error) {
+            results.push({ id, ok: false, error: error instanceof Error ? error.message : "Couldn't save it." });
+          }
+        }
+        void log(`Read ${results.length} job ${results.length === 1 ? "link" : "links"} for your tracker: ${results.filter((item) => item.changed?.length).length} filled in.`);
+        return reply({ ok: true, results });
       }
       // "I applied" in the panel: the job open on this tab (not the results beside it), for the student to check.
       case "read-opened-job": {
