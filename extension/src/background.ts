@@ -178,7 +178,7 @@ async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
  * company), so applying there without pressing Fill still saves it, with its description. A tab opened from
  * that page (Apply sends you to the company's site) starts with it.
  */
-type Seen = { url: string; title: string; company: string; description?: string; poster?: Scan["poster"]; at: number };
+type Seen = { url: string; title: string; company: string; description?: string; poster?: Scan["poster"]; at: number; pressed?: boolean };
 async function seenJobs(): Promise<Record<string, Seen>> {
   return ((await chrome.storage.session.get("seen")).seen as Record<string, Seen> | undefined) ?? {};
 }
@@ -194,7 +194,7 @@ async function rememberSeen(tabId: number, scan: Scan) {
   const before = all[tabId];
   // The company's application form knows less than the posting it came from: keep the posting's details.
   if (before?.description && !scan.description && sameCompany(before.company, scan.company)) return;
-  all[tabId] = { url: scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now() };
+  all[tabId] = { url: scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now(), pressed: before?.pressed && sameCompany(before.company, scan.company) };
   await chrome.storage.session.set({ seen: all });
 }
 chrome.tabs.onCreated.addListener((tab) => {
@@ -202,18 +202,50 @@ chrome.tabs.onCreated.addListener((tab) => {
   void seenJobs().then(async (all) => {
     const from = all[tab.openerTabId!];
     if (from && Date.now() - from.at < 60 * 60 * 1000) {
-      all[tab.id!] = { ...from, at: Date.now() };
+      // Opened from a job page (its Apply went to the company's site): applying here is likely.
+      all[tab.id!] = { ...from, at: Date.now(), pressed: true };
       await chrome.storage.session.set({ seen: all });
     }
   });
 });
-chrome.tabs.onRemoved.addListener((tabId) => {
-  void seenJobs().then((all) => {
-    if (!all[tabId]) return;
+/**
+ * "Did you apply to these?": jobs where the student pressed Apply or Unnepo filled the form, but nothing
+ * confirmed it went through. The panel lists them with ✓ and ✕, so a missed one takes a tap to save.
+ * Kept on this computer for a week.
+ */
+type Maybe = { id: string; url: string; title: string; company: string; description?: string; applicationId?: string; at: number };
+const MAYBE_DAYS = 7;
+async function maybeApplied(): Promise<Maybe[]> {
+  const list = ((await chrome.storage.local.get("maybeApplied")).maybeApplied as Maybe[] | undefined) ?? [];
+  return list.filter((item) => Date.now() - item.at < MAYBE_DAYS * 86_400_000);
+}
+async function addMaybe(item: Omit<Maybe, "id" | "at">) {
+  if (!item.title.trim() || !item.company.trim()) return;
+  const list = (await maybeApplied()).filter((entry) => !(entry.url === item.url || (item.applicationId && entry.applicationId === item.applicationId)));
+  await chrome.storage.local.set({ maybeApplied: [{ ...item, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now() }, ...list].slice(0, 40) });
+  void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+}
+async function dropMaybe(match: (item: Maybe) => boolean) {
+  const list = await maybeApplied();
+  const kept = list.filter((item) => !match(item));
+  if (kept.length !== list.length) await chrome.storage.local.set({ maybeApplied: kept });
+}
+
+/** A tab closed: a job filled or applied to there that never confirmed goes on the "Did you apply?" list. */
+async function tabGone(tabId: number) {
+  const [job, seen] = [(await jobs())[tabId], (await seenJobs())[tabId]];
+  if (job?.applicationId && !job.submission && (job.report?.filled.length || job.clickedAt)) {
+    await addMaybe({ url: job.url, title: job.title, company: job.company, applicationId: job.applicationId });
+  } else if (seen?.pressed && !job?.submission) {
+    await addMaybe({ url: seen.url, title: seen.title, company: seen.company, description: seen.description });
+  }
+  const all = await seenJobs();
+  if (all[tabId]) {
     delete all[tabId];
-    return chrome.storage.session.set({ seen: all });
-  });
-});
+    await chrome.storage.session.set({ seen: all });
+  }
+  await saveJob(tabId, null);
+}
 
 /**
  * The page says the student applied, and Unnepo wasn't tracking a job in this tab: save the job it last saw
@@ -251,7 +283,8 @@ async function recordSeen(tabId: number, text: string) {
   }
   try {
     const saved = await api<{ application: { id: string; title: string; company: string } }>("POST", "submissions", { url: seen.url, title: seen.title, company: seen.company, description: seen.description, poster: seen.poster, confidence: "likely", text, screenshot });
-    await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url: seen.url, host: new URL(seen.url).hostname, submission: "likely", step: `Saved to your tracker: ${saved.application.title} at ${saved.application.company}.` });
+    await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url: seen.url, host: new URL(seen.url).hostname, submission: "likely", clickedAt: Date.now(), step: `Saved to your tracker: ${saved.application.title} at ${saved.application.company}.` });
+    await dropMaybe((item) => item.url === seen!.url);
   } catch (error) {
     await saveJob(tabId, { error: error instanceof Error ? `Couldn't save this application: ${error.message}` : "Couldn't save this application." });
   }
@@ -269,7 +302,9 @@ async function state(): Promise<PanelState> {
   const job = saved && !saved.running && !saved.submission && saved.url && tab?.url && sameHost(saved.url, tab.url) && !sameApplication(saved.url, tab.url) ? null : saved;
   // While Unnepo is working on the tab, the job itself says what's there.
   const page = me && tab?.id !== undefined && !job?.running ? await peek(tab.id, tab.url ?? "").catch(() => null) : null;
-  return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase };
+  // Asked about two minutes after Apply was pressed, when a confirmation would have shown by then.
+  const maybe = me ? (await maybeApplied()).filter((item) => Date.now() - item.at > 120_000).map(({ id, title, company, at }) => ({ id, title, company, at })) : [];
+  return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase, maybe };
 }
 
 /** The frame the application form is in, per tab: 0 for the page itself, or an embedded form's frame. */
@@ -619,6 +654,14 @@ async function run(tabId: number) {
           resumeError = got.error;
         }
         if (!stillRunning(tabId, runId)) break;
+        // The cover letter is the slowest part: it's started now too, and attached at the end.
+        const letterSoon = wantsCoverLetter && applicationId ? api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null) : null;
+        // The AI's answers for the rest are asked for now, so they're worked out while the known ones are typed.
+        const answered = new Set(known.answers.filter((answer) => answer.values.length).map((answer) => answer.id));
+        const left = scan.useServerSchema ? null : scan.fields.filter((field) => field.type !== "file" && !answered.has(field.id));
+        const askRest = applicationId && formFields && (scan.useServerSchema || left!.length)
+          ? api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : left }).catch(() => null)
+          : Promise.resolve(null);
         noteCheck(known.answers);
         let report = await fillWith(known.answers, { resume: wantsResume ? resume ?? null : null });
         for (const attempt of report?.attempts ?? []) {
@@ -627,12 +670,10 @@ async function run(tabId: number) {
           if (workday) resumeUploaded = true;
         }
 
-        // 2. One AI call for the questions that are left, filled as soon as it answers.
-        const answered = new Set(known.answers.filter((answer) => answer.values.length).map((answer) => answer.id));
-        const left = scan.useServerSchema ? null : scan.fields.filter((field) => field.type !== "file" && !answered.has(field.id));
+        // 2. The AI's answers for the questions that are left (asked for above), filled as soon as they're in.
         if (applicationId && formFields && (scan.useServerSchema || left!.length) && stillRunning(tabId, runId)) {
           await step("Answering the rest…");
-          const more = await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : left }).catch(() => null);
+          const more = await askRest;
           llmCalls += more?.llmCalls ?? 0;
           const fresh = (more?.answers ?? []).filter((answer) => answer.values.length && !answered.has(answer.id) && answer.type !== "file");
           noteCheck(fresh);
@@ -668,10 +709,10 @@ async function run(tabId: number) {
           }
         }
 
-        // 3. The cover letter last: it's the slowest part, so nothing else waits for it.
+        // 3. The cover letter last (started above, so it's usually written by now).
         if (wantsCoverLetter && applicationId && stillRunning(tabId, runId)) {
-          await step("Writing your cover letter…");
-          const letter = await api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null);
+          await step("Attaching your cover letter…");
+          const letter = await (letterSoon ?? api<{ fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId }).catch(() => null));
           if (letter) {
             const file = { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 };
             const letterAnswer: Answer[] = scan.useServerSchema ? [{ id: "cover_letter", label: "Cover letter", type: "file", required: false, values: [file.name], source: "ai", why: null }] : [];
@@ -821,6 +862,7 @@ async function record(tabId: number, confidence: "confirmed" | "likely", text: s
   void send(tabId, { type: "spiders", celebrate: true }, 0).catch(() => undefined);
   try {
     await api("POST", "submissions", { applicationId: job.applicationId, url: job.url, confidence, text, screenshot });
+    await dropMaybe((item) => item.applicationId === job.applicationId || item.url === job.url);
     await saveJob(tabId, { step: confidence === "confirmed" ? "Submitted. The site accepted your application, and it's in your Unnepo tracker." : "Looks submitted. It's in your Unnepo tracker; check your email for the site's confirmation." });
   } catch (error) {
     await saveJob(tabId, { error: error instanceof Error ? `Couldn't save the submission: ${error.message}` : "Couldn't save the submission." });
@@ -1067,6 +1109,29 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ error: error instanceof Error ? error.message : "Couldn't write this one." });
         }
       }
+      // "Did you apply to these?": ✓ saves it as applied, ✕ drops it.
+      case "maybe-answer": {
+        if (sender.tab) return reply({ ok: false });
+        const item = (await maybeApplied()).find((entry) => entry.id === message.id);
+        if (!item) return reply({ ok: true });
+        try {
+          if (message.applied) {
+            await api("POST", "submissions", item.applicationId ? { applicationId: item.applicationId, confidence: "likely", text: "You said you applied." } : { url: item.url, title: item.title, company: item.company, description: item.description, confidence: "likely", text: "You said you applied." });
+          }
+          await dropMaybe((entry) => entry.id === item.id);
+          return reply({ ok: true });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't save it." });
+        }
+      }
+      // The setup card's answers, saved to the profile.
+      case "save-setup":
+        if (sender.tab) return reply({ ok: false });
+        try {
+          return reply({ ok: true, ...(await api<{ setup: unknown }>("POST", "setup", message.answers ?? {})) });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't save." });
+        }
       // "+ Add job" in My jobs.
       case "add-job": {
         if (sender.tab) return reply({ ok: false });
@@ -1119,6 +1184,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             await chrome.storage.session.set({ seen: all });
           }
           await rememberSeen(tabId, scan);
+          const seen = await seenJobs();
+          if (seen[tabId]) {
+            seen[tabId].pressed = true;
+            await chrome.storage.session.set({ seen });
+          }
+          // On the list now; the panel only asks about it after two minutes, and a confirmation takes it off.
+          // (A timer wouldn't do: Chrome puts the extension's background to sleep.)
+          const latest = seen[tabId];
+          if (latest) await addMaybe({ url: latest.url, title: latest.title, company: latest.company, description: latest.description });
         }
         if (message.final) applyClicks.set(tabId, Date.now());
         return reply({ ok: true });
@@ -1161,7 +1235,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   runs.delete(tabId);
   applyClicks.delete(tabId);
   formFrame.delete(tabId);
-  void saveJob(tabId, null);
+  void tabGone(tabId);
 });
 // A restarted worker has no runs going, so nothing should say it's running.
 void jobs().then(async (all) => {

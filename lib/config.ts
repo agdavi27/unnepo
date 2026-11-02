@@ -49,6 +49,9 @@ export function serverConfig() {
  */
 export const FREE_APPLICATIONS = 25;
 
+/** Cover letters Free writes each month. Paid plans have no limit. */
+export const FREE_COVER_LETTERS = 5;
+
 /** A semester plan: four months paid up front, with four months of credits at once. */
 export const SEMESTER_MONTHS = 4;
 
@@ -70,7 +73,7 @@ export const PUBLIC_PLANS = [
     monthly: false,
     credits: 3,
     applicationsLabel: `${FREE_APPLICATIONS} applications`,
-    features: [`Autofill ${FREE_APPLICATIONS} applications`, "People to reach at 3 companies", "Cover letters and the tracker"],
+    features: [`Autofill ${FREE_APPLICATIONS} applications`, "People to reach at 3 companies", `${FREE_COVER_LETTERS} cover letters a month, and the tracker`],
   },
   {
     id: "pro" as const,

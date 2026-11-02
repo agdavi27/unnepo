@@ -1,3 +1,4 @@
+import { hasUnlimitedCredits } from "@/lib/apply/limits";
 import { repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { claudeAsk } from "@/lib/apply/fast/pipeline";
@@ -64,7 +65,7 @@ export async function generateCv(userId: string, raw: unknown) {
   const info = await student(userId);
   const count = info.profile.cvCount ?? 0;
   const account = await repo.getAccount(userId);
-  const needsCredit = count % CVS_PER_CREDIT === 0;
+  const needsCredit = count % CVS_PER_CREDIT === 0 && !(await hasUnlimitedCredits(userId));
   if (needsCredit && (account?.balance ?? 0) < 1) throw new ServiceError(`You're out of credits. 1 credit covers ${CVS_PER_CREDIT} CVs.`, "credits", 402);
 
   const app = typeof body.applicationId === "string" && body.applicationId ? await requireApp(userId, body.applicationId) : null;

@@ -167,6 +167,11 @@ export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoadi
   const [length, setLength] = useState("standard");
   const [notes, setNotes] = useState("");
   const [letter, setLetter] = useState("");
+  // Part of the letter the student selected, to have just that rewritten.
+  const [part, setPart] = useState("");
+  const [partAsk, setPartAsk] = useState("");
+  const [partBusy, setPartBusy] = useState(false);
+  const [partError, setPartError] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
@@ -175,6 +180,24 @@ export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoadi
   const job = picked ? { title: picked.title, company: picked.company, description: picked.description, url: picked.url } : custom;
   const jobReady = Boolean(job.title.trim() && job.company.trim());
   const toggle = (value: string, list: string[], set: (next: string[]) => void) => set(list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
+
+  async function rewritePart(ask: string) {
+    if (!part || !ask.trim()) return;
+    setPartBusy(true);
+    setPartError("");
+    try {
+      const response = await fetch("/api/app/cover-letter-part", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ letter, part, ask, job }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Couldn't rewrite that part.");
+      setLetter(payload.letter);
+      setPart("");
+      setPartAsk("");
+    } catch (reason) {
+      setPartError(reason instanceof Error ? reason.message : "Couldn't rewrite that part.");
+    } finally {
+      setPartBusy(false);
+    }
+  }
 
   async function generate() {
     setBusy(true);
@@ -308,7 +331,35 @@ export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoadi
         {step === 3 && (
           <div className="space-y-3">
             <h3 className="text-lg font-semibold">Review your letter</h3>
-            <textarea aria-label="Cover letter" rows={16} className={`${field} leading-relaxed`} value={letter} onChange={(event) => setLetter(event.target.value)} />
+            <textarea
+              aria-label="Cover letter. Edit it here, or select part of it to have it rewritten."
+              rows={16}
+              className={`${field} leading-relaxed`}
+              value={letter}
+              readOnly={partBusy}
+              onChange={(event) => setLetter(event.target.value)}
+              onSelect={(event) => {
+                const box = event.currentTarget;
+                const chosen = box.value.slice(box.selectionStart, box.selectionEnd);
+                if (chosen.trim().length >= 12) setPart(chosen);
+              }}
+            />
+            {part && (
+              <div className="flex flex-col gap-2 rounded-xl border border-dashed border-line p-3 text-sm" role="group" aria-label="Change the selected part">
+                <p className="m-0 truncate text-xs text-muted">Selected: “{part.trim().slice(0, 90)}{part.trim().length > 90 ? "…" : ""}”</p>
+                <div className="flex flex-wrap gap-2">
+                  {[["shorter", "Shorter"], ["specific", "More specific"], ["confident", "More confident"], ["rewrite", "Rewrite"]].map(([ask, label]) => (
+                    <button key={ask} type="button" className={secondary} disabled={partBusy} onClick={() => void rewritePart(ask)}>{label}</button>
+                  ))}
+                  <button type="button" className="text-xs text-muted hover:text-white" onClick={() => setPart("")}>Cancel</button>
+                </div>
+                <form className="flex gap-2" onSubmit={(event) => { event.preventDefault(); void rewritePart(partAsk); }}>
+                  <input className={field} value={partAsk} onChange={(event) => setPartAsk(event.target.value)} placeholder="Or say how: mention my internship…" maxLength={300} aria-label="How to change the selected part" />
+                  <button type="submit" className={secondary} disabled={partBusy || !partAsk.trim()}>{partBusy ? "Rewriting…" : "Go"}</button>
+                </form>
+                {partError && <p role="alert" className="m-0 text-xs text-red-300">{partError}</p>}
+              </div>
+            )}
             <div className="flex flex-wrap gap-2">
               <button type="button" className={secondary} disabled={busy} onClick={() => void generate()}>{busy ? "Writing…" : "↻ Regenerate"}</button>
               <button type="button" className={secondary} onClick={() => void navigator.clipboard.writeText(letter).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })}>{copied ? "Copied" : "Copy"}</button>

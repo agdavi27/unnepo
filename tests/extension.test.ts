@@ -358,6 +358,52 @@ describe("cover letters from the panel", () => {
   });
 });
 
+describe("rewriting part of a cover letter", () => {
+  it("rewrites only the selected part and keeps the rest as it was", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/79", title: "Data Intern", company: "Globex" })).json();
+    const letter = "Dear Hiring Team,\n\nI am applying for the Data Intern role. I really really like data a lot.\n\nSincerely,\nPat Doe";
+    model.replies.push("I led the Colby Data Club's dashboards for 40 students.");
+    const result = await (await call("POST", "cover-letter", token, { applicationId: job.application.id, previous: letter, part: "I really really like data a lot.", ask: "specific" })).json();
+    expect(result.text).toBe("Dear Hiring Team,\n\nI am applying for the Data Intern role. I led the Colby Data Club's dashboards for 40 students.\n\nSincerely,\nPat Doe");
+    expect(model.lastPrompt).toContain("concrete detail");
+    expect((await call("POST", "cover-letter", token, { applicationId: job.application.id, previous: letter, part: "Not in the letter at all.", ask: "shorter" })).status).toBe(502);
+  });
+});
+
+describe("quick answers before the first fill", () => {
+  it("says which are missing, saves the ones given, and leaves blanks alone", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const before = (await (await call("GET", "me", token)).json()).setup;
+    expect(before).toMatchObject({ salaryExpectation: "", inPerson: null });
+    const saved = await (await call("POST", "setup", token, { salaryExpectation: "$22/hour", inPerson: true, needsSponsorship: false, earliestStart: "  " })).json();
+    expect(saved.setup).toMatchObject({ salaryExpectation: "$22/hour", inPerson: true, needsSponsorship: false, earliestStart: "" });
+    expect((await (await call("GET", "me", token)).json()).setup.salaryExpectation).toBe("$22/hour");
+  });
+});
+
+describe("Free's cover letter limit", () => {
+  it("writes 5 a month on Free, then stops; the student's own edits and a reused letter don't count", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/78", title: "Data Intern", company: "Globex" })).json();
+    for (let index = 0; index < 5; index += 1) {
+      model.replies.push(`Dear Hiring Team,\n\nLetter ${index}. I am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students.\n\nI would bring the same care to Globex's data team.\n\nSincerely,\nPat Doe`);
+      expect((await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" })).status).toBe(200);
+    }
+    const blocked = await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" });
+    expect(blocked.status).toBe(402);
+    expect((await blocked.json()).error).toMatch(/5 cover letters a month/);
+    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 4.");
+    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id, text: "My own letter." })).json()).text).toBe("My own letter.");
+    expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 5, left: 0 });
+  });
+});
+
 describe("phone numbers next to a country code dropdown", () => {
   it("drops the country code from the number", () => {
     expect(nationalNumber("+1 (207) 555-0100")).toBe("2075550100");

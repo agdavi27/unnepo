@@ -79,6 +79,62 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
   }
 }
 
+export const PART_PROMPT = `You rewrite one part of a college student's cover letter, as they ask, and nothing else.
+Use only facts from the student's resume and profile, the job posting, and the rest of the letter. Never invent experience, numbers, or skills.
+Keep it fitting the sentences around it: same tone, same person, plain text. If it was one sentence, return one or two.
+Return only the new text for that part: no quotes, no explanation.`;
+
+/** The quick asks for a selected part of the letter. */
+export const PART_ASKS: Record<string, string> = {
+  shorter: "Make it shorter and tighter, keeping its point.",
+  specific: "Make it more specific, using a concrete detail from the resume that fits the job.",
+  rewrite: "Say it a different way.",
+  confident: "Make it sound more confident, without bragging.",
+};
+
+/**
+ * Rewrites just the part of the letter the student selected, and puts it back in place. `ask` is one of
+ * PART_ASKS or the student's own words. Null when AI isn't set up or the part isn't in the letter.
+ */
+export async function rewriteLetterPart(userId: string, letter: string, part: string, ask: string, context: { job: string; student: CoverLetterStudent }) {
+  const at = letter.indexOf(part);
+  if (!part.trim() || at < 0) return null;
+  const apiKey = await readAnthropicKey();
+  if (!apiKey) return null;
+  const config = serverConfig();
+  const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+  const started = Date.now();
+  try {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const response = await new Anthropic({ apiKey }).messages.create({
+      model,
+      max_tokens: 600,
+      system: [{ type: "text", text: PART_PROMPT, cache_control: { type: "ephemeral" } }],
+      messages: [{ role: "user", content: [
+        `The letter:\n${letter.slice(0, 5000)}`,
+        `The part to rewrite:\n${part}`,
+        `What the student wants: ${PART_ASKS[ask] ?? `"${ask.slice(0, 300)}"`}`,
+        `The job:\n${context.job.slice(0, 2500)}`,
+        context.student.resumeText ? `Resume:\n${context.student.resumeText.slice(0, 5000)}` : "",
+        context.student.profile ? `Profile:\n${context.student.profile.slice(0, 2000)}` : "",
+      ].filter(Boolean).join("\n\n") }],
+    });
+    const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("").trim().replace(/^["“]|["”]$/g, "");
+    const inputTokens = response.usage?.input_tokens ?? 0;
+    const outputTokens = response.usage?.output_tokens ?? 0;
+    const costCents = (inputTokens * config.fastInputCentsPerMillion + outputTokens * config.fastOutputCentsPerMillion) / 1_000_000;
+    await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter_part", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
+    if (!text || response.stop_reason === "refusal" || /\[[^\]]*\]/.test(text)) return null;
+    // A sentence keeps its spacing: the part's own leading and trailing whitespace stays.
+    const lead = part.match(/^\s*/)![0];
+    const trail = part.match(/\s*$/)![0];
+    return `${letter.slice(0, at)}${lead}${text.slice(0, 1500)}${trail}${letter.slice(at + part.length)}`;
+  } catch (error) {
+    await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter_part", success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true, error: error instanceof Error ? error.message : "anthropic_failed", createdAt: nowIso() });
+    return null;
+  }
+}
+
 /** The standard PDF fonts only cover Latin-1, so typographic characters are swapped for plain ones. */
 function latin1(text: string) {
   return text

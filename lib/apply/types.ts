@@ -89,6 +89,8 @@ export type FillReport = {
   peopleSearch?: PeopleSearch;
   /** Social links for each listed person, by name: the contacts table keeps only LinkedIn. */
   peopleLinks?: Record<string, Array<{ label: string; url: string }>>;
+  /** When the student marked each person (by contact id) as emailed, for follow-up reminders. */
+  emailedAt?: Record<string, string>;
   /** The credit for this job's person was spent, so searching again is free. */
   personCharged?: boolean;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
@@ -187,6 +189,10 @@ export type ApplicationProfile = {
   resumeProfile?: ResumeProfile | null;
   /** Applications per week the student is aiming for. */
   weeklyGoal?: number;
+  /** Cover letters written this month ("2026-11"), for Free's monthly limit. */
+  letters?: { month: string; count: number };
+  /** Look for people as soon as a job is saved as applied. On by default for paid plans; Free turns it on. */
+  autoFindPeople?: boolean;
   /** The Jobs for you list: when each job was first shown, jobs the student hid, and how many refreshes. */
   jobFeed?: { seen: Record<string, string>; dismissed: string[]; round: number };
   /** The spider the student picked on the Stats page (lib/spiders.ts); worn once it's unlocked. */

@@ -12,6 +12,7 @@ import { findPeopleForApplication, hunterReady, siteDomain, writeOutreachEmails 
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
+import { hasUnlimitedCredits } from "@/lib/apply/limits";
 import { profileReady } from "@/lib/profile/service";
 import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState, PostedRecruiter } from "@/lib/apply/types";
@@ -68,6 +69,9 @@ export async function student(userId: string) {
     aiCache: stored?.aiCache,
     weeklyGoal: stored?.weeklyGoal,
     spiderSkin: stored?.spiderSkin,
+    autoFindPeople: stored?.autoFindPeople,
+    letters: stored?.letters,
+    jobFeed: stored?.jobFeed,
     cvCount: stored?.cvCount,
   };
   const form = document?.form;
@@ -312,7 +316,8 @@ export async function addJobByHand(userId: string, raw: unknown) {
     statusMessage: applied ? "Added by you." : "Added by you. Not applied yet.",
     ...(stage === "interviewing" || stage === "offer" || stage === "rejected" ? { fillReport: { ...report, outcome: stage } } : {}),
   });
-  return { application: summary(updated!) };
+  if (applied) await findPeopleOnApply(userId, app.id);
+  return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }
 
 // Jobs whose company couldn't be found, so a page load doesn't read their posting again.
@@ -354,6 +359,7 @@ export async function applyState(userId: string) {
     ready: { hunter: hunterReady(), profile: await profileReady(userId) },
     freeApplications: FREE_APPLICATIONS,
     school: info.context.school,
+    plan: (await repo.getAccount(userId))?.plan ?? "free",
   };
 }
 
@@ -470,6 +476,7 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     next.eligibility = eligibility;
   }
   if (typeof body.fastApply === "boolean") next.fastApply = body.fastApply;
+  if (typeof body.autoFindPeople === "boolean") next.autoFindPeople = body.autoFindPeople;
   if (body.weeklyGoal !== undefined) {
     const goal = Math.round(Number(body.weeklyGoal));
     if (!Number.isFinite(goal) || goal < 1 || goal > 200) throw new ServiceError("Pick a weekly goal between 1 and 200 applications.", "goal", 400);
@@ -539,6 +546,21 @@ async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof stu
 }
 
 /** `claimed`: the caller already marked the search as running. */
+/**
+ * A job was just saved as applied: look for people right away, so the list is waiting. Paid plans do this
+ * unless the student turned it off; Free only when they turned it on. Credits are spent as usual (only for a
+ * list with an email).
+ */
+export async function findPeopleOnApply(userId: string, applicationId: string) {
+  const [app, account, stored] = await Promise.all([applications.get(userId, applicationId), repo.getAccount(userId), applicationProfiles.get(userId)]);
+  if (!app || app.contactsStatus !== "idle" || (app.status !== "submitted" && app.status !== "applied_manual")) return false;
+  const on = account && account.plan !== "free" ? stored?.autoFindPeople !== false : stored?.autoFindPeople === true;
+  if (!on || companyMissing(app)) return false;
+  await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: `Searching for relevant people at ${app.company}…` });
+  startContacts(userId, app.id, true);
+  return true;
+}
+
 export function startContacts(userId: string, applicationId: string, claimed = false) {
   defer(async () => {
     await runContactDiscovery(userId, applicationId, claimed).catch((error) => console.error("contact discovery failed", error));
@@ -559,7 +581,8 @@ export async function markApplied(userId: string, raw: unknown) {
   if (app.status === "submitted" || app.status === "applied_manual") return { application: summary(app) };
   await ensureCharged(userId, app);
   const updated = await applications.update(userId, app.id, { status: "applied_manual", browserSessionId: null, submittedAt: nowIso(), statusMessage: "You marked this as applied." });
-  return { application: summary(updated!) };
+  await findPeopleOnApply(userId, app.id);
+  return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }
 
 const STALE_MS = 5 * 60 * 1000;
@@ -577,7 +600,8 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   // 1 credit finds 1 person, spent only when one with a verified email turns up. With none left, nothing is looked up.
   const paidKey = `person:${userId}:${app.id}`;
   const alreadyPaid = Boolean(app.fillReport?.personCharged);
-  if (!alreadyPaid && ((await repo.getAccount(userId))?.balance ?? 0) < 1) {
+  const unlimited = await hasUnlimitedCredits(userId);
+  if (!alreadyPaid && !unlimited && ((await repo.getAccount(userId))?.balance ?? 0) < 1) {
     await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds the people at a company for one job." });
     return;
   }
@@ -596,8 +620,9 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     return;
   }
   let charged = alreadyPaid;
-  // 1 credit for the job's list of people, once; searching again is free.
-  if (found.people.length && !charged) {
+  // 1 credit for the job's list of people, once, and only when someone on it has an email (checked or written
+  // from the company's format). Searching again is free; a list with no emails costs nothing.
+  if (found.people.some((person) => person.email) && !charged && !unlimited) {
     const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: paidKey, note: `A person at ${app.company.slice(0, 80)}`, entryType: "unlock_debit" });
     if (spent.insufficient) {
       await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds the people at a company for one job." });
@@ -619,7 +644,7 @@ export async function runContactDiscovery(userId: string, applicationId: string,
  * (`subject` and `body`), saved as typed.
  */
 export async function writeContactEmail(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; contactId?: unknown; subject?: unknown; body?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; contactId?: unknown; subject?: unknown; body?: unknown; followUp?: unknown };
   const app = await requireApp(userId, body.applicationId);
   const contact = (await applicationContacts.list(userId, [app.id])).find((row) => row.id === String(body.contactId ?? ""));
   if (!contact) throw new ServiceError("That contact wasn't found.", "not_found", 404);
@@ -630,7 +655,9 @@ export async function writeContactEmail(userId: string, raw: unknown) {
     return { contact: row };
   }
   const info = await student(userId);
-  const [email] = await writeOutreachEmails(userId, app, [contact], { name: info.user.name, resumeText: info.resumeText, profile: info.profileText }).catch((error: unknown) => {
+  // "Write follow-up": a short nudge on the email already sent, which stays in the thread.
+  const followUp = body.followUp === true && contact.emailBody ? { subject: contact.emailSubject ?? "", body: contact.emailBody, sentAt: app.fillReport?.emailedAt?.[contact.id] ?? null } : undefined;
+  const [email] = await writeOutreachEmails(userId, app, [contact], { name: info.user.name, resumeText: info.resumeText, profile: info.profileText }, { followUp }).catch((error: unknown) => {
     throw new ServiceError(`The email couldn't be written. ${error instanceof Error ? error.message : ""}`.trim(), "write_failed", 502);
   });
   if (!email?.body) throw new ServiceError("The email couldn't be written. Try again.", "write_failed", 502);
@@ -653,11 +680,21 @@ export async function retryContacts(userId: string, raw: unknown) {
 }
 
 export async function updateOutreach(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { contactId?: unknown; status?: unknown };
+  const body = (raw ?? {}) as { contactId?: unknown; status?: unknown; followedUp?: unknown };
   const status = String(body.status) as OutreachState;
   if (!OUTREACH_STATES.includes(status)) throw new ServiceError("Choose a valid status.", "status", 400);
   const row = await applicationContacts.update(userId, String(body.contactId ?? "").slice(0, 80), { outreachStatus: status });
   if (!row) throw new ServiceError("That contact wasn't found.", "not_found", 404);
+  // When they were emailed, for the reminder to follow up five business days later.
+  const app = await applications.get(userId, row.applicationId);
+  if (app) {
+    const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+    const emailedAt = { ...(report.emailedAt ?? {}) };
+    // "I sent the follow-up" starts the five business days again.
+    if (status === "emailed") emailedAt[row.id] = body.followedUp === true ? nowIso() : emailedAt[row.id] ?? nowIso();
+    else delete emailedAt[row.id];
+    await applications.update(userId, app.id, { fillReport: { ...report, emailedAt } });
+  }
   return { contact: row };
 }
 

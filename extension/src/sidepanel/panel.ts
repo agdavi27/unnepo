@@ -133,6 +133,8 @@ function pageCard(state: PanelState) {
   const company = job?.company || page?.company || "";
   const chips: string[] = [];
   if (report?.filled.length) chips.push(`${report.filled.length} filled`);
+  if (report?.needsYou.length) chips.push(`${report.needsYou.length} need you`);
+  if (report?.check?.length) chips.push(`${report.check.length} to check`);
   else if (page?.posting) chips.push("Job posting");
   else if (page?.fields) chips.push(`${page.fields} ${page.fields === 1 ? "field" : "fields"}`);
   if (page?.account === "new") chips.push("New account");
@@ -147,7 +149,13 @@ function pageCard(state: PanelState) {
   ].filter(Boolean);
   // What Unnepo couldn't fill that isn't already listed as needing the student. Each one goes to the question.
   const couldnt = (report?.failed ?? []).filter((item) => !report!.needsYou.includes(item.label));
-  return `
+  // One list of what's left, most urgent first: empty required questions, ones Unnepo couldn't fill, answers to check.
+  const todo = [
+    ...(report?.needsYou ?? []).map((label) => ({ kind: "needs", label, why: "" })),
+    ...couldnt.map((item) => ({ kind: "failed", label: item.label, why: item.reason })),
+    ...(report?.check ?? []).map((item) => ({ kind: "check", label: item.label, why: item.why })),
+  ];
+  return `${setupCard(state)}
     <section class="page" aria-label="This page">
       <span class="eyebrow">Job found${site ? ` · ${escape(site)}` : ""}</span>
       <div class="job">
@@ -155,13 +163,13 @@ function pageCard(state: PanelState) {
         ${title ? `<span class="job-company">${escape(title)}</span>` : ""}
       </div>
       ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
-      <span class="eyebrow">Resume Unnepo attaches</span>
-      ${resumeRow(state)}
+      ${job?.running || report
+        ? `<p class="small resume-line">Resume: ${escape(me!.resume?.fileName ?? "none yet")}${me!.resume?.file ? " ✓" : ""}</p>`
+        : `<span class="eyebrow">Resume Unnepo attaches</span>${resumeRow(state)}`}
       ${fill}
-      ${report?.needsYou.length ? `<p class="note warn">Still needs you <span class="small">(orange on the page)</span>:</p><ul class="needs">${report.needsYou.map((label) => needsLink(label)).join("")}</ul>` : ""}
-      ${couldnt.length ? `<p class="note">Couldn't fill:</p><ul class="needs">${couldnt.map((item) => needsLink(item.label, item.reason)).join("")}</ul>` : ""}
-      ${report?.check?.length ? `<p class="note">Double-check <span class="small">(dashed blue on the page; the checklist in the corner walks you through)</span>:</p><ul class="needs">${report.check.map((item) => needsLink(item.label, item.why)).join("")}</ul>` : ""}
-      ${(report?.needsYou.length || couldnt.length || report?.check?.length) && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
+      ${todo.length ? `<p class="note${report?.needsYou.length ? " warn" : ""}">Left to do · ${todo.length} <span class="small">(the checklist on the page walks you through)</span>:</p>
+        <ul class="needs todo">${todo.map((item) => `<li class="todo-row"><span class="tag ${item.kind}">${item.kind === "needs" ? "Needs you" : item.kind === "failed" ? "Couldn't fill" : "Check"}</span>${needsLink(item.label, item.why).replace(/^<li>|<\/li>$/g, "")}</li>`).join("")}</ul>` : ""}
+      ${todo.length && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
       ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
       ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
       ${letterBlock()}
@@ -240,6 +248,104 @@ function wireLinkedIn(tabId: number) {
   });
 }
 
+/**
+ * Before the first fill: the questions that hold up most forms, asked once, on one card. Skipping is fine;
+ * the card comes back only when something new is missing.
+ */
+const SETUP_SKIPPED = "setupSkipped";
+let setupSkipped: string | null = null;
+void chrome.storage.local.get(SETUP_SKIPPED).then((stored) => { setupSkipped = (stored[SETUP_SKIPPED] as string | undefined) ?? ""; void render(); });
+const setupDraft: Record<string, string | boolean | null> = {};
+let setupNote = "";
+let setupSaving = false;
+const SETUP_KEYS = ["salaryExpectation", "earliestStart", "willingToRelocate", "inPerson", "authorizedUS", "needsSponsorship", "classYear"] as const;
+const setupMissing = (setup: NonNullable<NonNullable<PanelState["me"]>["setup"]>) =>
+  SETUP_KEYS.filter((key) => (key === "classYear" ? setup.hasSchool && !setup.classYear : setup[key] === null || setup[key] === ""));
+
+function setupCard(state: PanelState) {
+  const setup = state.me?.setup;
+  // Asked before filling, never in the middle of one.
+  if (!setup || setupSkipped === null || state.job?.running || state.job?.report) return "";
+  const missing = setupMissing(setup);
+  if (!missing.length || setupSkipped === missing.join(",")) return "";
+  const yesNo = (key: string, question: string) => {
+    const value = setupDraft[key];
+    const pick = (on: boolean, label: string) => `<button type="button" class="choice${value === on ? " on" : ""}" data-setup="${key}" data-value="${on}" aria-pressed="${value === on}">${label}</button>`;
+    return `<div class="question"><span class="q-label">${question}</span><div class="choices">${pick(true, "Yes")}${pick(false, "No")}</div></div>`;
+  };
+  const text = (key: string, question: string, placeholder: string) => `<label class="question"><span class="q-label">${question}</span><input class="field" data-setup-text="${key}" value="${escape(String(setupDraft[key] ?? ""))}" maxlength="80" placeholder="${placeholder}"></label>`;
+  const fields: Record<(typeof SETUP_KEYS)[number], () => string> = {
+    salaryExpectation: () => text("salaryExpectation", "Pay you're looking for", "$20/hour, or Open to discussion"),
+    earliestStart: () => text("earliestStart", "Earliest start date", "June 2027"),
+    willingToRelocate: () => yesNo("willingToRelocate", "Willing to relocate?"),
+    inPerson: () => yesNo("inPerson", "Open to working in person?"),
+    authorizedUS: () => yesNo("authorizedUS", "Authorized to work in the U.S.?"),
+    needsSponsorship: () => yesNo("needsSponsorship", "Will you need visa sponsorship?"),
+    classYear: () => `<label class="question"><span class="q-label">Year in school</span><select class="field" data-setup-text="classYear"><option value="">Choose…</option>${[["freshman", "Freshman"], ["sophomore", "Sophomore"], ["junior", "Junior"], ["senior", "Senior"], ["graduate", "Graduate student"]].map(([value, label]) => `<option value="${value}"${setupDraft.classYear === value ? " selected" : ""}>${label}</option>`).join("")}</select></label>`,
+  };
+  return `
+    <section class="page" aria-label="Quick answers">
+      <span class="eyebrow">Before you fill · ${missing.length} quick ${missing.length === 1 ? "answer" : "answers"}</span>
+      <p class="note">Most forms ask these. Answer once and Unnepo fills them everywhere.</p>
+      <div class="letter-form">${missing.map((key) => fields[key]()).join("")}
+        <div class="links">
+          <button type="button" class="solid" id="setup-save" ${setupSaving ? "disabled" : ""}>${setupSaving ? "Saving…" : "Save"}</button>
+          <button type="button" class="link" id="setup-skip">Skip for now</button>
+        </div>
+      </div>
+      ${setupNote ? `<p class="small" role="status">${escape(setupNote)}</p>` : ""}
+    </section>`;
+}
+
+function wireSetup(state: PanelState) {
+  app.querySelectorAll<HTMLButtonElement>("[data-setup]").forEach((button) => button.addEventListener("click", () => {
+    setupDraft[button.dataset.setup!] = button.dataset.value === "true";
+    void render();
+  }));
+  app.querySelectorAll<HTMLInputElement | HTMLSelectElement>("[data-setup-text]").forEach((box) => box.addEventListener(box instanceof HTMLSelectElement ? "change" : "input", () => { setupDraft[box.dataset.setupText!] = box.value; }));
+  document.getElementById("setup-skip")?.addEventListener("click", () => {
+    const missing = state.me?.setup ? setupMissing(state.me.setup).join(",") : "";
+    setupSkipped = missing;
+    void chrome.storage.local.set({ [SETUP_SKIPPED]: missing });
+    void render();
+  });
+  document.getElementById("setup-save")?.addEventListener("click", async () => {
+    setupSaving = true;
+    setupNote = "";
+    void render();
+    const result = await ask<{ ok: boolean; error?: string }>({ type: "save-setup", answers: setupDraft }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    setupSaving = false;
+    setupNote = result.ok ? "Saved. These fill by themselves from now on." : result.error ?? "Couldn't save.";
+    if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
+    void render();
+  });
+}
+
+/** "Did you apply to these?": jobs Apply was pressed on or filled, with nothing confirming it. ✓ saves, ✕ drops. */
+let maybeNote = "";
+function maybeCard(state: PanelState) {
+  const list = state.maybe ?? [];
+  if (!list.length) return maybeNote ? `<p class="small" role="status">${escape(maybeNote)}</p>` : "";
+  return `
+    <section class="page" aria-label="Did you apply to these?">
+      <span class="eyebrow">Did you apply to ${list.length === 1 ? "this" : `these ${list.length}`}?</span>
+      <ul class="needs maybe">${list.slice(0, 6).map((item) => `
+        <li class="maybe-row"><span class="maybe-text"><span class="job-row-title">${escape(item.title)}</span><span class="job-row-company">${escape(item.company)}</span></span>
+          <button type="button" class="inline" data-maybe="${escape(item.id)}" data-applied="true" aria-label="Yes, I applied to ${escape(item.title)}">✓ Yes</button>
+          <button type="button" class="inline" data-maybe="${escape(item.id)}" data-applied="false" aria-label="No, I didn't apply to ${escape(item.title)}">✕</button></li>`).join("")}</ul>
+      ${maybeNote ? `<p class="small" role="status">${escape(maybeNote)}</p>` : ""}
+    </section>`;
+}
+function wireMaybe() {
+  app.querySelectorAll<HTMLButtonElement>("[data-maybe]").forEach((button) => button.addEventListener("click", async () => {
+    button.disabled = true;
+    const applied = button.dataset.applied === "true";
+    const result = await ask<{ ok: boolean; error?: string }>({ type: "maybe-answer", id: button.dataset.maybe, applied }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    maybeNote = result.ok ? (applied ? "Saved to your tracker." : "") : result.error ?? "Couldn't save it.";
+    void render();
+  }));
+}
+
 /** No job on the tab: paste a job description and get a cover letter for it. */
 let pasteText = "";
 
@@ -311,7 +417,17 @@ function writtenLetter(busy: boolean, forJob: boolean) {
   return `
     <div class="letter-form" id="letter-form">
       <span class="eyebrow">Your cover letter</span>
-      <textarea class="cv-text" id="letter-text" aria-label="Your cover letter. Edit it right here." ${busy ? "readonly" : ""}>${escape(letter!.text)}</textarea>
+      <textarea class="cv-text" id="letter-text" aria-label="Your cover letter. Edit it right here, or select part of it to have it rewritten." ${busy ? "readonly" : ""}>${escape(letter!.text)}</textarea>
+      <div class="part-bar" id="part-bar" hidden role="group" aria-label="Change the selected part">
+        <span class="small">Selected part:</span>
+        <div class="choices">
+          <button type="button" class="choice" data-part="shorter">Shorter</button>
+          <button type="button" class="choice" data-part="specific">More specific</button>
+          <button type="button" class="choice" data-part="confident">More confident</button>
+          <button type="button" class="choice" data-part="rewrite">Rewrite</button>
+        </div>
+        <div class="connect-code"><input class="field" id="part-own" maxlength="300" placeholder="Or say how: mention my internship…"><button type="button" class="solid" id="part-go">Go</button></div>
+      </div>
       <div class="links">
         <button type="button" class="solid" id="letter-save" ${letterEdited && !busy ? "" : "hidden"}>${letterStep === "saving" ? "Saving…" : "Save my edits"}</button>
         <button type="button" class="link" id="letter-copy">Copy</button>
@@ -334,12 +450,14 @@ const letterBlobUrl = () => {
   return URL.createObjectURL(new Blob([bytes], { type: "application/pdf" }));
 };
 
-/** `save`: the student's own edits, made into the PDF as typed (no AI). */
-async function writeLetter(tabId: number, revise: boolean, fromPaste = false, save = false) {
-  letterStep = save ? "saving" : revise ? "revising" : "writing";
+/** `save`: the student's own edits, made into the PDF as typed (no AI). `part`: rewrite only the selected part. */
+async function writeLetter(tabId: number, revise: boolean, fromPaste = false, save = false, part?: { part: string; ask: string }) {
+  letterStep = save ? "saving" : revise || part ? "revising" : "writing";
   letterNote = "";
   void render();
-  const options = save
+  const options = part
+    ? { previous: letter?.text ?? "", part: part.part, ask: part.ask }
+    : save
     ? { text: letter?.text ?? "" }
     : revise
       ? { previous: letter?.text ?? "", edit: letterChoices.edit }
@@ -366,7 +484,7 @@ function wireLetter(tabId: number) {
   document.getElementById("letter-start")?.addEventListener("click", () => go("asking"));
   document.getElementById("letter-cancel")?.addEventListener("click", () => go(letter ? "written" : "closed"));
   document.getElementById("letter-restart")?.addEventListener("click", () => go("asking"));
-  app.querySelectorAll<HTMLButtonElement>(".choice").forEach((button) => button.addEventListener("click", () => {
+  app.querySelectorAll<HTMLButtonElement>(".choice[data-choice]").forEach((button) => button.addEventListener("click", () => {
     letterChoices[button.dataset.choice as "length" | "tone"] = button.dataset.value ?? "";
     void render();
   }));
@@ -389,6 +507,25 @@ function wireLetter(tabId: number) {
   });
   pasteWrite?.addEventListener("click", () => void writeLetter(tabId, false, true));
   const typed = document.getElementById("letter-text") as HTMLTextAreaElement | null;
+  // Selecting part of the letter offers to rewrite just that part. Shown without redrawing, so the selection stays.
+  const partBar = document.getElementById("part-bar");
+  let part = "";
+  const showPartBar = () => {
+    if (!typed || !partBar) return;
+    const chosen = typed.value.slice(typed.selectionStart, typed.selectionEnd);
+    if (chosen.trim().length >= 12) part = chosen;
+    partBar.hidden = !part || (chosen.trim().length < 12 && document.activeElement === typed);
+  };
+  typed?.addEventListener("select", showPartBar);
+  typed?.addEventListener("mouseup", showPartBar);
+  typed?.addEventListener("keyup", showPartBar);
+  const rewrite = (ask: string) => {
+    if (!part || !ask.trim()) return;
+    if (letterEdited) letterEdited = false;
+    void writeLetter(tabId, false, fromPaste, false, { part, ask });
+  };
+  partBar?.querySelectorAll<HTMLButtonElement>("[data-part]").forEach((button) => button.addEventListener("click", () => rewrite(button.dataset.part!)));
+  document.getElementById("part-go")?.addEventListener("click", () => rewrite((document.getElementById("part-own") as HTMLInputElement).value));
   const save = document.getElementById("letter-save") as HTMLButtonElement | null;
   typed?.addEventListener("input", () => {
     letter!.text = typed.value;
@@ -490,7 +627,7 @@ function profileCard(state: PanelState) {
     <section class="profile" aria-label="Your profile">
       <div class="row">
         <span class="heading">Your profile</span>
-        <span class="mono">${me.completeness}% READY · ${me.credits} ${me.credits === 1 ? "CREDIT" : "CREDITS"}</span>
+        <span class="mono">${me.completeness}% READY · ${me.unlimitedCredits ? "UNLIMITED CREDITS" : `${me.credits} ${me.credits === 1 ? "CREDIT" : "CREDITS"}`}${me.coverLetters?.left != null ? ` · ${me.coverLetters.left} LETTERS LEFT` : ""}</span>
       </div>
       <div class="blocks" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}">
         ${Array.from({ length: 20 }, (_, index) => `<span class="${index < on ? "on" : ""}"></span>`).join("")}
@@ -647,7 +784,7 @@ async function renderPassword() {
 
 /** "My jobs": the newest jobs in Unnepo, each opening its page in Unnepo, and a link to the full tracker. */
 type JobRow = { id: string; title: string; company: string; status: string; url: string; submittedAt: string | null; createdAt: string };
-let jobsList: { rows: JobRow[]; total: number; error: string; loadedAt: number } | null = null;
+let jobsList: { rows: JobRow[]; total: number; followUpsDue: number; error: string; loadedAt: number } | null = null;
 let jobsLoading = false;
 
 const STATUS: Record<string, string> = {
@@ -658,9 +795,9 @@ const STATUS: Record<string, string> = {
 async function loadJobs() {
   if (jobsLoading) return;
   jobsLoading = true;
-  const result = await ask<{ ok: boolean; jobs?: JobRow[]; total?: number; error?: string }>({ type: "list-jobs" }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }) as const);
+  const result = await ask<{ ok: boolean; jobs?: JobRow[]; total?: number; followUpsDue?: number; error?: string }>({ type: "list-jobs" }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }) as const);
   jobsLoading = false;
-  jobsList = { rows: result.ok ? result.jobs ?? [] : [], total: result.ok ? result.total ?? 0 : 0, error: result.ok ? "" : result.error ?? "Couldn't load your jobs.", loadedAt: Date.now() };
+  jobsList = { rows: result.ok ? result.jobs ?? [] : [], total: result.ok ? result.total ?? 0 : 0, followUpsDue: result.ok ? result.followUpsDue ?? 0 : 0, error: result.ok ? "" : result.error ?? "Couldn't load your jobs.", loadedAt: Date.now() };
   void render();
 }
 
@@ -745,6 +882,7 @@ function jobsView(state: PanelState) {
   return `
     <section class="view" aria-label="My jobs">
       <div class="row"><span class="heading">My jobs</span>${jobsList && !jobsList.error ? `<span class="mono">${jobsList.total} IN ALL</span>` : ""}</div>
+      ${jobsList?.followUpsDue ? `<a class="note warn" href="${escape(state.apiBase)}/home" target="_blank" rel="noreferrer">${jobsList.followUpsDue} ${jobsList.followUpsDue === 1 ? "follow-up is" : "follow-ups are"} due. Open your tracker to write ${jobsList.followUpsDue === 1 ? "it" : "them"} →</a>` : ""}
       ${manualJobForm()}
       ${body}
       <a class="outline" href="${escape(state.apiBase)}/home" target="_blank" rel="noreferrer">Open my tracker on Unnepo</a>
@@ -818,7 +956,9 @@ async function render() {
   // Don't wipe what's being typed in the cover letter questions or edits box when the page changes.
   // The same for a problem being reported.
   if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea")) return;
-  const views: Record<View, () => string> = { home: () => pageCard(state), jobs: () => jobsView(state), profile: () => profileCard(state) + issuesCard(), settings: () => settingsView(state) };
+  // While a form is being filled (or was just filled), its card comes first; the other cards wait below.
+  const active = Boolean(state.job?.running || state.job?.report);
+  const views: Record<View, () => string> = { home: () => (active ? pageCard(state) + maybeCard(state) : maybeCard(state) + pageCard(state)), jobs: () => jobsView(state), profile: () => profileCard(state) + issuesCard(), settings: () => settingsView(state) };
   app.innerHTML = state.connected ? views[view]() : connectView(state);
   // A job opens on its own page in Unnepo, the tracker with its details open.
   app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
@@ -834,6 +974,8 @@ async function render() {
   document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
   if (state.tab) wireLetter(state.tab.id);
   if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
+  wireSetup(state);
+  wireMaybe();
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));

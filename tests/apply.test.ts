@@ -10,13 +10,14 @@ import { applicationProfiles, applications, applicationContacts } from "@/lib/ap
 import { companyNames, coreTitle, departmentOf, domainFits, guessedDomains, postingDomains, siteDomain, swapAnd } from "@/lib/apply/contacts";
 import { extensionCoverLetter, pagePoster } from "@/lib/extension/service";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
+import { businessDaysBetween, followUpsDue } from "@/lib/apply/follow-ups";
 import { acceptFixes } from "@/lib/apply/fast/fields";
 import { degreeAnswer, formatDate, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import { supportedBy } from "@/lib/apply/questions";
 import { bestOption } from "@/lib/apply/options";
 import { checkSchool } from "@/lib/school-plans";
 import { classYearOf } from "@/lib/profile/student";
-import { applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
+import { applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -650,6 +651,67 @@ describe("people after applying", () => {
     expect((await applications.get(userId, app.id))?.contactsMessage).toMatch(/out of credits/);
   });
 
+  it("charges nothing for a list with no emails, and never charges an unlimited account", async () => {
+    // Blurred names that can't be revealed: the people show, with no email, so no credit is spent.
+    const blurred = (id: string, first: string) => ({ ...person(id, first, "", "Recruiter"), last_name_obfuscated: "K***m" });
+    const noEmail = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [blurred("r1", "Avery")] : []), { poster: false, revealFails: true });
+    expect(noEmail.contacts.map((item) => item.email)).toEqual([null]);
+    expect((await repo.listLedger(noEmail.userId)).filter((entry) => entry.entryType === "unlock_debit")).toHaveLength(0);
+  });
+
+  it("never charges an account listed as unlimited, and searches with no credits left", async () => {
+    process.env.UNLIMITED_CREDIT_EMAILS = "someone@else.edu, Pat.Doe@colby.edu";
+    try {
+      const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
+      const free = await appliedWith(found, { verified: ["a1"] });
+      expect(free.contacts.length).toBeGreaterThan(0);
+      expect((await repo.listLedger(free.userId)).filter((entry) => entry.entryType === "unlock_debit")).toHaveLength(0);
+      await repo.setAccountForTests(free.userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
+      await applications.update(free.userId, free.application.id, { contactsStatus: "idle", fillReport: { ...free.application.fillReport!, personCharged: false } });
+      await runContactDiscovery(free.userId, free.application.id);
+      expect((await applications.get(free.userId, free.application.id))?.contactsMessage).not.toMatch(/out of credits/);
+    } finally {
+      delete process.env.UNLIMITED_CREDIT_EMAILS;
+    }
+  });
+
+  it("reminds to follow up five business days after emailing, and writes the follow-up in the thread", async () => {
+    const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
+    const { userId, application, contacts } = await appliedWith(found, { verified: ["a1"] });
+    const casey = contacts.find((item) => item.name === "Casey Park")!;
+    await writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, subject: "Hello", body: "Hi Casey, I applied to the Product Analyst Intern role." });
+    await updateOutreach(userId, { contactId: casey.id, status: "emailed" });
+    const emailedAt = (await applications.get(userId, application.id))!.fillReport!.emailedAt![casey.id];
+    expect(emailedAt).toBeTruthy();
+    const withPeople = async () => [{ ...(await applications.get(userId, application.id))!, contacts: await applicationContacts.list(userId, [application.id]) }];
+    // Monday to the next Monday is five business days; four isn't enough.
+    expect(businessDaysBetween(new Date("2026-11-02T10:00:00Z"), new Date("2026-11-09T09:00:00Z"))).toBe(5);
+    expect(businessDaysBetween(new Date("2026-11-06T10:00:00Z"), new Date("2026-11-09T09:00:00Z"))).toBe(1);
+    expect(followUpsDue(await withPeople(), new Date(Date.parse(emailedAt) + 3 * 86_400_000))).toHaveLength(0);
+    expect(followUpsDue(await withPeople(), new Date(Date.parse(emailedAt) + 8 * 86_400_000))).toMatchObject([{ name: "Casey Park", company: "Acme Corp" }]);
+    model.replies.push(JSON.stringify({ emails: [{ index: 1, subject: "Re: Hello", body: "Hi Casey, a quick note on my application." }] }));
+    const followUp = await writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, followUp: true });
+    expect(followUp.contact).toMatchObject({ emailSubject: "Re: Hello" });
+    expect(model.calls.at(-1)).toContain("This is a follow-up");
+    expect(model.calls.at(-1)).toContain("Hi Casey, I applied to the Product Analyst Intern role.");
+    // "I sent it" starts the five days again; marking them replied ends the reminders.
+    await updateOutreach(userId, { contactId: casey.id, status: "emailed", followedUp: true });
+    expect(Date.parse((await applications.get(userId, application.id))!.fillReport!.emailedAt![casey.id])).toBeGreaterThanOrEqual(Date.parse(emailedAt));
+    await updateOutreach(userId, { contactId: casey.id, status: "replied" });
+    expect((await applications.get(userId, application.id))!.fillReport!.emailedAt![casey.id]).toBeUndefined();
+  });
+
+  it("looks for people as soon as a job is applied to, on a paid plan or when Free turns it on", async () => {
+    const userId = await student();
+    process.env.APOLLO_API_KEY = "apollo";
+    setContactFetcher(async () => Response.json({ people: [], organizations: [] }));
+    const off = (await addJobByHand(userId, { title: "Intern", company: "Acme Corp" })).application;
+    expect(off.contactsStatus).toBe("idle");
+    await saveApplicationProfile(userId, { autoFindPeople: true });
+    const on = (await addJobByHand(userId, { title: "Analyst", company: "Acme Corp" })).application;
+    expect(on.contactsStatus).not.toBe("idle");
+  });
+
   it("keeps going when one search fails", async () => {
     const { application, contacts } = await appliedWith((search) => {
       if (search.q_keywords) return "fail";
@@ -757,6 +819,23 @@ describe("questions autofill used to miss", () => {
     expect(answer("Which country do you currently reside in?", "select", ["Canada", "United States of America"])).toBe("United States of America");
     expect(answer("Country of residence")).toBe("United States");
     expect(answer("Country of citizenship")).toBeNull();
+  });
+
+  it("reuses a saved answer for the same question worded differently, but never across a 'not' or for who you are", () => {
+    const saved = {
+      "when can you start": { label: "When can you start?", answer: "June 1, 2027", updatedAt: "" },
+      "are you willing to relocate": { label: "Are you willing to relocate?", answer: "Yes", updatedAt: "" },
+      "gender": { label: "Gender", answer: "Woman", updatedAt: "" },
+      "do you require visa sponsorship": { label: "Do you require visa sponsorship?", answer: "No", updatedAt: "" },
+    };
+    const own = { ...context, profile: { ...profile, saved } };
+    const plan = (label: string, kind: ApplicationQuestion["kind"] = "text", options: string[] = []) => planAnswers([q("x", label, kind, options)], own)[0].answer;
+    expect(plan("What is your earliest available start date?")).toBe("June 1, 2027");
+    expect(plan("Willing to relocation for this role?", "select", ["Yes", "No"])).toBe("Yes");
+    expect(plan("Are you not willing to relocate?", "select", ["Yes", "No"])).toBeNull();
+    expect(plan("Gender identity", "select", ["Woman", "Man"])).toBeNull();
+    expect(plan("Will you now or in the future require sponsorship for a work visa?", "select", ["Yes", "No"])).toBeNull();
+    expect(plan("What is your favorite color?")).toBeNull();
   });
 
   it("answers the year in school, in the form's own words", () => {

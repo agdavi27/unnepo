@@ -1,17 +1,20 @@
+import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
+import { followUpsDue } from "@/lib/apply/follow-ups";
+import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits } from "@/lib/apply/limits";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
-import { coverLetterPdf, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { createApplication, keyFor, minimalApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { coverLetterPdf, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
+import { createApplication, findPeopleOnApply, keyFor, minimalApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
 import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
 import { WRITING_STYLE, classifyQuestion, normalizeLabel, plainWriting, shortAnswer } from "@/lib/apply/questions";
-import { applicationProfiles, applications } from "@/lib/apply/store";
+import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { isApplied } from "@/lib/apply/stats";
 import { wornSkin } from "@/lib/spiders";
 import { CVS_PER_CREDIT, cvUsesLeft } from "@/lib/apply/cv";
 import type { FillAttempt, FillProblem, JobApplication, PostedRecruiter } from "@/lib/apply/types";
-import { profileReady, profileState } from "@/lib/profile/service";
+import { profileReady, profileState, saveStudentProfile } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
 
 /**
@@ -25,11 +28,58 @@ const DAILY_AI_CALLS = Number(process.env.EXTENSION_DAILY_AI_CALLS || 60);
 /** Answers the model wrote, cached by question so the same question never costs a second call. */
 const CACHE_LIMIT = 400;
 
+/**
+ * The questions that hold up most applications, asked once before the first fill: pay, start date,
+ * relocating, working in person, work authorization, sponsorship, and year in school. Each says whether
+ * it's answered yet.
+ */
+function setupState(student: StudentProfile) {
+  const school = student.education[0];
+  return {
+    salaryExpectation: student.standardAnswers.salaryExpectation ?? "",
+    earliestStart: student.standardAnswers.earliestStart ?? "",
+    willingToRelocate: student.contact.willingToRelocate ?? null,
+    inPerson: student.standardAnswers.inPerson ?? null,
+    authorizedUS: student.workAuth.authorizedUS ?? null,
+    needsSponsorship: student.workAuth.needsSponsorship ?? null,
+    classYear: school ? classYearOf(school) ?? "" : "",
+    hasSchool: Boolean(school),
+  };
+}
+
+/** Saves the setup card's answers into the profile. Blank ones are left as they were. */
+export async function extensionSetup(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const { profile: student } = await profileState(userId);
+  const yesNo = (value: unknown) => (value === true || value === false ? value : undefined);
+  const text = (value: unknown, max: number) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined);
+  const classYear = CLASS_YEARS.find(([value]) => value === body.classYear)?.[0];
+  const patch = {
+    contact: { ...(yesNo(body.willingToRelocate) !== undefined ? { willingToRelocate: yesNo(body.willingToRelocate) } : {}) },
+    standardAnswers: {
+      ...(text(body.salaryExpectation, 80) ? { salaryExpectation: text(body.salaryExpectation, 80) } : {}),
+      ...(text(body.earliestStart, 80) ? { earliestStart: text(body.earliestStart, 80) } : {}),
+      ...(yesNo(body.inPerson) !== undefined ? { inPerson: yesNo(body.inPerson) } : {}),
+    },
+    workAuth: {
+      ...(yesNo(body.authorizedUS) !== undefined ? { authorizedUS: yesNo(body.authorizedUS) } : {}),
+      ...(yesNo(body.needsSponsorship) !== undefined ? { needsSponsorship: yesNo(body.needsSponsorship) } : {}),
+    },
+    ...(classYear && student.education[0] ? { education: [{ ...student.education[0], classYear }, ...student.education.slice(1)] } : {}),
+  };
+  const state = await saveStudentProfile(userId, { profile: patch });
+  return { setup: setupState(state.profile) };
+}
+
 export async function extensionMe(userId: string) {
   const [user, credits, state, resume, stored] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId), applicationProfiles.get(userId)]);
   return {
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: credits?.balance ?? 0,
+    unlimitedCredits: await hasUnlimitedCredits(userId),
+    setup: setupState(state.profile),
+    plan: credits?.plan ?? "free",
+    coverLetters: await coverLettersLeft(userId),
     profileReady: state.ready,
     completeness: state.profile.completeness,
     // What the panel lists under "Missing": the parts of the profile still to fill in, required ones first.
@@ -97,7 +147,10 @@ export async function extensionJob(userId: string, raw: unknown) {
   if (pageTitle && pageCompany) {
     if (!(await profileReady(userId))) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
     const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany, description: pageDescription, poster });
-    if (!pageDescription) runLater(() => enrichFromPosting(userId, app.id, url));
+    runLater(async () => {
+      if (!pageDescription) await enrichFromPosting(userId, app.id, url);
+      await preWriteLetter(userId, app.id);
+    });
     return { application: summary(app), created: true };
   }
   try {
@@ -122,7 +175,30 @@ export async function extensionJobs(userId: string) {
       submittedAt: app.submittedAt, createdAt: app.createdAt,
     })),
     total: apps.length,
+    // People emailed five business days ago or more with no reply: the panel points to the tracker.
+    followUpsDue: apps.some((app) => Object.keys(app.fillReport?.emailedAt ?? {}).length) ? followUpsDue(await withContacts(userId, apps)).length : 0,
   };
+}
+
+async function withContacts(userId: string, apps: JobApplication[]) {
+  const contacts = await applicationContacts.list(userId, apps.map((app) => app.id));
+  return apps.map((app) => ({ ...app, contacts: contacts.filter((contact) => contact.applicationId === app.id) }));
+}
+
+/**
+ * Paid plans: the cover letter is written as soon as a job is opened, so it's ready when the form asks or the
+ * student presses Write. Free writes one only when asked, since it has a monthly number.
+ */
+async function preWriteLetter(userId: string, applicationId: string) {
+  const [account, app] = await Promise.all([repo.getAccount(userId), applications.get(userId, applicationId)]);
+  if (!account || account.plan === "free" || !app || app.fillReport?.coverLetter || !app.description.trim()) return;
+  const info = await student(userId);
+  const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
+  const text = await writeCoverLetter(userId, app, { name, resumeText: info.resumeText, profile: info.profileText });
+  if (!text) return;
+  const latest = (await applications.get(userId, applicationId)) ?? app;
+  if (latest.fillReport?.coverLetter) return;
+  await applications.update(userId, applicationId, { fillReport: { ...(latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
 }
 
 /** Fills in a quickly-opened job from its posting. Best effort: a posting Unnepo can't read keeps the page's details. */
@@ -323,7 +399,7 @@ export async function extensionLearn(userId: string, raw: unknown) {
 
 /** A cover letter for this job, as text and as a PDF to upload. Written once per job. */
 export async function extensionCoverLetter(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown; part?: unknown; ask?: unknown };
   // No job on the page: the student pasted the job description instead. Nothing is opened in the tracker.
   const pasted = !body.applicationId && typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
   if (!body.applicationId && pasted.length < 80) throw new ServiceError("Paste the whole job description (at least a few sentences).", "description", 400);
@@ -342,10 +418,24 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   // The student's choices (or edits) always mean a new letter; otherwise the one already written is reused.
   const asked = Boolean(style.length || style.tone || style.mention?.trim() || style.edit?.trim());
   const job = app ?? { title: "", company: "", department: null, description: pasted, requirements: [] };
+  // The student selected part of the letter and asked for it changed: only that part is rewritten.
+  if (typeof body.part === "string" && typeof body.previous === "string") {
+    const how = typeof body.ask === "string" ? body.ask.trim().slice(0, 300) : "";
+    if (!how) throw new ServiceError("Say how to change it.", "ask", 400);
+    const jobText = app ? `${app.title} at ${app.company}\n${app.requirements.join("\n")}\n${app.description}` : pasted;
+    const rewritten = await rewriteLetterPart(userId, body.previous.slice(0, 6000), body.part.slice(0, 2000), how, { job: jobText, student: { name, resumeText: info.resumeText, profile: info.profileText } });
+    if (!rewritten) throw new ServiceError("Couldn't rewrite that part. Select it again and try once more.", "part", 502);
+    body.text = rewritten;
+  }
   // The student edited the letter themselves: their text, as typed, with no AI.
   const own = typeof body.text === "string" ? body.text.replace(/\r\n/g, "\n").trim().slice(0, 6000) : "";
   if (typeof body.text === "string" && !own) throw new ServiceError("The cover letter is empty.", "text", 400);
-  const text = own || (!asked && app?.fillReport?.coverLetter) || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText }, style));
+  const reused = !own && !asked ? app?.fillReport?.coverLetter ?? "" : "";
+  // A new letter from AI counts toward Free's monthly number; the student's own edits and a reused letter don't.
+  const fresh = !own && !reused;
+  if (fresh) await assertCoverLetterAllowed(userId);
+  const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText }, style));
+  if (fresh && text) await countCoverLetter(userId);
   if (!text) throw new ServiceError("Couldn't write a cover letter. Add your resume and profile first.", "cover_letter", 409);
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
   if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
@@ -391,8 +481,9 @@ export async function extensionSubmission(userId: string, raw: unknown) {
     confirmation: { url: url || app.applicationUrl || app.jobUrl, text: String(body.text ?? "").slice(0, 240) || `Detected by the Unnepo extension (${confidence}).`, detectedAt, receiptPath, confidence },
     statusMessage: confidence === "confirmed" ? "Submitted. The site accepted your application." : "Submitted, as far as the page shows. Check your email for the site's confirmation.",
   });
-  // People to email are found only when the student asks ("Find me the best person to connect with").
-  return { application: summary(updated!) };
+  // People are looked for now when the student's plan or setting says so; otherwise when they ask.
+  await findPeopleOnApply(userId, app.id);
+  return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }
 
 /** The student says they didn't actually apply. Puts the job back to not applied. */

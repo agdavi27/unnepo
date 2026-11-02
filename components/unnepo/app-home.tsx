@@ -5,14 +5,14 @@ import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
 import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
-import { ENTERPRISE_PLAN, FREE_APPLICATIONS, PUBLIC_PLANS, creditMath } from "@/lib/config";
+import { ENTERPRISE_PLAN, FREE_APPLICATIONS, FREE_COVER_LETTERS, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 import { ApplicationSettings, ApplyArea } from "@/components/unnepo/apply";
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
   user: { name: string; email: string };
-  credits: { balance: number; plan: string; includedAllowance: number };
+  credits: { balance: number; plan: string; includedAllowance: number; unlimited?: boolean; coverLetters?: { used: number; left: number | null } };
   profile: { ready: boolean; form: Profile; organizedProfile: unknown | null } | null;
   /** The resume-first profile is confirmed (or the student finished the old onboarding). */
   ready: boolean;
@@ -204,7 +204,7 @@ export function AppHome() {
           <Logo />
           <div className="flex items-center gap-3 whitespace-nowrap text-sm sm:gap-4">
             {resumeButton("hidden sm:flex")}
-            {data && <span className="rounded-full border border-line px-2.5 py-1 text-muted sm:px-3"><span className="text-ink">{data.credits.balance}</span> credits</span>}
+            {data && <span className="rounded-full border border-line px-2.5 py-1 text-muted sm:px-3">{data.credits.unlimited ? <span className="text-ink">Unlimited credits</span> : <><span className="text-ink">{data.credits.balance}</span> credits</>}{data.credits.coverLetters?.left != null && <span className="ml-2 text-faint">· {data.credits.coverLetters.left} cover letters left</span>}</span>}
             {data && !showOnboarding && <button type="button" onClick={() => setView("settings")} aria-current={view === "settings" ? "page" : undefined} className={view === "settings" ? "text-white" : "text-muted hover:text-white"}>Settings</button>}
             <button type="button" onClick={logout} className="text-muted hover:text-white">Log out</button>
           </div>
@@ -285,7 +285,7 @@ export function AppHome() {
                 <div>
                   <h2 className="text-xl font-semibold tracking-tight">Plans</h2>
                   <p className="mt-1 text-sm text-muted">
-                    You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {data.credits.balance} {data.credits.balance === 1 ? "credit" : "credits"} left.
+                    You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {data.credits.unlimited ? "unlimited credits" : `${data.credits.balance} ${data.credits.balance === 1 ? "credit" : "credits"} left`}{data.credits.coverLetters?.left != null ? ` and ${data.credits.coverLetters.left} of ${FREE_COVER_LETTERS} cover letters left this month` : ""}.
                   </p>
                 </div>
                 <p className="text-xs text-faint">1 credit = up to 5 people at one company · Free covers {FREE_APPLICATIONS} applications</p>

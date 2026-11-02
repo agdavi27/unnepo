@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AtsBadge, CompanyLogo } from "@/components/unnepo/company";
 import { FollowUpFacts } from "@/components/unnepo/follow-up-facts";
+import { followUpsDue } from "@/lib/apply/follow-ups";
 import { PeopleSearching } from "@/components/unnepo/people-searching";
 import { StatsPage } from "@/components/unnepo/stats";
 import { stageOf, appliedOn, applicationStats, type Stage } from "@/lib/apply/stats";
@@ -22,6 +23,7 @@ export type ApplyData = {
   ready: { hunter: boolean; profile: boolean };
   freeApplications: number;
   school: string;
+  plan?: string;
 };
 export type TrackerView = "applied" | "stats";
 
@@ -134,9 +136,14 @@ export function ApplyArea({ view, refreshKey = 0 }: { view: TrackerView; refresh
 /** Job-site preferences that used to sit on the Apply page. Loads its own data. */
 export function ApplicationSettings() {
   const [consent, setConsent] = useState<boolean | null>(null);
+  const [autoPeople, setAutoPeople] = useState<boolean | null>(null);
   const [state, setState] = useState("");
   useEffect(() => {
-    call<ApplyData>("", "GET").then((data) => setConsent(Boolean(data.profile.accountConsentAt)), () => setConsent(false));
+    call<ApplyData>("", "GET").then((data) => {
+      setConsent(Boolean(data.profile.accountConsentAt));
+      // Paid plans look for people on applying unless turned off; Free only when turned on.
+      setAutoPeople(data.plan && data.plan !== "free" ? data.profile.autoFindPeople !== false : data.profile.autoFindPeople === true);
+    }, () => setConsent(false));
   }, []);
   async function save(value: boolean) {
     setConsent(value);
@@ -149,12 +156,27 @@ export function ApplicationSettings() {
       setState(reason instanceof Error ? reason.message : "Couldn't save.");
     }
   }
+  async function saveAutoPeople(value: boolean) {
+    setAutoPeople(value);
+    setState("Saving…");
+    try {
+      await call("/profile", "PUT", { autoFindPeople: value });
+      setState("Saved.");
+    } catch (reason) {
+      setAutoPeople(!value);
+      setState(reason instanceof Error ? reason.message : "Couldn't save.");
+    }
+  }
   return (
     <div className="rounded-2xl border border-line bg-panel p-5">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-faint">Applications</h2>
       <label className="mt-3 flex items-start gap-2.5 text-sm">
         <input type="checkbox" className="mt-1" checked={Boolean(consent)} disabled={consent === null} onChange={(event) => void save(event.target.checked)} />
         <span>Accept job sites&apos; terms, privacy notices, and acknowledgements on my behalf when an application asks. Arbitration, background-check, and non-compete agreements are always left for me, and Unnepo never opts me into marketing.</span>
+      </label>
+      <label className="mt-3 flex items-start gap-2.5 text-sm">
+        <input type="checkbox" className="mt-1" checked={Boolean(autoPeople)} disabled={autoPeople === null} onChange={(event) => void saveAutoPeople(event.target.checked)} />
+        <span>Find people at the company as soon as a job is saved as applied, so the list is ready when I open it. 1 credit per job, only when someone with an email is found.</span>
       </label>
       {state && <p className="mt-2 text-xs text-muted">{state}</p>}
     </div>
@@ -410,6 +432,17 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
         </div>
       )}
 
+      <FollowUpsDue
+        apps={apps}
+        onOpen={(appId) => {
+          setFilter("all");
+          setQuery("");
+          setOpen(appId);
+          requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+        }}
+        onWrite={(appId, contactId) => act("/contact-email", "POST", { applicationId: appId, contactId, followUp: true })}
+        onSent={(contactId) => act("/contact", "PATCH", { contactId, status: "emailed", followedUp: true })}
+      />
       {adding && <AddJobForm onDone={async (added) => { setAdding(false); if (added) await onReload(); }} />}
       {problem && <p role="alert" className="text-sm text-red-300">{problem}</p>}
 
@@ -473,6 +506,27 @@ function PostedBy({ app }: { app: App }) {
         </a>
       )}
     </div>
+  );
+}
+
+/** People emailed five business days ago or more with no reply yet: write the follow-up, or say it's sent. */
+function FollowUpsDue({ apps, onOpen, onWrite, onSent }: { apps: App[]; onOpen: (appId: string) => void; onWrite: (appId: string, contactId: string) => Promise<void>; onSent: (contactId: string) => Promise<void> }) {
+  const [busy, setBusy] = useState("");
+  const due = followUpsDue(apps);
+  if (!due.length) return null;
+  return (
+    <section aria-labelledby="follow-ups" className="rounded-xl border border-[#3D8BFF]/50 bg-panel p-3">
+      <h2 id="follow-ups" className="text-sm font-semibold">Follow-ups due <span className="font-normal text-faint tabular-nums">{due.length}</span></h2>
+      <ul className="mt-2 flex flex-col gap-2">
+        {due.slice(0, 5).map((item) => (
+          <li key={item.contactId} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            <span className="min-w-0 flex-1"><span className="font-medium">{item.name}</span> <span className="text-muted">at {item.company} · emailed {item.days} business days ago</span></span>
+            <button type="button" className="text-sm font-medium text-ink underline-offset-4 hover:underline disabled:opacity-50" disabled={busy === item.contactId} onClick={async () => { setBusy(item.contactId); await onWrite(item.applicationId, item.contactId); setBusy(""); onOpen(item.applicationId); }}>{busy === item.contactId ? "Writing…" : "Write follow-up"}</button>
+            <button type="button" className="text-xs text-muted hover:text-white" onClick={() => void onSent(item.contactId)}>I sent it</button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -665,8 +719,11 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail }: { app: App; 
         </>
       )}
       {contacts.map((contact) => {
+        // The one to email first: the most relevant person with an email (the list is ranked).
+        const first = contact.id === (contacts.find((item) => item.email) ?? contacts[0])?.id && contacts.length > 1;
         return (
-          <article key={contact.id} className="rounded-xl border border-line bg-panel p-4">
+          <article key={contact.id} className={`rounded-xl border bg-panel p-4 ${first ? "border-[#3D8BFF]" : "border-line"}`}>
+            {first && <p className="mb-2 text-xs font-semibold text-[#3D8BFF]">★ Start here: {contact.email ? "the most relevant person with an email." : "the most relevant person."}</p>}
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="flex min-w-0 items-center gap-3">
                 <Avatar name={contact.name} photoUrl={contact.photoUrl} />

@@ -10,6 +10,9 @@ import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/l
 import { highlightProfileWithModel, organizeQuizWithModel, quizSourceText } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
 import { applicationProfiles, applications } from "@/lib/apply/store";
+import { rewriteLetterPart } from "@/lib/apply/cover-letter";
+import { student } from "@/lib/apply/service";
+import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits } from "@/lib/apply/limits";
 import { profileState } from "@/lib/profile/service";
 
 function asForm(value: unknown): FormProfile {
@@ -244,6 +247,7 @@ export async function generateWorkspaceCoverLetter(userId: string, raw: unknown)
   }
   const apiKey = await readAnthropicKey();
   if (!apiKey) throw new ServiceError("AI writing is not configured.", "not_configured", 503);
+  await assertCoverLetterAllowed(userId);
 
   const prompt = [
     `Student name: ${user?.name || "Student"}`,
@@ -288,7 +292,23 @@ export async function generateWorkspaceCoverLetter(userId: string, raw: unknown)
   const costCents = (inputTokens * config.fastInputCentsPerMillion + outputTokens * config.fastOutputCentsPerMillion) / 1_000_000;
   await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
   await repo.insertGeneration({ id: id(), userId, purpose: "cover_letter", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
+  await countCoverLetter(userId);
   return { body: letter.slice(0, 8000) };
+}
+
+/** The web app's "rewrite just this part" for a cover letter: the selected part, changed as asked, put back. */
+export async function rewriteWorkspaceLetterPart(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { letter?: unknown; part?: unknown; ask?: unknown; job?: { title?: unknown; company?: unknown; description?: unknown } };
+  const letter = String(body.letter ?? "").slice(0, 8000);
+  const part = String(body.part ?? "").slice(0, 2000);
+  const ask = String(body.ask ?? "").trim().slice(0, 300);
+  if (part.trim().length < 3 || !letter.includes(part)) throw new ServiceError("Select part of the letter first.", "part", 400);
+  if (!ask) throw new ServiceError("Say how to change it.", "ask", 400);
+  const info = await student(userId);
+  const job = `${String(body.job?.title ?? "")} at ${String(body.job?.company ?? "")}\n${String(body.job?.description ?? "").slice(0, 3000)}`;
+  const rewritten = await rewriteLetterPart(userId, letter, part, ask, { job, student: { name: info.user.name, resumeText: info.resumeText, profile: info.profileText } });
+  if (!rewritten) throw new ServiceError("Couldn't rewrite that part. Try again.", "part", 502);
+  return { letter: rewritten };
 }
 
 function parseEmailJson(text: string) {
@@ -313,7 +333,7 @@ export async function workspaceState(userId: string) {
   const studentFacts = document ? profileIntelligence.approvedForOutreach(document.facts, document.form.excludedTopics) : [];
   return {
     user: { name: user?.name ?? "", email: user?.email ?? "" },
-    credits: { balance: credits?.balance ?? 0, plan: credits?.plan ?? "free", includedAllowance: credits?.includedAllowance ?? 0 },
+    credits: { balance: credits?.balance ?? 0, plan: credits?.plan ?? "free", includedAllowance: credits?.includedAllowance ?? 0, unlimited: await hasUnlimitedCredits(userId), coverLetters: await coverLettersLeft(userId) },
     profile: document,
     ready: student.ready,
     completeness: student.profile.completeness,

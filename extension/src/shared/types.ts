@@ -70,15 +70,20 @@ export type Issue = { id: string; at: string; kind: "fill" | "site" | "stopped" 
 /** Sites Unnepo never reads or fills, whatever is open in the panel: LinkedIn. */
 export const NEVER_READ = /(^|\.)linkedin\.com$/i;
 
+/** The quick questions asked once before the first fill. Null or "": not answered yet. */
+export type Setup = { salaryExpectation: string; earliestStart: string; willingToRelocate: boolean | null; inPerson: boolean | null; authorizedUS: boolean | null; needsSponsorship: boolean | null; classYear: string; hasSchool: boolean };
+
 export type PanelState = {
   connected: boolean;
-  me: { user: { name: string; email: string }; credits: number; profileReady: boolean; completeness: number; missing?: string[]; cv?: { usesLeft: number; perCredit: number }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
+  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; coverLetters?: { used: number; left: number | null }; setup?: Setup; profileReady: boolean; completeness: number; missing?: string[]; cv?: { usesLeft: number; perCredit: number }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
   /** What's on the tab before Fill is pressed: the job, how many fields, and whether there's an account to make. */
   page: { site: string; title: string; company: string; fields: number; posting: boolean; account: "new" | "sign_in" | null; mentionsCv: boolean } | null;
   tab: { id: number; url: string; title: string } | null;
   job: { tabId: number; applicationId: string; title: string; company: string; step: string; report: FillReport | null; submission: "confirmed" | "likely" | null; error: string | null; llmCalls: number; running?: boolean; cv?: boolean } | null;
   autoSubmit: boolean;
   apiBase: string;
+  /** "Did you apply to these?": jobs pressed Apply on or filled that nothing confirmed. */
+  maybe?: Array<{ id: string; title: string; company: string; at: number }>;
 };
 
 /** The confirmation language a site shows after an application goes through. */

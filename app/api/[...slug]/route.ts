@@ -9,13 +9,13 @@ import { ServiceError } from "@/lib/errors";
 import { nowIso } from "@/lib/db/file-store";
 import { usingDefaultSecret } from "@/lib/security";
 import { integrations } from "@/lib/integrations/flags";
-import { dismissRecommendedJob, generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
+import { dismissRecommendedJob, generateWorkspaceCoverLetter, rewriteWorkspaceLetterPart, listRecommendedJobs, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
 import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
-import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
+import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionSetup, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, addJobByHand, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
@@ -216,6 +216,9 @@ async function handle(request: Request, slug: string[]) {
   if (root === "app" && action === "jobs" && request.method === "POST" && slug[2] === "dismiss") {
     return json(await dismissRecommendedJob(user.id, await request.json()));
   }
+  if (root === "app" && action === "cover-letter-part" && request.method === "POST") {
+    return json(await rewriteWorkspaceLetterPart(user.id, await request.json()));
+  }
   if (root === "app" && action === "cover-letter" && request.method === "POST") {
     return json(await generateWorkspaceCoverLetter(user.id, await request.json()));
   }
@@ -335,6 +338,7 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
     return json({ ok: true });
   }
   if (action === "me" && method === "GET") return json(await extensionMe(user.id));
+  if (action === "setup" && method === "POST") return json(await extensionSetup(user.id, await request.json()));
   if (action === "profile" && method === "GET") return json(await extensionProfile(user.id));
   if (action === "resume" && method === "POST") {
     if (!rateLimit(`extension-resume:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of uploads in an hour. Try again later.", "rate_limited", 429);

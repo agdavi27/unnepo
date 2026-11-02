@@ -445,7 +445,7 @@ Each email: mention the specific role the student applied to, one or two real ex
 Return only JSON: {"emails":[{"index":1,"subject":"...","body":"..."}]} with one entry per person, using the index given.`;
 
 /** One model call writes an email for every person, from the student's resume and the posting. */
-export async function writeOutreachEmails(userId: string, app: JobApplication, people: Array<Pick<ApplicationContact, "name" | "title" | "role">>, student: { name: string; resumeText: string; profile: string }) {
+export async function writeOutreachEmails(userId: string, app: JobApplication, people: Array<Pick<ApplicationContact, "name" | "title" | "role">>, student: { name: string; resumeText: string; profile: string }, options: { followUp?: { subject: string; body: string; sentAt: string | null } } = {}) {
   if (!people.length) return [];
   const apiKey = await readAnthropicKey();
   if (!apiKey) throw new Error("AI writing is not configured.");
@@ -457,6 +457,7 @@ export async function writeOutreachEmails(userId: string, app: JobApplication, p
     student.resumeText ? `Resume:\n${student.resumeText.slice(0, 5000)}` : "",
     student.profile ? `Profile:\n${student.profile.slice(0, 3000)}` : "",
     `People:\n${people.map((person, index) => `${index + 1}. ${person.name}, ${person.title || "title unknown"} (${person.role.replace("_", " ")})`).join("\n")}`,
+    options.followUp ? `This is a follow-up. The student sent this email${options.followUp.sentAt ? ` on ${options.followUp.sentAt.slice(0, 10)}` : ""} and hasn't heard back:\nSubject: ${options.followUp.subject}\n${options.followUp.body.slice(0, 1500)}\n\nWrite a polite follow-up of 2 to 3 sentences: a quick nudge that restates interest in the role and the small ask. No guilt, no "just checking in" cliché. Subject: "Re: " and the original subject.` : "",
   ].filter(Boolean).join("\n\n");
   const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
   const started = Date.now();

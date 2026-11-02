@@ -51,6 +51,55 @@ export function classifyQuestion(label: string): { sensitive: boolean; field: St
   return { sensitive, field: sensitive ? null : field };
 }
 
+// Words that mean the same in a question, so "Desired compensation" and "What are your salary expectations?"
+// are one question. Everything is reduced to its first word.
+const SAME_WORDS: string[][] = [
+  ["salary", "compensation", "pay", "wage", "wages", "rate"],
+  ["expect", "expectation", "expectations", "expected", "desired", "desire", "target", "requirement", "requirements", "range"],
+  ["start", "begin", "beginning", "available", "availability", "earliest"],
+  ["relocate", "relocation", "relocating", "move", "moving"],
+  ["office", "onsite", "on-site", "in-person", "person", "hybrid"],
+  ["sponsorship", "sponsor", "visa"],
+  ["authorized", "authorization", "eligible", "eligibility", "legally", "permitted"],
+  ["hear", "heard", "learn", "find", "found", "source", "referred"],
+  ["portfolio", "website", "site"],
+  ["graduate", "graduation", "grad"],
+  ["school", "university", "college"],
+];
+const SAME_WORD = new Map(SAME_WORDS.flatMap((group) => group.map((word) => [word, group[0]] as [string, string])));
+const FILLER = new Set(["a", "an", "the", "your", "you", "are", "is", "do", "does", "what", "which", "when", "how", "of", "to", "for", "in", "on", "at", "this", "that", "with", "be", "will", "would", "please", "provide", "enter", "list", "can", "if", "any", "our", "us", "we", "or", "and", "my", "me", "have", "has"]);
+const NEGATION = /\b(not|no|never|don'?t|doesn'?t|won'?t|without)\b/i;
+
+function questionWords(label: string) {
+  return new Set(label.toLowerCase().replace(/[^a-z0-9' -]/g, " ").split(/\s+/)
+    .map((word) => word.replace(/'s$/, ""))
+    .filter((word) => word.length > 1 && !FILLER.has(word))
+    .map((word) => SAME_WORD.get(word) ?? SAME_WORD.get(word.replace(/s$/, "")) ?? word.replace(/(ing|ed|s)$/, "")));
+}
+
+/**
+ * A saved answer to a question worded differently: most of their meaningful words match (after treating
+ * "compensation" as "salary" and the like). Never across "not" and the like, and never for questions about
+ * who the student is or their legal status: those only take an answer to the very same question.
+ */
+export function similarSaved(label: string, saved: ApplicationProfile["saved"]) {
+  if (classifyQuestion(label).sensitive && !SALARY.test(label)) return null;
+  const want = questionWords(label);
+  if (!want.size) return null;
+  let best: { score: number; item: ApplicationProfile["saved"][string] } | null = null;
+  for (const item of Object.values(saved ?? {})) {
+    if (!item.answer?.trim() || NEGATION.test(item.label) !== NEGATION.test(label)) continue;
+    if (classifyQuestion(item.label).sensitive && !SALARY.test(item.label)) continue;
+    const have = questionWords(item.label);
+    const shared = [...want].filter((word) => have.has(word)).length;
+    const score = shared / new Set([...want, ...have]).size;
+    // Short questions ("When can you start?") have one meaningful word, so they match on it alone.
+    const needed = Math.min(2, want.size, have.size);
+    if (shared >= needed && score >= (needed === 1 ? 0.5 : 0.6) && (!best || score > best.score)) best = { score, item };
+  }
+  return best?.item ?? null;
+}
+
 export function normalizeLabel(label: string) {
   return label.toLowerCase().replace(/[*?:()]/g, " ").replace(/\s+/g, " ").trim().slice(0, 160);
 }
@@ -290,7 +339,8 @@ export function headlineAnswer(label: string, context: AnswerContext, latestJob?
 export function planAnswers(questions: ApplicationQuestion[], context: AnswerContext) {
   return questions.map((question) => {
     if (question.answer && question.source === "student") return question;
-    const saved = context.profile.saved[normalizeLabel(question.label)];
+    // The same question the student answered before: worded the same, or worded differently on another site.
+    const saved = context.profile.saved[normalizeLabel(question.label)] ?? similarSaved(question.label, context.profile.saved);
     if (saved) {
       const answer = question.kind === "select" ? matchOption(saved.answer, question.options) : saved.answer;
       if (answer) return { ...question, answer, source: "saved", evidence: null };
