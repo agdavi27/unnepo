@@ -75,7 +75,7 @@ export type Setup = { salaryExpectation: string; earliestStart: string; willingT
 
 export type PanelState = {
   connected: boolean;
-  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; coverLetters?: { used: number; left: number | null }; setup?: Setup; profileReady: boolean; completeness: number; missing?: string[]; cv?: { usesLeft: number; perCredit: number }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
+  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; coverLetters?: { used: number; left: number | null }; setup?: Setup; maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>; session?: { startedAt: string; lastAt: string; active: boolean } | null; profileReady: boolean; completeness: number; missing?: string[]; cv?: { usesLeft: number; perCredit: number }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
   /** What's on the tab before Fill is pressed: the job, how many fields, and whether there's an account to make. */
   page: { site: string; title: string; company: string; fields: number; posting: boolean; account: "new" | "sign_in" | null; mentionsCv: boolean } | null;
   tab: { id: number; url: string; title: string } | null;
@@ -83,7 +83,7 @@ export type PanelState = {
   autoSubmit: boolean;
   apiBase: string;
   /** "Did you apply to these?": jobs pressed Apply on or filled that nothing confirmed. */
-  maybe?: Array<{ id: string; title: string; company: string; at: number }>;
+  maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>;
 };
 
 /** The confirmation language a site shows after an application goes through. */

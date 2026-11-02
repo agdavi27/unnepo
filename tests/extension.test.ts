@@ -12,6 +12,8 @@ import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
+import { titleParts } from "@/extension/src/content/scan";
+import { appliedSince, bySite, secondsToApply } from "@/lib/apply/activity-stats";
 import { autofillProblems, siteName } from "@/lib/services/admin";
 
 const model = vi.hoisted(() => ({ replies: [] as string[], calls: 0, lastPrompt: "" }));
@@ -401,6 +403,62 @@ describe("Free's cover letter limit", () => {
     expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 4.");
     expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id, text: "My own letter." })).json()).text).toBe("My own letter.");
     expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 5, left: 0 });
+  });
+});
+
+describe("applying activity", () => {
+  it("records opened, filled and applied with how it was caught, and the pace by site", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/90", title: "Data Intern", company: "Globex" })).json();
+    expect((await call("POST", "activity", token, { applicationId: job.application.id, kind: "filled", fields: 31, needs: 2, ms: 48000 })).status).toBe(200);
+    await call("POST", "submissions", token, { applicationId: job.application.id, confidence: "likely", how: "button_changed" });
+    const stored = (await applications.get(userId, job.application.id))!;
+    expect(stored.fillReport!.activity!.map((event) => [event.kind, event.how ?? null])).toEqual([["opened", null], ["filled", null], ["applied", "button_changed"]]);
+    expect(stored.fillReport!.activity![1]).toMatchObject({ fields: 31, needs: 2, ms: 48000, site: "Globex" });
+    expect(secondsToApply(stored)).toBeNull(); // the same second: too quick to count
+    const opened = new Date(Date.now() - 100_000).toISOString();
+    const timed = { ...stored, fillReport: { ...stored.fillReport!, activity: stored.fillReport!.activity!.map((event, index) => (index === 0 ? { ...event, at: opened } : event)) } };
+    expect(secondsToApply(timed)).toBeGreaterThanOrEqual(99);
+    expect(bySite([timed])).toEqual([{ site: "Globex", count: 1, averageSeconds: expect.any(Number), confirmedShare: 100 }]);
+    expect(appliedSince([timed], Date.now() - 3600_000)).toMatchObject({ count: 1, sites: 1 });
+  });
+
+  it("keeps the Did you apply? list in Unnepo, and a yes saves the job as applied", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    await call("POST", "maybe", token, { action: "add", item: { url: "https://www.ziprecruiter.com/c/MealPal/Job/Growth-Intern?jid=1", title: "Growth Intern", company: "MealPal" } });
+    const me = await (await call("GET", "me", token)).json();
+    expect(me.maybe).toMatchObject([{ title: "Growth Intern", company: "MealPal", site: "ZipRecruiter" }]);
+    await call("POST", "maybe", token, { action: "answer", id: me.maybe[0].id, applied: true });
+    expect((await (await call("GET", "me", token)).json()).maybe).toEqual([]);
+    const saved = (await applications.list(userId)).find((app) => app.title === "Growth Intern")!;
+    expect(saved).toMatchObject({ status: "applied_manual", company: "MealPal" });
+    expect(saved.fillReport?.activity?.at(-1)).toMatchObject({ kind: "applied", how: "you_marked", site: "ZipRecruiter" });
+    // A job confirmed some other way leaves the list by itself.
+    await call("POST", "maybe", token, { action: "add", item: { url: "https://careers.globex.example/apply/91", title: "Analyst", company: "Globex" } });
+    await call("POST", "submissions", token, { url: "https://careers.globex.example/apply/91", title: "Analyst", company: "Globex", confidence: "confirmed" });
+    expect((await (await call("GET", "me", token)).json()).maybe).toEqual([]);
+  });
+
+  it("starts and ends an applying session", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const started = await (await call("POST", "session", token, { start: true })).json();
+    expect(started.session).toMatchObject({ active: true });
+    expect((await (await call("GET", "me", token)).json()).session.active).toBe(true);
+    expect((await (await call("POST", "session", token, { start: false })).json()).session).toBeNull();
+  });
+});
+
+describe("job boards' page titles", () => {
+  it("reads the job and company the way boards write them, and nothing from a title that doesn't say both", () => {
+    expect(titleParts("Growth Marketing Intern - MealPal - New York, NY | ZipRecruiter")).toEqual({ title: "Growth Marketing Intern", company: "MealPal" });
+    expect(titleParts("(3) Data Intern at Globex | Handshake")).toEqual({ title: "Data Intern", company: "Globex" });
+    expect(titleParts("MealPal hiring Growth Intern Job in New York, NY | Glassdoor")).toEqual({ title: "Growth Intern", company: "MealPal" });
+    expect(titleParts("Analyst - Initech - Austin, TX - Indeed.com")).toEqual({ title: "Analyst", company: "Initech" });
+    expect(titleParts("Jobs | ZipRecruiter")).toBeNull();
+    expect(titleParts("Search results")).toBeNull();
   });
 });
 

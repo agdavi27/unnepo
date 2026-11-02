@@ -68,7 +68,20 @@
         "https://*.applytojob.com/*",
         "https://*.dayforcehcm.com/*",
         "https://*.joinhandshake.com/*",
-        "https://*.ziprecruiter.com/*"
+        "https://*.ziprecruiter.com/*",
+        "https://*.indeed.com/*",
+        "https://*.glassdoor.com/*",
+        "https://wellfound.com/*",
+        "https://*.dice.com/*",
+        "https://simplify.jobs/*",
+        "https://*.builtin.com/*",
+        "https://builtin.com/*",
+        "https://*.monster.com/*",
+        "https://*.simplyhired.com/*",
+        "https://*.careerbuilder.com/*",
+        "https://*.wayup.com/*",
+        "https://*.idealist.org/*",
+        "https://*.usajobs.gov/*"
       ],
       "js": [
         "content/launcher.js"

@@ -213,22 +213,30 @@ chrome.tabs.onCreated.addListener((tab) => {
  * confirmed it went through. The panel lists them with ✓ and ✕, so a missed one takes a tap to save.
  * Kept on this computer for a week.
  */
-type Maybe = { id: string; url: string; title: string; company: string; description?: string; applicationId?: string; at: number };
-const MAYBE_DAYS = 7;
-async function maybeApplied(): Promise<Maybe[]> {
-  const list = ((await chrome.storage.local.get("maybeApplied")).maybeApplied as Maybe[] | undefined) ?? [];
-  return list.filter((item) => Date.now() - item.at < MAYBE_DAYS * 86_400_000);
-}
-async function addMaybe(item: Omit<Maybe, "id" | "at">) {
-  if (!item.title.trim() || !item.company.trim()) return;
-  const list = (await maybeApplied()).filter((entry) => !(entry.url === item.url || (item.applicationId && entry.applicationId === item.applicationId)));
-  await chrome.storage.local.set({ maybeApplied: [{ ...item, id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, at: Date.now() }, ...list].slice(0, 40) });
+const HOW_SAID: Record<AppliedHow, string> = {
+  site_confirmed: "the site confirmed it", page_said: "the page said so", button_changed: "the Apply button changed", board_saved: "the job board saved it",
+  linkedin_easy_apply: "LinkedIn Easy Apply", you_marked: "you marked it", added_by_hand: "added by you",
+};
+
+/** How Unnepo knew an application went through, as the tracker records it. */
+type AppliedHow = "site_confirmed" | "page_said" | "button_changed" | "board_saved" | "linkedin_easy_apply" | "you_marked" | "added_by_hand";
+
+// The list lives in Unnepo (the web app's Activity view shows it too); the server drops one once it's confirmed.
+async function addMaybe(item: { url: string; title: string; company: string; description?: string; applicationId?: string }) {
+  if (!item.title.trim()) return;
+  await api("POST", "maybe", { action: "add", item }).catch(() => undefined);
+  void log(`Not confirmed yet: ${item.title}${item.company ? ` at ${item.company}` : ""}. Unnepo will ask whether you applied.`);
   void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
 }
-async function dropMaybe(match: (item: Maybe) => boolean) {
-  const list = await maybeApplied();
-  const kept = list.filter((item) => !match(item));
-  if (kept.length !== list.length) await chrome.storage.local.set({ maybeApplied: kept });
+
+/**
+ * The panel's Activity list: what the extension noticed on job pages, newest first, so a missed application
+ * can be traced to the step that missed it. Kept on this computer only, never with the student's answers.
+ */
+async function log(text: string) {
+  const list = ((await chrome.storage.local.get("activityLog")).activityLog as Array<{ at: number; text: string }> | undefined) ?? [];
+  await chrome.storage.local.set({ activityLog: [{ at: Date.now(), text: text.slice(0, 200) }, ...list].slice(0, 30) });
+  void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
 }
 
 /** A tab closed: a job filled or applied to there that never confirmed goes on the "Did you apply?" list. */
@@ -262,11 +270,11 @@ function sameJobPage(a: string, b: string) {
   }
 }
 
-async function recordSeen(tabId: number, text: string) {
+async function recordSeen(tabId: number, text: string, how: AppliedHow = "page_said") {
   const job = (await jobs())[tabId];
   let seen = (await seenJobs())[tabId];
   // The job this tab is already tracking (Fill was pressed here, or this same job was saved a moment ago).
-  if (job?.applicationId && (!seen || !job.url || sameJobPage(job.url, seen.url) || (!job.submission && sameApplication(job.url, seen.url)))) return record(tabId, "likely", text);
+  if (job?.applicationId && (!seen || !job.url || sameJobPage(job.url, seen.url) || (!job.submission && sameApplication(job.url, seen.url)))) return record(tabId, "likely", text, how);
   if (!seen) {
     // Only a real posting on the page (Handshake's pane, schema.org data), never a bare "Thank you" page.
     const scan = await look(tabId).catch(() => null);
@@ -282,9 +290,9 @@ async function recordSeen(tabId: number, text: string) {
     // A screenshot is a bonus.
   }
   try {
-    const saved = await api<{ application: { id: string; title: string; company: string } }>("POST", "submissions", { url: seen.url, title: seen.title, company: seen.company, description: seen.description, poster: seen.poster, confidence: "likely", text, screenshot });
+    const saved = await api<{ application: { id: string; title: string; company: string } }>("POST", "submissions", { url: seen.url, title: seen.title, company: seen.company, description: seen.description, poster: seen.poster, confidence: "likely", text, screenshot, how });
     await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url: seen.url, host: new URL(seen.url).hostname, submission: "likely", clickedAt: Date.now(), step: `Saved to your tracker: ${saved.application.title} at ${saved.application.company}.` });
-    await dropMaybe((item) => item.url === seen!.url);
+    void log(`Saved: ${saved.application.title} at ${saved.application.company} (${HOW_SAID[how]}).`);
   } catch (error) {
     await saveJob(tabId, { error: error instanceof Error ? `Couldn't save this application: ${error.message}` : "Couldn't save this application." });
   }
@@ -303,7 +311,7 @@ async function state(): Promise<PanelState> {
   // While Unnepo is working on the tab, the job itself says what's there.
   const page = me && tab?.id !== undefined && !job?.running ? await peek(tab.id, tab.url ?? "").catch(() => null) : null;
   // Asked about two minutes after Apply was pressed, when a confirmation would have shown by then.
-  const maybe = me ? (await maybeApplied()).filter((item) => Date.now() - item.at > 120_000).map(({ id, title, company, at }) => ({ id, title, company, at })) : [];
+  const maybe = (me?.maybe ?? []).filter((item) => Date.now() - Date.parse(item.at) > 120_000);
   return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase, maybe };
 }
 
@@ -727,6 +735,8 @@ async function run(tabId: number) {
           const filledSet = new Set(filledAll);
           const check = [...toCheck].filter(([label]) => filledSet.has(label)).map(([label, why]) => ({ label, why }));
           await saveJob(tabId, { report: { ...report, filled: [...filledAll], check }, llmCalls });
+          if (applicationId) void api("POST", "activity", { applicationId, kind: "filled", fields: report.filled.length, needs: report.needsYou.length, ms: report.ms }).catch(() => undefined);
+          void log(`Filled ${report.filled.length} fields on ${new URL(scan.url).hostname.replace(/^www\./, "")}${report.needsYou.length ? `, ${report.needsYou.length} left for you` : ""}.`);
           void addIssues(scan.url, report.failed.map((item) => ({ kind: "fill" as const, question: item.label, what: `Couldn't fill: ${item.reason}` }))).catch(() => undefined);
           // The record of every question tried, for fixing what fails; the page's fill never waits on it.
           if (report.attempts?.length) {
@@ -847,7 +857,7 @@ async function run(tabId: number) {
 }
 
 /** Saves the submission in Unnepo with a screenshot of the confirmation. */
-async function record(tabId: number, confidence: "confirmed" | "likely", text: string) {
+async function record(tabId: number, confidence: "confirmed" | "likely", text: string, how: AppliedHow = confidence === "confirmed" ? "site_confirmed" : "page_said") {
   const job = (await jobs())[tabId];
   if (!job?.applicationId || job.submission === "confirmed" || (job.submission === "likely" && confidence === "likely")) return;
   await saveJob(tabId, { submission: confidence });
@@ -861,8 +871,8 @@ async function record(tabId: number, confidence: "confirmed" | "likely", text: s
   // It went through: any spiders still out dance, then leave. After the screenshot, so the receipt is clean.
   void send(tabId, { type: "spiders", celebrate: true }, 0).catch(() => undefined);
   try {
-    await api("POST", "submissions", { applicationId: job.applicationId, url: job.url, confidence, text, screenshot });
-    await dropMaybe((item) => item.applicationId === job.applicationId || item.url === job.url);
+    await api("POST", "submissions", { applicationId: job.applicationId, url: job.url, confidence, text, screenshot, how });
+    void log(`Saved: ${job.title} at ${job.company} (${HOW_SAID[how]}).`);
     await saveJob(tabId, { step: confidence === "confirmed" ? "Submitted. The site accepted your application, and it's in your Unnepo tracker." : "Looks submitted. It's in your Unnepo tracker; check your email for the site's confirmation." });
   } catch (error) {
     await saveJob(tabId, { error: error instanceof Error ? `Couldn't save the submission: ${error.message}` : "Couldn't save the submission." });
@@ -893,7 +903,7 @@ async function recordLinkedIn(tabId: number, requestUrl: string) {
   const url = `https://www.linkedin.com/jobs/view/${jobId}/`;
   try {
     const saved = await api<{ application: { id: string; title: string; company: string; companyMissing?: boolean } }>("POST", "submissions", {
-      url, title: named ? parts[0] : "LinkedIn Easy Apply job", company: named ? parts[1] : "LinkedIn", confidence: "likely", text: "Easy Apply on LinkedIn.",
+      url, title: named ? parts[0] : "LinkedIn Easy Apply job", company: named ? parts[1] : "LinkedIn", confidence: "likely", text: "Easy Apply on LinkedIn.", how: "linkedin_easy_apply",
     });
     const name = saved.application.companyMissing ? "a LinkedIn job (add the company in your tracker)" : `${saved.application.title} at ${saved.application.company}`;
     await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url, host: "www.linkedin.com", submission: "likely", step: `Saved your Easy Apply: ${name}.` });
@@ -920,7 +930,7 @@ chrome.webRequest.onCompleted.addListener((details) => {
   const clicked = applyClicks.get(details.tabId);
   if (clicked && Date.now() - clicked < 60_000 && BOARD_APPLY.test(details.url) && !BOARD_NOT_APPLY.test(details.url)) {
     applyClicks.delete(details.tabId);
-    void recordSeen(details.tabId, "The job site saved your application.").catch(() => undefined);
+    void recordSeen(details.tabId, "The job site saved your application.", "board_saved").catch(() => undefined);
   }
   void jobs().then((all) => {
     const job = all[details.tabId];
@@ -1076,7 +1086,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await saveJob(Number(message.tabId), { running: false, step: "Stopped. Press Fill to start again." });
         return reply({ ok: true });
       case "applied":
-        await record(Number(message.tabId), "likely", "Marked as applied in the extension.");
+        await record(Number(message.tabId), "likely", "Marked as applied in the extension.", "you_marked");
         return reply({ ok: true });
       case "not-applied": {
         const job = (await jobs())[Number(message.tabId)];
@@ -1109,16 +1119,35 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ error: error instanceof Error ? error.message : "Couldn't write this one." });
         }
       }
+      // An applying session, started or ended from the panel.
+      case "session":
+        if (sender.tab) return reply({ ok: false });
+        try {
+          return reply({ ok: true, ...(await api<{ session: unknown }>("POST", "session", { start: Boolean(message.start) })) });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't do that." });
+        }
+      case "activity-log":
+        if (sender.tab) return reply({ ok: false });
+        return reply({ log: ((await chrome.storage.local.get("activityLog")).activityLog as unknown[] | undefined) ?? [] });
+      // "It missed one": a report of this page for the issues list, so detection can be fixed for this site.
+      case "missed-one": {
+        if (sender.tab) return reply({ ok: false });
+        const tab = Number(message.tabId);
+        await look(tab).catch(() => null);
+        const page = await send<{ path: string; title: string; headings: string[]; buttons: string[]; postingData: boolean; job: { title: string; company: string } }>(tab, { type: "page-report" }, 0).catch(() => null);
+        const url = (await chrome.tabs.get(tab).catch(() => null))?.url ?? "";
+        if (!page) return reply({ ok: false, error: "Couldn't read this page. Unnepo never reads LinkedIn; add LinkedIn jobs with the form instead." });
+        const recent = (((await chrome.storage.local.get("activityLog")).activityLog as Array<{ at: number; text: string }> | undefined) ?? []).filter((item) => Date.now() - item.at < 30 * 60 * 1000).slice(0, 5).map((item) => item.text);
+        await addIssues(url, [{ kind: "note", what: `Missed an application. Page "${page.title}" (${page.path}). Job read as "${page.job.title}" at "${page.job.company}"${page.postingData ? ", with posting data" : ", no posting data"}. Buttons: ${page.buttons.join(" | ") || "none"}. Headings: ${page.headings.join(" | ") || "none"}. Recent: ${recent.join(" / ") || "nothing seen"}.` }]);
+        void log("Saved a report of this page to your issues list (Profile).");
+        return reply({ ok: true });
+      }
       // "Did you apply to these?": ✓ saves it as applied, ✕ drops it.
       case "maybe-answer": {
         if (sender.tab) return reply({ ok: false });
-        const item = (await maybeApplied()).find((entry) => entry.id === message.id);
-        if (!item) return reply({ ok: true });
         try {
-          if (message.applied) {
-            await api("POST", "submissions", item.applicationId ? { applicationId: item.applicationId, confidence: "likely", text: "You said you applied." } : { url: item.url, title: item.title, company: item.company, description: item.description, confidence: "likely", text: "You said you applied." });
-          }
-          await dropMaybe((entry) => entry.id === item.id);
+          await api("POST", "maybe", { action: "answer", id: message.id, applied: Boolean(message.applied) });
           return reply({ ok: true });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't save it." });
@@ -1187,20 +1216,27 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           const seen = await seenJobs();
           if (seen[tabId]) {
             seen[tabId].pressed = true;
+            // The company's tab may have opened before the job was read: it gets the job now.
+            for (const opened of await chrome.tabs.query({}).catch(() => [] as chrome.tabs.Tab[])) {
+              if (opened.id !== undefined && opened.openerTabId === tabId && !seen[opened.id]) seen[opened.id] = { ...seen[tabId], at: Date.now(), pressed: true };
+            }
             await chrome.storage.session.set({ seen });
           }
           // On the list now; the panel only asks about it after two minutes, and a confirmation takes it off.
-          // (A timer wouldn't do: Chrome puts the extension's background to sleep.)
+          // (A timer wouldn't do: Chrome puts the extension's background to sleep.) Going to the company's site
+          // isn't applying yet: that tab asks when it closes.
           const latest = seen[tabId];
-          if (latest) await addMaybe({ url: latest.url, title: latest.title, company: latest.company, description: latest.description });
+          if (latest && !message.elsewhere) await addMaybe({ url: latest.url, title: latest.title, company: latest.company, description: latest.description });
         }
         if (message.final) applyClicks.set(tabId, Date.now());
+        void log(`Saw "${String(message.label ?? "Apply").slice(0, 40)}" pressed${scan?.title ? ` on ${scan.title}${scan.company ? ` at ${scan.company}` : ""}` : ""}. Watching for the confirmation.`);
         return reply({ ok: true });
       }
       // The page changed to say so right after an Apply press ("Applied", "Application sent").
       case "applied-detected":
         if (tabId === undefined) return reply({ ok: false });
-        void recordSeen(tabId, String(message.text ?? "The job site shows you applied.")).catch(() => undefined);
+        void log(`The page changed to "${String(message.text ?? "Applied").slice(0, 60)}" after Apply.`);
+        void recordSeen(tabId, String(message.text ?? "The job site shows you applied."), "button_changed").catch(() => undefined);
         return reply({ ok: true });
       case "received-page": {
         // The page says the application went through, whoever filled it: the spiders come out and dance.

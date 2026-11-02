@@ -220,6 +220,16 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       reply({ marked: markNeeds(Array.isArray(message.labels) ? message.labels.map(String) : [], check) });
       return false;
     }
+    // "It missed one": what this page shows that detection reads, without any of the student's answers.
+    if (message?.type === "page-report") {
+      const visible = (el: Element) => (el as HTMLElement).getBoundingClientRect().height > 0;
+      const label = (el: Element) => ((el as HTMLElement).innerText || el.getAttribute("aria-label") || (el as HTMLInputElement).value || "").replace(/\s+/g, " ").trim();
+      const buttons = [...new Set(Array.from(document.querySelectorAll("button, [role=button], a.btn, a[class*=button], input[type=submit]")).filter(visible).map(label).filter((text) => text && text.length <= 40))].slice(0, 30);
+      const headings = Array.from(document.querySelectorAll("h1, h2")).filter(visible).map(label).filter(Boolean).slice(0, 4).map((text) => text.slice(0, 80));
+      const posting = scanPage();
+      reply({ path: location.pathname.slice(0, 120), title: document.title.slice(0, 120), headings, buttons, postingData: Boolean(posting.description), job: { title: posting.title.slice(0, 120), company: posting.company.slice(0, 80) } });
+      return false;
+    }
     if (message?.type === "focus-field") {
       reply({ ok: showField(String(message.label ?? "")) });
       return false;

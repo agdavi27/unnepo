@@ -1,12 +1,14 @@
 /** Job boards where applying is often one press, with no confirmation page: Handshake, ZipRecruiter, Indeed… */
-export const QUICK_BOARDS = /(^|\.)(joinhandshake|ziprecruiter|indeed|simplyhired|wellfound|glassdoor)\.com$/;
+export const QUICK_BOARDS = /(^|\.)((joinhandshake|ziprecruiter|indeed|simplyhired|wellfound|glassdoor|dice|builtin|monster|careerbuilder|wayup)\.com|simplify\.jobs|idealist\.org|usajobs\.gov)$/;
 // An Apply press. `FINAL` ones send the application right away; plain "Apply" may open a form first.
 const APPLY_PRESS = /^(1-click apply|one-click apply|quick apply|easy apply|instant apply|apply|apply now|submit( my)? application|send( my)? application|submit|apply with (my )?(profile|resume))$/i;
 const FINAL_PRESS = /1-click|one-click|quick apply|instant apply|submit|send|apply with/i;
 // Apply buttons that go to the company's own site: that site's page is where the applying happens.
 const ELSEWHERE = /externally|company('|’)?s? (site|website)|employer('|’)?s? (site|website)|on company site/i;
 // What a job board shows once it's done: the button now says Applied, or a note says the application went.
-const APPLIED_NOW = /^(✓\s*)?(applied|application (sent|submitted)|you applied|you(?:'|’| ha)ve applied|already applied|applied on .{0,30})[!.]?$/i;
+// Short labels only, so a long paragraph that mentions "applied" doesn't count: "Applied 2 min ago", "✓ Application
+// submitted to MealPal", "Your application was sent!".
+const APPLIED_NOW = /^([✓✔☑]\s*)?((you )?applied|application (sent|submitted|received|complete)|you(?:'|’| ha)ve applied|already applied|your application (was |has been )?(sent|submitted|received))\b.{0,40}$/i;
 
 const shortText = (el: Element) => ((el as HTMLElement).innerText || el.textContent || "").replace(/\s+/g, " ").trim();
 const shown = (el: Element) => (el as HTMLElement).getBoundingClientRect().height > 0;
@@ -27,7 +29,13 @@ export function watchApplyPresses(tell: (message: Record<string, unknown>) => vo
   document.addEventListener("click", (event) => {
     const button = (event.target as Element | null)?.closest<HTMLElement>("button, a, [role=button], input[type=submit]");
     const label = button ? shortText(button) || (button as HTMLInputElement).value || "" : "";
-    if (!button || !APPLY_PRESS.test(label) || ELSEWHERE.test(label)) return;
+    if (!button) return;
+    // "Apply on company site": the job is kept, so the company's tab that opens knows which job it is.
+    if (ELSEWHERE.test(label) || /^apply( now)? (on|at) /i.test(label)) {
+      tell({ type: "apply-clicked", url: location.href, label, final: false, elsewhere: true });
+      return;
+    }
+    if (!APPLY_PRESS.test(label)) return;
     tell({ type: "apply-clicked", url: location.href, label, final: FINAL_PRESS.test(label) });
     // Counted, not compared one by one: job boards redraw their lists, so the same badges come back as new elements.
     const before = appliedLabels().length;
@@ -35,7 +43,9 @@ export function watchApplyPresses(tell: (message: Record<string, unknown>) => vo
     const started = Date.now();
     const check = () => {
       if (run !== watching) return;
-      const changed = button.isConnected && APPLIED_NOW.test(shortText(button));
+      // The pressed button now says Applied, by its text or its label, often turned off so it can't be pressed twice.
+      const said = `${shortText(button)} ${button.getAttribute("aria-label") ?? ""}`.trim();
+      const changed = button.isConnected && (APPLIED_NOW.test(shortText(button)) || (/\bapplied\b/i.test(said) && ((button as HTMLButtonElement).disabled || button.getAttribute("aria-disabled") === "true")));
       const now = appliedLabels();
       if (changed || now.length > before) {
         tell({ type: "applied-detected", text: shortText(changed ? button : now[now.length - 1]).slice(0, 120), url: location.href });

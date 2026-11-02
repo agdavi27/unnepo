@@ -95,7 +95,16 @@ export type FillReport = {
   personCharged?: boolean;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
   attempts?: FillAttempt[];
+  /** What happened with this job, oldest first: opened, filled, applied (and how that was caught). */
+  activity?: ActivityEvent[];
 };
+
+/** How Unnepo knew an application went through. */
+export type AppliedHow = "site_confirmed" | "page_said" | "button_changed" | "board_saved" | "linkedin_easy_apply" | "you_marked" | "added_by_hand";
+/** One thing that happened with a job. `site`: where ("ZipRecruiter", "Workday"). `ms`: time it took, for fills. */
+export type ActivityEvent = { at: string; kind: "opened" | "filled" | "applied" | "not_confirmed"; site: string; how?: AppliedHow; fields?: number; needs?: number; ms?: number };
+
+export type MaybeApplied = { id: string; url: string; title: string; company: string; site: string; description?: string; applicationId?: string; at: string };
 
 export type ApplicationOutcome = "interviewing" | "offer" | "rejected";
 
@@ -191,6 +200,10 @@ export type ApplicationProfile = {
   weeklyGoal?: number;
   /** Cover letters written this month ("2026-11"), for Free's monthly limit. */
   letters?: { month: string; count: number };
+  /** "Did you apply to these?": jobs Apply was pressed on or filled that nothing confirmed. Shared by the panel and the web app. */
+  maybeApplied?: MaybeApplied[];
+  /** An applying session: when it started, and the last thing that happened in it (it ends after 15 idle minutes). */
+  session?: { startedAt: string; lastAt: string } | null;
   /** Look for people as soon as a job is saved as applied. On by default for paid plans; Free turns it on. */
   autoFindPeople?: boolean;
   /** The Jobs for you list: when each job was first shown, jobs the student hid, and how many refreshes. */

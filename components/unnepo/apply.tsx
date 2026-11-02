@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AtsBadge, CompanyLogo } from "@/components/unnepo/company";
 import { FollowUpFacts } from "@/components/unnepo/follow-up-facts";
+import { ActivityView, type Maybe, type Session } from "@/components/unnepo/activity";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { PeopleSearching } from "@/components/unnepo/people-searching";
 import { StatsPage } from "@/components/unnepo/stats";
@@ -24,6 +25,8 @@ export type ApplyData = {
   freeApplications: number;
   school: string;
   plan?: string;
+  maybe?: Maybe[];
+  session?: Session;
 };
 export type TrackerView = "applied" | "stats";
 
@@ -239,6 +242,13 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
   const [query, setQuery] = useState("");
   const [problem, setProblem] = useState("");
   const [adding, setAdding] = useState(false);
+  // List: every job. Activity: applying as it happens, reloaded every few seconds while it's open.
+  const [mode, setMode] = useState<"list" | "activity">("list");
+  useEffect(() => {
+    if (mode !== "activity") return;
+    const id = setInterval(() => void onReload().catch(() => undefined), 5000);
+    return () => clearInterval(id);
+  }, [mode, onReload]);
   const stats = useMemo(() => applicationStats(apps), [apps]);
   const counts = useMemo(() => {
     const result: Record<string, number> = { all: apps.length };
@@ -404,7 +414,14 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
         )}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <button type="button" className={secondary} onClick={() => setAdding((on) => !on)} aria-expanded={adding}>+ Add job</button>
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex rounded-xl border border-line p-0.5" role="group" aria-label="View">
+            {(["list", "activity"] as const).map((item) => (
+              <button key={item} type="button" aria-pressed={mode === item} onClick={() => setMode(item)} className={`rounded-lg px-3 py-1 text-sm ${mode === item ? "bg-white text-black" : "text-muted hover:text-white"}`}>{item === "list" ? "List" : "Activity"}{item === "activity" && (data.maybe?.length ?? 0) > 0 ? ` · ${data.maybe!.length}` : ""}</button>
+            ))}
+          </span>
+          <button type="button" className={secondary} onClick={() => setAdding((on) => !on)} aria-expanded={adding}>+ Add job</button>
+        </span>
         {apps.length > 0 && (
           <label className="relative w-full sm:w-64">
             <span className="sr-only">Search applications</span>
@@ -414,6 +431,24 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
         )}
       </div>
 
+      {mode === "activity" ? (
+        <ActivityView
+          apps={apps}
+          maybe={data.maybe ?? []}
+          session={data.session ?? null}
+          onMaybe={(id, applied) => act("/maybe", "POST", { id, applied })}
+          onSession={(start) => act("/session", "POST", { start })}
+          onCompany={(appId, company) => act("/company", "PATCH", { applicationId: appId, company })}
+          onOpen={(appId) => {
+            setMode("list");
+            setFilter("all");
+            setQuery("");
+            setOpen(appId);
+            requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+          }}
+        />
+      ) : (
+        <>
       {apps.length > 0 && (
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Filter by status">
           {FILTERS.filter(([id]) => id === "all" || counts[id]).map(([id, label]) => (
@@ -466,6 +501,8 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
               <ul className="border-t border-line">{unnamed.map(row)}</ul>
             </section>
           )}
+        </>
+      )}
         </>
       )}
 

@@ -1,10 +1,11 @@
+import { APPLIED_HOW, addActivity, addMaybe, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits } from "@/lib/apply/limits";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { createApplication, findPeopleOnApply, keyFor, minimalApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { answerMaybe, createApplication, findPeopleOnApply, keyFor, minimalApplication, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
 import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
@@ -78,6 +79,8 @@ export async function extensionMe(userId: string) {
     credits: credits?.balance ?? 0,
     unlimitedCredits: await hasUnlimitedCredits(userId),
     setup: setupState(state.profile),
+    maybe: liveMaybe(stored?.maybeApplied).map(({ id, title, company, site, at }) => ({ id, title, company, site, at })),
+    session: sessionNow(stored?.session),
     plan: credits?.plan ?? "free",
     coverLetters: await coverLettersLeft(userId),
     profileReady: state.ready,
@@ -128,6 +131,34 @@ export function pagePoster(raw: unknown): PostedRecruiter | null {
 
 /** Opens (or reuses) the application for the job the extension is on. A new job spends credits as usual. */
 export async function extensionJob(userId: string, raw: unknown) {
+  const result = await openJob(userId, raw);
+  await addActivity(userId, result.application.id, { kind: "opened" });
+  return result;
+}
+
+/** What the extension sends as it works: a form filled (how many fields, how many left for the student, how long). */
+export async function extensionActivity(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; kind?: unknown; fields?: unknown; needs?: unknown; ms?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  if (body.kind !== "filled") throw new ServiceError("Unknown event.", "kind", 400);
+  const count = (value: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(value) || 0)));
+  await addActivity(userId, app.id, { kind: "filled", fields: count(body.fields, 500), needs: count(body.needs, 500), ms: count(body.ms, 3_600_000) });
+  return { ok: true };
+}
+
+/** The panel's "Did you apply?" list: add one, or answer one. */
+export async function extensionMaybe(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { action?: unknown; item?: unknown; id?: unknown; applied?: unknown; url?: unknown; applicationId?: unknown };
+  if (body.action === "add") return addMaybe(userId, body.item);
+  if (body.action === "answer") return answerMaybe(userId, { id: body.id, applied: body.applied });
+  if (body.action === "drop") {
+    await dropMaybe(userId, { url: typeof body.url === "string" ? body.url : undefined, applicationId: typeof body.applicationId === "string" ? body.applicationId : undefined });
+    return { ok: true };
+  }
+  throw new ServiceError("Unknown action.", "action", 400);
+}
+
+async function openJob(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { url?: unknown; title?: unknown; company?: unknown; description?: unknown; poster?: unknown };
   const url = String(body.url ?? "").trim().slice(0, 2000);
   if (!/^https:\/\//i.test(url)) throw new ServiceError("Open a job application page first.", "job_url", 400);
@@ -457,7 +488,7 @@ async function saveScreenshot(userId: string, applicationId: string, dataUrl: un
  * said so after a submit click ("likely"). Records it and keeps the screenshot.
  */
 export async function extensionSubmission(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; url?: unknown; title?: unknown; company?: unknown; description?: unknown; poster?: unknown; confidence?: unknown; screenshot?: unknown; text?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; url?: unknown; title?: unknown; company?: unknown; description?: unknown; poster?: unknown; confidence?: unknown; screenshot?: unknown; text?: unknown; how?: unknown };
   const confidence = body.confidence === "confirmed" ? "confirmed" : body.confidence === "likely" ? "likely" : null;
   if (!confidence) throw new ServiceError("Say whether the submission was confirmed or likely.", "confidence", 400);
   const url = String(body.url ?? "").trim().slice(0, 2000);
@@ -481,6 +512,10 @@ export async function extensionSubmission(userId: string, raw: unknown) {
     confirmation: { url: url || app.applicationUrl || app.jobUrl, text: String(body.text ?? "").slice(0, 240) || `Detected by the Unnepo extension (${confidence}).`, detectedAt, receiptPath, confidence },
     statusMessage: confidence === "confirmed" ? "Submitted. The site accepted your application." : "Submitted, as far as the page shows. Check your email for the site's confirmation.",
   });
+  // How it was caught, for the Activity view and each site's confirmation rate.
+  const how = APPLIED_HOW.find((item) => item === body.how) ?? (confidence === "confirmed" ? "site_confirmed" : "page_said");
+  await addActivity(userId, app.id, { kind: "applied", how });
+  await dropMaybe(userId, { applicationId: app.id, url });
   // People are looked for now when the student's plan or setting says so; otherwise when they ask.
   await findPeopleOnApply(userId, app.id);
   return { application: summary((await applications.get(userId, app.id)) ?? updated!) };

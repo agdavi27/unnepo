@@ -13,6 +13,7 @@ import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyF
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { hasUnlimitedCredits } from "@/lib/apply/limits";
+import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { profileReady } from "@/lib/profile/service";
 import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState, PostedRecruiter } from "@/lib/apply/types";
@@ -70,6 +71,8 @@ export async function student(userId: string) {
     weeklyGoal: stored?.weeklyGoal,
     spiderSkin: stored?.spiderSkin,
     autoFindPeople: stored?.autoFindPeople,
+    maybeApplied: stored?.maybeApplied,
+    session: stored?.session,
     letters: stored?.letters,
     jobFeed: stored?.jobFeed,
     cvCount: stored?.cvCount,
@@ -316,6 +319,7 @@ export async function addJobByHand(userId: string, raw: unknown) {
     statusMessage: applied ? "Added by you." : "Added by you. Not applied yet.",
     ...(stage === "interviewing" || stage === "offer" || stage === "rejected" ? { fillReport: { ...report, outcome: stage } } : {}),
   });
+  if (applied) await addActivity(userId, app.id, { kind: "applied", how: "added_by_hand", site: link ? undefined : "Added by you" });
   if (applied) await findPeopleOnApply(userId, app.id);
   return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }
@@ -360,7 +364,24 @@ export async function applyState(userId: string) {
     freeApplications: FREE_APPLICATIONS,
     school: info.context.school,
     plan: (await repo.getAccount(userId))?.plan ?? "free",
+    maybe: liveMaybe(info.profile.maybeApplied).map(({ description, ...item }) => (void description, item)),
+    session: sessionNow(info.profile.session),
   };
+}
+
+/** "Did you apply to this?" answered in the web app or the panel: yes saves it as applied, no drops it. */
+export async function answerMaybe(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { id?: unknown; applied?: unknown };
+  const item = await dropMaybe(userId, { id: String(body.id ?? "") });
+  if (!item || body.applied !== true) return { ok: true, application: null };
+  let app = item.applicationId ? await applications.get(userId, item.applicationId) : await applications.findByKey(userId, keyFor(item.url));
+  if (!app) app = await minimalApplication(userId, { url: item.url, title: item.title, company: item.company || item.site, description: item.description });
+  if (app.status !== "submitted" && app.status !== "applied_manual") {
+    await applications.update(userId, app.id, { status: "applied_manual", submittedAt: nowIso(), statusMessage: "You said you applied." });
+  }
+  await addActivity(userId, app.id, { kind: "applied", how: "you_marked" });
+  await findPeopleOnApply(userId, app.id);
+  return { ok: true, application: summary((await applications.get(userId, app.id))!) };
 }
 
 /** Reads the job link and proposes answers. Pasting the same job again returns the first application. */
@@ -581,6 +602,8 @@ export async function markApplied(userId: string, raw: unknown) {
   if (app.status === "submitted" || app.status === "applied_manual") return { application: summary(app) };
   await ensureCharged(userId, app);
   const updated = await applications.update(userId, app.id, { status: "applied_manual", browserSessionId: null, submittedAt: nowIso(), statusMessage: "You marked this as applied." });
+  await addActivity(userId, app.id, { kind: "applied", how: "you_marked" });
+  await dropMaybe(userId, { applicationId: app.id });
   await findPeopleOnApply(userId, app.id);
   return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }

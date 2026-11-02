@@ -1,3 +1,4 @@
+import { QUICK_BOARDS } from "./quick-apply";
 import type { FieldType, PageField, Scan } from "../shared/types";
 
 /**
@@ -402,7 +403,26 @@ export function structuredJob(): { title: string; company: string; description: 
 }
 
 // What job sites call themselves, which isn't the company's name.
-const JOB_SITE_NAME = /^(workday|greenhouse|lever|ashby|icims|smartrecruiters|jobvite|taleo|workable|careers?|jobs?|job application)$/i;
+const JOB_SITE_NAME = /^(workday|greenhouse|lever|ashby|icims|smartrecruiters|jobvite|taleo|workable|careers?|jobs?|job application|handshake|ziprecruiter|indeed|glassdoor|wellfound|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|linkedin)$/i;
+const BOARD_SUFFIX = /\s*[|·–—-]\s*(handshake|ziprecruiter|indeed(\.com)?|glassdoor|wellfound|dice|simplify|built ?in[a-z ]*|monster(\.com)?|simplyhired|careerbuilder|wayup|idealist|usajobs|linkedin)\s*$/i;
+
+/**
+ * The job and company from a page's title, the way job boards write them: "Growth Intern - MealPal - New York |
+ * ZipRecruiter", "Growth Intern at MealPal", "MealPal hiring Growth Intern in New York | Glassdoor". Null when
+ * the title doesn't say both.
+ */
+export function titleParts(text: string): { title: string; company: string } | null {
+  const plainText = text.replace(/^\(\d+\)\s*/, "").replace(/\s+/g, " ").trim();
+  if (!BOARD_SUFFIX.test(plainText) && !/ at | hiring /i.test(plainText)) return null;
+  const bare = plainText.replace(BOARD_SUFFIX, "").replace(/\s+(job|jobs)$/i, "").trim();
+  const hiring = bare.match(/^(.{2,80}?) (?:is )?hiring (?:for )?(?:an? )?(.{2,120}?)(?: (?:job )?in .{2,60})?$/i);
+  if (hiring) return { title: hiring[2].trim(), company: hiring[1].trim() };
+  const at = bare.match(/^(.{2,120}?)(?: job)? at (.{2,80}?)(?:\s*[-–|,·]\s*.{2,60})?$/i);
+  if (at) return { title: at[1].trim(), company: at[2].trim() };
+  const parts = bare.split(/\s+[|·–—-]\s+/).map((part) => part.trim()).filter(Boolean);
+  if (parts.length >= 2 && !JOB_SITE_NAME.test(parts[1])) return { title: parts[0], company: parts[1] };
+  return null;
+}
 
 /**
  * Workday pages call themselves "Workday". The company is the tenant: "nvidia.wd5.myworkdayjobs.com", or
@@ -425,9 +445,11 @@ export function scanPage(): Scan {
   // The job a job board shows (Handshake's details pane, or a posting's schema.org data).
   const posting = handshakeJob() ?? (host.endsWith("linkedin.com") ? null : structuredJob());
   const poster = hiringTeam();
-  const title = (posting?.title || greenhouseTitle?.[1] || heading || meta("og:title") || document.title).slice(0, 200);
+  // On a job board without posting data, the tab's title names the job and company better than the page does.
+  const fromTitle = posting || !QUICK_BOARDS.test(host) ? null : titleParts(document.title) ?? titleParts(meta("og:title"));
+  const title = (posting?.title || greenhouseTitle?.[1] || fromTitle?.title || heading || meta("og:title") || document.title).slice(0, 200);
   const siteName = meta("og:site_name");
-  const company = (posting?.company || greenhouseTitle?.[2] || (ats === "workday" ? workdayCompany() : "")
+  const company = (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "")
     || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || host.replace(/^(www|jobs|careers|boards|apply)\./, "").split(".")[0]).slice(0, 200);
   const frame = document.querySelector<HTMLIFrameElement>("iframe#grnhse_iframe, iframe[src*='greenhouse.io/embed'], iframe[src*='jobs.lever.co'], iframe[src*='ashbyhq.com']");
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);

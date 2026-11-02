@@ -321,6 +321,50 @@ function wireSetup(state: PanelState) {
   });
 }
 
+/** The bottom of the Apply view: an applying session, and "It missed one" for a job Unnepo didn't save. */
+let missedNote = "";
+function sessionAndMissed(state: PanelState) {
+  const session = state.me?.session;
+  const minutes = session?.active ? Math.max(1, Math.round((Date.now() - Date.parse(session.startedAt)) / 60000)) : 0;
+  return `
+    <section class="page quiet" aria-label="Session">
+      <div class="links">
+        ${session?.active ? `<span class="small">Session going · ${minutes} min</span><button type="button" class="link" id="session-stop">End session</button>` : `<button type="button" class="link" id="session-start">Start an applying session</button>`}
+        <button type="button" class="link" id="missed-one">It missed an application</button>
+      </div>
+      ${missedNote ? `<p class="small" role="status">${escape(missedNote)}</p>` : ""}
+    </section>`;
+}
+function wireSessionAndMissed(state: PanelState) {
+  for (const [id, start] of [["session-start", true], ["session-stop", false]] as const) {
+    document.getElementById(id)?.addEventListener("click", async () => {
+      await ask({ type: "session", start }).catch(() => undefined);
+      void render();
+    });
+  }
+  document.getElementById("missed-one")?.addEventListener("click", async () => {
+    if (!state.tab) return;
+    const result = await ask<{ ok: boolean; error?: string }>({ type: "missed-one", tabId: state.tab.id }).catch(() => ({ ok: false, error: "Couldn't reach the page." }));
+    missedNote = result.ok ? "Saved a report of this page to your issues list (Profile). Add the job with + Add a job in My jobs." : result.error ?? "Couldn't save the report.";
+    void render();
+  });
+}
+
+/** What the extension noticed on job pages lately, newest first: for tracing a missed application. */
+let activityLog: Array<{ at: number; text: string }> | null = null;
+function activityCard() {
+  if (activityLog === null) {
+    void ask<{ log?: Array<{ at: number; text: string }> }>({ type: "activity-log" }).then((result) => { activityLog = result.log ?? []; void render(); }, () => undefined);
+    return "";
+  }
+  const when = (at: number) => new Date(at).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return `
+    <section class="view" aria-label="Activity">
+      <span class="heading">Activity</span>
+      ${activityLog.length ? `<ul class="needs activity">${activityLog.slice(0, 15).map((item) => `<li><span class="mono small">${when(item.at)}</span> ${escape(item.text)}</li>`).join("")}</ul>` : `<p class="note">Nothing yet. Apply to a job and what Unnepo notices shows up here.</p>`}
+    </section>`;
+}
+
 /** "Did you apply to these?": jobs Apply was pressed on or filled, with nothing confirming it. ✓ saves, ✕ drops. */
 let maybeNote = "";
 function maybeCard(state: PanelState) {
@@ -958,7 +1002,7 @@ async function render() {
   if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea")) return;
   // While a form is being filled (or was just filled), its card comes first; the other cards wait below.
   const active = Boolean(state.job?.running || state.job?.report);
-  const views: Record<View, () => string> = { home: () => (active ? pageCard(state) + maybeCard(state) : maybeCard(state) + pageCard(state)), jobs: () => jobsView(state), profile: () => profileCard(state) + issuesCard(), settings: () => settingsView(state) };
+  const views: Record<View, () => string> = { home: () => (active ? pageCard(state) + maybeCard(state) : maybeCard(state) + pageCard(state)) + sessionAndMissed(state), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
   app.innerHTML = state.connected ? views[view]() : connectView(state);
   // A job opens on its own page in Unnepo, the tracker with its details open.
   app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
@@ -976,6 +1020,7 @@ async function render() {
   if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
   wireSetup(state);
   wireMaybe();
+  wireSessionAndMissed(state);
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));
@@ -996,6 +1041,7 @@ menu.querySelectorAll<HTMLButtonElement>("button").forEach((button) => button.ad
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "state-changed") return;
+  activityLog = null;
   // New problems may have been added; Profile reads the list again.
   if (view === "profile") void loadIssues();
   else void render();
