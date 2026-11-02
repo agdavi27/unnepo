@@ -325,14 +325,16 @@ function wireSetup(state: PanelState) {
  * "I applied to this job": reads the job that's open on the tab (the details pane, not the results listed
  * beside it), shows what it read for the student to fix, then saves it as applied or for later.
  */
+// What a job board calls itself, which isn't the employer.
+const BOARD_COMPANY = /^(handshake|joinhandshake|ziprecruiter|indeed|glassdoor|linkedin|wellfound|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|localhost|jobs?|careers?)$/i;
 type OpenedRead = { title: string; company: string; description: string; url: string; link: string; from: string };
-const here = { key: "", step: "idle" as "idle" | "reading" | "check" | "saving" | "saved", applied: true, job: null as OpenedRead | null, note: "" };
+const here = { key: "", step: "idle" as "idle" | "reading" | "check" | "saving" | "saved", applied: true, job: null as OpenedRead | null, note: "", auto: false };
 function openedCard(state: PanelState) {
   const key = state.tab ? `${state.tab.id}|${state.tab.url}` : "";
   if (here.key !== key && here.step !== "saving") Object.assign(here, { key, step: "idle", job: null, note: "" });
   if (!state.tab || !/^https:\/\//.test(state.tab.url) || onLinkedIn(state) || state.job?.running || state.job?.submission) return "";
   if (here.step === "saved") return `<section class="page" aria-label="Saved"><p class="note ok" role="status">${escape(here.note)}</p></section>`;
-  if (here.step === "check" || here.step === "saving") {
+  if (here.step === "check" || (here.step === "saving" && !here.auto)) {
     const job = here.job!;
     const ready = job.title.trim().length >= 2 && job.company.trim().length >= 2 && here.step !== "saving";
     return `
@@ -351,9 +353,12 @@ function openedCard(state: PanelState) {
       ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
     </section>`;
   }
+  // What the panel sees on the page right now, so the student knows which job one press saves.
+  const seen = state.page?.title && state.page.company ? `${state.page.title} · ${state.page.company}` : "";
   return `
     <section class="page" aria-label="Applied to this job?">
-      <button type="button" class="outline" id="here-applied" ${here.step === "reading" ? "disabled" : ""}>${here.step === "reading" ? "Reading the job…" : "✓ I applied to this job"}</button>
+      ${seen ? `<p class="small">On this page: <strong>${escape(seen)}</strong></p>` : ""}
+      <button type="button" class="px" id="here-applied" ${here.step === "reading" || here.step === "saving" ? "disabled" : ""}>${here.step === "reading" ? "READING THE JOB…" : here.step === "saving" ? "SAVING…" : "✓ I APPLIED: ADD TO TRACKER"}</button>
       <div class="links"><button type="button" class="link" id="here-later" ${here.step === "reading" ? "disabled" : ""}>Save it for later</button></div>
       ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
     </section>`;
@@ -362,12 +367,34 @@ function wireOpened(state: PanelState) {
   if (!state.tab) return;
   const tabId = state.tab.id;
   const read = async (applied: boolean) => {
-    Object.assign(here, { step: "reading", applied, note: "" });
+    Object.assign(here, { step: "reading", applied, note: "", auto: false });
     void render();
     type Read = { ok: boolean; error?: string; job?: OpenedRead };
     const result = await ask<Read>({ type: "read-opened-job", tabId }).catch((): Read => ({ ok: false, error: "Couldn't reach the page." }));
-    if (result.ok && result.job) Object.assign(here, { step: "check", job: result.job });
-    else Object.assign(here, { step: "idle", note: result.error ?? "Couldn't read this page." });
+    if (!result.ok || !result.job) {
+      Object.assign(here, { step: "idle", note: result.error ?? "Couldn't read this page." });
+      return void render();
+    }
+    here.job = result.job;
+    // Sure of the job (its pane, posting data, the selected result or the board's title) and its company:
+    // saved with one press. Otherwise the student checks it first.
+    const sure = result.job.from !== "page" && result.job.title.trim().length >= 2 && result.job.company.trim().length >= 2 && !BOARD_COMPANY.test(result.job.company.trim());
+    here.auto = sure;
+    if (sure) return save();
+    Object.assign(here, { step: "check", note: result.job.company.trim() && !BOARD_COMPANY.test(result.job.company.trim()) ? "Check the job, then save it." : "Type the company: the page didn't say." });
+    if (BOARD_COMPANY.test(here.job.company.trim())) here.job.company = "";
+    void render();
+  };
+  const save = async () => {
+    if (!here.job) return;
+    here.step = "saving";
+    here.note = "";
+    if (document.activeElement?.closest("#here-form")) (document.activeElement as HTMLElement).blur();
+    void render();
+    type Saved = { ok: boolean; error?: string; title?: string; company?: string };
+    const result = await ask<Saved>({ type: "save-opened-job", tabId, applied: here.applied, job: here.job }).catch((): Saved => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    if (result.ok) Object.assign(here, { step: "saved", note: here.applied ? `Saved as applied: ${result.title} at ${result.company}. It's in your Applied jobs.` : `Saved for later: ${result.title} at ${result.company}.` });
+    else Object.assign(here, { step: "check", note: result.error ?? "Couldn't save it." });
     void render();
   };
   document.getElementById("here-applied")?.addEventListener("click", () => void read(true));
@@ -382,18 +409,7 @@ function wireOpened(state: PanelState) {
       if (save) save.disabled = here.job.title.trim().length < 2 || here.job.company.trim().length < 2;
     });
   }
-  document.getElementById("here-save")?.addEventListener("click", async () => {
-    if (!here.job) return;
-    here.step = "saving";
-    here.note = "";
-    if (document.activeElement?.closest("#here-form")) (document.activeElement as HTMLElement).blur();
-    void render();
-    type Saved = { ok: boolean; error?: string; title?: string; company?: string };
-    const result = await ask<Saved>({ type: "save-opened-job", tabId, applied: here.applied, job: here.job }).catch((): Saved => ({ ok: false, error: "Couldn't reach Unnepo." }));
-    if (result.ok) Object.assign(here, { step: "saved", note: here.applied ? `Saved as applied: ${result.title} at ${result.company}. It's in your Applied jobs.` : `Saved for later: ${result.title} at ${result.company}.` });
-    else Object.assign(here, { step: "check", note: result.error ?? "Couldn't save it." });
-    void render();
-  });
+  document.getElementById("here-save")?.addEventListener("click", () => void save());
 }
 
 /** The bottom of the Apply view: an applying session, and "It missed one" for a job Unnepo didn't save. */
@@ -1096,7 +1112,7 @@ async function render() {
   if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return;
   // While a form is being filled (or was just filled), its card comes first; the other cards wait below.
   const active = Boolean(state.job?.running || state.job?.report);
-  const views: Record<View, () => string> = { home: () => (active ? pageCard(state) + maybeCard(state) : maybeCard(state) + pageCard(state)) + openedCard(state) + sessionAndMissed(state), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
+  const views: Record<View, () => string> = { home: () => (active ? pageCard(state) + maybeCard(state) + openedCard(state) : openedCard(state) + maybeCard(state) + pageCard(state)) + sessionAndMissed(state), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
   app.innerHTML = state.connected ? views[view]() : connectView(state);
   // A job opens on its own page in Unnepo, the tracker with its details open.
   app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
