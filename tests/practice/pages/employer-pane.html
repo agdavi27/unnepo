@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Handshake</title>
+<style>body{font:15px system-ui;margin:0} .wrap{display:grid;grid-template-columns:300px 1fr;gap:16px;padding:16px} .card{display:block;border:1px solid #ccc;border-radius:8px;padding:10px;margin-bottom:8px;color:inherit;text-decoration:none} img{width:32px;height:32px;background:#ddd} button{font:inherit;padding:8px 14px}</style>
+</head>
+<body data-quick-apply>
+<p style="padding:0 16px">Practice: a job board that shows the employer above the job's name with only a logo and plain text, no employer link and no posting data (like Handshake).</p>
+<div class="wrap">
+  <section aria-label="Results">
+    <a class="card" href="/job-search/111"><div>Acme</div><strong>Brand Intern</strong></a>
+    <a class="card" href="/job-search/222"><div>MealPal</div><strong>Growth Marketing Intern</strong></a>
+    <a class="card" href="/job-search/333"><div>Globex</div><strong>Sales Intern</strong></a>
+  </section>
+  <section id="pane" aria-label="Job details">
+    <div id="top"><img id="logo" alt="MealPal logo" src="data:image/gif;base64,R0lGODlhAQABAAAAACw="><div id="above">MealPal · Food &amp; Beverage</div></div>
+    <h1>Growth Marketing Intern</h1>
+    <div>New York, NY · Internship · $25/hr</div>
+    <h2>Applied on November 2, 2026</h2>
+    <button id="apply">Apply</button>
+    <h3>About the job</h3>
+    <p id="desc">MealPal is hiring a Growth Marketing Intern for the summer. You'll run campaigns, analyze funnel data, and work with the brand team on weekly experiments.</p>
+  </section>
+</div>
+<script>window.pageValues = () => ({});</script>
+<script src="harness.js"></script>
+</body>
+</html>

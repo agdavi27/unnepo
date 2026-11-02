@@ -333,11 +333,9 @@ export function handshakeJob(where: { hostname: string; pathname: string } = win
   const heading = ["h1", "h2", "h3"].map((tag) => Array.from(pane.querySelectorAll<HTMLElement>(tag)).find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !notJobTitle(clean(el.textContent)))).find(Boolean);
   const title = clean(heading?.textContent);
   // The employer is a link to its Handshake page, or failing that the logo's alt text.
-  const employer = Array.from(pane.querySelectorAll<HTMLAnchorElement>("a[href*='/e/'], a[href*='/employers/']")).map((a) => clean(a.textContent)).find((text) => text.length >= 2 && text.length <= 120);
-  const logo = Array.from(pane.querySelectorAll<HTMLImageElement>("img[alt]")).map((img) => clean(img.alt.replace(/\s*logo$/i, ""))).find((text) => text.length >= 2 && text.length <= 120 && text !== title);
   const description = (pane.innerText || "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
   if (!title) return null;
-  return { title: title.slice(0, 200), company: (employer || logo || "").slice(0, 200), description };
+  return { title: title.slice(0, 200), company: employerIn(pane, heading ?? null, title).slice(0, 200), description };
 }
 
 /**
@@ -441,6 +439,16 @@ export function workdayCompany(where: { hostname: string; pathname: string } = w
   return tenant.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
 }
 
+/**
+ * The last guess at the company, from the site's address: "mealpal" from mealpal.applytojob.com. Never on a job
+ * board (app.joinhandshake.com is not a company called "app"), and never a generic first part.
+ */
+function hostCompany(host: string) {
+  if (QUICK_BOARDS.test(host) || /(^|\.)linkedin\.com$/.test(host)) return "";
+  const first = host.replace(/^(www|jobs|careers|boards|apply|job-boards|hire|recruiting)\./, "").split(".")[0];
+  return NOT_COMPANY.test(first) ? "" : first;
+}
+
 /** What the page is: the job system, title and company, and the form's fields. */
 export function scanPage(): Scan {
   const host = window.location.hostname;
@@ -461,7 +469,7 @@ export function scanPage(): Scan {
   const title = (named(posting?.title) || greenhouseTitle?.[1] || named(fromTitle?.title) || named(heading) || firstHeading || named(meta("og:title")) || document.title).slice(0, 200);
   const siteName = meta("og:site_name");
   const company = (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "")
-    || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || host.replace(/^(www|jobs|careers|boards|apply)\./, "").split(".")[0]).slice(0, 200);
+    || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || hostCompany(host)).slice(0, 200);
   const frame = document.querySelector<HTMLIFrameElement>("iframe#grnhse_iframe, iframe[src*='greenhouse.io/embed'], iframe[src*='jobs.lever.co'], iframe[src*='ashbyhq.com']");
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);
   return {
@@ -487,8 +495,8 @@ const APPLY_LABEL = /^(1-click apply|one-click apply|quick apply|easy apply|inst
 // Section headings in a job's pane that aren't the job's name.
 const NOT_JOB_NAME = /^(job details|about the job|about (the |this )?(company|role|position)|description|job description|overview|qualifications|requirements|benefits|similar jobs|more jobs|recommended( jobs)?|people also viewed|jobs you may like|salary|location|full job description|apply|share|report)$/i;
 // Where boards put the employer: its own page, or an element named for it.
-const COMPANY_LINK = "a[href*='/company/'], a[href*='/cmp/'], a[href*='/companies/'], a[href*='/e/'], a[href*='/employers/'], a[href*='/Overview/'], a[href*='/c/']";
-const COMPANY_NAMED = "[data-testid*='company' i], [data-test*='employer' i], [data-test*='company' i], [class*='companyName' i], [class*='company-name' i], [class*='employer-name' i], [class*='employerName' i], [itemprop='hiringOrganization']";
+const COMPANY_LINK = "a[href*='/company/'], a[href*='/cmp/'], a[href*='/companies/'], a[href*='/e/'], a[href*='/emp/'], a[href*='/employers/'], a[href*='/organizations/'], a[href*='/Overview/'], a[href*='/c/']";
+const COMPANY_NAMED = "[data-testid*='company' i], [data-testid*='employer' i], [data-test*='employer' i], [data-test*='company' i], [data-hook*='employer' i], [data-hook*='company' i], [class*='companyName' i], [class*='company-name' i], [class*='employer-name' i], [class*='employerName' i], [class*='employer_name' i], [itemprop='hiringOrganization']";
 
 const distinctJobLinks = (root: Element) => {
   const seen = new Set<string>();
@@ -524,15 +532,56 @@ export function jobLink(href: string) {
   }
 }
 
-// Words that make a line a place, a pay or a date, not an employer.
-const NOT_EMPLOYER = /^(remote|hybrid|on-?site|in person|full[- ]time|part[- ]time|internship|contract|\$|\d|posted|new|today|easy apply|apply)/i;
-/** The short line right under a job's heading, which boards use for the employer ("MealPal · New York"). */
-function lineUnder(heading: HTMLElement) {
-  const next = heading.nextElementSibling as HTMLElement | null;
-  const first = clean(next?.innerText || next?.textContent).split(/\s+[·|•–—-]\s+|,\s/)[0]?.trim() ?? "";
-  return first.length >= 2 && first.length <= 60 && !NOT_EMPLOYER.test(first) ? first : "";
+// What's never an employer: a job board's name, a web address part, a button, or a section.
+const NOT_COMPANY = /^(app|www|my|portal|localhost|students?|jobs?|careers?|employers?|companies|company|organization|job board|logo|image|avatar|profile|view profile|follow|following|message|save|saved|share|report|apply|more|see more|show more|about|overview|reviews?|salaries|benefits|united states|usa|us|remote|hybrid|on-?site)$/i;
+const LOCATION = /^[A-Z][a-zA-Z .'-]+, ([A-Z]{2}|[A-Z][a-z]+)( \d{5})?$|^(remote|hybrid|on-?site)\b/i;
+
+/** Whether this text can be the employer of a job named `title`. */
+function goodEmployer(raw: string, title: string) {
+  const text = raw.trim();
+  return text.length >= 2 && text.length <= 80 && !sameName(text, title) && !notJobTitle(text) && !NOT_EMPLOYER.test(text)
+    && !NOT_COMPANY.test(text) && !JOB_SITE_NAME.test(text) && !LOCATION.test(text) && !/^https?:|\.(com|org|io|net)$/i.test(text) && /[a-z]/i.test(text);
+}
+const firstPart = (text: string) => clean(text).split(/\s+[·|•–—]\s+|\s-\s|\n/)[0].replace(/(['’]s)?\s*(company )?logo$/i, "").replace(/^(logo|image|avatar)( of| for)?\s+/i, "").trim();
+
+/**
+ * The employer of the job in `pane`, from the most to the least telling: an element the board marks as the
+ * employer, a link to the employer's page, the logo's name near the heading, an "About <Company>" section, the
+ * short line just above or below the heading (Handshake and Glassdoor show it above, Indeed below), the tab's
+ * title, then how the description names it ("MealPal is hiring", "Join MealPal"). "" when nothing says.
+ */
+function employerIn(pane: HTMLElement, heading: HTMLElement | null, title: string) {
+  const pick = (values: Array<string | null | undefined>) => values.map((value) => firstPart(value ?? "")).find((value) => goodEmployer(value, title)) ?? "";
+  const shown = (el: Element) => visible(el);
+  const named = pick(Array.from(pane.querySelectorAll<HTMLElement>(COMPANY_NAMED)).filter(shown).map((el) => el.innerText || el.textContent || el.getAttribute("aria-label")));
+  if (named) return named;
+  const linked = pick(Array.from(pane.querySelectorAll<HTMLAnchorElement>(COMPANY_LINK)).filter(shown).map((a) => clean(a.innerText || a.textContent) || a.getAttribute("aria-label") || a.querySelector("img")?.alt || a.title));
+  if (linked) return linked;
+  // The logo, nearest the heading first.
+  let near: HTMLElement | null = heading?.parentElement ?? null;
+  for (let level = 0; near && level < 4 && near !== pane.parentElement; level += 1, near = near.parentElement) {
+    const logo = pick(Array.from(near.querySelectorAll<HTMLElement>("img[alt], [role=img][aria-label], [aria-label*='logo' i]")).map((el) => (el as HTMLImageElement).alt || el.getAttribute("aria-label")));
+    if (logo) return logo;
+  }
+  const about = pick(Array.from(pane.querySelectorAll<HTMLElement>("h2, h3, h4, strong")).map((el) => clean(el.textContent).match(/^about (?!the |this |us$|the$)(.{2,60})$/i)?.[1]));
+  if (about) return about;
+  // The lines next to the job's name in the pane.
+  const lines = (pane.innerText || "").split("\n").map((line) => clean(line)).filter(Boolean);
+  const at = lines.findIndex((line) => sameName(line, title));
+  if (at >= 0) {
+    const beside = pick([lines[at - 1], lines[at + 1], lines[at - 2], lines[at + 2]]);
+    if (beside) return beside;
+  }
+  const fromTitle = titleParts(document.title)?.company;
+  if (fromTitle && goodEmployer(fromTitle, title)) return fromTitle;
+  const text = (pane.innerText || "").slice(0, 6000);
+  const said = text.match(/\b([A-Z][\w&.'’-]*(?: [A-Z][\w&.'’-]*){0,3}) (?:is hiring|is looking for|is seeking|seeks)\b/)?.[1]
+    ?? text.match(/\b(?:Join|At|About) ([A-Z][\w&.'’-]*(?: [A-Z][\w&.'’-]*){0,3})(?:,| we\b| is\b|!|\.)/)?.[1];
+  return said && goodEmployer(said, title) ? said : "";
 }
 
+// Words that make a line a place, a pay or a date, not an employer.
+const NOT_EMPLOYER = /^(remote|hybrid|on-?site|in person|full[- ]time|part[- ]time|internship|contract|\$|\d|posted|new|today|easy apply|apply)/i;
 /** How Unnepo read the job: shown in the panel, so a wrong read can be traced. */
 export type OpenedJob = { title: string; company: string; description: string; url: string; from: "details pane" | "posting data" | "selected result" | "page title" | "page" };
 
@@ -579,12 +628,7 @@ function findOpenedJob(given?: Element | null): OpenedJob | null {
     const title = clean(heading?.textContent);
     if (title) {
       const matching = postings.find((posting) => sameName(posting.title, title));
-      const company = matching?.company
-        || Array.from(pane.querySelectorAll<HTMLElement>(`${COMPANY_NAMED}, ${COMPANY_LINK}`)).map((el) => clean(el.innerText || el.textContent).split(/\s{2,}|\n/)[0]).find((text) => text.length >= 2 && text.length <= 100 && !sameName(text, title) && !/^\d/.test(text))
-        || titleParts(document.title)?.company
-        || Array.from(pane.querySelectorAll<HTMLImageElement>("img[alt]")).map((img) => clean(img.alt.replace(/\s*(company )?logo$/i, ""))).find((text) => text.length >= 2 && text.length <= 100 && !sameName(text, title))
-        || lineUnder(heading!)
-        || "";
+      const company = (matching?.company && goodEmployer(matching.company, title) ? matching.company : "") || employerIn(pane, heading ?? null, title);
       // The job's own link in the pane, when it names this job: a lasting address on a search page.
       const own = Array.from(pane.querySelectorAll<HTMLAnchorElement>("a[href]")).find((a) => JOB_HREF.test(a.href) && sameName(clean(a.textContent), title));
       const description = matching?.description || (pane.innerText || "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);

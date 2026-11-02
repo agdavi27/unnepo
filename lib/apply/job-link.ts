@@ -1,6 +1,6 @@
 import { nowIso } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
-import { extractJob, isJobSiteName } from "@/lib/apply/extract";
+import { companyFromDescription, extractJob, isJobSiteName } from "@/lib/apply/extract";
 import { postingLink } from "@/lib/apply/applied-list";
 import { applications } from "@/lib/apply/store";
 import { companyMissing, requireApp, summary, titleMissing } from "@/lib/apply/service";
@@ -54,14 +54,34 @@ export function cleanInfo(raw: unknown, url: string): LinkInfo {
  * stand-in, the place and the description when they're empty. Never replaces what the student typed or a real
  * company. `info` is what the extension read in the browser; without it, the server reads the link itself.
  */
+/** A job just saved without its company: named from its description, when the description says. */
+export async function nameCompanyFromDescription(userId: string, applicationId: string) {
+  const app = await applications.get(userId, applicationId);
+  if (!app || !companyMissing(app) || app.description.trim().length < 80) return;
+  const company = await companyFromDescription(app.title, app.description);
+  if (company && !companyMissing({ company, jobUrl: app.jobUrl })) await applications.update(userId, app.id, { company, companyDomain: null });
+}
+
 export async function fillFromLink(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { applicationId?: unknown; info?: unknown };
   const app = await requireApp(userId, body.applicationId);
   const link = postingLink(app) || app.applicationUrl || "";
   if (!link) throw new ServiceError("This job has no link to read. Type the company instead.", "url", 400);
-  const info = body.info ? cleanInfo(body.info, link) : (await readJobLink({ url: link })).info;
+  let info: LinkInfo;
+  try {
+    info = body.info ? cleanInfo(body.info, link) : (await readJobLink({ url: link })).info;
+  } catch (error) {
+    // A job board the server can't read: the description saved with the job may still name the company.
+    const named = companyMissing(app) && error instanceof ServiceError && error.code === "in_browser" ? await companyFromDescription(app.title, app.description) : "";
+    if (!named) throw error;
+    info = { title: "", company: named, location: "", description: "", url: link };
+  }
   const patch: Partial<JobApplication> = {};
   const changed: string[] = [];
+  // The page didn't say who's hiring: the description usually does.
+  if (companyMissing(app) && (info.company.length < 2 || companyMissing({ company: info.company, jobUrl: link }))) {
+    info.company = await companyFromDescription(info.title || app.title, info.description.length > app.description.length ? info.description : app.description);
+  }
   const goodCompany = info.company.length >= 2 && !companyMissing({ company: info.company, jobUrl: link });
   if (companyMissing(app) && goodCompany) {
     patch.company = info.company;

@@ -496,6 +496,47 @@ async function extractWithModel(parsed: ParsedUrl, pageUrl: string, text: string
   };
 }
 
+/**
+ * The employer named in a job's description, for a job saved without one: how postings say it ("MealPal is
+ * hiring", "Join MealPal", "About MealPal", "At MealPal, we…"), else a quick AI read that may only copy a name
+ * the text itself states. "" when the text doesn't say.
+ */
+export async function companyFromDescription(title: string, text: string): Promise<string> {
+  const body = text.slice(0, 8000);
+  if (body.trim().length < 80) return "";
+  const usable = (name: string | null | undefined) => {
+    const value = (name ?? "").replace(/\s+/g, " ").trim().replace(/[.,!]$/, "");
+    return value.length >= 2 && value.length <= 80 && !isJobSiteName(value) && !/^(we|our|the|this|us|you|your|a|an|about|join)\b/i.test(value) && !/^(company|team|role|position|job|us)$/i.test(value)
+      && value.toLowerCase() !== title.trim().toLowerCase() && body.includes(value) ? value : "";
+  };
+  const name = "([A-Z][\\w&.'’-]*(?: (?:[A-Z][\\w&.'’-]*|of|and|&)){0,4})";
+  for (const pattern of [
+    new RegExp(`\\b(?:About|ABOUT) ${name}\\s*\\n`),
+    new RegExp(`\\b${name} (?:is hiring|is looking for|is seeking|seeks|is searching for)\\b`),
+    new RegExp(`\\b(?:Join|At) ${name}(?:,| we\\b| our\\b| is\\b|!|\\.)`),
+    new RegExp(`\\b${name} is an? (?:[a-z-]+ ){0,4}(?:company|startup|firm|organization|nonprofit|agency|platform|leader|provider)\\b`),
+  ]) {
+    const found = usable(body.match(pattern)?.[1]);
+    if (found) return found;
+  }
+  const { readAnthropicKey } = await import("@/lib/db/file-store");
+  const apiKey = await readAnthropicKey();
+  if (!apiKey) return "";
+  try {
+    const Anthropic = (await import("@anthropic-ai/sdk")).default;
+    const response = await new Anthropic({ apiKey }).messages.create({
+      model: process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5",
+      max_tokens: 60,
+      system: "You read job postings. Reply with only the name of the company that is hiring, copied exactly as the text writes it. If the text doesn't name the hiring company, reply with nothing.",
+      messages: [{ role: "user", content: `Job title: ${title}\n\nPosting text:\n${body}` }],
+    });
+    const reply = response.content.map((block) => (block.type === "text" ? block.text : "")).join("").trim().split("\n")[0];
+    return usable(reply);
+  } catch {
+    return "";
+  }
+}
+
 /** Reads a job posting link into structured details. Never fills in a field the posting doesn't state. */
 export async function extractJob(rawUrl: string): Promise<JobDetails> {
   const parsed = parseJobUrl(rawUrl);

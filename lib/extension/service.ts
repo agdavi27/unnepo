@@ -1,4 +1,5 @@
 import { APPLIED_HOW, addActivity, addMaybe, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
+import { nameCompanyFromDescription } from "@/lib/apply/job-link";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits } from "@/lib/apply/limits";
@@ -506,6 +507,7 @@ export async function extensionSubmission(userId: string, raw: unknown) {
     app = await minimalApplication(userId, { url, title: title.slice(0, 200), company: company.slice(0, 200), description, poster: pagePoster(body.poster), key: tracked?.key });
     // No description, or no company: the link is read for them (company sites; job boards wait for the extension).
     if (!description || companyMissing(app)) runLater(() => enrichFromPosting(userId, app!.id, url));
+    if (description && companyMissing(app)) runLater(() => nameCompanyFromDescription(userId, app!.id));
   }
   await ensureCharged(userId, app);
   const receiptPath = await saveScreenshot(userId, app.id, body.screenshot);

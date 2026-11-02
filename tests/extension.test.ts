@@ -15,6 +15,8 @@ import { nationalNumber } from "@/extension/src/content/generic";
 import { jobLink, titleParts } from "@/extension/src/content/scan";
 import { arrange, postingLink, siteFor, sitesIn } from "@/lib/apply/applied-list";
 import { notJobTitle } from "@/lib/apply/job-title";
+import { companyFromDescription } from "@/lib/apply/extract";
+import { fillFromLink } from "@/lib/apply/job-link";
 import { appliedSince, bySite, secondsToApply } from "@/lib/apply/activity-stats";
 import { autofillProblems, siteName } from "@/lib/services/admin";
 
@@ -256,6 +258,27 @@ describe("status lines aren't job titles", () => {
     await applications.update(userId, saved.application.id, { title: "Applied on November 2, 2026" });
     const fixed = await setCompany(userId, { applicationId: saved.application.id, title: "Brand Intern" });
     expect(fixed.application).toMatchObject({ title: "Brand Intern", titleMissing: false, company: "Initech" });
+  });
+});
+
+describe("the company named in a job's description", () => {
+  it("finds it the way postings say it, and nothing from text that doesn't name one", async () => {
+    const intro = "You will run experiments on the funnel, write SQL, and present results to the team every week this summer.";
+    expect(await companyFromDescription("Growth Intern", `MealPal is hiring a Growth Intern. ${intro}`)).toBe("MealPal");
+    expect(await companyFromDescription("Growth Intern", `${intro}\nAbout Initech\nInitech makes software for banks.`)).toBe("Initech");
+    expect(await companyFromDescription("Growth Intern", `At Globex Corporation, we build tools. ${intro}`)).toBe("Globex Corporation");
+    expect(await companyFromDescription("Growth Intern", `About the role\n${intro}`)).toBe("");
+    expect(await companyFromDescription("Growth Intern", `Join our team! ${intro}`)).toBe("");
+  });
+
+  it("names a Handshake job saved as 'app' from its description, without opening the page", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const description = "MealPal is hiring a Growth Marketing Intern. You will run campaigns, analyze funnel data, and work with the brand team all summer.";
+    const saved = await (await call("POST", "submissions", token, { url: "https://app.joinhandshake.com/jobs/7654321", title: "Growth Marketing Intern", company: "app", description, confidence: "likely" })).json();
+    expect(saved.application.companyMissing).toBe(true);
+    const fixed = await fillFromLink(userId, { applicationId: saved.application.id });
+    expect(fixed.application).toMatchObject({ company: "MealPal", companyMissing: false });
   });
 });
 
