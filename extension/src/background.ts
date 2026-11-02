@@ -151,6 +151,8 @@ const peeks = new Map<number, { url: string; at: number; page: PanelState["page"
 /** A quick look at the tab for the panel: the job, its fields, and any account to make. Kept for a few seconds. */
 async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
   if (!/^https:\/\//.test(url)) return null;
+  // Unnepo's own pages list jobs, but none of them is one to apply to.
+  try { if (new URL(url).origin === new URL((await settings()).apiBase).origin) return null; } catch { return null; }
   const cached = peeks.get(tabId);
   if (cached && cached.url === url && Date.now() - cached.at < 4000) return cached.page;
   const scan = await look(tabId);
@@ -223,12 +225,15 @@ const HOW_SAID: Record<AppliedHow, string> = {
 type AppliedHow = "site_confirmed" | "page_said" | "button_changed" | "board_saved" | "linkedin_easy_apply" | "you_marked" | "added_by_hand";
 
 // The list lives in Unnepo (the web app's Activity view shows it too); the server drops one once it's confirmed.
+// No "Did you apply?" list any more: an unconfirmed job only goes in the Activity log, and the student presses
+// ✓ I applied in the panel if they did.
 async function addMaybe(item: { url: string; title: string; company: string; description?: string; applicationId?: string }) {
   if (!item.title.trim()) return;
-  await api("POST", "maybe", { action: "add", item }).catch(() => undefined);
-  void log(`Not confirmed yet: ${item.title}${item.company ? ` at ${item.company}` : ""}. Unnepo will ask whether you applied.`);
-  void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+  void log(`Not confirmed: ${item.title}${item.company ? ` at ${item.company}` : ""}. If you applied, press ✓ I applied in the panel.`);
 }
+
+// What a job board or a page calls itself, which isn't the employer.
+const BOARD_WORD = /^(app|www|handshake|joinhandshake|ziprecruiter|indeed|glassdoor|linkedin|wellfound|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|jobs?|careers?)$/i;
 
 /**
  * The panel's Activity list: what the extension noticed on job pages, newest first, so a missed application
@@ -1329,26 +1334,44 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         const tabId = Number(message.tabId);
         const job = (message.job ?? {}) as Record<string, unknown>;
-        const title = String(job.title ?? "").trim();
-        const company = String(job.company ?? "").trim();
+        let title = String(job.title ?? "").trim();
+        let company = String(job.company ?? "").trim();
         // `url` is the page this tab is on (an application already tracked is found by it); `link` is the
-        // posting the student checked, kept as the job's link in the tracker.
+        // posting, kept as the job's link in the tracker.
         const link = String(job.link ?? "").trim();
         const url = String(job.url ?? "").trim() || link;
-        const description = String(job.description ?? "").trim() || undefined;
-        if (title.length < 2 || company.length < 2) return reply({ ok: false, error: "Type the job title and company." });
-        if (!/^https:\/\/\S+\.\S+/.test(link || url)) return reply({ ok: false, error: "The job link should start with https://." });
+        let description = String(job.description ?? "").trim();
+        if (!/^https:\/\/\S+\.\S+/.test(link || url)) return reply({ ok: false, error: "Open the job's page first." });
+        // What the page didn't say is read from the job's link: Unnepo reads company sites; a job board posting
+        // that isn't this page is read in a background tab.
+        const unsure = (name: string) => name.length < 2 || BOARD_WORD.test(name);
+        if ((unsure(company) || title.length < 2 || description.length < 200) && link) {
+          let info: LinkInfo | null = null;
+          try {
+            info = (await api<{ info: LinkInfo }>("POST", "read-link", { url: link })).info;
+          } catch (error) {
+            if (error instanceof ApiError && error.code === "in_browser" && !sameJobPage(link, url)) info = await readLinkInTab(link).catch(() => null);
+          }
+          if (info) {
+            if (unsure(company) && !unsure(info.company)) company = info.company;
+            if (title.length < 2) title = info.title;
+            if (info.description.length > description.length) description = info.description;
+          }
+        }
+        // Still nothing: saved anyway, under the site's name, and Unnepo names it from the description.
+        if (title.length < 2) title = "Job title missing";
+        if (unsure(company)) company = new URL(link || url).hostname.replace(/^www\./, "").split(".").slice(-2)[0];
         try {
           if (message.applied) {
-            const saved = await saveSubmission({ url, postingUrl: link && link !== url ? link : undefined, title, company, description, confidence: "likely", text: "Marked applied in the Unnepo panel.", how: "you_marked" });
-            await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url, host: new URL(url).hostname, submission: "likely", clickedAt: Date.now(), step: `Saved to your tracker: ${saved.application.title} at ${saved.application.company}.` });
+            const saved = await saveSubmission({ url, postingUrl: link && link !== url ? link : undefined, title, company, description: description || undefined, confidence: "likely", text: "Marked applied in the Unnepo panel.", how: "you_marked" });
+            await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url, host: new URL(url).hostname, submission: "likely", clickedAt: Date.now(), step: `Added to your Applied jobs: ${saved.application.title}${saved.application.companyMissing ? "" : ` at ${saved.application.company}`}.` });
             void log(`Saved: ${saved.application.title} at ${saved.application.company} (you marked it).`);
             celebrate(tabId);
-            return reply({ ok: true, title: saved.application.title, company: saved.application.company });
+            return reply({ ok: true, id: saved.application.id, title: saved.application.title, company: saved.application.company, companyMissing: Boolean(saved.application.companyMissing) });
           }
-          await api("POST", "add-job", { title, company, url: link || url, stage: "in_progress", description });
+          const added = await api<{ application: { id: string; title: string; company: string; companyMissing?: boolean } }>("POST", "add-job", { title, company, url: link || url, stage: "in_progress", description: description || undefined });
           void log(`Saved for later: ${title} at ${company}.`);
-          return reply({ ok: true, title, company });
+          return reply({ ok: true, id: added.application.id, title, company, companyMissing: Boolean(added.application.companyMissing) });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't save it." });
         }

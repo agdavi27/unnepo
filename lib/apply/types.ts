@@ -95,6 +95,8 @@ export type FillReport = {
   personCharged?: boolean;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
   attempts?: FillAttempt[];
+  /** The student's own notes on this job, typed on the Applied page. */
+  notes?: string;
   /** When the job's details were last read from its link (to fill in a missing company). */
   infoReadAt?: string;
   /** The job board posting the student applied from, when they applied on another page (the company's site). */

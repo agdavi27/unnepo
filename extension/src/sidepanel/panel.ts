@@ -110,6 +110,17 @@ function connectView(state: PanelState) {
     </section>`;
 }
 
+/** Unnepo's own site: its pages list jobs, but none of them is a job to apply to. */
+function onUnnepo(state: PanelState) {
+  try { return Boolean(state.tab && new URL(state.tab.url).origin === new URL(state.apiBase).origin); } catch { return false; }
+}
+function unnepoCard() {
+  return `
+    <section class="page" aria-label="Unnepo">
+      <p class="note">This is your Unnepo dashboard. Open a job posting or an application, and the panel finds the job there.</p>
+    </section>`;
+}
+
 function onLinkedIn(state: PanelState) {
   try { return Boolean(state.tab && NEVER_READ.test(new URL(state.tab.url).hostname)); } catch { return false; }
 }
@@ -170,7 +181,7 @@ function pageCard(state: PanelState) {
       ${todo.length ? `<p class="note${report?.needsYou.length ? " warn" : ""}">Left to do · ${todo.length} <span class="small">(the checklist on the page walks you through)</span>:</p>
         <ul class="needs todo">${todo.map((item) => `<li class="todo-row"><span class="tag ${item.kind}">${item.kind === "needs" ? "Needs you" : item.kind === "failed" ? "Couldn't fill" : "Check"}</span>${needsLink(item.label, item.why).replace(/^<li>|<\/li>$/g, "")}</li>`).join("")}</ul>` : ""}
       ${todo.length && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
-      ${job?.submission ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
+      ${job?.submission && here.step !== "saved" ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
       ${links.length ? `<div class="links">${links.join("")}</div>` : ""}
       ${letterBlock()}
     </section>`;
@@ -347,12 +358,14 @@ const STATUS_TITLE = /^(applied( on .+| \d+ \w+ ago| today| yesterday)?|applicat
 // What a job board calls itself, which isn't the employer.
 const BOARD_COMPANY = /^(handshake|joinhandshake|ziprecruiter|indeed|glassdoor|linkedin|wellfound|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|localhost|jobs?|careers?)$/i;
 type OpenedRead = { title: string; company: string; description: string; url: string; link: string; from: string };
-const here = { key: "", step: "idle" as "idle" | "reading" | "check" | "saving" | "saved", applied: true, job: null as OpenedRead | null, note: "", auto: false };
+const here = { key: "", step: "idle" as "idle" | "reading" | "check" | "saving" | "saved", applied: true, job: null as OpenedRead | null, note: "", auto: false, savedUrl: "" };
 function openedCard(state: PanelState) {
   const key = state.tab ? `${state.tab.id}|${state.tab.url}` : "";
   if (here.key !== key && here.step !== "saving") Object.assign(here, { key, step: "idle", job: null, note: "" });
-  if (!state.tab || !/^https:\/\//.test(state.tab.url) || onLinkedIn(state) || state.job?.running || state.job?.submission) return "";
-  if (here.step === "saved") return `<section class="page" aria-label="Saved"><p class="note ok" role="status">${escape(here.note)}</p></section>`;
+  if (here.step === "saved") {
+    return `<section class="page" aria-label="Saved"><p class="note ok" role="status">${escape(here.note)}</p>${here.savedUrl ? `<div class="links"><a class="link" href="${escape(here.savedUrl)}" target="_blank" rel="noreferrer">See it in Applied jobs ↗</a></div>` : ""}</section>`;
+  }
+  if (!state.tab || !/^https:\/\//.test(state.tab.url) || onLinkedIn(state) || onUnnepo(state) || state.job?.running || state.job?.submission) return "";
   if (here.step === "check" || (here.step === "saving" && !here.auto)) {
     const job = here.job!;
     const ready = job.title.trim().length >= 2 && job.company.trim().length >= 2 && here.step !== "saving";
@@ -395,15 +408,11 @@ function wireOpened(state: PanelState) {
       Object.assign(here, { step: "idle", note: result.error ?? "Couldn't read this page." });
       return void render();
     }
+    // Saved with one press. Whatever the page didn't say (the company, the description) is read from the
+    // job's link, here and on Unnepo, so the student never has to type it.
     here.job = result.job;
-    // Sure of the job (its pane, posting data, the selected result or the board's title) and its company:
-    // saved with one press. Otherwise the student checks it first.
-    const sure = result.job.from !== "page" && result.job.title.trim().length >= 2 && result.job.company.trim().length >= 2 && !BOARD_COMPANY.test(result.job.company.trim());
-    here.auto = sure;
-    if (sure) return save();
-    Object.assign(here, { step: "check", note: result.job.company.trim() && !BOARD_COMPANY.test(result.job.company.trim()) ? "Check the job, then save it." : "Type the company: the page didn't say." });
-    if (BOARD_COMPANY.test(here.job.company.trim())) here.job.company = "";
-    void render();
+    here.auto = true;
+    return save();
   };
   const save = async () => {
     if (!here.job) return;
@@ -411,9 +420,10 @@ function wireOpened(state: PanelState) {
     here.note = "";
     if (document.activeElement?.closest("#here-form")) (document.activeElement as HTMLElement).blur();
     void render();
-    type Saved = { ok: boolean; error?: string; title?: string; company?: string };
+    type Saved = { ok: boolean; error?: string; title?: string; company?: string; id?: string; companyMissing?: boolean };
     const result = await ask<Saved>({ type: "save-opened-job", tabId, applied: here.applied, job: here.job }).catch((): Saved => ({ ok: false, error: "Couldn't reach Unnepo." }));
-    if (result.ok) Object.assign(here, { step: "saved", note: here.applied ? `Saved as applied: ${result.title} at ${result.company}. It's in your Applied jobs.` : `Saved for later: ${result.title} at ${result.company}.` });
+    const named = result.companyMissing ? (result.title ?? "The job") : `${result.title} at ${result.company}`;
+    if (result.ok) Object.assign(here, { step: "saved", savedUrl: result.id ? `${state.apiBase}/home?job=${encodeURIComponent(result.id)}` : "", note: `✓ Success! ${named} ${here.applied ? "is added to your Applied jobs" : "is saved for later"}.${result.companyMissing ? " Unnepo is finding the company from the job's link." : ""}` });
     else Object.assign(here, { step: "check", note: result.error ?? "Couldn't save it." });
     void render();
   };
@@ -485,31 +495,6 @@ function activityCard() {
       <span class="heading">Activity</span>
       ${activityLog.length ? `<ul class="needs activity">${activityLog.slice(0, 15).map((item) => `<li><span class="mono small">${when(item.at)}</span> ${escape(item.text)}</li>`).join("")}</ul>` : `<p class="note">Nothing yet. Apply to a job and what Unnepo notices shows up here.</p>`}
     </section>`;
-}
-
-/** "Did you apply to these?": jobs Apply was pressed on or filled, with nothing confirming it. ✓ saves, ✕ drops. */
-let maybeNote = "";
-function maybeCard(state: PanelState) {
-  const list = state.maybe ?? [];
-  if (!list.length) return maybeNote ? `<p class="small" role="status">${escape(maybeNote)}</p>` : "";
-  return `
-    <section class="page" aria-label="Did you apply to these?">
-      <span class="eyebrow">Did you apply to ${list.length === 1 ? "this" : `these ${list.length}`}?</span>
-      <ul class="needs maybe">${list.slice(0, 6).map((item) => `
-        <li class="maybe-row"><span class="maybe-text"><span class="job-row-title">${escape(item.title)}</span><span class="job-row-company">${escape(item.company)}</span></span>
-          <button type="button" class="inline" data-maybe="${escape(item.id)}" data-applied="true" aria-label="Yes, I applied to ${escape(item.title)}">✓ Yes</button>
-          <button type="button" class="inline" data-maybe="${escape(item.id)}" data-applied="false" aria-label="No, I didn't apply to ${escape(item.title)}">✕</button></li>`).join("")}</ul>
-      ${maybeNote ? `<p class="small" role="status">${escape(maybeNote)}</p>` : ""}
-    </section>`;
-}
-function wireMaybe() {
-  app.querySelectorAll<HTMLButtonElement>("[data-maybe]").forEach((button) => button.addEventListener("click", async () => {
-    button.disabled = true;
-    const applied = button.dataset.applied === "true";
-    const result = await ask<{ ok: boolean; error?: string }>({ type: "maybe-answer", id: button.dataset.maybe, applied }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
-    maybeNote = result.ok ? (applied ? "Saved to your tracker." : "") : result.error ?? "Couldn't save it.";
-    void render();
-  }));
 }
 
 /** No job on the tab: paste a job description and get a cover letter for it. */
@@ -1146,7 +1131,7 @@ async function render() {
   if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return;
   // While a form is being filled (or was just filled), its card comes first; the other cards wait below.
   const active = Boolean(state.job?.running || state.job?.report);
-  const views: Record<View, () => string> = { home: () => (active ? pageCard(state) + maybeCard(state) + openedCard(state) : openedCard(state) + maybeCard(state) + pageCard(state)) + sessionAndMissed(state), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
+  const views: Record<View, () => string> = { home: () => (onUnnepo(state) ? unnepoCard() : active ? pageCard(state) + openedCard(state) : openedCard(state) + pageCard(state)) + sessionAndMissed(state), jobs: () => jobsView(state), profile: () => profileCard(state) + activityCard() + issuesCard(), settings: () => settingsView(state) };
   app.innerHTML = state.connected ? views[view]() : connectView(state);
   // A job opens on its own page in Unnepo, the tracker with its details open.
   app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
@@ -1163,7 +1148,6 @@ async function render() {
   if (state.tab) wireLetter(state.tab.id);
   if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
   wireSetup(state);
-  wireMaybe();
   wireSessionAndMissed(state);
   wireOpened(state);
   document.getElementById("see-resume")?.addEventListener("click", () => void seeResume());

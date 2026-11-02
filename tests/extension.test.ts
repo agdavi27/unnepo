@@ -3,7 +3,7 @@ import { repo } from "@/lib/db/file-store";
 import { applications } from "@/lib/apply/store";
 import { setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { readStoredResume } from "@/lib/services/resume";
-import { setCompany, setDeferForTests } from "@/lib/apply/service";
+import { setCompany, setDeferForTests, updateJobDetails } from "@/lib/apply/service";
 import { issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { saveStudentProfile } from "@/lib/profile/service";
 import { login, signUp, userFromSessionToken, verifyEmail } from "@/lib/services/auth";
@@ -279,6 +279,22 @@ describe("the company named in a job's description", () => {
     expect(saved.application.companyMissing).toBe(true);
     const fixed = await fillFromLink(userId, { applicationId: saved.application.id });
     expect(fixed.application).toMatchObject({ company: "MealPal", companyMissing: false });
+  });
+});
+
+describe("editing a job and its notes", () => {
+  it("changes only what's sent, keeps notes, and turns down a status line as the title", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const saved = await (await call("POST", "submissions", token, { url: "https://jobs.lever.co/mealpal/abc", title: "Growth Intern", company: "MealPal", confidence: "likely" })).json();
+    const edited = await updateJobDetails(userId, { applicationId: saved.application.id, title: "Growth Marketing Intern", location: "New York, NY", url: "https://www.indeed.com/viewjob?jk=1a2b", notes: "Talked to Sam at the fair." });
+    expect(edited.application).toMatchObject({ title: "Growth Marketing Intern", company: "MealPal", location: "New York, NY" });
+    expect(edited.application.fillReport?.notes).toBe("Talked to Sam at the fair.");
+    expect(edited.application.fillReport?.postingUrl).toBe("https://www.indeed.com/viewjob?jk=1a2b");
+    const cleared = await updateJobDetails(userId, { applicationId: saved.application.id, notes: "" });
+    expect(cleared.application.fillReport?.notes).toBeUndefined();
+    expect(cleared.application.title).toBe("Growth Marketing Intern");
+    await expect(updateJobDetails(userId, { applicationId: saved.application.id, title: "Applied on November 2, 2026" })).rejects.toThrow("Type the job title.");
   });
 });
 

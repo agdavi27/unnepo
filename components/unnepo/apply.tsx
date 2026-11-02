@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AtsBadge, CompanyLogo } from "@/components/unnepo/company";
 import { FollowUpFacts } from "@/components/unnepo/follow-up-facts";
-import { DidYouApply, SessionBar, type Maybe, type Session } from "@/components/unnepo/activity";
+import { SessionBar, type Maybe, type Session } from "@/components/unnepo/activity";
 import { extensionHere, readLinksInBrowser } from "@/lib/extension-bridge";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { PeopleSearching } from "@/components/unnepo/people-searching";
@@ -396,8 +396,9 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
   const row = (app: App) => {
             const expanded = open === app.id;
             const stage = stageOf(app);
-            const people = app.contacts?.length ?? 0;
             const posting = postingLink(app);
+            // Applied, nobody looked up yet: one press finds people to email there.
+            const canFind = stage !== "in_progress" && !app.companyMissing && app.contactsStatus === "idle" && !(app.contacts?.length);
             const toggle = () => setOpen(expanded ? null : app.id);
             return (
               <li key={app.id} id={`job-${app.id}`} className="group border-b border-line">
@@ -426,7 +427,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                   </span>
                   <StageControl app={app} onChange={(next) => void setStage(app, next)} />
                   <button type="button" onClick={toggle} aria-expanded={expanded} className="hidden items-center justify-end gap-1 text-sm text-muted hover:text-white sm:inline-flex">
-                    {stage === "in_progress" ? "Details" : `${people} ${people === 1 ? "person" : "people"}`}
+                    {expanded ? "See less" : "See more"}
                     <span aria-hidden className={`transition-transform ${expanded ? "rotate-90" : ""}`}>→</span>
                   </button>
                   <button type="button" onClick={() => remove(app)} aria-label={`Remove ${app.title} at ${app.company}`} title="Remove" className="-mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint transition-colors hover:bg-red-500/10 hover:text-red-300 sm:justify-self-end sm:opacity-40 sm:group-hover:opacity-100 sm:focus-visible:opacity-100">
@@ -434,9 +435,14 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                   </button>
                 </div>
                 {(app.companyMissing || app.titleMissing) && <AddCompany app={app} onSaved={onReplace} />}
+                {canFind && (
+                  <div className="-mt-1.5 mb-3 pl-12">
+                    <button type="button" className={secondary} onClick={() => { setOpen(app.id); void act("/retry-contacts", "POST", { applicationId: app.id }); }}>Find people to reach out to</button>
+                  </div>
+                )}
                 {expanded && (
                   <div className="mb-4 space-y-4 rounded-xl border border-line bg-panel p-4">
-                    <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={() => void readLinks([app], app.id)} />
+                    <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={() => void readLinks([app], app.id)} onSaved={onReplace} />
                     {stage === "in_progress" && <PostedBy app={app} />}
                     {stage === "in_progress" ? (
                       <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
@@ -502,7 +508,6 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
         )}
       </div>
 
-      <DidYouApply maybe={data.maybe ?? []} onMaybe={(id, applied) => act("/maybe", "POST", { id, applied })} />
       {apps.length > 0 && (
         <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Filter by status">
           {FILTERS.filter(([id]) => id === "all" || counts[id]).map(([id, label]) => (
@@ -778,40 +783,114 @@ function AddJobForm({ onDone }: { onDone: (added: boolean) => void | Promise<voi
 }
 
 /**
- * A job's info: what Unnepo knows about it, from the page it was saved from or its link. "Fill in from the
- * link" reads the link again for a missing company, place or description.
+ * A job's info: what Unnepo knows about it, from the page it was saved from or its link, with the posting and
+ * application as links. "Edit" changes any of it; "Fill in from the link" reads the link again for whatever is
+ * missing. Below, the student's own quick notes, saved when they press Save.
  */
-function JobInfo({ app, reading, disabled, note, onRead }: { app: App; reading: boolean; disabled: boolean; note: string; onRead: () => void }) {
+function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; reading: boolean; disabled: boolean; note: string; onRead: () => void; onSaved: (app: App) => void }) {
   const posting = postingLink(app);
   const applied = app.fillReport?.activity?.find((event) => event.kind === "applied");
   const link = posting || app.applicationUrl || "";
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ title: "", company: "", location: "", url: "", description: "" });
+  const [notes, setNotes] = useState(app.fillReport?.notes ?? "");
+  const [busy, setBusy] = useState("");
+  const [problem, setProblem] = useState("");
+  const [saidSaved, setSaidSaved] = useState(false);
+  const save = async (key: string, body: Record<string, string>) => {
+    setBusy(key);
+    setProblem("");
+    try {
+      const result = await call<{ application: App }>("/details", "PATCH", { applicationId: app.id, ...body });
+      onSaved({ ...app, ...result.application, contacts: app.contacts });
+      return true;
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't save it.");
+      return false;
+    } finally {
+      setBusy("");
+    }
+  };
+  const startEdit = () => {
+    setDraft({ title: app.titleMissing ? "" : app.title, company: app.companyMissing ? "" : app.company, location: app.location ?? "", url: posting, description: app.description });
+    setEditing(true);
+  };
+  const box = "w-full rounded-lg border border-line bg-card px-3 py-2 text-sm";
   const rows: Array<[string, React.ReactNode]> = [
-    ["Company", app.companyMissing ? <span className="text-[#F5A524]">Missing</span> : app.company],
+    ["Company", app.companyMissing ? <span key="company" className="text-[#F5A524]">Missing</span> : app.company],
     ["Job", app.titleMissing ? <span key="title" className="text-[#F5A524]">Missing</span> : app.title],
-    ["Location", app.location || <span className="text-faint">Not known</span>],
+    ["Location", app.location || <span key="location" className="text-faint">Not known</span>],
     ["Found on", siteFor(app)],
     ["Applied", app.submittedAt ? `${new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${applied?.how ? ` · ${HOW_LABEL[applied.how]}` : ""}` : "Not yet"],
   ];
-  if (posting) rows.push(["Job posting", <a key="posting" href={posting} target="_blank" rel="noreferrer" className="break-all text-ink underline-offset-4 hover:underline">{posting}</a>]);
-  if (app.applicationUrl && app.applicationUrl !== posting) rows.push(["Application", <a key="application" href={app.applicationUrl} target="_blank" rel="noreferrer" className="break-all text-ink underline-offset-4 hover:underline">{app.applicationUrl}</a>]);
+  const links = [
+    posting ? <a key="posting" href={posting} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-white">Job posting ↗</a> : null,
+    app.applicationUrl && app.applicationUrl !== posting ? <a key="application" href={app.applicationUrl} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-white">Application ↗</a> : null,
+  ].filter(Boolean);
+  if (links.length) rows.push(["Links", <span key="links" className="flex flex-wrap gap-4">{links}</span>]);
   return (
-    <section aria-label={`Info for ${app.title}`} className="flex flex-col gap-2">
+    <section aria-label={`Info for ${app.title}`} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Info</h3>
-        {link && <button type="button" className="text-xs text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-40" disabled={disabled} onClick={onRead}>{reading ? "Reading the link…" : "Fill in from the link"}</button>}
+        {!editing && (
+          <span className="flex flex-wrap gap-4 text-xs">
+            {link && <button type="button" className="text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-40" disabled={disabled} onClick={onRead}>{reading ? "Reading the link…" : "Fill in from the link"}</button>}
+            <button type="button" className="text-muted underline-offset-4 hover:text-white hover:underline" onClick={startEdit}>Edit</button>
+          </span>
+        )}
       </div>
-      <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
-        {rows.map(([term, value]) => (
-          <div key={term} className="contents"><dt className="text-faint">{term}</dt><dd className="min-w-0">{value}</dd></div>
-        ))}
-      </dl>
-      {app.description.trim() ? (
-        <details className="text-sm">
-          <summary className="cursor-pointer select-none text-muted hover:text-white">Job description</summary>
-          <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-line text-muted">{app.description}</p>
-        </details>
-      ) : <p className="text-xs text-faint">No job description saved{link ? ". Fill in from the link to add it." : "."}</p>}
-      {note && <p role="status" className="text-xs text-muted">{note}</p>}
+      {editing ? (
+        <form
+          className="grid gap-3 sm:grid-cols-2"
+          aria-label={`Edit ${app.title}`}
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (await save("edit", draft)) setEditing(false);
+          }}
+        >
+          <label className="text-xs font-medium text-muted">Job title<input className={`${box} mt-1`} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} maxLength={200} required /></label>
+          <label className="text-xs font-medium text-muted">Company<input className={`${box} mt-1`} value={draft.company} onChange={(event) => setDraft({ ...draft, company: event.target.value })} maxLength={200} required /></label>
+          <label className="text-xs font-medium text-muted">Location<input className={`${box} mt-1`} value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} maxLength={200} placeholder="Boston, MA" /></label>
+          <label className="text-xs font-medium text-muted">Job posting link<input type="url" className={`${box} mt-1`} value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://…" /></label>
+          <label className="text-xs font-medium text-muted sm:col-span-2">Job description<textarea rows={5} className={`${box} mt-1`} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} maxLength={8000} /></label>
+          <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+            <button type="submit" className={primary} disabled={busy === "edit" || draft.title.trim().length < 2 || draft.company.trim().length < 2}>{busy === "edit" ? "Saving…" : "Save changes"}</button>
+            <button type="button" className={secondary} onClick={() => setEditing(false)}>Cancel</button>
+          </div>
+        </form>
+      ) : (
+        <>
+          <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+            {rows.map(([term, value]) => (
+              <div key={term} className="contents"><dt className="text-faint">{term}</dt><dd className="min-w-0">{value}</dd></div>
+            ))}
+          </dl>
+          {app.description.trim() ? (
+            <details className="text-sm">
+              <summary className="cursor-pointer select-none text-muted hover:text-white">Job description</summary>
+              <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-line text-muted">{app.description}</p>
+            </details>
+          ) : <p className="text-xs text-faint">No job description saved{link ? ". Fill in from the link to add it." : "."}</p>}
+        </>
+      )}
+      <form
+        className="flex flex-col gap-2"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          if (await save("notes", { notes })) {
+            setSaidSaved(true);
+            setTimeout(() => setSaidSaved(false), 2500);
+          }
+        }}
+      >
+        <label htmlFor={`notes-${app.id}`} className="text-sm font-semibold">Quick notes</label>
+        <textarea id={`notes-${app.id}`} rows={3} className={box} value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={4000} placeholder="Who you talked to, the next step, anything to remember…" />
+        <span className="flex items-center gap-3">
+          <button type="submit" className={secondary} disabled={busy === "notes" || notes === (app.fillReport?.notes ?? "")}>{busy === "notes" ? "Saving…" : "Save notes"}</button>
+          {saidSaved && <span role="status" className="text-xs text-muted">Saved.</span>}
+        </span>
+      </form>
+      {(note || problem) && <p role={problem ? "alert" : "status"} className={`text-xs ${problem ? "text-red-300" : "text-muted"}`}>{problem || note}</p>}
     </section>
   );
 }
@@ -899,7 +978,7 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail }: { app: App; 
       <div className="space-y-3">
         <PostedBy app={app} />
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
-          <button type="button" className={primary} onClick={() => onRetry()}>Find relevant people</button>
+          <button type="button" className={primary} onClick={() => onRetry()}>Find people to reach out to</button>
           <p>Up to 5 people at {app.company}: from your school, recruiters, and the team, with their emails and links.</p>
         </div>
       </div>

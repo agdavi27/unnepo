@@ -18,7 +18,7 @@ import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
-import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
+import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
 export const maxDuration = 60;
@@ -194,6 +194,7 @@ async function handle(request: Request, slug: string[]) {
     if (action === "contact" && method === "PATCH") return json(await updateOutreach(user.id, await request.json()));
     if (action === "contact-email" && method === "POST") return json(await writeContactEmail(user.id, await request.json()));
     if (action === "company" && method === "PATCH") return json(await setCompany(user.id, await request.json()));
+    if (action === "details" && method === "PATCH") return json(await updateJobDetails(user.id, await request.json()));
     if (action === "read-link" && method === "POST") {
       if (!rateLimit(`read-link:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of links in an hour. Try again a bit later.", "rate_limited", 429);
       return json(await readJobLink(await request.json()));

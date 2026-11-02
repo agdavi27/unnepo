@@ -277,6 +277,33 @@ export async function setCompany(userId: string, raw: unknown) {
   return { application: summary(updated!) };
 }
 
+/**
+ * The student edits a job's details on the Applied page: its title, company, place, posting link and
+ * description, and their own notes. Only what's sent changes; an empty notes box clears the notes.
+ */
+export async function updateJobDetails(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const app = await requireApp(userId, body.applicationId);
+  const text = (key: string, max: number) => (typeof body[key] === "string" ? (body[key] as string).trim().slice(0, max) : undefined);
+  const [title, company, location, link, description, notes] = [text("title", 200), text("company", 200), text("location", 200), text("url", 2000), text("description", 8000), typeof body.notes === "string" ? body.notes.slice(0, 4000) : undefined];
+  if (title !== undefined && (title.length < 2 || notJobTitle(title))) throw new ServiceError("Type the job title.", "title", 400);
+  if (company !== undefined && company.length < 2) throw new ServiceError("Type the company's name.", "company", 400);
+  if (link !== undefined && link && !/^https:\/\/\S+\.\S+/i.test(link)) throw new ServiceError("The link should start with https://.", "url", 400);
+  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  const nextReport = { ...report, ...(link !== undefined ? { postingUrl: link || undefined } : {}), ...(notes !== undefined ? { notes: notes.trim() ? notes : undefined } : {}) };
+  const updated = await applications.update(userId, app.id, {
+    ...(title !== undefined ? { title } : {}),
+    // A new company means a new search for its website and people.
+    ...(company !== undefined && company !== app.company ? { company, companyDomain: null } : {}),
+    ...(location !== undefined ? { location: location || null } : {}),
+    ...(description !== undefined ? { description } : {}),
+    // A job added without a link takes the one typed in as its own.
+    ...(link && !app.jobUrl ? { jobUrl: link } : {}),
+    fillReport: nextReport,
+  });
+  return { application: summary(updated!) };
+}
+
 /** One key per job link, for links Unnepo can't parse too. */
 export function keyFor(url: string) {
   try {
