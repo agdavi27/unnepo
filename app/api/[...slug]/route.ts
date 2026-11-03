@@ -18,6 +18,7 @@ import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
+import { handlePostmark, webhookAuthorized } from "@/lib/email/inbound";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
@@ -27,6 +28,12 @@ const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests"
 
 async function handle(request: Request, slug: string[]) {
   const [root, action] = slug;
+  // Postmark posting a forwarded email: a server, not a browser, so it's checked by its secret instead of its origin.
+  if (root === "inbound" && action === "postmark" && request.method === "POST") {
+    if (!webhookAuthorized(request)) return json({ error: "Not allowed." }, 401);
+    const handled = await handlePostmark(await request.json().catch(() => ({})));
+    return json(handled.status === 200 ? { ok: true, result: handled.result } : { error: "Unknown address." }, handled.status);
+  }
   // The extension sends a bearer token, which a browser never attaches on its own, so it skips the origin check.
   if (request.method !== "GET" && !(root === "extension" && hasExtensionToken(request))) assertSameOrigin(request);
 

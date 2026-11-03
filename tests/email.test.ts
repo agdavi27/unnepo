@@ -12,6 +12,8 @@ import { setClassifierForTests } from "@/lib/email/classify";
 import { applications } from "@/lib/apply/store";
 import { stageOf } from "@/lib/apply/stats";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
+import { POST } from "@/app/api/[...slug]/route";
+import { unwrapForward } from "@/lib/email/inbound";
 import { useTempDb } from "./helpers";
 
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(__dirname, "fixtures/emails", `${name}.json`), "utf8")) as InboundEmail & { messageId: string };
@@ -23,6 +25,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   setClassifierForTests(null);
+  delete process.env.INBOUND_WEBHOOK_USER;
+  delete process.env.INBOUND_WEBHOOK_SECRET;
   delete process.env.INBOUND_EMAIL_DOMAIN;
   delete process.env.INBOUND_EMAIL_BASE;
 });
@@ -169,8 +173,9 @@ describe("processing forwarded emails", () => {
 
   it("confirms a saved job by its title, and moves a job to interviewing", async () => {
     const userId = await student();
-    const acme = await applications.insert({ userId, jobKey: "k1", jobUrl: "https://acme.example/jobs/1", ats: "other", title: "Data Analyst Intern", company: "Acme, Inc.", companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "extracted", statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0 });
-    const globex = await applications.insert({ ...acme.app, id: undefined as never, createdAt: undefined as never, updatedAt: undefined as never, jobKey: "k2", title: "Brand Marketing Intern", company: "Globex", status: "submitted", submittedAt: "2026-10-20T12:00:00.000Z" });
+    const base = { userId, jobUrl: "https://acme.example/jobs/1", ats: "other" as const, companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, contactsStatus: "idle" as const, contactsMessage: "", charged: false, attempts: 0 };
+    const acme = await applications.insert({ ...base, jobKey: "k1", title: "Data Analyst Intern", company: "Acme, Inc.", status: "extracted", submittedAt: null });
+    const globex = await applications.insert({ ...base, jobKey: "k2", title: "Brand Marketing Intern", company: "Globex", status: "submitted", submittedAt: "2026-10-20T12:00:00.000Z" });
     expect((await processEmail(userId, fixture("workday-confirmation"), "forward"))).toMatchObject({ outcome: "updated", applicationId: acme.app.id });
     expect((await applications.get(userId, acme.app.id))?.status).toBe("applied_manual");
     expect((await processEmail(userId, fixture("interview-invite"), "forward"))).toMatchObject({ outcome: "updated", applicationId: globex.app.id });
@@ -227,5 +232,39 @@ describe("processing forwarded emails", () => {
     expect(stageOf(applied, now)).toBe("no_response");
     expect(stageOf({ ...applied, fillReport: { filled: [], failed: [], liveViewUrl: null, screenshotAt: null, lastEmailAt: "2026-10-20T12:00:00.000Z" } }, now)).toBe("submitted");
     expect(stageOf({ ...applied, submittedAt: "2026-10-20T12:00:00.000Z" }, now)).toBe("submitted");
+  });
+});
+
+describe("Postmark's webhook", () => {
+  const post = (body: unknown, auth?: string) => POST(new Request("https://unneponew.vercel.app/api/inbound/postmark", {
+    method: "POST", headers: { "Content-Type": "application/json", ...(auth ? { Authorization: `Basic ${Buffer.from(auth).toString("base64")}` } : {}) }, body: JSON.stringify(body),
+  }), { params: Promise.resolve({ slug: ["inbound", "postmark"] }) });
+  const postmark = (email: ReturnType<typeof fixture>, to: string) => ({
+    FromFull: { Email: email.from.match(/<(.+)>/)?.[1] ?? email.from, Name: email.from.replace(/\s*<.+>/, "") }, OriginalRecipient: to, ToFull: [{ Email: to }],
+    Subject: email.subject, Date: email.date, TextBody: email.text, MessageID: "postmark-id", Headers: [{ Name: "Message-ID", Value: email.messageId }],
+  });
+
+  it("turns away posts without the secret and addresses no student has, and processes the rest once", async () => {
+    process.env.INBOUND_WEBHOOK_USER = "postmark";
+    process.env.INBOUND_WEBHOOK_SECRET = "a-long-secret-for-tests-1234";
+    setClassifierForTests(async () => '{"type":"applied","company":"P&G","job_title":null,"confidence":0.93,"summary":"P&G confirmed your application."}');
+    const signed = await signUp({ email: "pat.doe@colby.edu", password: "password123", name: "Pat Doe" });
+    await verifyEmail(signed.verifyToken!);
+    const userId = (await login("pat.doe@colby.edu", "password123")).user.id;
+    const inbox = await emailInboxes.forUser(userId);
+    const to = `abc123+${inbox.token}@inbound.postmarkapp.com`;
+    const body = postmark(fixture("pg-thank-you"), to);
+    expect((await post(body)).status).toBe(401);
+    expect((await post(body, "postmark:wrong-secret-wrong-secret")).status).toBe(401);
+    expect((await post(postmark(fixture("pg-thank-you"), "abc123+u_bbbbbbbbbbbbbbbbbbbb@inbound.postmarkapp.com"), "postmark:a-long-secret-for-tests-1234")).status).toBe(403);
+    const first = await post(body, "postmark:a-long-secret-for-tests-1234");
+    expect([first.status, (await first.json()).result]).toEqual([200, "created"]);
+    expect((await (await post(body, "postmark:a-long-secret-for-tests-1234")).json()).result).toBe("duplicate");
+    expect(await applications.list(userId)).toHaveLength(1);
+  });
+
+  it("reads the original sender of an email forwarded by hand", () => {
+    const forwarded = unwrapForward({ from: "Pat <pat.doe@gmail.com>", subject: "Fwd: Thank you for applying", text: "---------- Forwarded message ---------\nFrom: P&G Careers <no-reply@pgcareers.com>\nDate: Mon, Nov 2, 2026 at 2:05 PM\nSubject: Thank you for applying to P&G\nTo: <pat.doe@gmail.com>\n\nDear Pat, thank you for applying." });
+    expect(forwarded).toMatchObject({ from: "P&G Careers <no-reply@pgcareers.com>", subject: "Thank you for applying to P&G", date: "Mon, Nov 2, 2026 at 2:05 PM" });
   });
 });
