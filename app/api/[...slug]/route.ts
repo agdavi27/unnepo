@@ -19,6 +19,7 @@ import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExt
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { handlePostmark, webhookAuthorized } from "@/lib/email/inbound";
+import { emailState, pasteEmail, regenerateAddress, reviewInboxAction } from "@/lib/email/service";
 import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
@@ -216,6 +217,17 @@ async function handle(request: Request, slug: string[]) {
       if (!rateLimit(`add-job:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of jobs in an hour. Try again a bit later.", "rate_limited", 429);
       return json(await addJobByHand(user.id, await request.json()));
     }
+  }
+
+  // Email tracking: the forwarding address, the paste box, and the Review Inbox.
+  if (root === "email") {
+    if (action === "state" && request.method === "GET") return json(await emailState(user.id));
+    if (action === "regenerate" && request.method === "POST") return json(await regenerateAddress(user.id));
+    if (action === "paste" && request.method === "POST") {
+      if (!rateLimit(`email-paste:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of emails in an hour. Try again a bit later.", "rate_limited", 429);
+      return json(await pasteEmail(user.id, await request.json()));
+    }
+    if (action === "review" && request.method === "POST") return json(await reviewInboxAction(user.id, await request.json()));
   }
 
   if (root === "app" && action === "state" && request.method === "GET") {

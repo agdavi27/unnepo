@@ -14,6 +14,7 @@ import { stageOf } from "@/lib/apply/stats";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { POST } from "@/app/api/[...slug]/route";
 import { unwrapForward } from "@/lib/email/inbound";
+import { emailState, parsePasted, pasteEmail } from "@/lib/email/service";
 import { useTempDb } from "./helpers";
 
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(__dirname, "fixtures/emails", `${name}.json`), "utf8")) as InboundEmail & { messageId: string };
@@ -266,5 +267,28 @@ describe("Postmark's webhook", () => {
   it("reads the original sender of an email forwarded by hand", () => {
     const forwarded = unwrapForward({ from: "Pat <pat.doe@gmail.com>", subject: "Fwd: Thank you for applying", text: "---------- Forwarded message ---------\nFrom: P&G Careers <no-reply@pgcareers.com>\nDate: Mon, Nov 2, 2026 at 2:05 PM\nSubject: Thank you for applying to P&G\nTo: <pat.doe@gmail.com>\n\nDear Pat, thank you for applying." });
     expect(forwarded).toMatchObject({ from: "P&G Careers <no-reply@pgcareers.com>", subject: "Thank you for applying to P&G", date: "Mon, Nov 2, 2026 at 2:05 PM" });
+  });
+});
+
+describe("the paste box and the setup page", () => {
+  it("reads a pasted email's own headers, runs it through the same steps, and lists what needs review", async () => {
+    setClassifierForTests(async (email) => email.subject.includes("Globex")
+      ? '{"type":"interview","company":"Globex","job_title":null,"confidence":0.6,"summary":"Maybe an interview."}'
+      : '{"type":"applied","company":"P&G","job_title":null,"confidence":0.93,"summary":"P&G confirmed your application."}');
+    const signed = await signUp({ email: "pat.doe@colby.edu", password: "password123", name: "Pat Doe" });
+    await verifyEmail(signed.verifyToken!);
+    const userId = (await login("pat.doe@colby.edu", "password123")).user.id;
+    const pasted = "From: P&G Careers <no-reply@pgcareers.com>\nSubject: Thank you for applying to P&G\nDate: Mon, 2 Nov 2026 14:05:00 -0500\n\nDear Pat, thank you for applying to Procter & Gamble.";
+    expect(parsePasted(pasted)).toMatchObject({ from: "P&G Careers <no-reply@pgcareers.com>", subject: "Thank you for applying to P&G" });
+    expect((await pasteEmail(userId, { text: pasted })).outcome).toBe("created");
+    expect((await pasteEmail(userId, { text: pasted })).outcome).toBe("duplicate");
+    await pasteEmail(userId, { text: "From: Globex <hr@globex.com>\nSubject: Globex interview\n\nWe'd like to talk about an interview next week." });
+    await processEmail(userId, fixture("gmail-forwarding"), "forward");
+    const state = await emailState(userId);
+    expect(state.address).toMatch(/^u_[a-z2-7]{20}@inbox\.unnepo\.local$/);
+    expect(state.verification).toMatchObject({ provider: "gmail", code: "418923567" });
+    expect(state.review).toHaveLength(1);
+    expect(state.review[0]).toMatchObject({ company: "Globex", reason: "low_confidence" });
+    expect(state.recent[0]).toMatchObject({ outcome: "created", application: { company: "P&G", title: "Unknown role" } });
   });
 });
