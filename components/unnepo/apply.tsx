@@ -57,6 +57,8 @@ const OUTREACH: Array<[OutreachState, string]> = [["not_contacted", "Not contact
 export const STAGE: Record<Stage, { label: string; color: string }> = {
   in_progress: { label: "In progress", color: "#F5A524" },
   submitted: { label: "Submitted", color: "#9A9AA3" },
+  no_response: { label: "No response", color: "#6B6B74" },
+  assessment: { label: "Assessment", color: "#A78BFA" },
   interviewing: { label: "Interviewing", color: "#3D8BFF" },
   offer: { label: "Offer", color: "#4ADE80" },
   rejected: { label: "Rejected", color: "#8B8B94" },
@@ -247,14 +249,15 @@ function StageControl({ app, onChange }: { app: App; onChange: (outcome: Stage) 
         value={stage}
         onChange={(event) => onChange(event.target.value as Stage)}
       >
-        {(["submitted", "interviewing", "offer", "rejected"] as const).map((value) => <option key={value} value={value} className="bg-card text-ink">{STAGE[value].label}</option>)}
+        {/* "No response" is worked out (28 days with no email), so it shows only while it's true. */}
+        {([...(stage === "no_response" ? ["no_response" as const] : []), "submitted", "assessment", "interviewing", "offer", "rejected"] as const).map((value) => <option key={value} value={value} className="bg-card text-ink">{STAGE[value].label}</option>)}
       </select>
       <span aria-hidden className="pointer-events-none absolute right-2 text-[10px] text-faint">▾</span>
     </span>
   );
 }
 
-const FILTERS: Array<["all" | Stage, string]> = [["all", "All"], ["submitted", "Submitted"], ["interviewing", "Interviewing"], ["offer", "Offer"], ["rejected", "Rejected"], ["in_progress", "In progress"]];
+const FILTERS: Array<["all" | Stage, string]> = [["all", "All"], ["submitted", "Submitted"], ["assessment", "Assessment"], ["interviewing", "Interviewing"], ["offer", "Offer"], ["rejected", "Rejected"], ["no_response", "No response"], ["in_progress", "In progress"]];
 
 const UNDO_MS = 5000;
 const deleteNow = (applicationId: string, keepalive = false) =>
@@ -380,6 +383,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
   }
   async function setStage(app: App, stage: Stage) {
     setProblem("");
+    if (stage === "no_response") return;
     const outcome = stage === "submitted" || stage === "in_progress" ? null : stage;
     onReplace({ ...app, fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), outcome } });
     try {
@@ -767,7 +771,7 @@ function AddJobForm({ onDone }: { onDone: (added: boolean) => void | Promise<voi
         <div>
           <label className={label} htmlFor="add-stage">Status</label>
           <select id="add-stage" className={input} value={job.stage} onChange={(event) => set({ stage: event.target.value })}>
-            <option value="applied">Applied</option><option value="in_progress">Not applied yet</option><option value="interviewing">Interviewing</option><option value="offer">Offer</option><option value="rejected">Rejected</option>
+            <option value="applied">Applied</option><option value="in_progress">Not applied yet</option><option value="assessment">Assessment</option><option value="interviewing">Interviewing</option><option value="offer">Offer</option><option value="rejected">Rejected</option>
           </select>
         </div>
         <div><label className={label} htmlFor="add-date">Applied on</label><input id="add-date" type="date" className={input} value={job.appliedOn} max={new Date().toISOString().slice(0, 10)} onChange={(event) => set({ appliedOn: event.target.value })} disabled={job.stage === "in_progress"} /></div>

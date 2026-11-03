@@ -1,15 +1,21 @@
 import type { ApplicationContact, ApplicationOutcome, ApplicationStatus, Ats, JobApplication } from "@/lib/apply/types";
 
 /** What the Applied tracker and Stats page show for one application. */
-export type Stage = "in_progress" | "submitted" | ApplicationOutcome;
+export type Stage = "in_progress" | "submitted" | "no_response" | ApplicationOutcome;
+
+/** Applied, no outcome, and no email about it for this many days: "No response". */
+export const NO_RESPONSE_DAYS = 28;
 
 type Item = Pick<JobApplication, "status" | "ats" | "createdAt" | "submittedAt" | "fillReport"> & { contacts?: Array<Pick<ApplicationContact, "outreachStatus">> };
 
 export const isApplied = (status: ApplicationStatus) => status === "submitted" || status === "applied_manual";
 
-export function stageOf(app: Pick<JobApplication, "status" | "fillReport">): Stage {
+export function stageOf(app: Pick<JobApplication, "status" | "fillReport"> & Partial<Pick<JobApplication, "createdAt" | "submittedAt">>, now = Date.now()): Stage {
   if (!isApplied(app.status)) return "in_progress";
-  return app.fillReport?.outcome ?? "submitted";
+  if (app.fillReport?.outcome) return app.fillReport.outcome;
+  // Worked out when read, so it's always current: the day applied, or the last email about it.
+  const last = Math.max(Date.parse(app.submittedAt ?? app.createdAt ?? "") || 0, Date.parse(app.fillReport?.lastEmailAt ?? "") || 0);
+  return last && now - last > NO_RESPONSE_DAYS * 86_400_000 ? "no_response" : "submitted";
 }
 
 /** The day an application counts for: when it was submitted, else when it was added. */

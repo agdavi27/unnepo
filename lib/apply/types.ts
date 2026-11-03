@@ -95,6 +95,12 @@ export type FillReport = {
   personCharged?: boolean;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
   attempts?: FillAttempt[];
+  /** Every status change, oldest first. */
+  statusHistory?: StatusChange[];
+  /** The last email about this job, for "No response" (none in 28 days). */
+  lastEmailAt?: string;
+  /** Saved from a forwarded email ("added"), or its status changed by one ("updated"): the badge on the Applied list. */
+  fromEmail?: "added" | "updated";
   /** The student's own notes on this job, typed on the Applied page. */
   notes?: string;
   /** When the job's details were last read from its link (to fill in a missing company). */
@@ -112,7 +118,10 @@ export type ActivityEvent = { at: string; kind: "opened" | "filled" | "applied" 
 
 export type MaybeApplied = { id: string; url: string; title: string; company: string; site: string; description?: string; applicationId?: string; at: string };
 
-export type ApplicationOutcome = "interviewing" | "offer" | "rejected";
+export type ApplicationOutcome = "assessment" | "interviewing" | "offer" | "rejected";
+
+/** One change in an application's status, and where it came from: a forwarded email, or the student. */
+export type StatusChange = { at: string; status: ApplicationOutcome | "applied"; source: "email" | "you"; summary: string };
 
 export type Confirmation = {
   url: string;

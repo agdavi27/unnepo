@@ -7,6 +7,11 @@ import { gmailFilterQuery, passesPrefilter, senderDomain, type InboundEmail } fr
 import { forwardingVerification } from "@/lib/email/verification";
 import { parseClassification } from "@/lib/email/classify";
 import { matchApplication, normalizeCompany, sameCompany, sameTitle } from "@/lib/email/match";
+import { processEmail, reviewEmail } from "@/lib/email/process";
+import { setClassifierForTests } from "@/lib/email/classify";
+import { applications } from "@/lib/apply/store";
+import { stageOf } from "@/lib/apply/stats";
+import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { useTempDb } from "./helpers";
 
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(__dirname, "fixtures/emails", `${name}.json`), "utf8")) as InboundEmail & { messageId: string };
@@ -17,6 +22,7 @@ beforeEach(() => {
   delete process.env.INBOUND_EMAIL_BASE;
 });
 afterEach(() => {
+  setClassifierForTests(null);
   delete process.env.INBOUND_EMAIL_DOMAIN;
   delete process.env.INBOUND_EMAIL_BASE;
 });
@@ -123,5 +129,103 @@ describe("matching an email to an application", () => {
   it("finds a job saved before its title was known", () => {
     const apps = [app("5", "P&G", "Unknown role")];
     expect(matchApplication(apps, { company: "Procter & Gamble", jobTitle: "Brand Intern" })).toEqual({ kind: "one", app: apps[0] });
+  });
+});
+
+describe("processing forwarded emails", () => {
+  async function student() {
+    const signed = await signUp({ email: "pat.doe@colby.edu", password: "password123", name: "Pat Doe" });
+    await verifyEmail(signed.verifyToken!);
+    return (await login("pat.doe@colby.edu", "password123")).user.id;
+  }
+  // What the AI would answer for each sample email.
+  const answers: Record<string, string> = {
+    "Thank you for applying to P&G": '{"type":"applied","company":"P&G","job_title":null,"confidence":0.93,"summary":"P&G confirmed your application."}',
+    "Application received: Data Analyst Intern (R-10423)": '{"type":"applied","company":"Acme","job_title":"Data Analyst Intern","confidence":0.95,"summary":"Acme received your Data Analyst Intern application."}',
+    "Your application to Initech": '{"type":"rejected","company":"Initech","job_title":"Growth Intern","confidence":0.9,"summary":"Initech isn\'t moving forward."}',
+    "Interview invitation: Brand Marketing Intern at Globex": '{"type":"interview","company":"Globex","job_title":"Brand Marketing Intern","confidence":0.94,"summary":"Globex wants to set up an interview."}',
+  };
+  let calls = 0;
+  beforeEach(() => {
+    calls = 0;
+    setClassifierForTests(async (email) => {
+      calls += 1;
+      return answers[email.subject] ?? '{"type":"not_job_related","company":"","job_title":null,"confidence":0.9,"summary":"Not about a job."}';
+    });
+  });
+
+  it("saves a confirmation with no title as a new application, once", async () => {
+    const userId = await student();
+    const first = await processEmail(userId, fixture("pg-thank-you"), "forward");
+    expect(first.outcome).toBe("created");
+    const app = await applications.get(userId, first.applicationId!);
+    expect(app).toMatchObject({ company: "P&G", title: "Unknown role", status: "applied_manual" });
+    expect(app?.fillReport?.fromEmail).toBe("added");
+    expect(app?.fillReport?.statusHistory?.[0]).toMatchObject({ status: "applied", source: "email", summary: "P&G confirmed your application." });
+    expect((await processEmail(userId, fixture("pg-thank-you"), "forward")).outcome).toBe("duplicate");
+    expect(calls).toBe(1);
+    expect(await applications.list(userId)).toHaveLength(1);
+  });
+
+  it("confirms a saved job by its title, and moves a job to interviewing", async () => {
+    const userId = await student();
+    const acme = await applications.insert({ userId, jobKey: "k1", jobUrl: "https://acme.example/jobs/1", ats: "other", title: "Data Analyst Intern", company: "Acme, Inc.", companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "extracted", statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0 });
+    const globex = await applications.insert({ ...acme.app, id: undefined as never, createdAt: undefined as never, updatedAt: undefined as never, jobKey: "k2", title: "Brand Marketing Intern", company: "Globex", status: "submitted", submittedAt: "2026-10-20T12:00:00.000Z" });
+    expect((await processEmail(userId, fixture("workday-confirmation"), "forward"))).toMatchObject({ outcome: "updated", applicationId: acme.app.id });
+    expect((await applications.get(userId, acme.app.id))?.status).toBe("applied_manual");
+    expect((await processEmail(userId, fixture("interview-invite"), "forward"))).toMatchObject({ outcome: "updated", applicationId: globex.app.id });
+    const moved = await applications.get(userId, globex.app.id);
+    expect(moved?.fillReport).toMatchObject({ outcome: "interviewing", fromEmail: "updated" });
+    expect(stageOf(moved!)).toBe("interviewing");
+  });
+
+  it("sends a status email about a job that isn't saved to review, and approving saves it", async () => {
+    const userId = await student();
+    const result = await processEmail(userId, fixture("rejection"), "forward");
+    expect(result.outcome).toBe("review");
+    expect(result.event?.reason).toBe("no_match");
+    expect(await applications.list(userId)).toHaveLength(0);
+    const approved = await reviewEmail(userId, { eventId: result.event!.id, action: "approve" });
+    expect(approved.ok).toBe(true);
+    const [app] = await applications.list(userId);
+    expect(app).toMatchObject({ company: "Initech", title: "Growth Intern" });
+    expect(stageOf(app)).toBe("rejected");
+  });
+
+  it("changes nothing when it isn't sure, and lets the student pick when two jobs fit", async () => {
+    const userId = await student();
+    setClassifierForTests(async () => '{"type":"interview","company":"Acme","job_title":null,"confidence":0.55,"summary":"Maybe an interview at Acme."}');
+    const unsure = await processEmail(userId, { ...fixture("interview-invite"), messageId: "<unsure@x>" }, "forward");
+    expect(unsure.event).toMatchObject({ outcome: "review", reason: "low_confidence" });
+    const base = { userId, jobUrl: "https://acme.example/jobs/1", ats: "other" as const, companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "submitted" as const, statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: "2026-10-20T12:00:00.000Z", contactsStatus: "idle" as const, contactsMessage: "", charged: false, attempts: 0 };
+    await applications.insert({ ...base, jobKey: "a1", title: "Data Intern", company: "Acme" });
+    const sales = await applications.insert({ ...base, jobKey: "a2", title: "Sales Intern", company: "Acme" });
+    setClassifierForTests(async () => '{"type":"interview","company":"Acme","job_title":null,"confidence":0.9,"summary":"Acme wants to interview you."}');
+    const several = await processEmail(userId, { ...fixture("interview-invite"), messageId: "<several@x>" }, "forward");
+    expect(several.event).toMatchObject({ outcome: "review", reason: "several_matches" });
+    expect(several.event?.candidates).toHaveLength(2);
+    expect((await reviewEmail(userId, { eventId: several.event!.id, action: "approve" })).ok).toBe(false);
+    expect((await reviewEmail(userId, { eventId: several.event!.id, action: "pick", applicationId: sales.app.id })).ok).toBe(true);
+    expect(stageOf((await applications.get(userId, sales.app.id))!)).toBe("interviewing");
+    expect((await reviewEmail(userId, { eventId: unsure.event!.id, action: "dismiss" })).event?.outcome).toBe("dismissed");
+  });
+
+  it("drops emails that aren't about jobs without asking the AI, and keeps the forwarding code", async () => {
+    const userId = await student();
+    expect((await processEmail(userId, fixture("newsletter"), "forward")).outcome).toBe("dropped");
+    expect(calls).toBe(0);
+    const verify = await processEmail(userId, fixture("gmail-forwarding"), "forward");
+    expect(verify.event?.verification).toMatchObject({ provider: "gmail", code: "418923567" });
+    expect(calls).toBe(0);
+    // Nothing is kept about the newsletter; only the forwarding code is.
+    expect((await emailEvents.list(userId)).map((event) => event.kind)).toEqual(["verification"]);
+  });
+
+  it("marks a job No response after 28 days without an email", () => {
+    const now = Date.parse("2026-11-03T12:00:00.000Z");
+    const applied = { status: "submitted" as const, submittedAt: "2026-10-01T12:00:00.000Z", createdAt: "2026-10-01T12:00:00.000Z", fillReport: null };
+    expect(stageOf(applied, now)).toBe("no_response");
+    expect(stageOf({ ...applied, fillReport: { filled: [], failed: [], liveViewUrl: null, screenshotAt: null, lastEmailAt: "2026-10-20T12:00:00.000Z" } }, now)).toBe("submitted");
+    expect(stageOf({ ...applied, submittedAt: "2026-10-20T12:00:00.000Z" }, now)).toBe("submitted");
   });
 });
