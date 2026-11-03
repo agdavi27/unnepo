@@ -8,6 +8,7 @@ import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
 import { ENTERPRISE_PLAN, FREE_APPLICATIONS, FREE_COVER_LETTERS, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 import { ApplicationSettings, ApplyArea } from "@/components/unnepo/apply";
+import { EmailTracking } from "@/components/unnepo/email-tracking";
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
@@ -24,11 +25,12 @@ type Workspace = {
 };
 
 // Applications are added by the Chrome extension. "Jobs for you" suggests postings that fit the resume.
-type View = "applied" | "stats" | "jobs" | "settings";
+type View = "applied" | "stats" | "jobs" | "email" | "settings";
 const VIEWS: { id: View; label: string }[] = [
   { id: "applied", label: "Applied" },
   { id: "stats", label: "Stats" },
   { id: "jobs", label: "Jobs for you" },
+  { id: "email", label: "Email tracking" },
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
@@ -258,6 +260,7 @@ export function AppHome() {
         )}
         {data && !showOnboarding && (view === "applied" || view === "stats") && <ApplyArea view={view} refreshKey={resumeVersion} />}
         {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
+        {data && !showOnboarding && view === "email" && <EmailTracking />}
         {data && !showOnboarding && view === "settings" && (
           <>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>

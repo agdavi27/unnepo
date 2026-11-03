@@ -415,6 +415,7 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
                         <span className="truncate">{app.titleMissing ? <span className="text-faint">No job title</span> : app.title}</span>
                         <span aria-hidden className="hidden text-faint sm:inline">·</span>
                         <span className="hidden sm:inline-flex"><AtsBadge ats={app.ats} /></span>
+                        {app.fillReport?.fromEmail && <EmailBadge mark={app.fillReport.fromEmail} />}
                       </span>
                       <span className="mt-1 flex items-center gap-2 text-xs text-faint sm:hidden">
                         <AtsBadge ats={app.ats} label />
@@ -786,6 +787,13 @@ function AddJobForm({ onDone }: { onDone: (added: boolean) => void | Promise<voi
   );
 }
 
+/** "Auto-added from email" or "Updated from email": a forwarded email saved or changed this job. */
+function EmailBadge({ mark }: { mark: "added" | "updated" }) {
+  return <span className="shrink-0 rounded-full border border-[#3D8BFF]/50 px-2 py-0.5 text-[11px] font-medium text-[#7FB2FF]" title={mark === "added" ? "Saved from a forwarded email" : "Its status changed from a forwarded email"}>{mark === "added" ? "Auto-added from email" : "Updated from email"}</span>;
+}
+
+const HISTORY_LABEL: Record<string, string> = { applied: "Applied", assessment: "Assessment", interviewing: "Interviewing", offer: "Offer", rejected: "Rejected" };
+
 /**
  * A job's info: what Unnepo knows about it, from the page it was saved from or its link, with the posting and
  * application as links. "Edit" changes any of it; "Fill in from the link" reads the link again for whatever is
@@ -869,6 +877,21 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
               <div key={term} className="contents"><dt className="text-faint">{term}</dt><dd className="min-w-0">{value}</dd></div>
             ))}
           </dl>
+          {app.fillReport?.statusHistory?.length ? (
+            <div className="text-sm">
+              <h4 className="mb-1 text-xs font-medium text-faint">Status history</h4>
+              <ol className="flex flex-col gap-1">
+                {[...app.fillReport.statusHistory].reverse().map((change, index) => (
+                  <li key={`${change.at}-${index}`} className="flex flex-wrap gap-x-2 text-muted">
+                    <span className="w-16 flex-none text-faint tabular-nums">{new Date(change.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+                    <span className="text-ink">{HISTORY_LABEL[change.status] ?? change.status}</span>
+                    <span className="text-faint">{change.source === "email" ? "from email" : "by you"}</span>
+                    {change.source === "email" && change.summary && <span className="min-w-0">· {change.summary}</span>}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          ) : null}
           {app.description.trim() ? (
             <details className="text-sm">
               <summary className="cursor-pointer select-none text-muted hover:text-white">Job description</summary>
