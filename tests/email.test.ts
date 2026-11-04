@@ -223,8 +223,34 @@ describe("processing forwarded emails", () => {
     const verify = await processEmail(userId, fixture("gmail-forwarding"), "forward");
     expect(verify.event?.verification).toMatchObject({ provider: "gmail", code: "418923567" });
     expect(calls).toBe(0);
-    // Nothing is kept about the newsletter; only the forwarding code is.
-    expect((await emailEvents.list(userId)).map((event) => event.kind)).toEqual(["verification"]);
+    // Nothing from the newsletter is kept, only a count; the forwarding code is kept.
+    const events = await emailEvents.list(userId);
+    expect(events.filter((event) => event.outcome !== "skipped").map((event) => event.kind)).toEqual(["verification"]);
+    const count = events.find((event) => event.outcome === "skipped")!;
+    expect(count).toMatchObject({ skippedCount: 1, fromDomain: "", company: "", jobTitle: null, summary: "" });
+    expect(JSON.stringify(count)).not.toContain(fixture("newsletter").subject);
+  });
+
+  it("shows skipped emails on the page: the AI's line for those it read, a count for those dropped before it", async () => {
+    const userId = await student();
+    expect((await emailState(userId)).skipped).toEqual({ read: [], dropped: 0, droppedAt: null });
+
+    const newsletter = fixture("newsletter");
+    await processEmail(userId, newsletter, "forward");
+    await processEmail(userId, { ...newsletter, messageId: "<another-newsletter@example.com>" }, "forward");
+    // Told on the spot, so a pasted one isn't counted.
+    await processEmail(userId, { ...newsletter, messageId: "<pasted@example.com>" }, "paste");
+
+    setClassifierForTests(async () => '{"type":"not_job_related","company":"","job_title":null,"confidence":0.95,"summary":"A job alert listing other roles."}');
+    await processEmail(userId, { ...fixture("workday-confirmation"), messageId: "<alert@example.com>" }, "forward");
+
+    const { skipped, review, recent } = await emailState(userId);
+    expect(skipped.dropped).toBe(2);
+    expect(skipped.droppedAt).toBeTruthy();
+    expect(skipped.read.map((item) => item.summary)).toEqual(["A job alert listing other roles."]);
+    // Skipped emails stay out of the other lists.
+    expect(review).toEqual([]);
+    expect(recent).toEqual([]);
   });
 
   it("marks a job No response after 28 days without an email", () => {

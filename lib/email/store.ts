@@ -99,6 +99,16 @@ export const emailEvents = {
     });
   },
 
+  /** One saved email by its key, however old it is. */
+  async byKey(userId: string, key: string): Promise<EmailEvent | null> {
+    if (onTables()) {
+      const { data, error } = await supabaseTables().from("email_events").select("data").eq("user_id", userId).eq("message_key", key).maybeSingle();
+      if (error) throw tableError(error);
+      return (data?.data as EmailEvent | undefined) ?? null;
+    }
+    return withLock((db) => (db.emailEvents ?? []).find((row) => row.userId === userId && row.messageKey === key) ?? null);
+  },
+
   async list(userId: string, limit = 100): Promise<EmailEvent[]> {
     if (onTables()) {
       const { data, error } = await supabaseTables().from("email_events").select("data").eq("user_id", userId).order("created_at", { ascending: false }).limit(limit);

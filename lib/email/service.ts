@@ -2,16 +2,17 @@ import { ServiceError } from "@/lib/errors";
 import { applications } from "@/lib/apply/store";
 import { addressFor, inboundReady } from "@/lib/email/address";
 import { ATS_DOMAINS, JOB_PHRASES, gmailFilterQuery, type InboundEmail } from "@/lib/email/filter";
-import { processEmail, reviewEmail } from "@/lib/email/process";
+import { SKIPPED_KEY, processEmail, reviewEmail } from "@/lib/email/process";
 import { emailEvents, emailInboxes } from "@/lib/email/store";
 import { unwrapForward } from "@/lib/email/inbound";
 
 /** What the Email tracking page shows, and what it can do: regenerate the address, paste an email, review. */
 
 const VERIFICATION_DAYS = 3;
+const SKIPPED_SHOWN = 5;
 
 export async function emailState(userId: string) {
-  const [inbox, events, apps] = await Promise.all([emailInboxes.forUser(userId), emailEvents.list(userId, 200), applications.list(userId)]);
+  const [inbox, events, apps, count] = await Promise.all([emailInboxes.forUser(userId), emailEvents.list(userId, 200), applications.list(userId), emailEvents.byKey(userId, SKIPPED_KEY)]);
   const name = new Map(apps.map((app) => [app.id, { id: app.id, title: app.title, company: app.company }]));
   // The newest forwarding confirmation from the last few days: its code and link, to finish setting up.
   const verification = events.find((event) => event.outcome === "verification" && Date.now() - Date.parse(event.createdAt) < VERIFICATION_DAYS * 86_400_000);
@@ -29,6 +30,13 @@ export async function emailState(userId: string) {
     verification: verification?.verification ? { ...verification.verification, at: verification.createdAt } : null,
     review: events.filter((event) => event.outcome === "review").map(show),
     recent: events.filter((event) => ["created", "updated", "approved"].includes(event.outcome)).slice(0, 20).map(show),
+    // Emails that arrived but weren't about a job, so the student knows they got here. The AI's one line for those
+    // it read; only a count and a time for those dropped before it.
+    skipped: {
+      read: events.filter((event) => event.outcome === "ignored").slice(0, SKIPPED_SHOWN).map((event) => ({ id: event.id, at: event.receivedAt, summary: event.summary })),
+      dropped: count?.skippedCount ?? 0,
+      droppedAt: count?.receivedAt ?? null,
+    },
     // Every open application, for "Pick application".
     applications: apps.filter((app) => app.status === "submitted" || app.status === "applied_manual").map((app) => ({ id: app.id, title: app.title, company: app.company })),
   };

@@ -12,6 +12,7 @@ export type EmailOutcome =
   | "approved" // the student approved it from the Review Inbox
   | "dismissed" // the student dismissed it
   | "ignored" // not about a job application
+  | "skipped" // the one running count of emails dropped before the AI: holds a number and a time, nothing from any email
   | "verification"; // Gmail's or Outlook's forwarding confirmation
 
 /**
@@ -36,6 +37,8 @@ export type EmailEvent = {
   reason?: "low_confidence" | "several_matches" | "no_match";
   /** The jobs it could be, for "Pick application". */
   candidates?: string[];
+  /** On the "skipped" row: how many emails were dropped before the AI read them. */
+  skippedCount?: number;
   /** The forwarding confirmation's code and link, shown on the setup page until it's confirmed. */
   verification?: { provider: "gmail" | "outlook"; code: string | null; link: string | null };
   createdAt: string;

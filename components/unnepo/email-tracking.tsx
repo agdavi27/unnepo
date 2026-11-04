@@ -18,6 +18,7 @@ type State = {
   address: string; ready: boolean; gmailQuery: string; atsDomains: string[]; phrases: string[];
   verification: { provider: "gmail" | "outlook"; code: string | null; link: string | null; at: string } | null;
   review: Item[]; recent: Item[]; applications: Named[];
+  skipped: { read: Array<{ id: string; at: string; summary: string }>; dropped: number; droppedAt: string | null };
 };
 
 const btn = "inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
@@ -280,6 +281,27 @@ export function EmailTracking() {
             ))}
           </ul>
         ) : <p className="mt-4 text-sm text-faint">No changes from email yet.</p>}
+      </section>
+
+      <section className={card} aria-labelledby="skipped">
+        <h2 id="skipped" className="text-lg font-semibold">Skipped emails</h2>
+        <p className="mt-1 text-sm text-muted">These reached Unnepo but didn&apos;t look like they were about a job application, so your tracker didn&apos;t change.</p>
+        {state.skipped.read.length || state.skipped.dropped ? (
+          <ul className="mt-4 flex flex-col divide-y divide-line rounded-xl border border-line">
+            {state.skipped.read.map((item) => (
+              <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 text-sm">
+                <span className="min-w-0">{item.summary || "Not about a job application."}</span>
+                <span className="text-xs text-faint tabular-nums">{when(item.at)}</span>
+              </li>
+            ))}
+            {state.skipped.dropped > 0 && (
+              <li className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3 text-sm">
+                <span className="min-w-0">{state.skipped.dropped === 1 ? "1 email" : `${state.skipped.dropped} emails`} with no job words. Nothing from {state.skipped.dropped === 1 ? "it" : "them"} was kept.</span>
+                {state.skipped.droppedAt && <span className="text-xs text-faint tabular-nums">Last: {when(state.skipped.droppedAt)}</span>}
+              </li>
+            )}
+          </ul>
+        ) : <p className="mt-4 text-sm text-faint">No skipped emails yet.</p>}
       </section>
       {problem && <p role="alert" className="text-sm text-red-300">{problem}</p>}
     </div>

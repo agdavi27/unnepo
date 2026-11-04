@@ -25,6 +25,19 @@ const OUTCOME_FOR: Record<Exclude<Classification["type"], "applied" | "not_job_r
   interview: "interviewing", assessment: "assessment", offer: "offer", rejected: "rejected",
 };
 
+// One row per student, however many emails are dropped, so it can't push real emails out of the list.
+export const SKIPPED_KEY = "skipped-count";
+
+/** Counts a dropped email: only a number and the time. Its sender, subject and text aren't kept. */
+async function countSkipped(userId: string, at: string) {
+  const row = await emailEvents.byKey(userId, SKIPPED_KEY);
+  if (row) {
+    await emailEvents.update(userId, row.id, { skippedCount: (row.skippedCount ?? 0) + 1, receivedAt: at });
+    return;
+  }
+  await emailEvents.add({ userId, messageKey: SKIPPED_KEY, receivedAt: at, source: "forward", fromDomain: "", kind: "not_job_related", company: "", jobTitle: null, confidence: 0, summary: "", outcome: "skipped", applicationId: null, skippedCount: 1 });
+}
+
 export type Processed = { outcome: EmailEvent["outcome"] | "duplicate" | "dropped"; event?: EmailEvent; applicationId?: string | null };
 
 /** A key for an email with no Message-ID (one pasted in): its sender, subject, date and text. */
@@ -116,8 +129,12 @@ export async function processEmail(userId: string, email: InboundEmail, source: 
       summary: verification.provider === "gmail" ? "Gmail sent a code to confirm forwarding." : "Outlook sent a code to confirm forwarding." });
     return event ? { outcome: "verification", event } : { outcome: "duplicate" };
   }
-  // Not about a job: dropped now, and nothing about it is kept.
-  if (!passesPrefilter(email)) return { outcome: "dropped" };
+  // Not about a job: dropped now, and nothing from it is kept. A forwarded one adds to a count, so the page can
+  // show it arrived. A pasted one doesn't need to: the student is told on the spot.
+  if (!passesPrefilter(email)) {
+    if (source === "forward") await countSkipped(userId, at);
+    return { outcome: "dropped" };
+  }
 
   const job = await classifyEmail(email);
   const fields = { kind: job.type, company: cleanCompanyName(job.company) || job.company, jobTitle: job.job_title, confidence: job.confidence, summary: job.summary };
