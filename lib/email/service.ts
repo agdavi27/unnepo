@@ -16,6 +16,7 @@ export async function emailState(userId: string) {
   const name = new Map(apps.map((app) => [app.id, { id: app.id, title: app.title, company: app.company }]));
   // The newest forwarding confirmation from the last few days: its code and link, to finish setting up.
   const verification = events.find((event) => event.outcome === "verification" && Date.now() - Date.parse(event.createdAt) < VERIFICATION_DAYS * 86_400_000);
+  const lastEmail = events.find((event) => event.source === "forward" && event.outcome !== "verification" && event.messageKey !== SKIPPED_KEY);
   const show = (event: (typeof events)[number]) => ({
     id: event.id, at: event.receivedAt, kind: event.kind, company: event.company, jobTitle: event.jobTitle, confidence: event.confidence, summary: event.summary,
     outcome: event.outcome, reason: event.reason ?? null, source: event.source, application: event.applicationId ? name.get(event.applicationId) ?? null : null,
@@ -26,6 +27,8 @@ export async function emailState(userId: string) {
     ready: inboundReady(),
     // Any forwarded email at all, the forwarding code or a skipped one included: forwarding works.
     forwarded: events.some((event) => event.source === "forward") || Boolean(count),
+    // The newest real email forwarded in (not the forwarding code): the setup's test looks for a new one.
+    lastEmail: lastEmail ? { id: lastEmail.id, at: lastEmail.createdAt, outcome: lastEmail.outcome, company: lastEmail.company, jobTitle: lastEmail.jobTitle, summary: lastEmail.summary } : null,
     gmailQuery: gmailFilterQuery(),
     atsDomains: ATS_DOMAINS,
     phrases: JOB_PHRASES,

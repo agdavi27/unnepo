@@ -312,6 +312,20 @@ describe("processing forwarded emails", () => {
     expect((await emailState(userId)).forwarded).toBe(true);
   });
 
+  it("tells the setup's test about real emails, not the forwarding code", async () => {
+    const userId = await student();
+    await processEmail(userId, fixture("gmail-forwarding"), "forward");
+    const coded = await emailState(userId);
+    expect(coded.lastEmail).toBeNull();
+    expect(coded.skipped.dropped).toBe(0);
+    await processEmail(userId, fixture("newsletter"), "forward");
+    const dropped = await emailState(userId);
+    expect(dropped.lastEmail).toBeNull();
+    expect(dropped.skipped.dropped).toBe(1);
+    await processEmail(userId, fixture("pg-thank-you"), "forward");
+    expect((await emailState(userId)).lastEmail).toMatchObject({ outcome: "created" });
+  });
+
   it("marks a job No response after 28 days without an email", () => {
     const now = Date.parse("2026-11-03T12:00:00.000Z");
     const applied = { status: "submitted" as const, submittedAt: "2026-10-01T12:00:00.000Z", createdAt: "2026-10-01T12:00:00.000Z", fillReport: null };

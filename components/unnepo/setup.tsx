@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApplyData } from "@/components/unnepo/apply";
 import { EmailTracking } from "@/components/unnepo/email-tracking";
 import { FollowUpFacts } from "@/components/unnepo/follow-up-facts";
@@ -8,41 +8,22 @@ import { stageOf } from "@/lib/apply/stats";
 import { spiderSvg, wornSkin } from "@/lib/spiders";
 
 /**
- * The Setup tab: how Unnepo works, then a thread with three steps that fills as each is done, with the spider at
- * the first one left. The steps are Autofill answers, Email tracking and Follow-up contacts.
+ * The Setup tab: three parts, one on screen at a time, picked from the pills at the top. It opens on the first one
+ * left to do. The parts are Autofill answers, Email tracking and Follow-up contacts.
  */
 
-type Status = "done" | "next" | "later";
-const ACCENT = "#3D8BFF";
+type Part = "answers" | "email" | "people";
+const PARTS: Array<{ id: Part; label: string }> = [{ id: "answers", label: "Autofill answers" }, { id: "email", label: "Email tracking" }, { id: "people", label: "Follow-up contacts" }];
+const heading = "m-0 text-[32px] font-extrabold leading-[1.05] tracking-[-1.2px] sm:text-[40px] sm:tracking-[-1.4px]";
+const intro = "m-0 max-w-[640px] text-base leading-normal text-[#9A9AA3]";
+const card = "flex min-w-0 flex-col gap-4 rounded-[20px] border border-[#26262C] bg-[#0C0C0E] p-5 sm:p-7";
+const nextButton = "h-11 self-start rounded-[11px] bg-[#F7F7F8] px-[18px] text-sm font-semibold text-[#070708] hover:bg-white";
 
 async function call<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const response = await fetch(`/api/apply${path}`, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error || `Something went wrong (${response.status}).`);
   return payload as T;
-}
-
-function Step({ id, number, title, status, tag, tagColor, intro, spider, children }: { id: string; number: number; title: string; status: Status; tag?: string; tagColor?: string; intro: string; spider: string; children: ReactNode }) {
-  const current = status === "next";
-  return (
-    <section aria-labelledby={id} className={`relative flex min-w-0 flex-col gap-4 rounded-2xl border p-4 sm:p-6 ${current ? "border-[#3D8BFF] bg-[#0C0C0E]" : "border-[#1F1F24]"}`}>
-      {current ? (
-        <div aria-hidden className="dash-bob absolute -left-[46px] top-3 h-[30px] w-10 sm:-left-[68px]" dangerouslySetInnerHTML={{ __html: spider }} />
-      ) : status === "done" ? (
-        <span aria-hidden className="absolute -left-[41px] top-[22px] flex h-[30px] w-[30px] items-center justify-center rounded-full bg-[#3D8BFF] text-white sm:-left-[63px]">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>
-        </span>
-      ) : (
-        <span aria-hidden className="absolute -left-[41px] top-[22px] flex h-[30px] w-[30px] items-center justify-center rounded-full border-2 border-[#26262C] bg-[#070708] text-xs font-semibold text-[#8B8B94] sm:-left-[63px]">{number}</span>
-      )}
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 id={id} className="m-0 text-xl font-bold">{number}. {title}</h2>
-        <span className="font-mono text-[11px] uppercase tracking-[1.2px]" style={{ color: tagColor ?? (status === "done" ? "#4ADE80" : current ? ACCENT : "#8B8B94") }}>{tag ?? (status === "done" ? "Done" : current ? "Next" : "To do")}</span>
-      </div>
-      <p className="m-0 text-sm leading-normal text-[#9A9AA3]">{intro}</p>
-      {children}
-    </section>
-  );
 }
 
 /** One saved answer: what the extension types when a form asks this question. */
@@ -96,7 +77,8 @@ export function SetupPage({ resume, completeness, resumeBusy, onReplaceResume, o
   const [data, setData] = useState<ApplyData | null>(null);
   const [problem, setProblem] = useState("");
   const [note, setNote] = useState("");
-  const [email, setEmail] = useState({ forwarded: false, toReview: 0 });
+  const [email, setEmail] = useState<{ received: boolean; toReview: number } | null>(null);
+  const [picked, setPicked] = useState<Part | null>(null);
   const [finding, setFinding] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const load = useCallback(async () => {
@@ -154,70 +136,92 @@ export function SetupPage({ resume, completeness, resumeBusy, onReplaceResume, o
     }
   }
 
-  const statusDone = [Boolean(data.ready.profile), email.forwarded, autoPeople || (applied.length > 0 && noPeople.length === 0)];
-  const doneCount = statusDone.filter(Boolean).length;
-  const first = statusDone.indexOf(false);
-  const status = (index: number): Status => (statusDone[index] ? "done" : index === first ? "next" : "later");
+  const done: Record<Part, boolean> = { answers: Boolean(data.ready.profile), email: Boolean(email?.received), people: Boolean(autoPeople) || (applied.length > 0 && noPeople.length === 0) };
+  // Waits for the email state, so it doesn't open on Email tracking and then jump past it.
+  const opening: Part | null = !email ? null : email.toReview ? "email" : PARTS.find((item) => !done[item.id])?.id ?? "answers";
+  const part = picked ?? opening;
+  const open = (next: Part) => { setPicked(next); window.scrollTo({ top: 0 }); };
   const look = { skin: wornSkin(data.profile.spiderSkin ?? null, applied.length), school: data.school };
-  const spider = spiderSvg(look, { size: 40 });
+  const spider = spiderSvg(look, { size: 80 });
   const answers = Object.entries(data.profile.saved ?? {});
   const shownAnswers = showAll ? answers : answers.slice(0, 6);
   const check = "mt-0.5 h-4 w-4 flex-none accent-[#3D8BFF]";
   const toggleLabel = "flex items-start gap-2.5 text-[13px] leading-normal text-[#9A9AA3]";
 
   return (
-    <div className="mx-auto flex w-full max-w-[960px] flex-col gap-10 pt-4 sm:pt-8">
-      <div className="flex flex-col gap-3">
-        <span className="font-mono text-xs uppercase tracking-[2px] text-[#8B8B94]">Setup · {doneCount} of 3 done</span>
-        <h1 className="m-0 text-4xl font-extrabold leading-none tracking-[-1.6px] sm:text-[44px]">Spin your web once.<br /><span style={{ color: ACCENT }}>Unnepo does the rest.</span></h1>
-        <p className="m-0 max-w-[620px] text-base leading-relaxed text-[#9A9AA3]">How it works: the extension fills applications from your answers, forwarded emails keep each job&apos;s stage up to date, and Unnepo finds the people to follow up with. <a href="/demo" className="text-[#F7F7F8] underline underline-offset-4 hover:text-white">See it in action</a></p>
-      </div>
+    <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-7 pt-4 sm:pt-8">
+      <nav aria-label="Setup" className="flex flex-wrap gap-2 text-[13px]">
+        {PARTS.map((item, index) => {
+          const now = part === item.id;
+          return (
+            <button key={item.id} type="button" aria-current={now ? "step" : undefined} onClick={() => open(item.id)} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 hover:text-white ${now ? "border-[#3D8BFF] text-[#F7F7F8]" : done[item.id] ? "border-[#26262C] text-[#9A9AA3]" : "border-[#26262C] text-[#8B8B94]"}`}>
+              {done[item.id] ? <span className="text-[#4ADE80]">✓<span className="sr-only"> Done:</span></span> : <span className={`font-mono ${now ? "text-[#3D8BFF]" : ""}`}>{index + 1}</span>}
+              {item.label}
+              {item.id === "email" && Boolean(email?.toReview) && <span className="text-[#F5A524]">{email?.toReview} to review</span>}
+            </button>
+          );
+        })}
+      </nav>
       {note && <p role="status" className="m-0 text-sm text-[#9A9AA3]">{note}</p>}
       {problem && <p role="alert" className="m-0 text-sm text-red-300">{problem}</p>}
+      {!part && <p className="m-0 text-sm text-muted">Loading your setup…</p>}
 
-      <div className="relative flex flex-col gap-7 pl-[50px] sm:pl-[72px]">
-        <div aria-hidden className="absolute bottom-2 left-[23px] top-2 w-0.5 bg-[#26262C]" />
-        <div aria-hidden className="absolute left-[23px] top-2 w-0.5 transition-[height] motion-reduce:transition-none" style={{ height: `calc((100% - 16px) * ${doneCount / 3})`, background: ACCENT }} />
-
-        <Step id="setup-answers" number={1} title="Autofill answers" status={status(0)} spider={spider} intro="What the extension types into applications. Edit any answer and it's used on the next form.">
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#26262C] bg-[#0C0C0E] px-3.5 py-3">
-            <span className="min-w-0 flex-1 basis-48 text-sm">{resume?.fileName ?? "No resume yet"} <span className="text-[#8B8B94]">· profile {completeness}% ready</span></span>
-            <span className="flex flex-wrap items-center gap-2">
-              <label className={`inline-flex h-[34px] cursor-pointer items-center rounded-[9px] border border-[#26262C] px-3 text-[13px] font-medium hover:bg-white/5 focus-within:outline focus-within:outline-2 focus-within:outline-[#3D8BFF] ${resumeBusy ? "pointer-events-none opacity-60" : ""}`}>
-                {resumeBusy ? "Uploading…" : resume ? "Replace resume" : "Attach resume"}
-                <input type="file" className="sr-only" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={resumeBusy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onReplaceResume(file); }} />
-              </label>
-              <button type="button" onClick={onEditProfile} className="h-[34px] rounded-[9px] border border-[#26262C] px-3 text-[13px] font-medium hover:bg-white/5">Edit my info</button>
-            </span>
+      {part === "answers" && (
+        <>
+          <div className="flex flex-col gap-2">
+            <h1 className={heading}>Fill every form from one set of answers.</h1>
+            <p className={intro}>What the extension types into applications. Edit any answer and it&apos;s used on the next form. <a href="/demo" className="text-[#F7F7F8] underline underline-offset-4 hover:text-white">See it in action</a></p>
           </div>
-          {answers.length ? (
-            <div className="flex flex-col">
-              {shownAnswers.map(([key, item]) => <SavedAnswer key={key} itemKey={key} label={item.label} answer={item.answer} onSave={(answerKey, answer) => saveProfile({ savedAnswer: { key: answerKey, answer } })} />)}
-              {answers.length > 6 && <button type="button" onClick={() => setShowAll((on) => !on)} className="self-start border-t-0 py-2 text-xs text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline">{showAll ? "Show fewer" : `Show all ${answers.length}`}</button>}
+          <section className={card} aria-label="Autofill answers">
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#26262C] bg-[#070708] px-3.5 py-3">
+              <span className="min-w-0 flex-1 basis-48 text-sm">{resume?.fileName ?? "No resume yet"} <span className="text-[#8B8B94]">· profile {completeness}% ready</span></span>
+              <span className="flex flex-wrap items-center gap-2">
+                <label className={`inline-flex h-[34px] cursor-pointer items-center rounded-[9px] border border-[#26262C] px-3 text-[13px] font-medium hover:bg-white/5 focus-within:outline focus-within:outline-2 focus-within:outline-[#3D8BFF] ${resumeBusy ? "pointer-events-none opacity-60" : ""}`}>
+                  {resumeBusy ? "Uploading…" : resume ? "Replace resume" : "Attach resume"}
+                  <input type="file" className="sr-only" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" disabled={resumeBusy} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) onReplaceResume(file); }} />
+                </label>
+                <button type="button" onClick={onEditProfile} className="h-[34px] rounded-[9px] border border-[#26262C] px-3 text-[13px] font-medium hover:bg-white/5">Edit my info</button>
+              </span>
             </div>
-          ) : <p className="m-0 text-[13px] text-[#8B8B94]">No saved answers yet. Questions you answer on application forms show up here.</p>}
-          <label className={toggleLabel}>
-            <input type="checkbox" className={check} checked={consent} onChange={(event) => void toggle({ accountConsent: event.target.checked })} />
-            <span>Accept job sites&apos; terms, privacy notices, and acknowledgements on my behalf when an application asks. Arbitration, background-check, and non-compete agreements are always left for me, and Unnepo never opts me into marketing.</span>
-          </label>
-        </Step>
+            {answers.length ? (
+              <div className="flex flex-col">
+                {shownAnswers.map(([key, item]) => <SavedAnswer key={key} itemKey={key} label={item.label} answer={item.answer} onSave={(answerKey, answer) => saveProfile({ savedAnswer: { key: answerKey, answer } })} />)}
+                {answers.length > 6 && <button type="button" onClick={() => setShowAll((on) => !on)} className="self-start border-t-0 py-2 text-xs text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline">{showAll ? "Show fewer" : `Show all ${answers.length}`}</button>}
+              </div>
+            ) : <p className="m-0 text-[13px] text-[#8B8B94]">No saved answers yet. Questions you answer on application forms show up here.</p>}
+            <label className={toggleLabel}>
+              <input type="checkbox" className={check} checked={consent} onChange={(event) => void toggle({ accountConsent: event.target.checked })} />
+              <span>Accept job sites&apos; terms, privacy notices, and acknowledgements on my behalf when an application asks. Arbitration, background-check, and non-compete agreements are always left for me, and Unnepo never opts me into marketing.</span>
+            </label>
+            <button type="button" onClick={() => open("email")} className={nextButton}>Next: email tracking →</button>
+          </section>
+        </>
+      )}
 
-        <Step id="setup-email" number={2} title="Email tracking" status={status(1)} spider={spider} tag={email.toReview ? `${email.toReview} to review` : undefined} tagColor={email.toReview ? "#F5A524" : undefined} intro="Keep applying with your own email. Forward job emails to your Unnepo address and each application's stage updates on its own.">
-          <EmailTracking onState={setEmail} />
-        </Step>
-
-        <Step id="setup-people" number={3} title="Follow-up contacts" status={status(2)} spider={spider} intro="Unnepo looks up the company's email format, finds recruiters and the team behind the role, and drafts a short note you send from your own inbox.">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <p className="m-0 text-[28px] font-bold leading-tight tracking-[-1px] tabular-nums">{followed} <span className="text-[15px] font-medium tracking-normal text-[#8B8B94]">of {applied.length} followed up</span></p>
-            {applied.length > 0 && <FollowUpFacts applied={applied} school={data.school} onOpen={onOpenJob} />}
-          </div>
-          <label className={toggleLabel}>
-            <input type="checkbox" className={check} checked={Boolean(autoPeople)} onChange={(event) => void toggle({ autoFindPeople: event.target.checked })} />
-            <span>Find people as soon as a job is marked applied, so the list is ready when I open it. 1 credit per job, only when someone with an email is found.</span>
-          </label>
-          {noPeople.length > 0 && <button type="button" disabled={finding} onClick={() => void findForAll()} className="h-11 self-start rounded-[11px] bg-[#F7F7F8] px-[18px] text-sm font-semibold text-[#070708] hover:bg-white disabled:opacity-50">{finding ? "Starting…" : `Find people for ${noPeople.length} ${noPeople.length === 1 ? "job" : "jobs"}`}</button>}
-        </Step>
+      {/* Stays mounted on the other parts: it reports the pill's state and keeps its place in the wizard. */}
+      <div hidden={part !== "email"}>
+        <EmailTracking applyEmail={data.profile.email} spider={spider} onState={setEmail} onNext={() => open("people")} />
       </div>
+
+      {part === "people" && (
+        <>
+          <div className="flex flex-col gap-2">
+            <h1 className={heading}>Know who to follow up with.</h1>
+            <p className={intro}>Unnepo looks up the company&apos;s email format, finds recruiters and the team behind the role, and drafts a short note you send from your own inbox.</p>
+          </div>
+          <section className={card} aria-label="Follow-up contacts">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <p className="m-0 text-[28px] font-bold leading-tight tracking-[-1px] tabular-nums">{followed} <span className="text-[15px] font-medium tracking-normal text-[#8B8B94]">of {applied.length} followed up</span></p>
+              {applied.length > 0 && <FollowUpFacts applied={applied} school={data.school} onOpen={onOpenJob} />}
+            </div>
+            <label className={toggleLabel}>
+              <input type="checkbox" className={check} checked={Boolean(autoPeople)} onChange={(event) => void toggle({ autoFindPeople: event.target.checked })} />
+              <span>Find people as soon as a job is marked applied, so the list is ready when I open it. 1 credit per job, only when someone with an email is found.</span>
+            </label>
+            {noPeople.length > 0 && <button type="button" disabled={finding} onClick={() => void findForAll()} className={`${nextButton} disabled:opacity-50`}>{finding ? "Starting…" : `Find people for ${noPeople.length} ${noPeople.length === 1 ? "job" : "jobs"}`}</button>}
+          </section>
+        </>
+      )}
     </div>
   );
 }

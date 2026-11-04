@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AddressRow, CopyButton, EmailWizard, guessProvider, type Progress, type Provider } from "@/components/unnepo/email-wizard";
 
 /**
- * Step 2 of Setup: the student's own forwarding address, step-by-step guides for setting up a forwarding rule in
- * Gmail, Outlook and Yahoo/AOL, the forwarding confirmation code once it arrives, the Review Inbox for what Unnepo
- * wasn't sure about, a box to paste an email by hand, and what emails changed lately.
+ * The Email tracking part of Setup. Until forwarding is set up, the step-by-step wizard. After that: the student's
+ * address, the Review Inbox for what Unnepo wasn't sure about, a box to paste an email by hand, and what emails
+ * changed lately. Where they are in the wizard is kept in this browser, so going off to Gmail or reloading keeps it.
  */
 
 type Named = { id: string; title: string; company: string };
@@ -14,8 +15,10 @@ type Item = {
   outcome: string; reason: "low_confidence" | "several_matches" | "no_match" | null; source: "forward" | "paste";
   application: Named | null; candidates: Named[];
 };
-type State = {
-  address: string; ready: boolean; forwarded: boolean; gmailQuery: string; atsDomains: string[]; phrases: string[];
+export type State = {
+  address: string; ready: boolean; forwarded: boolean;
+  lastEmail: { id: string; at: string; outcome: string; company: string; jobTitle: string | null; summary: string } | null;
+  gmailQuery: string; atsDomains: string[]; phrases: string[];
   verification: { provider: "gmail" | "outlook"; code: string | null; link: string | null; at: string } | null;
   review: Item[]; recent: Item[]; applications: Named[];
   skipped: { read: Array<{ id: string; at: string; summary: string }>; dropped: number; droppedAt: string | null };
@@ -24,7 +27,7 @@ type State = {
 const btn = "inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 const primary = `${btn} bg-white text-black hover:bg-zinc-200`;
 const secondary = `${btn} border border-line bg-transparent text-ink hover:bg-white/5`;
-const part = "flex flex-col gap-3 border-t border-[#17171B] pt-4";
+const part = "flex flex-col gap-3 rounded-2xl border border-[#1F1F24] p-5";
 const partTitle = "m-0 text-sm font-semibold";
 
 async function call<T>(path: string, method = "GET", body?: unknown): Promise<T> {
@@ -34,27 +37,6 @@ async function call<T>(path: string, method = "GET", body?: unknown): Promise<T>
   return payload as T;
 }
 
-function CopyButton({ text, label = "Copy", primary: solid = false }: { text: string; label?: string; primary?: boolean }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      type="button"
-      className={solid ? "h-[34px] rounded-[9px] bg-[#F7F7F8] px-3 text-[13px] font-semibold text-[#070708] hover:bg-white" : secondary}
-      onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(text);
-          setDone(true);
-          setTimeout(() => setDone(false), 1800);
-        } catch {
-          setDone(false);
-        }
-      }}
-    >
-      {done ? "Copied" : label}
-    </button>
-  );
-}
-
 const KIND: Record<string, string> = { applied: "Applied", incomplete: "Not finished", interview: "Interview", assessment: "Assessment", offer: "Offer", rejected: "Rejected", not_job_related: "Not about a job" };
 const REASON: Record<string, string> = {
   low_confidence: "Unnepo wasn't sure what this email says.",
@@ -62,50 +44,6 @@ const REASON: Record<string, string> = {
   no_match: "No saved application matches. Approve to save it as a new one, or pick one.",
 };
 const when = (at: string) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-
-function Guides({ state }: { state: State }) {
-  const [tab, setTab] = useState<"gmail" | "outlook" | "yahoo">("gmail");
-  const step = (n: number, body: React.ReactNode) => (
-    <li className="flex gap-3"><span className="flex h-6 w-6 flex-none items-center justify-center rounded-full border border-line text-xs tabular-nums text-muted">{n}</span><div className="min-w-0 flex-1 text-[13px] leading-relaxed text-[#B4B4BC]">{body}</div></li>
-  );
-  const code = (text: string) => <code className="break-all rounded bg-card px-1.5 py-0.5 font-mono text-xs text-ink">{text}</code>;
-  return (
-    <section className="flex flex-col gap-1" aria-label="Set up forwarding">
-      <div className="flex w-fit max-w-full flex-wrap rounded-[9px] border border-[#26262C] p-0.5" role="group" aria-label="Your email">
-        {([["gmail", "Gmail"], ["outlook", "Outlook"], ["yahoo", "Yahoo / AOL"]] as const).map(([id, label]) => (
-          <button key={id} type="button" aria-pressed={tab === id} onClick={() => setTab(id)} className={`h-[30px] rounded-[7px] px-3 text-xs font-medium ${tab === id ? "bg-[#F7F7F8] text-[#070708]" : "text-[#9A9AA3] hover:text-white"}`}>{label}</button>
-        ))}
-      </div>
-      {tab === "gmail" && (
-        <ol className="mt-3 flex flex-col gap-3 p-0">
-          {step(1, <>In Gmail, open <strong>Settings</strong> (the gear) → <strong>See all settings</strong> → <strong>Forwarding and POP/IMAP</strong> → <strong>Add a forwarding address</strong>. Paste your Unnepo address, then press Next and Proceed.</>)}
-          {step(2, <>Gmail sends a confirmation code to Unnepo. <strong>It shows up above these steps</strong> within a minute. Type it into Gmail and press <strong>Verify</strong>. Leave &ldquo;Disable forwarding&rdquo; selected: only job emails should go to Unnepo.</>)}
-          {step(3, <><div>Make a filter. Click the sliders at the right of Gmail&apos;s search bar, and paste this into <strong>Has the words</strong>:</div><div className="mt-2 flex flex-wrap items-start gap-2">{code(state.gmailQuery)}<CopyButton text={state.gmailQuery} label="Copy search" /></div></>)}
-          {step(4, <>Press <strong>Create filter</strong>, tick <strong>Forward it to</strong>, choose your Unnepo address, and press <strong>Create filter</strong>. New job emails now go to Unnepo too. Older ones don&apos;t: paste those below.</>)}
-        </ol>
-      )}
-      {tab === "outlook" && (
-        <ol className="mt-3 flex flex-col gap-3 p-0">
-          {step(1, <>In Outlook.com, open <strong>Settings</strong> (the gear) → <strong>Mail</strong> → <strong>Rules</strong> → <strong>Add new rule</strong>. Name it &ldquo;Unnepo jobs&rdquo;.</>)}
-          {step(2, <><div>Condition: <strong>From</strong> → <strong>Sender address includes</strong>, and add each of these:</div><div className="mt-2 flex flex-wrap items-start gap-2">{code(state.atsDomains.join(", "))}<CopyButton text={state.atsDomains.join("\n")} label="Copy list" /></div></>)}
-          {step(3, <>Action: <strong>Forward to</strong> → paste your Unnepo address. Save the rule.</>)}
-          {step(4, <><div>Make a second rule the same way, with the condition <strong>Subject or body includes</strong> and these phrases:</div><div className="mt-2 flex flex-wrap items-start gap-2">{code(state.phrases.map((phrase) => `"${phrase}"`).join(", "))}<CopyButton text={state.phrases.join("\n")} label="Copy phrases" /></div></>)}
-          {step(5, <>If Outlook asks to confirm the forwarding address, the code shows up above these steps.</>)}
-          <li className="rounded-xl border border-[#F5A524]/40 bg-[#F5A524]/5 px-4 py-3 text-sm text-zinc-300"><strong className="text-[#F5A524]">School or work email?</strong> Microsoft 365 accounts from schools and companies often block forwarding outside the organization. If the rule doesn&apos;t forward, apply with a personal email (Gmail or Outlook.com) instead, or paste emails below.</li>
-        </ol>
-      )}
-      {tab === "yahoo" && (
-        <div className="mt-3 flex flex-col gap-3 text-sm text-zinc-300">
-          <p>Free Yahoo and AOL accounts can&apos;t forward email automatically. Two ways that still work:</p>
-          <ul className="list-disc space-y-1 pl-5">
-            <li><strong>Forward each job email by hand</strong> to your Unnepo address. Unnepo reads who it was originally from.</li>
-            <li><strong>Paste the email</strong> into the box below.</li>
-          </ul>
-        </div>
-      )}
-    </section>
-  );
-}
 
 function ReviewItem({ item, applications, onDone }: { item: Item; applications: Named[]; onDone: () => Promise<void> }) {
   const [picking, setPicking] = useState(false);
@@ -156,116 +94,204 @@ function ReviewItem({ item, applications, onDone }: { item: Item; applications: 
   );
 }
 
-export function EmailTracking({ onState }: { onState?: (state: { forwarded: boolean; toReview: number }) => void }) {
+function PasteBox({ focus, onDone }: { focus?: boolean; onDone: () => Promise<void> }) {
+  const [pasted, setPasted] = useState("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <section className={part} aria-labelledby="paste">
+      <h3 id="paste" className={partTitle}>Paste an email</h3>
+      <p className="m-0 text-[13px] text-[#9A9AA3]">For an older email, or one that wasn&apos;t forwarded. Include the From and Subject lines if you can.</p>
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          setBusy(true);
+          setNote("");
+          try {
+            const result = await call<{ message: string }>("/paste", "POST", { text: pasted });
+            setNote(result.message);
+            setPasted("");
+            await onDone();
+          } catch (reason) {
+            setNote(reason instanceof Error ? reason.message : "Couldn't read it.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <label className="sr-only" htmlFor="paste-email">Email</label>
+        <textarea id="paste-email" autoFocus={focus} rows={5} value={pasted} onChange={(event) => setPasted(event.target.value)} maxLength={30000} placeholder={"From: Acme Careers <no-reply@myworkday.com>\nSubject: Thank you for applying\n\nThank you for applying to the Data Analyst Intern role…"} className="w-full rounded-lg border border-[#26262C] bg-[#070708] px-3 py-2 font-mono text-sm" />
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="submit" className={primary} disabled={busy || pasted.trim().length < 40}>{busy ? "Reading…" : "Add from this email"}</button>
+          {note && <span role="status" className="text-sm text-muted">{note}</span>}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+function ReviewInbox({ state, onDone }: { state: State; onDone: () => Promise<void> }) {
+  return (
+    <section className={part} aria-labelledby="review">
+      <h3 id="review" className={partTitle}>Review Inbox <span className="font-normal text-[#8B8B94] tabular-nums">{state.review.length}</span></h3>
+      <p className="m-0 text-[13px] text-[#9A9AA3]">Emails Unnepo wasn&apos;t sure about. Nothing changes until you say.</p>
+      {state.review.length ? (
+        <ul className="m-0 flex list-none flex-col p-0">
+          {state.review.map((item) => <ReviewItem key={item.id} item={item} applications={state.applications} onDone={onDone} />)}
+        </ul>
+      ) : <p className="m-0 text-[13px] text-[#8B8B94]">Nothing to review.</p>}
+    </section>
+  );
+}
+
+const headingClass = "m-0 text-[32px] font-extrabold leading-[1.05] tracking-[-1.2px] sm:text-[40px] sm:tracking-[-1.4px]";
+const introClass = "m-0 max-w-[640px] text-base leading-normal text-[#9A9AA3]";
+
+function readSaved(key: string): Progress | "finished" | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    if (saved === "finished") return "finished";
+    return saved && ["gmail", "outlook", "yahoo"].includes(saved.provider) && Number.isInteger(saved.step) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+function writeSaved(key: string, value: Progress | "finished") {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Private windows can refuse this. The wizard still works, it just won't remember its place.
+  }
+}
+const savedKey = (address: string) => `unnepo-email-setup:${address}`;
+
+export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEmail?: string | null; spider: string; onState?: (state: { received: boolean; toReview: number }) => void; onNext?: () => void }) {
   const [state, setState] = useState<State | null>(null);
   const [problem, setProblem] = useState("");
-  const [pasted, setPasted] = useState("");
-  const [pasteNote, setPasteNote] = useState("");
   const [busy, setBusy] = useState("");
+  // null: finished, showing the tracker. Otherwise where they are in the wizard.
+  const [progress, setProgress] = useState<Progress | null>(null);
+  const [placed, setPlaced] = useState(false);
+  const [pasting, setPasting] = useState(false);
+  const loaded = useRef(false);
+  const guess: Provider | null = guessProvider(applyEmail);
+
   const load = useCallback(async () => {
     try {
       const next = await call<State>("/state");
       setState(next);
-      onState?.({ forwarded: next.forwarded, toReview: next.review.length });
+      const received = Boolean(next.lastEmail || next.skipped.dropped);
+      onState?.({ received, toReview: next.review.length });
       setProblem("");
+      if (!loaded.current) {
+        loaded.current = true;
+        // Back where they were, on the tracker if forwarding already works, and otherwise at the start.
+        const saved = readSaved(savedKey(next.address));
+        setProgress(saved === "finished" ? null : saved ?? (received ? null : { provider: guess ?? "gmail", step: 0, baseline: null }));
+        setPlaced(true);
+      }
     } catch (reason) {
       setProblem(reason instanceof Error ? reason.message : "Couldn't load email tracking.");
+      if (!loaded.current) onState?.({ received: false, toReview: 0 });
     }
-  }, [onState]);
+  }, [onState, guess]);
+
+  // The forwarding code and the test email should show up quickly while the wizard's waiting on them.
+  const inWizard = progress !== null;
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- the page reads its data once it's in the browser
     void load();
-    // The forwarding code and forwarded emails show up without reloading.
-    const timer = setInterval(() => void load(), 15_000);
+    const timer = setInterval(() => void load(), inWizard ? 5_000 : 15_000);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, inWizard]);
 
-  if (!state) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <p className="text-sm text-muted">Loading email tracking…</p>;
-  return (
-    <div className="flex flex-col gap-4">
-      {!state.ready && <p className="m-0 rounded-xl border border-[#F5A524]/40 bg-[#F5A524]/5 px-4 py-3 text-sm text-zinc-300">Email forwarding isn&apos;t switched on for Unnepo yet, so forwarded emails won&apos;t arrive. You can still paste emails below.</p>}
+  function moveTo(next: Progress) {
+    if (state) writeSaved(savedKey(state.address), next);
+    setProgress(next);
+  }
+  function finish() {
+    if (state) writeSaved(savedKey(state.address), "finished");
+    setProgress(null);
+    setPasting(false);
+    window.scrollTo({ top: 0 });
+  }
+  async function regenerate() {
+    if (!window.confirm("Make a new address? The old one stops working right away, so you'll need to set up forwarding again.")) return;
+    setBusy("regenerate");
+    try {
+      const made = await call<{ address: string }>("/regenerate", "POST", {});
+      const start: Progress = { provider: guess ?? "gmail", step: 0, baseline: null };
+      writeSaved(savedKey(made.address), start);
+      setProgress(start);
+      await load();
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't make a new address.");
+    } finally {
+      setBusy("");
+    }
+  }
 
-      <div className="flex flex-col gap-2" aria-label="Your Unnepo address" role="group">
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#26262C] bg-[#0C0C0E] px-3.5 py-3">
-          <code className="min-w-0 flex-1 basis-56 break-all font-mono text-sm text-ink">{state.address}</code>
-          <span className="flex items-center gap-2">
-            <CopyButton text={state.address} primary />
-            <button
-              type="button"
-              className="h-[34px] rounded-[9px] border border-[#26262C] px-3 text-[13px] font-medium text-ink hover:bg-white/5 disabled:opacity-40"
-              disabled={busy === "regenerate"}
-              onClick={async () => {
-                if (!window.confirm("Make a new address? The old one stops working right away, so you'll need to update your forwarding rule.")) return;
-                setBusy("regenerate");
-                try {
-                  await call("/regenerate", "POST", {});
-                  await load();
-                } catch (reason) {
-                  setProblem(reason instanceof Error ? reason.message : "Couldn't make a new address.");
-                } finally {
-                  setBusy("");
-                }
-              }}
-            >
-              {busy === "regenerate" ? "Making a new one…" : "Regenerate"}
-            </button>
-          </span>
+  if (!state || !placed) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <p className="text-sm text-muted">Loading email tracking…</p>;
+  const offWarning = !state.ready && <p className="m-0 rounded-xl border border-[#F5A524]/40 bg-[#F5A524]/5 px-4 py-3 text-sm text-zinc-300">Email forwarding isn&apos;t switched on for Unnepo yet, so forwarded emails won&apos;t arrive. You can still paste emails.</p>;
+  const problemLine = problem && <p role="alert" className="m-0 text-sm text-red-300">{problem}</p>;
+
+  if (progress) {
+    return (
+      <div className="flex flex-col gap-7">
+        <div className="flex flex-col gap-2">
+          <h1 className={headingClass}>Connect your email in about 3 minutes.</h1>
+          <p className={introClass}>One step at a time. Unnepo shows you when each email arrives, so you&apos;ll know it worked before moving on.</p>
         </div>
-        <p className="m-0 text-xs text-[#8B8B94]">It&apos;s yours alone. Anyone with it could send emails into your tracker, so keep it private. Unnepo keeps only the company, the job, the status and a one-line summary, never the email itself.</p>
+        {offWarning}
+        <EmailWizard state={state} progress={progress} guess={guess} spider={spider} onProgress={moveTo} onFinish={finish} onCheck={load} onPaste={() => setPasting(true)} />
+        {state.review.length > 0 && <ReviewInbox state={state} onDone={load} />}
+        {pasting && <PasteBox focus onDone={load} />}
+        {problemLine}
       </div>
+    );
+  }
 
-      {state.verification && (
-        <section className="rounded-xl border border-[#3D8BFF]/60 bg-[#0C0C0E] p-4" aria-labelledby="confirm" role="status">
-          <h3 id="confirm" className={partTitle}>{state.verification.provider === "gmail" ? "Gmail" : "Outlook"} sent a confirmation code</h3>
-          <p className="m-0 mt-1 text-[13px] text-[#9A9AA3]">Type it into {state.verification.provider === "gmail" ? "Gmail's forwarding settings" : "Outlook"} to finish setting up forwarding. Received {when(state.verification.at)}.</p>
-          <div className="mt-3 flex flex-wrap items-center gap-3">
-            {state.verification.code && <><code className="rounded-lg border border-line bg-card px-4 py-2 font-mono text-2xl tracking-widest text-ink">{state.verification.code}</code><CopyButton text={state.verification.code} label="Copy code" /></>}
-            {state.verification.link && <a href={state.verification.link} target="_blank" rel="noreferrer" className={secondary}>Or open the confirmation link ↗</a>}
+  const working = Boolean(state.lastEmail || state.skipped.dropped);
+  const codeIsNew = state.verification && (!state.lastEmail || state.verification.at > state.lastEmail.at);
+  return (
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-col gap-2">
+        <h1 className={headingClass}>{working ? "Your tracker updates itself." : "Almost there."}</h1>
+        <p className={introClass}>{working ? "New job emails update your applications on their own. Anything Unnepo isn't sure about waits in your Review Inbox." : "Forward one job email to your Unnepo address to check that it works."}</p>
+      </div>
+      {offWarning}
+
+      <section className="flex flex-col gap-5 rounded-[20px] border border-[#26262C] bg-[#0C0C0E] p-5 sm:p-7" aria-labelledby="email-on">
+        <div className="flex items-center gap-3.5">
+          <div aria-hidden className="dash-bob h-[60px] w-20 flex-none" dangerouslySetInnerHTML={{ __html: spider }} />
+          <div className="flex min-w-0 flex-col gap-1">
+            <span className="font-mono text-[11px] tracking-[1.4px] text-[#8B8B94]">{working ? "ALL DONE" : "NO EMAILS YET"}</span>
+            <h2 id="email-on" className="m-0 text-2xl font-bold tracking-[-0.5px]">{working ? "Email tracking is on." : "Waiting for your first email."}</h2>
           </div>
-        </section>
-      )}
-
-      <Guides state={state} />
-
-      <section className={part} aria-labelledby="review">
-        <h3 id="review" className={partTitle}>Review Inbox <span className="font-normal text-[#8B8B94] tabular-nums">{state.review.length}</span></h3>
-        <p className="m-0 text-[13px] text-[#9A9AA3]">Emails Unnepo wasn&apos;t sure about. Nothing changes until you say.</p>
-        {state.review.length ? (
-          <ul className="m-0 flex list-none flex-col p-0">
-            {state.review.map((item) => <ReviewItem key={item.id} item={item} applications={state.applications} onDone={load} />)}
-          </ul>
-        ) : <p className="m-0 text-[13px] text-[#8B8B94]">Nothing to review.</p>}
+        </div>
+        <AddressRow address={state.address}>
+          <button type="button" disabled={busy === "regenerate"} onClick={() => void regenerate()} className="h-[38px] rounded-[10px] border border-[#26262C] px-3.5 text-[13px] font-medium hover:bg-white/5 disabled:opacity-40">{busy === "regenerate" ? "Making a new one…" : "New address"}</button>
+        </AddressRow>
+        <p className="m-0 text-xs leading-normal text-[#8B8B94]">It&apos;s yours alone. Anyone with it could send emails into your tracker, so keep it private. Unnepo keeps only the company, the job, the status and a one-line summary, never the email itself.</p>
+        {codeIsNew && state.verification && (
+          <div role="status" className="flex flex-wrap items-center gap-3.5 rounded-xl border border-[#3D8BFF] bg-[#070708] p-4">
+            <span className="basis-full text-[13px] text-[#9A9AA3]">{state.verification.provider === "gmail" ? "Gmail" : "Outlook"} sent a confirmation code on {when(state.verification.at)}.</span>
+            {state.verification.code && <><span className="break-all font-mono text-2xl tracking-[4px]">{state.verification.code}</span><CopyButton text={state.verification.code} label="Copy code" /></>}
+            {state.verification.link && <a href={state.verification.link} target="_blank" rel="noreferrer" className="text-[13px] underline underline-offset-4">Open the confirmation link ↗</a>}
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {onNext && <button type="button" onClick={onNext} className="h-11 rounded-[11px] bg-[#F7F7F8] px-[18px] text-sm font-semibold text-[#070708] hover:bg-white">Next: follow-up contacts →</button>}
+          <button type="button" onClick={() => document.getElementById("paste-email")?.focus()} className="h-11 rounded-[11px] border border-[#26262C] px-[18px] text-sm font-medium hover:bg-white/5">Paste older emails</button>
+          <button type="button" onClick={() => moveTo({ provider: guess ?? "gmail", step: 0, baseline: null })} className="px-2 py-1 text-[13px] text-[#9A9AA3] underline underline-offset-4 hover:text-white">Go through setup again</button>
+        </div>
       </section>
 
-      <section className={part} aria-labelledby="paste">
-        <h3 id="paste" className={partTitle}>Paste an email</h3>
-        <p className="m-0 text-[13px] text-[#9A9AA3]">For an email that wasn&apos;t forwarded. Include the From and Subject lines if you can.</p>
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            setBusy("paste");
-            setPasteNote("");
-            try {
-              const result = await call<{ message: string }>("/paste", "POST", { text: pasted });
-              setPasteNote(result.message);
-              setPasted("");
-              await load();
-            } catch (reason) {
-              setPasteNote(reason instanceof Error ? reason.message : "Couldn't read it.");
-            } finally {
-              setBusy("");
-            }
-          }}
-        >
-          <label className="sr-only" htmlFor="paste-email">Email</label>
-          <textarea id="paste-email" rows={5} value={pasted} onChange={(event) => setPasted(event.target.value)} maxLength={30000} placeholder={"From: Acme Careers <no-reply@myworkday.com>\nSubject: Thank you for applying\n\nThank you for applying to the Data Analyst Intern role…"} className="w-full rounded-lg border border-[#26262C] bg-[#070708] px-3 py-2 font-mono text-sm" />
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="submit" className={primary} disabled={busy === "paste" || pasted.trim().length < 40}>{busy === "paste" ? "Reading…" : "Add from this email"}</button>
-            {pasteNote && <span role="status" className="text-sm text-muted">{pasteNote}</span>}
-          </div>
-        </form>
-      </section>
+      <ReviewInbox state={state} onDone={load} />
+      <PasteBox onDone={load} />
 
       <details className={part}>
         <summary className="cursor-pointer text-sm font-semibold">Recent changes from email <span className="font-normal text-[#8B8B94] tabular-nums">{state.recent.length}</span></summary>
@@ -301,7 +327,7 @@ export function EmailTracking({ onState }: { onState?: (state: { forwarded: bool
           </ul>
         ) : <p className="m-0 mt-2 text-[13px] text-[#8B8B94]">No skipped emails yet.</p>}
       </details>
-      {problem && <p role="alert" className="text-sm text-red-300">{problem}</p>}
+      {problemLine}
     </div>
   );
 }
