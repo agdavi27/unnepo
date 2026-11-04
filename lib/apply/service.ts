@@ -613,7 +613,7 @@ export async function ensureCharged(userId: string, app: JobApplication) {
 }
 
 /** The student's facts and resume text: the only things the mapping's AI call may use. */
-export function runContext(userId: string, info: Awaited<ReturnType<typeof student>>, app: JobApplication) {
+export function runContext(userId: string, info: Awaited<ReturnType<typeof student>>, app: Pick<JobApplication, "title" | "company">) {
   const sources = [info.profileText, info.resumeText].join("\n\n");
   // The student's own details as plain lines: the only facts the AI may use besides the resume.
   const p = info.profile;
@@ -628,7 +628,7 @@ export function runContext(userId: string, info: Awaited<ReturnType<typeof stude
     `At least 18 years old: ${said(p.eligibility?.over18)}`,
     `Unnepo may accept privacy notices and candidate terms for the student: ${p.accountConsentAt ? "Yes" : "No"}`,
     ...Object.entries(p.student?.eeo ?? {}).filter(([, value]) => value && value !== DECLINE).map(([key, value]) => `Self-identification. ${key}: ${EEO_OPTIONS[key as keyof typeof EEO_OPTIONS].find(([option]) => option === value)?.[1] ?? value}`),
-    `Applying to: ${app.title} at ${app.company}`,
+    ...(app.title ? [`Applying to: ${app.title} at ${app.company}`] : []),
     ...Object.values(p.saved).slice(0, 60).map((item) => `Saved answer. ${item.label}: ${item.answer}`),
   ].join("\n");
   return { sources, facts };

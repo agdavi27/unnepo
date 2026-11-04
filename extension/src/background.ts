@@ -1204,6 +1204,17 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ error: error instanceof Error ? error.message : "Couldn't write this one." });
         }
       }
+      // The panel's "Answer a question": for the job on the tab when Unnepo knows it, or from the profile alone.
+      case "answer-question": {
+        if (sender.tab) return reply({ ok: false });
+        try {
+          const job = (await jobs())[Number(message.tabId)];
+          const written = await api<{ answer: string }>("POST", "write", { question: String(message.question ?? ""), ...(job?.applicationId ? { applicationId: job.applicationId } : {}) });
+          return reply({ ok: true, answer: written.answer });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't write this one." });
+        }
+      }
       // An applying session, started or ended from the panel.
       case "session":
         if (sender.tab) return reply({ ok: false });

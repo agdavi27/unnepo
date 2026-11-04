@@ -74,8 +74,12 @@ export async function extensionSetup(userId: string, raw: unknown) {
 }
 
 export async function extensionMe(userId: string) {
-  const [user, credits, state, resume, stored] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId), applicationProfiles.get(userId)]);
+  const [user, credits, state, resume, stored, saved] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId), applicationProfiles.get(userId), applications.list(userId)]);
+  const applied = saved.filter((app) => isApplied(app.status));
+  const weekAgo = Date.now() - 8 * 86_400_000;
   return {
+    // The panel's Day / Week goal. The panel counts them, so "today" is the student's own day.
+    goal: { weekly: stored?.weeklyGoal ?? null, appliedAt: applied.map((app) => app.submittedAt ?? app.createdAt).filter((at) => Date.parse(at) >= weekAgo) },
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: credits?.balance ?? 0,
     unlimitedCredits: await hasUnlimitedCredits(userId),
@@ -93,7 +97,7 @@ export async function extensionMe(userId: string) {
     resume: resume ? { fileName: resume.fileName, uploadedAt: resume.createdAt, file: Boolean(resume.storagePath) && resume.byteSize > 0 } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
     // The spider the student wears from the Stats page, for the panel and the crawling spiders.
-    spider: { skin: wornSkin(stored?.spiderSkin, (await applications.list(userId)).filter((app) => isApplied(app.status)).length), school: state.profile.education?.[0]?.school ?? "" },
+    spider: { skin: wornSkin(stored?.spiderSkin, applied.length), school: state.profile.education?.[0]?.school ?? "" },
   };
 }
 
@@ -296,13 +300,14 @@ export async function extensionWrite(userId: string, raw: unknown) {
   const question = String(body.question ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
   if (!question) throw new ServiceError("Which question should Unnepo write?", "question", 400);
   if (classifyQuestion(question).sensitive) throw new ServiceError("Unnepo doesn't answer questions about you like this one. Answer it yourself.", "sensitive", 400);
-  const app = await requireApp(userId, body.applicationId);
+  // No job: a question pasted in the panel, answered from the student's details alone.
+  const app = body.applicationId ? await requireApp(userId, body.applicationId) : null;
   if ((await aiCallsToday(userId)) >= DAILY_AI_CALLS) throw new ServiceError("That's today's AI limit. Write this one yourself, or try again tomorrow.", "limit", 429);
   const info = await student(userId);
-  const context = runContext(userId, info, app);
+  const context = runContext(userId, info, app ?? { title: "", company: "" });
   const text = await claudeAsk(userId, "question_draft")(DRAFT_PROMPT, [
     `Question: ${question}`,
-    `Job: ${app.title} at ${app.company}\n${app.description.slice(0, 3500)}`,
+    ...(app ? [`Job: ${app.title} at ${app.company}\n${app.description.slice(0, 3500)}`] : []),
     `Student's details:\n${context.facts}`,
     `Resume and profile:\n${context.sources.slice(0, 12000)}`,
   ].join("\n\n")).catch(() => {

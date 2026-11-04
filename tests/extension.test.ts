@@ -4,6 +4,7 @@ import { applications } from "@/lib/apply/store";
 import { setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { readStoredResume } from "@/lib/services/resume";
 import { setCompany, setDeferForTests, updateJobDetails } from "@/lib/apply/service";
+import { extensionMe, extensionWrite } from "@/lib/extension/service";
 import { issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { saveStudentProfile } from "@/lib/profile/service";
 import { login, signUp, userFromSessionToken, verifyEmail } from "@/lib/services/auth";
@@ -744,5 +745,22 @@ describe("Workday steps", () => {
     // What Workday's language dropdown says: changing it starts the application over.
     for (const label of ["English", "English (United States)", "Español", "Français", "日本語"]) expect(LANGUAGE_SWITCH.test(label)).toBe(true);
     for (const label of ["Language", "Languages spoken", "English proficiency", "What languages do you speak?", "Country"]) expect(LANGUAGE_SWITCH.test(label)).toBe(false);
+  });
+});
+
+describe("the side panel's goal and pasted questions", () => {
+  it("answers a pasted question with no job, and sends what the goal needs", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    model.replies.push("I led a team of four on a class project.");
+    expect((await extensionWrite(userId, { question: "Describe a time you led a team" })).answer).toContain("team of four");
+    expect(model.lastPrompt).not.toContain("Job:");
+    expect(model.lastPrompt).not.toContain("Applying to:");
+    await expect(extensionWrite(userId, { question: "" })).rejects.toThrow(/Which question/);
+
+    expect((await extensionMe(userId)).goal).toEqual({ weekly: null, appliedAt: [] });
+    await applications.insert({ userId, jobKey: "a", jobUrl: "https://example.com/a", ats: "other", title: "Analyst", company: "Acme", companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: new Date().toISOString(), contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0 });
+    expect((await extensionMe(userId)).goal?.appliedAt).toHaveLength(1);
+    delete process.env.ANTHROPIC_API_KEY;
   });
 });
