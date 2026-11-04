@@ -35,7 +35,8 @@ export type StudentProfile = {
   workAuth: { authorizedUS: YesNo; needsSponsorship: YesNo; over18: YesNo; citizenship?: string };
   /** Each defaults to "decline". */
   eeo: { gender: string; race: string; hispanicLatino: string; veteran: string; disability: string };
-  preferences: { roles: string[]; industries: string[]; locations: string[]; remote: "yes" | "no" | "either"; startTerm?: string; jobType: "internship" | "full_time" | "either" };
+  /** `setAt`: the student chose these on Edit careers & roles, so nothing from their resume is added to them. */
+  preferences: { roles: string[]; industries: string[]; locations: string[]; remote: "yes" | "no" | "either"; startTerm?: string; jobType: "internship" | "full_time" | "either"; companies?: string[]; setAt?: string };
   standardAnswers: { heardAbout?: string; earliestStart?: string; salaryExpectation?: string; inPerson?: YesNo };
   essays: { aboutMe?: string; whyField?: string };
   /** Answers the student gave to new questions in applications; matched later by question text, no AI. */
@@ -183,6 +184,7 @@ export function cleanStudentProfile(raw: unknown, base: StudentProfile): Student
     preferences: {
       roles: list(pr.roles, 10), industries: list(pr.industries, 10), locations: list(pr.locations, 10),
       remote: pick(pr.remote, ["yes", "no", "either"] as const, "either"), startTerm: text(pr.startTerm, 40) || undefined, jobType: pick(pr.jobType, ["internship", "full_time", "either"] as const, "either"),
+      companies: list(pr.companies, 20), setAt: text(pr.setAt, 40) || undefined,
     },
     standardAnswers: { heardAbout: text(st.heardAbout, 120) || undefined, earliestStart: text(st.earliestStart, 80) || undefined, salaryExpectation: text(st.salaryExpectation, 80) || undefined, inPerson },
     essays: { aboutMe: text(es.aboutMe, 800) || undefined, whyField: text(es.whyField, 800) || undefined },

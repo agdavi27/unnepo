@@ -3,7 +3,10 @@ import { readAnthropicKey, id, nowIso, repo } from "@/lib/db/file-store";
 import type { ProfileDocument } from "@/lib/db/types";
 import { serverConfig } from "@/lib/config";
 import { brandsForInterests } from "@/lib/suggestions";
-import { SOURCE_LABEL, recommendJobs } from "@/lib/jobs/recommend";
+import { INTEREST_WORDS, SOURCE_LABEL, recommendJobs, type JobSource } from "@/lib/jobs/recommend";
+import { categoryOf } from "@/lib/jobs/category";
+import { suggestRoles } from "@/lib/roles";
+import { classYearOf } from "@/lib/profile/student";
 import { integrations } from "@/lib/integrations/flags";
 import { profileIntelligence, type FormProfile } from "@/lib/profile/intelligence";
 import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
@@ -13,7 +16,7 @@ import { applicationProfiles, applications } from "@/lib/apply/store";
 import { rewriteLetterPart } from "@/lib/apply/cover-letter";
 import { student } from "@/lib/apply/service";
 import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits } from "@/lib/apply/limits";
-import { profileState } from "@/lib/profile/service";
+import { profileState, saveStudentProfile } from "@/lib/profile/service";
 
 function asForm(value: unknown): FormProfile {
   const body = (value ?? {}) as Partial<FormProfile>;
@@ -142,35 +145,116 @@ function roleFromTitle(title: string) {
 }
 
 /**
+ * What jobs are matched against. Once the student has chosen on Edit careers & roles, exactly that. Before then,
+ * what their profile and resume say: the roles they want and have done, their industries, city and dream companies.
+ */
+async function jobInputs(userId: string) {
+  const [document, state] = await Promise.all([repo.getProfileDocument(userId), profileState(userId)]);
+  const student = state.profile;
+  const wanted = student.preferences;
+  const majors = student.education.map((item) => item.major).filter(Boolean);
+  const skills = uniqueList([...student.skills.technical, ...(student.projects ?? []).flatMap((project) => project.tech ?? [])]).slice(0, 25);
+  if (wanted.setAt) {
+    return { student, chosen: true, roles: wanted.roles, companies: wanted.companies ?? [], industries: wanted.industries, locations: wanted.locations, majors, skills, remote: wanted.remote };
+  }
+  const me = document?.ready ? await profileInputs(userId) : { roles: [], companies: [], locations: [] };
+  const pastRoles = student.experience.map((job) => roleFromTitle(job.title)).filter((role) => role.length >= 3);
+  return {
+    student, chosen: false,
+    roles: uniqueList([...wanted.roles, ...me.roles, ...pastRoles]).slice(0, 8),
+    companies: uniqueList([...(wanted.companies ?? []), ...me.companies]).slice(0, 15),
+    industries: uniqueList([...(document?.form.interests ?? []), ...wanted.industries]).slice(0, 8),
+    locations: uniqueList([...wanted.locations, ...me.locations, student.contact.city ?? ""].filter((place) => place && !/^(remote|anywhere)/i.test(place))).slice(0, 6),
+    majors, skills,
+    remote: wanted.remote === "either" && document?.form.workPreference === "onsite" ? "no" as const : wanted.remote,
+  };
+}
+
+/** What Edit careers & roles shows: what jobs match now, and roles to add from the student's resume. */
+export async function jobPreferences(userId: string) {
+  const { student, chosen, roles, companies, industries, locations, remote } = await jobInputs(userId);
+  const resumeWords = [
+    ...student.experience.flatMap((job) => [job.title, ...job.bullets]),
+    ...(student.projects ?? []).flatMap((project) => [project.name, ...project.bullets, ...(project.tech ?? [])]),
+    ...student.skills.technical,
+    ...student.education.map((item) => item.major),
+  ].filter(Boolean).join("\n");
+  const { fromResume, similar } = suggestRoles([], resumeWords);
+  const have = new Set(roles.map((role) => role.toLowerCase()));
+  return {
+    chosen, roles, companies, industries, locations, remote, jobType: student.preferences.jobType,
+    suggestedRoles: uniqueList([...fromResume, ...similar]).filter((role) => !have.has(role.toLowerCase())).slice(0, 8),
+    industryOptions: uniqueList([...industries, ...Object.keys(INTEREST_WORDS)]),
+  };
+}
+
+/** Saves Edit careers & roles. From now on these are what jobs match against, and nothing else is added. */
+export async function saveJobPreferences(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as Record<string, unknown>;
+  const list = (value: unknown, max: number) => (Array.isArray(value) ? uniqueList(value.map((item) => String(item).replace(/\s+/g, " ").trim().slice(0, 80)).filter(Boolean)).slice(0, max) : []);
+  const roles = list(body.roles, 10);
+  if (!roles.length) throw new ServiceError("Add at least one role, so Unnepo knows what to look for.", "roles", 400);
+  const { student } = await jobInputs(userId);
+  const remote = body.remote === "yes" || body.remote === "no" ? body.remote : "either";
+  const jobType = body.jobType === "internship" || body.jobType === "full_time" ? body.jobType : "either";
+  await saveStudentProfile(userId, { profile: { preferences: { ...student.preferences, roles, companies: list(body.companies, 20), industries: list(body.industries, 10), locations: list(body.locations, 10), remote, jobType, setAt: nowIso() } } });
+  return jobPreferences(userId);
+}
+
+/** "Save for later" on a job, or taking it back. The whole job is kept, since the list changes. */
+export async function saveRecommendedJob(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { job?: Record<string, unknown>; jobId?: unknown; saved?: unknown };
+  const stored = await applicationProfiles.get(userId);
+  if (!stored) throw new ServiceError("Finish your profile first.", "profile", 400);
+  const feed = stored.jobFeed ?? { seen: {}, dismissed: [], round: 0 };
+  const jobId = String(body.job?.id ?? body.jobId ?? "").trim().slice(0, 300);
+  if (!jobId) throw new ServiceError("Say which job to save.", "job", 400);
+  const others = (feed.saved ?? []).filter((job) => job.id !== jobId);
+  if (body.saved === false) {
+    await applicationProfiles.put(userId, { ...stored, jobFeed: { ...feed, saved: others } });
+    return { ok: true };
+  }
+  const job = body.job ?? {};
+  const text = (key: string, max: number) => String(job[key] ?? "").slice(0, max);
+  const url = text("url", 2000);
+  if (!/^https:\/\//i.test(url)) throw new ServiceError("That job has no link to save.", "job", 400);
+  const entry = {
+    id: jobId, title: text("title", 200), company: text("company", 200), location: text("location", 200), postedAt: text("postedAt", 40), postedKind: job.postedKind === "updated" ? "updated" as const : "posted" as const,
+    url, source: text("source", 20), description: text("description", 6000), reasons: Array.isArray(job.reasons) ? job.reasons.map((reason) => String(reason).slice(0, 120)).slice(0, 8) : [], score: Math.max(0, Math.min(99, Number(job.score) || 0)), savedAt: nowIso(),
+  };
+  await applicationProfiles.put(userId, { ...stored, jobFeed: { ...feed, saved: [entry, ...others].slice(0, 100) } });
+  return { ok: true };
+}
+
+/**
  * Jobs from public job feeds, ranked against the student's resume and profile: the roles they want and
  * have done (their past job titles), their skills, major, city, and dream companies.
  */
 export async function listRecommendedJobs(userId: string, { refresh = false } = {}) {
-  const [document, state] = await Promise.all([repo.getProfileDocument(userId), profileState(userId)]);
-  const student = state.profile;
-  const me = document?.ready ? await profileInputs(userId) : { roles: [], companies: [], locations: [] };
-  const pastRoles = student.experience.map((job) => roleFromTitle(job.title)).filter((role) => role.length >= 3);
-  const roles = uniqueList([...student.preferences.roles, ...me.roles, ...pastRoles]).slice(0, 8);
-  const interests = uniqueList([...(document?.form.interests ?? []), ...student.preferences.industries, ...student.education.map((item) => item.major).filter(Boolean)]).slice(0, 8);
-  const locations = uniqueList([...student.preferences.locations, ...me.locations, student.contact.city ?? ""].filter((place) => place && !/^(remote|anywhere)/i.test(place))).slice(0, 6);
-  const skills = uniqueList([...student.skills.technical, ...(student.projects ?? []).flatMap((project) => project.tech ?? [])]).slice(0, 25);
+  const { student, roles, companies: dreamCompanies, industries, locations, majors, skills, remote } = await jobInputs(userId);
+  const interests = uniqueList([...industries, ...majors]).slice(0, 10);
   if (!roles.length && !interests.length && !skills.length) throw new ServiceError("Add your resume first so Unnepo can match jobs to it.", "profile", 400);
-  const suggestedCompanies = brandsForInterests(interests, me.companies, 32);
-  const remoteOk = student.preferences.remote !== "no" && document?.form.workPreference !== "onsite";
-  const prefs = { roles, companies: me.companies, suggestedCompanies, locations, interests, remoteOk, skills };
+  const suggestedCompanies = brandsForInterests(interests, dreamCompanies, 32);
+  const places = locations.filter((place) => !/^anywhere/i.test(place));
+  const prefs = {
+    roles, companies: dreamCompanies, suggestedCompanies, locations: places, interests, remoteOk: remote !== "no", remoteOnly: remote === "yes", skills,
+    anywhere: places.length < locations.length, jobType: student.preferences.jobType, classYear: classYearOf(student.education[0]), needsSponsorship: student.workAuth.needsSponsorship === true,
+  };
   const key = `${userId}:${createHash("sha256").update(JSON.stringify(prefs)).digest("hex").slice(0, 16)}`;
   const stored = await applicationProfiles.get(userId);
   const feed = stored?.jobFeed ?? { seen: {}, dismissed: [], round: 0 };
+  const savedIds = new Set((feed.saved ?? []).map((job) => job.id));
   const round = refresh ? feed.round + 1 : feed.round;
   const result = await recommendJobs(key, prefs, { refresh, round });
   // Jobs the student hid or already applied to don't come back; ones they've never been shown go first.
   const applied = new Set((await applications.list(userId)).flatMap((app) => [jobKey(app.company, app.title), app.jobUrl]));
   const hidden = new Set(feed.dismissed);
   const now = nowIso();
-  const jobs = result.jobs
-    .filter((job) => !hidden.has(job.id) && !applied.has(jobKey(job.company, job.title)) && !applied.has(job.url))
-    .map((job) => ({ ...job, sourceLabel: SOURCE_LABEL[job.source], isNew: !feed.seen[job.id] }))
-    .sort((a, b) => Number(b.isNew) - Number(a.isNew));
+  const stillOpen = (job: { id: string; company: string; title: string; url: string }) => !hidden.has(job.id) && !applied.has(jobKey(job.company, job.title)) && !applied.has(job.url);
+  const jobs = [...result.jobs.filter((job) => !savedIds.has(job.id)), ...(feed.saved ?? []).map((job) => ({ ...job, source: job.source as JobSource }))]
+    .filter(stillOpen)
+    .map((job) => ({ ...job, sourceLabel: SOURCE_LABEL[job.source], category: categoryOf(job.title).name, saved: savedIds.has(job.id), isNew: !feed.seen[job.id] }))
+    .sort((a, b) => b.score - a.score || (b.postedAt || "").localeCompare(a.postedAt || ""));
   // The first job list a student ever sees isn't "new": everything would be.
   const firstLook = !Object.keys(feed.seen).length;
   const seen = { ...feed.seen };
@@ -179,15 +263,15 @@ export async function listRecommendedJobs(userId: string, { refresh = false } = 
   const newToday = Object.values(seen).filter((at) => Date.parse(at) > day).length;
   // Read again just before saving: the job search takes a while, and the profile may have changed meanwhile.
   const latest = await applicationProfiles.get(userId);
-  if (latest) await applicationProfiles.put(userId, { ...latest, jobFeed: { seen: Object.fromEntries(Object.entries(seen).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 800)), dismissed: latest.jobFeed?.dismissed ?? feed.dismissed, round } });
-  const companies = uniqueList([...me.companies, ...suggestedCompanies]).slice(0, 12);
+  if (latest) await applicationProfiles.put(userId, { ...latest, jobFeed: { seen: Object.fromEntries(Object.entries(seen).sort((a, b) => b[1].localeCompare(a[1])).slice(0, 800)), dismissed: latest.jobFeed?.dismissed ?? feed.dismissed, round, saved: latest.jobFeed?.saved ?? feed.saved } });
+  const companies = uniqueList([...dreamCompanies, ...suggestedCompanies]).slice(0, 12);
   return {
     jobs: firstLook ? jobs.map((job) => ({ ...job, isNew: false })) : jobs,
     cachedAt: result.cachedAt,
     newCount: firstLook ? 0 : jobs.filter((job) => job.isNew).length,
     newToday: firstLook ? 0 : newToday,
     searchedCompanies: companies,
-    matchedOn: { roles: roles.slice(0, 4), skills: skills.slice(0, 6) },
+    matchedOn: { roles: roles.slice(0, 6), skills: skills.slice(0, 6) },
   };
 }
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { Highlight } from "@/components/unnepo/UnnepoForms";
+import { categoryColor, categoryOf } from "@/lib/jobs/category";
 
 export type Job = {
   id: string;
@@ -17,6 +18,10 @@ export type Job = {
   reasons: string[];
   /** Not shown to the student before this load. */
   isNew?: boolean;
+  /** How well it fits the student's profile, 0 to 99. */
+  score: number;
+  category: string;
+  saved?: boolean;
 };
 
 type LetterInput = { job: { title: string; company: string; description: string; url?: string }; studentFactIds: string[]; detailFactIds: string[]; tone: string; length: string; notes: string };
@@ -27,28 +32,33 @@ const secondary = `${btn} border border-line bg-transparent text-ink hover:bg-wh
 const field = "w-full rounded-xl border border-line bg-card px-3 py-2.5 text-sm text-ink outline-none placeholder:text-faint focus:border-zinc-500";
 const label = "mb-1.5 block text-xs font-medium text-muted";
 
-/** "Posted today", "Posted 3 days ago", "Updated Oct 2". */
-export function postedLabel(job: Pick<Job, "postedAt" | "postedKind">, now: number) {
-  if (!job.postedAt) return "Date not listed";
-  const verb = job.postedKind === "updated" ? "Updated" : "Posted";
+/** "Today", "3 days ago", "Oct 2". */
+function postedLabel(job: Pick<Job, "postedAt">, now: number) {
+  if (!job.postedAt) return "";
   const date = new Date(job.postedAt);
   const days = Math.floor((now - date.getTime()) / 86400000);
-  if (days <= 0) return `${verb} today`;
-  if (days === 1) return `${verb} yesterday`;
-  if (days < 7) return `${verb} ${days} days ago`;
-  return `${verb} ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+  if (days <= 0) return "Today";
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
+
+const chipOn = "border-[#F7F7F8] bg-[#F7F7F8] text-[#070708]";
+const chipOff = "border-[#26262C] bg-transparent text-[#9A9AA3] hover:text-white";
+const heading = "m-0 text-[28px] font-extrabold tracking-[-1.1px] sm:text-[34px]";
 
 export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, jobs: Job[]) => void }) {
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [companies, setCompanies] = useState<string[]>([]);
-  const [matched, setMatched] = useState<{ roles: string[]; skills: string[] } | null>(null);
+  const [roles, setRoles] = useState<string[]>([]);
   const [now, setNow] = useState(0);
   const [open, setOpen] = useState<string | null>(null);
-  const [studentOnly, setStudentOnly] = useState(false);
-  const [fresh, setFresh] = useState<{ newCount: number; newToday: number; cachedAt: string } | null>(null);
+  const [off, setOff] = useState<string[]>([]);
+  const [savedOnly, setSavedOnly] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [cachedAt, setCachedAt] = useState("");
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async (refresh: boolean) => {
     setLoading(true);
@@ -57,13 +67,17 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
       const response = await fetch(`/api/app/jobs${refresh ? "?refresh=1" : ""}`, { signal: AbortSignal.timeout(45_000) });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Jobs could not be loaded.");
-      setJobs(payload.jobs ?? []);
-      setCompanies(payload.searchedCompanies ?? []);
-      setMatched(payload.matchedOn ?? null);
-      setFresh({ newCount: payload.newCount ?? 0, newToday: payload.newToday ?? 0, cachedAt: payload.cachedAt ?? new Date().toISOString() });
+      const list: Job[] = payload.jobs ?? [];
+      setJobs(list);
+      setRoles(payload.matchedOn?.roles ?? []);
+      setCachedAt(payload.cachedAt ?? new Date().toISOString());
       setNow(Date.now());
+      setOpen((current) => (current && list.some((job) => job.id === current) ? current : list[0]?.id ?? null));
+      if (refresh) setNotice(payload.newCount ? `${payload.newCount} new ${payload.newCount === 1 ? "match" : "matches"} since you last looked.` : "No new matches right now. Check back later.");
+      return list.length;
     } catch (reason) {
       setError(reason instanceof Error && reason.name !== "TimeoutError" ? reason.message : "Job boards took too long to answer. Try again.");
+      return null;
     } finally {
       setLoading(false);
     }
@@ -78,74 +92,284 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
     setJobs((list) => (list ?? []).filter((item) => item.id !== job.id));
     await fetch("/api/app/jobs/dismiss", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: job.id }) }).catch(() => undefined);
   }
-  const updated = fresh && now ? Math.max(0, Math.round((now - Date.parse(fresh.cachedAt)) / 60000)) : null;
+  async function save(job: Job) {
+    const saved = !job.saved;
+    const mark = (value: boolean) => setJobs((list) => (list ?? []).map((item) => (item.id === job.id ? { ...item, saved: value } : item)));
+    mark(saved);
+    const response = await fetch("/api/app/jobs/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(saved ? { job, saved } : { jobId: job.id, saved }) }).catch(() => null);
+    if (!response?.ok) {
+      mark(!saved);
+      setError("Couldn't save that job. Try again.");
+    }
+  }
 
-  const shown = (jobs ?? []).filter((job) => !studentOnly || job.reasons.some((reason) => reason === "Internship" || reason === "Early-career role"));
+  const all = jobs ?? [];
+  const categories = [...new Set(all.map((job) => job.category))];
+  const shown = all.filter((job) => (savedOnly ? job.saved : !off.includes(job.category)));
+  const savedCount = all.filter((job) => job.saved).length;
+  const updated = cachedAt && now ? Math.max(0, Math.round((now - Date.parse(cachedAt)) / 60000)) : null;
+
+  if (editing) {
+    return (
+      <EditCareers
+        onClose={() => setEditing(false)}
+        onSaved={async (count) => {
+          setEditing(false);
+          setOff([]);
+          setSavedOnly(false);
+          window.scrollTo({ top: 0 });
+          const found = await load(false);
+          if (found !== null) setNotice(`Saved. Matches refreshed for your ${count} ${count === 1 ? "role" : "roles"}.`);
+        }}
+      />
+    );
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Jobs you may be interested in</h1>
-          <p className="mt-1 text-sm text-muted">
-            Open postings matched to your resume
-            {matched && (matched.roles.length || matched.skills.length) ? `: ${[...matched.roles.slice(0, 3), ...matched.skills.slice(0, 3)].join(", ")}` : ""}.
-          </p>
+        <div className="flex min-w-0 flex-col gap-2">
+          <h1 className={heading}>Jobs for you {jobs && <span className="text-base font-medium tracking-normal text-[#8B8B94]">{shown.length} {shown.length === 1 ? "match" : "matches"}, best first</span>}</h1>
+          <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-[#9A9AA3]">
+            {roles.length > 0 && "Matching"}
+            {roles.map((role) => (
+              <span key={role} className="inline-flex items-center gap-1.5 rounded-full border border-[#26262C] px-[9px] py-[3px] text-[#E4E4E8]">
+                <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: categoryOf(role).color }} />{role}
+              </span>
+            ))}
+            <button type="button" onClick={() => setEditing(true)} className="h-7 px-2.5 text-[13px] font-medium text-[#3D8BFF] hover:underline">Edit careers &amp; roles</button>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void load(true)} disabled={loading} className={secondary}>{loading ? "Searching…" : "Find new jobs"}</button>
-          <button type="button" onClick={() => onCoverLetter(null, jobs ?? [])} className={primary}>✦ Write me a cover letter</button>
+          <button type="button" onClick={() => void load(true)} disabled={loading} className="h-10 rounded-[10px] border border-[#26262C] px-3.5 text-[13px] font-medium hover:bg-white/5 disabled:opacity-50">{loading ? "Searching…" : "↻ Find new jobs"}</button>
+          <button type="button" onClick={() => onCoverLetter(null, all)} className="h-10 rounded-[10px] bg-[#F7F7F8] px-3.5 text-[13px] font-semibold text-[#070708] hover:bg-white">✦ Write me a cover letter</button>
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-faint">
-        <label className="flex items-center gap-2 text-sm text-zinc-300">
-          <input type="checkbox" checked={studentOnly} onChange={(event) => setStudentOnly(event.target.checked)} />
-          Internships and early-career only
-        </label>
-        {fresh && (
-          <span className="text-sm text-zinc-300">
-            {fresh.newCount ? <><strong className="text-ink">{fresh.newCount} new</strong> this time · </> : fresh.newToday ? <>{fresh.newToday} new today · </> : null}
-            updated {updated === null || updated < 1 ? "just now" : `${updated} min ago`}
-          </span>
-        )}
-        <span>From company career pages (Greenhouse, Lever, Ashby), Remotive, and The Muse.{companies.length ? ` Checked: ${companies.slice(0, 6).join(", ")}${companies.length > 6 ? "…" : ""}` : ""}</span>
-      </div>
+      {notice && <p role="status" className="m-0 rounded-[10px] border border-[#1F4D2E] bg-[#0B1A11] px-3.5 py-2.5 text-[13px] text-[#B4E8C5]">{notice}</p>}
+      {error && <p role="alert" className="m-0 rounded-[10px] border border-red-900/60 bg-red-950/40 px-3.5 py-2.5 text-[13px] text-red-300">{error}</p>}
 
-      {error && <p role="alert" className="rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">{error}</p>}
-      {loading && !jobs && <p className="rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">Looking across job boards… this can take up to 20 seconds.</p>}
-      {jobs && shown.length === 0 && !loading && (
-        <p className="rounded-2xl border border-line bg-panel p-8 text-center text-sm text-muted">No matching openings right now. Add roles you want or more skills to your profile, or try Refresh later.</p>
+      {jobs && all.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div role="group" aria-label="Show jobs" className="flex flex-wrap gap-1.5">
+            {categories.map((name) => {
+              const on = !savedOnly && !off.includes(name);
+              return (
+                <button key={name} type="button" aria-pressed={on} onClick={() => { setSavedOnly(false); setOff((list) => (list.includes(name) ? list.filter((item) => item !== name) : [...list, name])); }} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium ${on ? chipOn : chipOff}`}>
+                  <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: categoryColor(name) }} />{name} <span className="opacity-70">{all.filter((job) => job.category === name).length}</span>
+                </button>
+              );
+            })}
+            {savedCount > 0 && <button type="button" aria-pressed={savedOnly} onClick={() => setSavedOnly((value) => !value)} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium ${savedOnly ? chipOn : chipOff}`}>Saved <span className="opacity-70">{savedCount}</span></button>}
+          </div>
+          <span className="text-xs text-[#8B8B94]">Greenhouse, Lever, Ashby, Remotive and The Muse · updated {updated === null || updated < 1 ? "just now" : `${updated} min ago`}</span>
+        </div>
+      )}
+
+      {loading && !jobs && <p className="m-0 rounded-2xl border border-[#1F1F24] p-8 text-center text-sm text-[#8B8B94]">Looking across job boards. This can take up to 20 seconds.</p>}
+      {jobs && !shown.length && !loading && (
+        <p className="m-0 p-8 text-center text-sm text-[#8B8B94]">
+          {all.length ? "Nothing here with these filters." : "No matches right now."} <button type="button" onClick={() => setEditing(true)} className="font-medium text-[#F7F7F8] underline underline-offset-4">Add a role</button>
+        </p>
       )}
 
       {shown.length > 0 && (
-        <ul className="grid gap-3 lg:grid-cols-2">
-          {shown.map((job) => (
-            <li key={job.id} className="flex flex-col rounded-2xl border border-line bg-panel p-5">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h2 className="font-semibold leading-snug">{job.isNew && <span className="mr-2 rounded-full bg-[#3D8BFF] px-2 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white">New</span>}{job.title}</h2>
-                  <p className="mt-0.5 truncate text-sm text-muted">{job.company}{job.location ? ` · ${job.location}` : ""}</p>
-                </div>
-                <span className="shrink-0 rounded-full border border-line px-2.5 py-0.5 text-[11px] text-zinc-300">{postedLabel(job, now)}</span>
-              </div>
-              {job.reasons.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1.5">
-                  {job.reasons.map((reason) => <span key={reason} className="rounded-full bg-card px-2.5 py-0.5 text-[11px] text-muted">{reason}</span>)}
-                </div>
-              )}
-              {open === job.id && job.description && <p className="mt-3 max-h-60 overflow-auto whitespace-pre-line text-sm text-zinc-300">{job.description}</p>}
-              <div className="mt-auto flex flex-wrap items-center gap-2 pt-4">
-                <a href={job.url} target="_blank" rel="noopener noreferrer" className={primary}>Apply ↗</a>
-                <button type="button" onClick={() => onCoverLetter(job, jobs ?? [])} className={secondary}>Cover letter</button>
-                {job.description && <button type="button" onClick={() => setOpen(open === job.id ? null : job.id)} className="text-xs text-muted hover:text-white">{open === job.id ? "Hide details" : "Details"}</button>}
-                <span className="ml-auto text-[11px] text-faint">{job.sourceLabel}</span>
-                <button type="button" onClick={() => void hide(job)} className="text-xs text-muted hover:text-white" aria-label={`Not for me: hide ${job.title} at ${job.company}`}>✕ Not for me</button>
-              </div>
-            </li>
-          ))}
+        <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(280px,100%),1fr))] items-start gap-3 p-0">
+          {shown.map((job) => {
+            const on = open === job.id;
+            const panel = `job-card-${job.id.replace(/[^a-z0-9]/gi, "-")}`;
+            const posted = postedLabel(job, now);
+            return (
+              <li key={job.id} className={`flex min-w-0 flex-col rounded-2xl border ${on ? "border-[#3D8BFF] bg-[#0F0F12]" : "border-[#1F1F24] hover:border-[#3A3A42]"}`}>
+                <button type="button" aria-expanded={on} aria-controls={panel} onClick={() => setOpen(on ? null : job.id)} className="flex flex-col gap-2.5 p-4 text-left">
+                  <span className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] text-[#9A9AA3]"><span aria-hidden className="h-[7px] w-[7px] rounded-full" style={{ background: categoryColor(job.category) }} />{job.category}</span>
+                    <span className={`font-mono text-xs ${job.score >= 75 ? "text-[#3D8BFF]" : "text-[#9A9AA3]"}`}><span className="sr-only">Match: </span>{job.score}%</span>
+                  </span>
+                  <span className="break-words text-[15px] font-semibold leading-[1.3]">{job.title}</span>
+                  <span className="break-words text-xs text-[#8B8B94]">
+                    {[job.company, job.location, posted].filter(Boolean).join(" · ")}
+                    {job.isNew && <span className="text-[#3D8BFF]"> · New</span>}
+                    {job.saved && <span className="text-[#3D8BFF]"> · Saved</span>}
+                  </span>
+                </button>
+                {on && (
+                  <div id={panel} className="flex flex-col gap-3 px-4 pb-4">
+                    {job.reasons.length > 0 && (
+                      <ul aria-label="Why it matches" className="m-0 flex list-none flex-col gap-1.5 border-t border-[#1F1F24] p-0 pt-3">
+                        {job.reasons.map((reason) => <li key={reason} className="flex gap-2 text-xs text-[#E4E4E8]"><span aria-hidden className="text-[#3D8BFF]">✓</span><span className="min-w-0">{reason}</span></li>)}
+                      </ul>
+                    )}
+                    {job.description && (
+                      <details className="text-xs text-[#9A9AA3]">
+                        <summary className="cursor-pointer select-none hover:text-white">Read the description</summary>
+                        <p className="mb-0 mt-2 max-h-60 overflow-auto whitespace-pre-line break-words">{job.description}</p>
+                      </details>
+                    )}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <a href={job.url} target="_blank" rel="noopener noreferrer" className="flex h-[38px] items-center justify-center rounded-[10px] bg-[#F7F7F8] text-[13px] font-semibold text-[#070708] hover:bg-white">Apply <span aria-hidden>&nbsp;↗</span></a>
+                      <button type="button" onClick={() => onCoverLetter(job, all)} className="h-[38px] rounded-[10px] border border-[#26262C] text-[13px] font-medium hover:bg-white/5">✦ Cover letter</button>
+                    </div>
+                    <div className="flex justify-between">
+                      <button type="button" onClick={() => void save(job)} aria-pressed={Boolean(job.saved)} className="h-8 text-xs font-medium hover:underline">{job.saved ? "✓ Saved" : "+ Save for later"}</button>
+                      <button type="button" onClick={() => void hide(job)} aria-label={`Not for me: hide ${job.title} at ${job.company}`} className="h-8 text-xs font-medium text-[#9A9AA3] hover:text-white">✕ Not for me</button>
+                    </div>
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
+    </div>
+  );
+}
+
+type Preferences = { chosen: boolean; roles: string[]; companies: string[]; industries: string[]; locations: string[]; remote: "yes" | "no" | "either"; jobType: "internship" | "full_time" | "either"; suggestedRoles: string[]; industryOptions: string[] };
+
+function AddBox({ label, placeholder, onAdd }: { label: string; placeholder: string; onAdd: (value: string) => void }) {
+  const [value, setValue] = useState("");
+  const add = () => {
+    if (value.trim()) onAdd(value.trim());
+    setValue("");
+  };
+  return (
+    <label className="inline-flex h-[34px] items-center rounded-lg border border-dashed border-[#3A3A42] px-2.5 focus-within:border-[#3D8BFF]">
+      <span className="sr-only">{label}</span>
+      <input
+        type="text"
+        value={value}
+        maxLength={80}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }}
+        onBlur={add}
+        placeholder={placeholder}
+        className="w-40 border-0 bg-transparent text-[13px] text-[#F7F7F8] outline-none placeholder:text-[#8B8B94]"
+      />
+    </label>
+  );
+}
+
+/** Edit careers & roles: what jobs are matched against. Starts from the student's resume until they save it. */
+function EditCareers({ onClose, onSaved }: { onClose: () => void; onSaved: (roleCount: number) => Promise<void> }) {
+  const [draft, setDraft] = useState<Preferences | null>(null);
+  const [places, setPlaces] = useState<string[]>([]);
+  const [problem, setProblem] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void (async () => {
+      try {
+        const response = await fetch("/api/app/job-preferences");
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Couldn't load your careers and roles.");
+        setDraft(payload);
+        setPlaces([...new Set([...(payload.locations as string[]), "Anywhere in the US"])]);
+      } catch (reason) {
+        setProblem(reason instanceof Error ? reason.message : "Couldn't load your careers and roles.");
+      }
+    })();
+  }, []);
+  const toggled = (list: string[], value: string) => (list.includes(value) ? list.filter((item) => item !== value) : [...list, value]);
+  const added = (list: string[], value: string) => (list.some((item) => item.toLowerCase() === value.toLowerCase()) ? list : [...list, value]);
+  const chip = "h-9 rounded-full border px-3.5 text-[13px] font-medium";
+  const section = "flex flex-col gap-3 border-t border-[#17171B] pt-6";
+  const title = "m-0 text-[17px] font-semibold";
+  const back = <button type="button" onClick={onClose} className="h-8 self-start text-[13px] font-medium text-[#9A9AA3] hover:text-white">← Back to jobs</button>;
+
+  if (!draft) return <div className="mx-auto flex w-full max-w-[880px] flex-col gap-3">{back}{problem ? <p role="alert" className="m-0 text-sm text-red-300">{problem}</p> : <p className="m-0 text-sm text-[#8B8B94]">Loading your careers and roles…</p>}</div>;
+  const set = (change: Partial<Preferences>) => setDraft({ ...draft, ...change });
+  const remoteOn = draft.remote !== "no";
+  const onlyPlaces = draft.locations.length > 0;
+  async function submit() {
+    setBusy(true);
+    setProblem("");
+    try {
+      const response = await fetch("/api/app/job-preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        // Remote with no other place picked means only remote jobs.
+        body: JSON.stringify({ ...draft, remote: !remoteOn ? "no" : onlyPlaces ? "either" : "yes" }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Couldn't save your careers and roles.");
+      await onSaved(draft!.roles.length);
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't save your careers and roles.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mx-auto flex w-full max-w-[880px] flex-col gap-7">
+      <div className="flex flex-col gap-2">
+        {back}
+        <h1 className={heading}>Edit careers &amp; roles</h1>
+        <p className="m-0 text-[15px] text-[#9A9AA3]">Unnepo finds jobs that match these.{draft.chosen ? "" : " We started from your resume, so change anything that's off."}</p>
+      </div>
+
+      <section aria-labelledby="edit-roles" className="flex flex-col gap-3">
+        <h2 id="edit-roles" className={title}>Roles you want <span className="text-[13px] font-normal text-[#8B8B94]">{draft.roles.length}</span></h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {draft.roles.map((role) => (
+            <span key={role} className="inline-flex h-[38px] items-center gap-2 rounded-full border border-[#3A3A42] bg-[#111114] pl-3.5 pr-1.5 text-sm">
+              <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: categoryOf(role).color }} />{role}
+              <button type="button" aria-label={`Remove ${role}`} onClick={() => set({ roles: draft.roles.filter((item) => item !== role) })} className="h-7 w-7 rounded-full text-[#9A9AA3] hover:text-white">✕</button>
+            </span>
+          ))}
+          <AddBox label="Add a role" placeholder="+ Add a role" onAdd={(value) => set({ roles: added(draft.roles, value) })} />
+        </div>
+        {draft.suggestedRoles.filter((role) => !draft.roles.includes(role)).length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-[13px] text-[#8B8B94]">Suggested from your resume:</span>
+            {draft.suggestedRoles.filter((role) => !draft.roles.includes(role)).map((role) => (
+              <button key={role} type="button" onClick={() => set({ roles: [...draft.roles, role] })} className="h-8 rounded-full border border-dashed border-[#3A3A42] px-3 text-[13px] font-medium text-[#B4B4BC] hover:text-white">+ {role}</button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="edit-industries" className={section}>
+        <h2 id="edit-industries" className={title}>Industries</h2>
+        <div className="flex flex-wrap gap-2">
+          {draft.industryOptions.map((name) => <button key={name} type="button" aria-pressed={draft.industries.includes(name)} onClick={() => set({ industries: toggled(draft.industries, name) })} className={`${chip} ${draft.industries.includes(name) ? chipOn : chipOff}`}>{name}</button>)}
+        </div>
+      </section>
+
+      <section aria-labelledby="edit-companies" className={section}>
+        <h2 id="edit-companies" className={title}>Dream companies <span className="text-[13px] font-normal text-[#8B8B94]">checked first</span></h2>
+        <div className="flex flex-wrap items-center gap-2">
+          {draft.companies.map((name) => (
+            <span key={name} className="inline-flex h-[34px] items-center gap-1 rounded-lg border border-[#26262C] pl-3 pr-1 text-[13px]">
+              {name}
+              <button type="button" aria-label={`Remove ${name}`} onClick={() => set({ companies: draft.companies.filter((item) => item !== name) })} className="h-6 w-6 rounded text-[#9A9AA3] hover:text-white">✕</button>
+            </span>
+          ))}
+          <AddBox label="Add a company" placeholder="+ Add a company" onAdd={(value) => set({ companies: added(draft.companies, value) })} />
+        </div>
+      </section>
+
+      <section className="flex flex-wrap gap-8 border-t border-[#17171B] pt-6">
+        <div className="flex min-w-0 flex-[1_1_280px] flex-col gap-3">
+          <h2 id="edit-where" className={title}>Where</h2>
+          <div role="group" aria-labelledby="edit-where" className="flex flex-wrap items-center gap-2">
+            <button type="button" aria-pressed={remoteOn} onClick={() => set({ remote: remoteOn ? "no" : "either" })} className={`${chip} ${remoteOn ? chipOn : chipOff}`}>Remote</button>
+            {places.map((place) => <button key={place} type="button" aria-pressed={draft.locations.includes(place)} onClick={() => set({ locations: toggled(draft.locations, place) })} className={`${chip} ${draft.locations.includes(place) ? chipOn : chipOff}`}>{place}</button>)}
+            <AddBox label="Add a place" placeholder="+ Add a place" onAdd={(value) => { setPlaces((list) => added(list, value)); set({ locations: added(draft.locations, value) }); }} />
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-[1_1_280px] flex-col gap-3">
+          <h2 id="edit-type" className={title}>Job type</h2>
+          <div role="group" aria-labelledby="edit-type" className="flex self-start rounded-[10px] border border-[#26262C] p-[3px]">
+            {([["internship", "Internship"], ["full_time", "Full-time"], ["either", "Both"]] as const).map(([id, name]) => <button key={id} type="button" aria-pressed={draft.jobType === id} onClick={() => set({ jobType: id })} className={`h-8 rounded-[7px] px-3 text-[13px] font-medium ${draft.jobType === id ? "bg-[#F7F7F8] text-[#070708]" : "text-[#9A9AA3] hover:text-white"}`}>{name}</button>)}
+          </div>
+        </div>
+      </section>
+
+      <div className="flex flex-wrap items-center gap-3 border-t border-[#17171B] pt-6">
+        <button type="button" disabled={busy || !draft.roles.length} onClick={() => void submit()} className="h-12 rounded-xl bg-[#F7F7F8] px-[22px] text-[15px] font-semibold text-[#070708] hover:bg-white disabled:opacity-50">{busy ? "Saving…" : "Save and refresh matches"}</button>
+        {!draft.roles.length && <span className="text-[13px] text-[#8B8B94]">Add at least one role.</span>}
+        {problem && <span role="alert" className="text-[13px] text-red-300">{problem}</span>}
+      </div>
     </div>
   );
 }

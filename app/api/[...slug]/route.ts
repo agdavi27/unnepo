@@ -10,7 +10,7 @@ import { ServiceError } from "@/lib/errors";
 import { nowIso } from "@/lib/db/file-store";
 import { usingDefaultSecret } from "@/lib/security";
 import { integrations } from "@/lib/integrations/flags";
-import { dismissRecommendedJob, generateWorkspaceCoverLetter, rewriteWorkspaceLetterPart, listRecommendedJobs, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
+import { dismissRecommendedJob, generateWorkspaceCoverLetter, rewriteWorkspaceLetterPart, listRecommendedJobs, jobPreferences, saveJobPreferences, saveRecommendedJob, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
 import { generateCv } from "@/lib/apply/cv";
@@ -253,6 +253,11 @@ async function handle(request: Request, slug: string[]) {
   }
   if (root === "app" && action === "jobs" && request.method === "GET") {
     return json(await listRecommendedJobs(user.id, { refresh: new URL(request.url).searchParams.get("refresh") === "1" }));
+  }
+  if (root === "app" && action === "job-preferences" && request.method === "GET") return json(await jobPreferences(user.id));
+  if (root === "app" && action === "job-preferences" && request.method === "PUT") return json(await saveJobPreferences(user.id, await request.json()));
+  if (root === "app" && action === "jobs" && request.method === "POST" && slug[2] === "save") {
+    return json(await saveRecommendedJob(user.id, await request.json()));
   }
   if (root === "app" && action === "jobs" && request.method === "POST" && slug[2] === "dismiss") {
     return json(await dismissRecommendedJob(user.id, await request.json()));

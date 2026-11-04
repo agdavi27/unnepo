@@ -3,9 +3,9 @@ import { repo } from "@/lib/db/file-store";
 import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditCommitAllowed } from "@/lib/credits/quote";
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
-import { dismissRecommendedJob, resetStructuredProfile, saveStructuredProfile, generateWorkspaceCoverLetter, listRecommendedJobs, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
+import { dismissRecommendedJob, resetStructuredProfile, saveStructuredProfile, generateWorkspaceCoverLetter, listRecommendedJobs, jobPreferences, saveJobPreferences, saveRecommendedJob, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
 import { PUBLIC_PLANS, creditMath, serverConfig } from "@/lib/config";
-import { scoreJob, setJobFetcherForTests } from "@/lib/jobs/recommend";
+import { roleFit, scoreJob, setJobFetcherForTests } from "@/lib/jobs/recommend";
 import { isPersonalWorkEmail, looksLikePerson } from "@/lib/providers/contacts/router";
 import { COLLEGE_SUGGESTIONS, brandsForInterests, rankSuggestions } from "@/lib/suggestions";
 import { formatLocation, joinProfileList, parseLocation, splitLocations, splitProfileList } from "@/lib/profile/lists";
@@ -144,6 +144,87 @@ describe("structured profile", () => {
     expect(scoreJob({ ...base, title: "Senior Brand Marketing Manager", postedAt: "2026-10-25T00:00:00Z" }, prefs, now)).toBeNull();
     expect(scoreJob({ ...base, title: "Brand Marketing Intern", postedAt: "2026-06-01T00:00:00Z" }, prefs, now)).toBeNull();
     expect(scoreJob({ ...base, company: "Acme", location: "Denver", description: "", title: "Accountant", postedAt: "2026-10-25T00:00:00Z" }, prefs, now)).toBeNull();
+  });
+
+  describe("how well a job fits the student", () => {
+    const now = Date.parse("2026-10-27T12:00:00Z");
+    const prefs = { roles: ["Marketing Intern", "Data Analyst"], companies: [], locations: ["Boston"], interests: ["Marketing"], remoteOk: true };
+    const job = (title: string, more = {}) => ({ id: "j", title, company: "Acme", location: "Boston, MA", postedAt: "2026-10-25T00:00:00Z", postedKind: "posted" as const, url: "https://example.com/j", source: "greenhouse" as const, description: "", ...more });
+
+    it("reads a role by the words that say what the work is", () => {
+      expect(roleFit("Brand Marketing Coordinator", "Marketing Intern")).toBe("full");
+      expect(roleFit("Data Engineer", "Data Analyst")).toBe("part");
+      expect(roleFit("Financial Analyst", "Data Analyst")).toBeNull();
+      expect(roleFit("Internal Auditor", "Intern")).toBeNull();
+      expect(roleFit("Corporate Finance Associate", "Financial Analyst")).toBe("part");
+    });
+
+    it("doesn't show a job just because it's an internship nearby", () => {
+      expect(scoreJob(job("Mechanical Engineering Intern"), prefs, now)).toBeNull();
+      expect(scoreJob(job("Marketing Intern"), prefs, now)?.score).toBeGreaterThanOrEqual(70);
+    });
+
+    it("ranks a full match above a partial one, and a nearby job above a far one", () => {
+      const best = scoreJob(job("Data Analyst Intern"), prefs, now)!;
+      const partly = scoreJob(job("Data Engineering Intern"), prefs, now)!;
+      const far = scoreJob(job("Data Analyst Intern", { location: "Denver, CO" }), prefs, now)!;
+      expect(best.score).toBeGreaterThan(partly.score);
+      expect(best.score).toBeGreaterThan(far.score);
+      expect(partly.reasons).toContain("Close to your role: Data Analyst");
+    });
+
+    it("doesn't show an unrelated job because it's at a dream company, or a graduate-degree one to an undergraduate", () => {
+      expect(scoreJob(job("Machine Learning Engineer, Intern", { company: "Patagonia" }), { ...prefs, roles: ["Marketing Intern"], companies: ["Patagonia"] }, now)).toBeNull();
+      const dream = scoreJob(job("Marketing Intern", { company: "Patagonia" }), { ...prefs, companies: ["Patagonia"] }, now)!;
+      expect(dream.score).toBeGreaterThan(scoreJob(job("Marketing Intern"), prefs, now)!.score);
+      expect(scoreJob(job("Data Analyst, PhD Intern"), prefs, now)).toBeNull();
+      expect(scoreJob(job("Data Analyst, PhD Intern"), { ...prefs, classYear: "graduate" }, now)).not.toBeNull();
+    });
+
+    it("doesn't count a manager job as a full match for an intern role", () => {
+      const intern = scoreJob(job("Marketing Intern"), prefs, now)!;
+      const manager = scoreJob(job("Marketing Manager"), prefs, now)!;
+      expect(manager.reasons).toContain("Close to your role: Marketing Intern");
+      expect(intern.score).toBeGreaterThan(manager.score + 20);
+    });
+
+    it("follows the job type, place, class year and sponsorship on the profile", () => {
+      expect(scoreJob(job("Data Analyst"), { ...prefs, jobType: "internship" }, now)).toBeNull();
+      expect(scoreJob(job("Data Analyst Intern"), { ...prefs, jobType: "full_time" }, now)).toBeNull();
+      expect(scoreJob(job("Data Analyst Intern", { location: "Dublin" }), prefs, now)).toBeNull();
+      expect(scoreJob(job("Data Analyst Intern", { location: "Dublin" }), { ...prefs, locations: ["Dublin"] }, now)).not.toBeNull();
+      expect(scoreJob(job("Data Analyst Intern", { location: "Boston, MA" }), { ...prefs, remoteOnly: true }, now)).toBeNull();
+      expect(scoreJob(job("Data Analyst, New Grad"), { ...prefs, classYear: "sophomore" }, now)).toBeNull();
+      expect(scoreJob(job("Data Analyst, New Grad"), { ...prefs, classYear: "senior" }, now)).not.toBeNull();
+      expect(scoreJob(job("Data Analyst Intern", { description: "We do not offer visa sponsorship." }), { ...prefs, needsSponsorship: true }, now)).toBeNull();
+      expect(scoreJob(job("Data Analyst Intern", { description: "We do not offer visa sponsorship." }), prefs, now)).not.toBeNull();
+      expect(scoreJob(job("Data Analyst", { description: "You have 6+ years of experience." }), prefs, now)).toBeNull();
+    });
+  });
+
+  it("matches exactly what the student chose on Edit careers & roles, and keeps saved jobs", async () => {
+    const userId = await verifiedStudent("careers@colby.edu", "Jobseeker");
+    await saveStudentProfile(userId, { profile: { experience: [{ company: "Colby", title: "Data Analyst Intern", startDate: "2025", current: false, bullets: ["Ran SEO for the brand"] }], skills: { technical: ["SQL"] } } });
+    const before = await jobPreferences(userId);
+    expect(before).toMatchObject({ chosen: false, roles: ["Data Analyst"] });
+    expect(before.suggestedRoles.length).toBeGreaterThan(0);
+    expect(before.suggestedRoles).not.toContain("Data Analyst");
+    await expect(saveJobPreferences(userId, { roles: [] })).rejects.toThrow(/at least one role/);
+    const posting = (id: number, title: string) => ({ id, title, company_name: `Co${id}`, candidate_required_location: "USA", publication_date: new Date().toISOString(), url: `https://remotive.com/jobs/${id}`, description: "" });
+    setJobFetcherForTests(async (url) => (url.includes("remotive.com") ? Response.json({ jobs: [posting(1, "Data Analyst Intern"), posting(2, "Sales Intern"), posting(3, "Sales Representative")] }) : new Response("not found", { status: 404 })));
+    const after = await saveJobPreferences(userId, { roles: ["Sales"], companies: ["Patagonia"], industries: ["Retail"], locations: ["Boston"], remote: "either", jobType: "internship" });
+    expect(after).toMatchObject({ chosen: true, roles: ["Sales"], companies: ["Patagonia"], jobType: "internship" });
+    const result = await listRecommendedJobs(userId);
+    // Their past role isn't added back, and full-time jobs are gone.
+    expect(result.jobs.map((job) => job.title)).toEqual(["Sales Intern"]);
+    expect(result.jobs[0]).toMatchObject({ category: "Sales", saved: false });
+    await saveRecommendedJob(userId, { job: result.jobs[0], saved: true });
+    // It stays after the feed stops listing it.
+    setJobFetcherForTests(async () => new Response("not found", { status: 404 }));
+    const later = await listRecommendedJobs(userId, { refresh: true });
+    expect(later.jobs.map((job) => [job.title, job.saved])).toEqual([["Sales Intern", true]]);
+    await saveRecommendedJob(userId, { jobId: result.jobs[0].id, saved: false });
+    expect((await listRecommendedJobs(userId)).jobs).toEqual([]);
   });
 
   it("suggests jobs from the resume alone: past job titles and skills", async () => {

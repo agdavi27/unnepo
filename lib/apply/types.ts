@@ -125,6 +125,9 @@ export type ActivityEvent = { at: string; kind: "opened" | "filled" | "applied" 
 /** A posting found for a job. `url` is the page to open, `readUrl` is where Unnepo reads its details. */
 export type PostingChoice = { title: string; location: string; url: string; readUrl: string };
 
+/** A job saved for later from Jobs for you: kept whole, since the list changes. */
+export type SavedFeedJob = { id: string; title: string; company: string; location: string; postedAt: string; postedKind: "posted" | "updated"; url: string; source: string; description: string; reasons: string[]; score: number; savedAt: string };
+
 export type MaybeApplied = { id: string; url: string; title: string; company: string; site: string; description?: string; applicationId?: string; at: string };
 
 export type ApplicationOutcome = "assessment" | "interviewing" | "offer" | "rejected";
@@ -231,7 +234,7 @@ export type ApplicationProfile = {
   /** Look for people as soon as a job is saved as applied. On by default for paid plans; Free turns it on. */
   autoFindPeople?: boolean;
   /** The Jobs for you list: when each job was first shown, jobs the student hid, and how many refreshes. */
-  jobFeed?: { seen: Record<string, string>; dismissed: string[]; round: number };
+  jobFeed?: { seen: Record<string, string>; dismissed: string[]; round: number; saved?: SavedFeedJob[] };
   /** The spider the student picked on the Stats page (lib/spiders.ts); worn once it's unlocked. */
   spiderSkin?: string;
   /** CVs Unnepo has written for the student; 1 credit covers CVS_PER_CREDIT of them. */
