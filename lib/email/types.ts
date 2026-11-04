@@ -1,5 +1,5 @@
 /** What an email about a job says happened. */
-export type EmailKind = "applied" | "interview" | "assessment" | "offer" | "rejected" | "not_job_related";
+export type EmailKind = "applied" | "incomplete" | "interview" | "assessment" | "offer" | "rejected" | "not_job_related";
 
 /** A student's forwarding address: `token` is the "u_..." part, unique and hard to guess. */
 export type EmailInbox = { token: string; userId: string; active: boolean; createdAt: string };

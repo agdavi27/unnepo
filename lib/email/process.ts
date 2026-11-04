@@ -21,7 +21,7 @@ import { forwardingVerification } from "@/lib/email/verification";
 
 export const MIN_CONFIDENCE = 0.7;
 const EMPTY_REPORT: FillReport = { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
-const OUTCOME_FOR: Record<Exclude<Classification["type"], "applied" | "not_job_related">, ApplicationOutcome> = {
+const OUTCOME_FOR: Record<Exclude<Classification["type"], "applied" | "incomplete" | "not_job_related">, ApplicationOutcome> = {
   interview: "interviewing", assessment: "assessment", offer: "offer", rejected: "rejected",
 };
 
@@ -63,15 +63,20 @@ export function withEmailChange(report: FillReport | null, change: StatusChange,
   };
 }
 
-/** Saves the job the email confirms: an application of its own, marked applied, added from email. */
+/**
+ * Saves the job an email is about, as a job of its own, added from email: applied, or not yet when the student
+ * still has to finish it. Noting an email doesn't use up the free plan's applications.
+ */
 async function createFromEmail(userId: string, job: Classification, at: string) {
+  const unfinished = job.type === "incomplete";
   const company = cleanCompanyName(job.company) || job.company;
   const title = job.job_title || "Unknown role";
   // No link to the posting: a key of its own, so two emailed jobs at one company stay two jobs.
-  const app = await minimalApplication(userId, { url: `https://unnepo.local/email/${id()}`, title, company });
+  const app = await minimalApplication(userId, { url: `https://unnepo.local/email/${id()}`, title, company, charge: false });
   const updated = await applications.update(userId, app.id, {
-    jobUrl: "", applicationUrl: null, status: "applied_manual", submittedAt: at, statusMessage: "Added from a forwarded email.",
-    fillReport: withEmailChange(app.fillReport, { at, status: "applied", source: "email", summary: job.summary }, "added"),
+    jobUrl: "", applicationUrl: null,
+    ...(unfinished ? { statusMessage: "Added from a forwarded email. Not applied yet." } : { status: "applied_manual" as const, submittedAt: at, statusMessage: "Added from a forwarded email." }),
+    fillReport: withEmailChange(app.fillReport, { at, status: unfinished ? "incomplete" : "applied", source: "email", summary: job.summary }, "added"),
   });
   return updated ?? app;
 }
@@ -88,7 +93,7 @@ export async function applyEmail(userId: string, job: Classification, at: string
     if (match.kind === "several") return { outcome: "review", applicationId: null, reason: "several_matches", candidates: match.candidates.map((app) => app.id) };
     if (match.kind === "one") target = match.app;
     // A status email about a job that isn't saved: the student says which one, or saves it.
-    if (match.kind === "none" && job.type !== "applied") return { outcome: "review", applicationId: null, reason: "no_match", candidates: match.atCompany.map((app) => app.id) };
+    if (match.kind === "none" && job.type !== "applied" && job.type !== "incomplete") return { outcome: "review", applicationId: null, reason: "no_match", candidates: match.atCompany.map((app) => app.id) };
   }
   if (job.type === "applied") {
     if (!target) return { outcome: "created", applicationId: (await createFromEmail(userId, job, at)).id };
@@ -99,6 +104,12 @@ export async function applyEmail(userId: string, job: Classification, at: string
       ...(job.job_title && /^(unknown role|job title missing)$/i.test(target.title.trim()) ? { title: job.job_title } : {}),
       fillReport: withEmailChange(target.fillReport, { at, status: "applied", source: "email", summary: job.summary }, "updated"),
     });
+    return { outcome: "updated", applicationId: target.id };
+  }
+  if (job.type === "incomplete") {
+    if (!target) return { outcome: "created", applicationId: (await createFromEmail(userId, job, at)).id };
+    // A reminder never takes a job back from applied: it only goes on the job's history.
+    await applications.update(userId, target.id, { fillReport: withEmailChange(target.fillReport, { at, status: "incomplete", source: "email", summary: job.summary }, "updated") });
     return { outcome: "updated", applicationId: target.id };
   }
   if (job.type === "not_job_related") return { outcome: "review", applicationId: null, reason: "low_confidence" };

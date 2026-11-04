@@ -8,7 +8,14 @@ export const ATS_DOMAINS = [
   "jobvite.com", "taleo.net", "successfactors.com", "linkedin.com", "indeed.com",
 ];
 
-export const JOB_PHRASES = ["thank you for applying", "application received", "your application", "interview", "assessment", "offer"];
+// What the mail rule forwards: phrases job emails use, kept narrow so little else leaves the student's inbox.
+export const JOB_PHRASES = [
+  "thank you for applying", "thanks for applying", "application received", "application submitted", "your application", "your candidacy",
+  "thank you for your interest", "thanks for your interest", "interview", "assessment", "offer",
+];
+// Unnepo's own check is wider, since the AI reads what passes and the student may forward anything by hand.
+// "Thank you for your submission for the Sales position" says none of the phrases above.
+const JOB_WORDS = [...JOB_PHRASES, "application", "applying", "applied", "candidacy", "candidate", "recruiter", "recruiting", "hiring", "position", "resume", "moving forward", "move forward"];
 
 export type InboundEmail = { from: string; subject: string; date?: string; text: string; messageId?: string };
 
@@ -20,7 +27,7 @@ export function senderDomain(from: string) {
 const fromJobSystem = (domain: string) => ATS_DOMAINS.some((ats) => domain === ats || domain.endsWith(`.${ats}`));
 
 // Whole words, with or without a plural s: "interviews" counts, "offered" and "unoffered" don't.
-const PHRASE = new RegExp(`\\b(${JOB_PHRASES.map((phrase) => phrase.replace(/ /g, "\\s+")).join("|")})s?\\b`, "i");
+const PHRASE = new RegExp(`\\b(${JOB_WORDS.map((phrase) => phrase.replace(/ /g, "\\s+")).join("|")})s?\\b`, "i");
 
 export function passesPrefilter(email: InboundEmail) {
   if (fromJobSystem(senderDomain(email.from))) return true;

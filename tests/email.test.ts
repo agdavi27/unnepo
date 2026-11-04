@@ -253,6 +253,56 @@ describe("processing forwarded emails", () => {
     expect(recent).toEqual([]);
   });
 
+  it("reads job emails that don't use the usual phrases, and still drops the rest", () => {
+    const email = (subject: string, text: string) => ({ from: "Careers <careers@almocorp.com>", subject, text });
+    expect(passesPrefilter(email("Thanks for your submission", "We got what you sent for the Sales position."))).toBe(true);
+    expect(passesPrefilter(email("Finish applying", "You're almost done."))).toBe(true);
+    expect(passesPrefilter(email("We've decided", "We won't be moving forward."))).toBe(true);
+    expect(passesPrefilter(fixture("newsletter"))).toBe(false);
+    // The mail rule stays narrow: a word like "position" alone doesn't forward an email.
+    expect(gmailFilterQuery()).toContain('"thanks for applying"');
+    expect(gmailFilterQuery()).not.toContain('"position"');
+  });
+
+  it("saves a reminder to finish an application as In progress, and a later confirmation makes it applied", async () => {
+    const userId = await student();
+    const say = (type: string) => setClassifierForTests(async () => JSON.stringify({ type, company: "ALMO CORP", job_title: "Account Specialist", confidence: 0.95, summary: `${type} at ALMO CORP.` }));
+    const email = (id: string, subject: string) => ({ messageId: `<${id}@almo.example.com>`, from: "ALMO <jobs@almo.example.com>", subject, text: "Your application for Account Specialist." });
+
+    say("incomplete");
+    const first = await processEmail(userId, email("one", "Finish your application"), "forward");
+    expect(first.outcome).toBe("created");
+    const saved = await applications.get(userId, first.applicationId!);
+    expect(stageOf(saved!)).toBe("in_progress");
+    expect(saved).toMatchObject({ company: "ALMO CORP", title: "Account Specialist", submittedAt: null });
+    expect(saved?.fillReport?.fromEmail).toBe("added");
+
+    // A second reminder is the same job.
+    const second = await processEmail(userId, email("two", "Reminder: your application"), "forward");
+    expect(second).toMatchObject({ outcome: "updated", applicationId: first.applicationId });
+    expect(stageOf((await applications.get(userId, first.applicationId!))!)).toBe("in_progress");
+
+    say("applied");
+    await processEmail(userId, email("three", "Thank you for applying"), "forward");
+    expect(stageOf((await applications.get(userId, first.applicationId!))!)).toBe("submitted");
+
+    // A late reminder doesn't take it back.
+    say("incomplete");
+    expect((await processEmail(userId, email("four", "Reminder: your application"), "forward")).outcome).toBe("updated");
+    expect(stageOf((await applications.get(userId, first.applicationId!))!)).toBe("submitted");
+  });
+
+  it("saves jobs from email without using up the free plan's applications", async () => {
+    const userId = await student();
+    // Names nothing like each other, so each email is a job of its own.
+    setClassifierForTests(async () => JSON.stringify({ type: "applied", company: crypto.randomUUID().slice(0, 13), job_title: "Analyst", confidence: 0.95, summary: "Confirmed." }));
+    for (let index = 0; index < 27; index += 1) {
+      const result = await processEmail(userId, { messageId: `<limit-${index}@example.com>`, from: "Jobs <jobs@example.com>", subject: "Thank you for applying", text: "Thank you for applying." }, "forward");
+      expect(result.outcome).toBe("created");
+    }
+    expect((await applications.list(userId)).filter((app) => app.charged)).toEqual([]);
+  });
+
   it("marks a job No response after 28 days without an email", () => {
     const now = Date.parse("2026-11-03T12:00:00.000Z");
     const applied = { status: "submitted" as const, submittedAt: "2026-10-01T12:00:00.000Z", createdAt: "2026-10-01T12:00:00.000Z", fillReport: null };

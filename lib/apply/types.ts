@@ -121,7 +121,7 @@ export type MaybeApplied = { id: string; url: string; title: string; company: st
 export type ApplicationOutcome = "assessment" | "interviewing" | "offer" | "rejected";
 
 /** One change in an application's status, and where it came from: a forwarded email, or the student. */
-export type StatusChange = { at: string; status: ApplicationOutcome | "applied"; source: "email" | "you"; summary: string };
+export type StatusChange = { at: string; status: ApplicationOutcome | "applied" | "incomplete"; source: "email" | "you"; summary: string };
 
 export type Confirmation = {
   url: string;

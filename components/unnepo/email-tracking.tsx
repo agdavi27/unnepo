@@ -54,7 +54,7 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
   );
 }
 
-const KIND: Record<string, string> = { applied: "Applied", interview: "Interview", assessment: "Assessment", offer: "Offer", rejected: "Rejected", not_job_related: "Not about a job" };
+const KIND: Record<string, string> = { applied: "Applied", incomplete: "Not finished", interview: "Interview", assessment: "Assessment", offer: "Offer", rejected: "Rejected", not_job_related: "Not about a job" };
 const REASON: Record<string, string> = {
   low_confidence: "Unnepo wasn't sure what this email says.",
   several_matches: "More than one of your applications fits. Pick the right one.",

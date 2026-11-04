@@ -9,7 +9,7 @@ import type { EmailKind } from "@/lib/email/types";
  */
 
 export const CLASSIFICATION = z.object({
-  type: z.enum(["applied", "interview", "assessment", "offer", "rejected", "not_job_related"]),
+  type: z.enum(["applied", "incomplete", "interview", "assessment", "offer", "rejected", "not_job_related"]),
   company: z.string().max(200),
   job_title: z.string().max(200).nullable(),
   confidence: z.number().min(0).max(1),
@@ -36,8 +36,9 @@ export function parseClassification(raw: string): Classification {
 }
 
 const SYSTEM = `You read emails a student received about job applications. Reply with only JSON:
-{"type": "applied" | "interview" | "assessment" | "offer" | "rejected" | "not_job_related", "company": string, "job_title": string or null, "confidence": number from 0 to 1, "summary": string}
+{"type": "applied" | "incomplete" | "interview" | "assessment" | "offer" | "rejected" | "not_job_related", "company": string, "job_title": string or null, "confidence": number from 0 to 1, "summary": string}
 - applied: the company confirms it received the student's application.
+- incomplete: the student started an application but hasn't finished it, like a reminder to complete it.
 - interview: an invitation to interview or to schedule a call.
 - assessment: a test, coding challenge, case study, or questionnaire to complete.
 - offer: a job offer.

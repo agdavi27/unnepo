@@ -792,7 +792,7 @@ function EmailBadge({ mark }: { mark: "added" | "updated" }) {
   return <span className="shrink-0 rounded-full border border-[#3D8BFF]/50 px-2 py-0.5 text-[11px] font-medium text-[#7FB2FF]" title={mark === "added" ? "Saved from a forwarded email" : "Its status changed from a forwarded email"}>{mark === "added" ? "Auto-added from email" : "Updated from email"}</span>;
 }
 
-const HISTORY_LABEL: Record<string, string> = { applied: "Applied", assessment: "Assessment", interviewing: "Interviewing", offer: "Offer", rejected: "Rejected" };
+const HISTORY_LABEL: Record<string, string> = { applied: "Applied", incomplete: "Not finished", assessment: "Assessment", interviewing: "Interviewing", offer: "Offer", rejected: "Rejected" };
 
 /**
  * A job's info: what Unnepo knows about it, from the page it was saved from or its link, with the posting and

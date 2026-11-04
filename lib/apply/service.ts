@@ -339,7 +339,7 @@ export async function trackedAt(userId: string, url: string, named?: { title?: s
 }
 
 /** A job tracked from what a page (or the student) says about it, without reading the posting. */
-export async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string; poster?: PostedRecruiter | null; key?: string }) {
+export async function minimalApplication(userId: string, input: { url: string; title: string; company: string; description?: string; poster?: PostedRecruiter | null; key?: string; charge?: boolean }) {
   let ats: JobApplication["ats"] = "other";
   try { ats = parseJobUrl(input.url).ats; } catch { /* a page Unnepo can't parse is still tracked */ }
   // A Workday page calls itself "Workday"; the link names the company.
@@ -354,7 +354,7 @@ export async function minimalApplication(userId: string, input: { url: string; t
     statusMessage: "Opened from the extension.", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null,
     contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
   });
-  await ensureCharged(userId, app);
+  if (input.charge !== false) await ensureCharged(userId, app);
   return (await applications.get(userId, app.id))!;
 }
 
