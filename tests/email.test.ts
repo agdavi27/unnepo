@@ -303,6 +303,15 @@ describe("processing forwarded emails", () => {
     expect((await applications.list(userId)).filter((app) => app.charged)).toEqual([]);
   });
 
+  it("says whether any forwarded email has arrived, for Setup", async () => {
+    const userId = await student();
+    expect((await emailState(userId)).forwarded).toBe(false);
+    await processEmail(userId, fixture("newsletter"), "paste");
+    expect((await emailState(userId)).forwarded).toBe(false);
+    await processEmail(userId, fixture("newsletter"), "forward");
+    expect((await emailState(userId)).forwarded).toBe(true);
+  });
+
   it("marks a job No response after 28 days without an email", () => {
     const now = Date.parse("2026-11-03T12:00:00.000Z");
     const applied = { status: "submitted" as const, submittedAt: "2026-10-01T12:00:00.000Z", createdAt: "2026-10-01T12:00:00.000Z", fillReport: null };

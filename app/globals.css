@@ -21,7 +21,8 @@
 * { box-sizing: border-box; }
 html, body { background: #070708; color: #f7f7f8; min-height: 100%; }
 body { font-family: var(--font-geist-sans), sans-serif; }
-button, input, select, textarea { font: inherit; }
+/* In the base layer, so a text size or weight class on a button still applies. */
+@layer base { button, input, select, textarea { font: inherit; } }
 ::selection { background: #f6e7a8; color: #111; }
 
 .hand { font-family: var(--font-caveat), cursive; }
@@ -81,3 +82,8 @@ button, input, select, textarea { font: inherit; }
   .school-track-reverse { animation: none; }
   .loader { animation: none; border-top-color: #f6e7a8; }
 }
+
+/* The dashboard's hanging spider. */
+@keyframes dash-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(8px); } }
+.dash-bob { animation: dash-bob 3s steps(3) infinite; }
+@media (prefers-reduced-motion: reduce) { .dash-bob { animation: none; } }

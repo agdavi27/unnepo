@@ -588,6 +588,14 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     if (!skinUnlocked(skin, applied)) throw new ServiceError(`That spider unlocks after ${skin.unlockAt} applications.`, "spider", 403);
     next.spiderSkin = skin.id;
   }
+  if (body.savedAnswer && typeof body.savedAnswer === "object") {
+    const given = body.savedAnswer as { key?: unknown; answer?: unknown };
+    const current = info.profile.saved?.[String(given.key ?? "")];
+    if (!current) throw new ServiceError("That saved answer isn't there anymore.", "answer", 404);
+    const answer = String(given.answer ?? "").trim().slice(0, 4000);
+    if (!answer) throw new ServiceError("Type an answer.", "answer", 400);
+    next.saved = { ...info.profile.saved, [String(given.key)]: { ...current, answer, updatedAt: nowIso() } };
+  }
   if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? (info.profile.accountConsentAt && info.profile.accountConsentAt !== CONSENT_BY_DEFAULT ? info.profile.accountConsentAt : nowIso()) : null;
   await applicationProfiles.put(userId, next);
   return { profile: publicProfile(next) };

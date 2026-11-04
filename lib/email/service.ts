@@ -24,6 +24,8 @@ export async function emailState(userId: string) {
   return {
     address: addressFor(inbox.token),
     ready: inboundReady(),
+    // Any forwarded email at all, the forwarding code or a skipped one included: forwarding works.
+    forwarded: events.some((event) => event.source === "forward") || Boolean(count),
     gmailQuery: gmailFilterQuery(),
     atsDomains: ATS_DOMAINS,
     phrases: JOB_PHRASES,

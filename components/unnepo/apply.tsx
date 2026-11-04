@@ -1,13 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AtsBadge, CompanyLogo } from "@/components/unnepo/company";
-import { FollowUpFacts } from "@/components/unnepo/follow-up-facts";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { HomeHero, HomeTiles, MoreStats, NextSpider, PerDayCard } from "@/components/unnepo/home";
 import { SessionBar, type Maybe, type Session } from "@/components/unnepo/activity";
 import { extensionHere, readLinksInBrowser } from "@/lib/extension-bridge";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { PeopleSearching } from "@/components/unnepo/people-searching";
-import { StatsPage } from "@/components/unnepo/stats";
+import { Spiders } from "@/components/unnepo/stats";
 import { stageOf, appliedOn, applicationStats, type Stage } from "@/lib/apply/stats";
 import { HOW_LABEL } from "@/lib/apply/activity-stats";
 import { SORTS, WHENS, arrange, postingLink, siteFor, sitesIn, type SortBy, type When } from "@/lib/apply/applied-list";
@@ -31,7 +30,6 @@ export type ApplyData = {
   maybe?: Maybe[];
   session?: Session;
 };
-export type TrackerView = "applied" | "stats";
 
 const ROLE_LABEL: Record<ApplicationContact["role"], string> = {
   alumni: "From your school",
@@ -114,8 +112,8 @@ function when(date: Date) {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric", ...(sameYear ? {} : { year: "numeric" }) });
 }
 
-/** The tracker's two pages share one data load: Applied and Stats. */
-export function ApplyArea({ view, refreshKey = 0 }: { view: TrackerView; refreshKey?: number }) {
+/** The Home tab: the day so far, the totals, and the list of jobs, from one data load. */
+export function ApplyArea({ refreshKey = 0, userName, onSetup, onSpiders }: { refreshKey?: number; userName: string; onSetup: () => void; onSpiders: () => void }) {
   const [data, setData] = useState<ApplyData | null>(null);
   const [error, setError] = useState("");
 
@@ -151,27 +149,16 @@ export function ApplyArea({ view, refreshKey = 0 }: { view: TrackerView; refresh
   }
   if (!data) return <p className="text-sm text-muted">Loading your applications…</p>;
 
-  if (view === "stats") {
-    return (
-      <StatsPage
-        applications={data.applications}
-        weeklyGoal={data.profile.weeklyGoal ?? null}
-        onGoal={async (weeklyGoal) => {
-          const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { weeklyGoal });
-          setData({ ...data, profile: result.profile });
-        }}
-        school={data.school}
-        spiderSkin={data.profile.spiderSkin ?? null}
-        onSpider={async (spiderSkin) => {
-          const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { spiderSkin });
-          setData({ ...data, profile: result.profile });
-        }}
-      />
-    );
-  }
   return (
     <AppliedPage
       data={data}
+      userName={userName}
+      onSetup={onSetup}
+      onSpiders={onSpiders}
+      onGoal={async (weeklyGoal) => {
+        const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { weeklyGoal });
+        setData((previous) => (previous ? { ...previous, profile: result.profile } : previous));
+      }}
       onReload={load}
       onReplace={(app) => setData({ ...data, applications: data.applications.map((item) => (item.id === app.id ? { ...item, ...app, contacts: item.contacts } : item)) })}
       onApps={(change) => setData((previous) => (previous ? { ...previous, applications: change(previous.applications) } : previous))}
@@ -179,53 +166,23 @@ export function ApplyArea({ view, refreshKey = 0 }: { view: TrackerView; refresh
   );
 }
 
-/** Job-site preferences that used to sit on the Apply page. Loads its own data. */
-export function ApplicationSettings() {
-  const [consent, setConsent] = useState<boolean | null>(null);
-  const [autoPeople, setAutoPeople] = useState<boolean | null>(null);
-  const [state, setState] = useState("");
+/** Settings: the spiders to wear. Loads its own data. */
+export function SpiderSettings() {
+  const [data, setData] = useState<ApplyData | null>(null);
   useEffect(() => {
-    call<ApplyData>("", "GET").then((data) => {
-      setConsent(Boolean(data.profile.accountConsentAt));
-      // Paid plans look for people on applying unless turned off; Free only when turned on.
-      setAutoPeople(data.plan && data.plan !== "free" ? data.profile.autoFindPeople !== false : data.profile.autoFindPeople === true);
-    }, () => setConsent(false));
+    call<ApplyData>("", "GET").then(setData, () => undefined);
   }, []);
-  async function save(value: boolean) {
-    setConsent(value);
-    setState("Saving…");
-    try {
-      await call("/profile", "PUT", { accountConsent: value });
-      setState("Saved.");
-    } catch (reason) {
-      setConsent(!value);
-      setState(reason instanceof Error ? reason.message : "Couldn't save.");
-    }
-  }
-  async function saveAutoPeople(value: boolean) {
-    setAutoPeople(value);
-    setState("Saving…");
-    try {
-      await call("/profile", "PUT", { autoFindPeople: value });
-      setState("Saved.");
-    } catch (reason) {
-      setAutoPeople(!value);
-      setState(reason instanceof Error ? reason.message : "Couldn't save.");
-    }
-  }
+  if (!data) return null;
   return (
-    <div className="rounded-2xl border border-line bg-panel p-5">
-      <h2 className="text-xs font-semibold uppercase tracking-wider text-faint">Applications</h2>
-      <label className="mt-3 flex items-start gap-2.5 text-sm">
-        <input type="checkbox" className="mt-1" checked={Boolean(consent)} disabled={consent === null} onChange={(event) => void save(event.target.checked)} />
-        <span>Accept job sites&apos; terms, privacy notices, and acknowledgements on my behalf when an application asks. Arbitration, background-check, and non-compete agreements are always left for me, and Unnepo never opts me into marketing.</span>
-      </label>
-      <label className="mt-3 flex items-start gap-2.5 text-sm">
-        <input type="checkbox" className="mt-1" checked={Boolean(autoPeople)} disabled={autoPeople === null} onChange={(event) => void saveAutoPeople(event.target.checked)} />
-        <span>Find people at the company as soon as a job is saved as applied, so the list is ready when I open it. 1 credit per job, only when someone with an email is found.</span>
-      </label>
-      {state && <p className="mt-2 text-xs text-muted">{state}</p>}
-    </div>
+    <Spiders
+      applied={applicationStats(data.applications).applied}
+      school={data.school}
+      picked={data.profile.spiderSkin ?? null}
+      onPick={async (spiderSkin) => {
+        const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { spiderSkin });
+        setData({ ...data, profile: result.profile });
+      }}
+    />
   );
 }
 
@@ -263,7 +220,7 @@ const UNDO_MS = 5000;
 const deleteNow = (applicationId: string, keepalive = false) =>
   fetch("/api/apply/applications", { method: "DELETE", keepalive, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId }) });
 
-function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
+function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onReplace, onApps }: { data: ApplyData; userName: string; onSetup: () => void; onSpiders: () => void; onGoal: (goal: number) => Promise<void>; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
   const apps = data.applications;
   // Removing is instant: the row goes away and is deleted for real after a few seconds, unless undone.
   const [removed, setRemoved] = useState<App[]>([]);
@@ -278,7 +235,6 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
     linked.current = true;
     window.history.replaceState(null, "", "/home");
     if (!apps.some((app) => app.id === wanted)) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
     setOpen(wanted);
     requestAnimationFrame(() => document.getElementById(`job-${wanted}`)?.scrollIntoView({ block: "center" }));
   }, [apps]);
@@ -397,208 +353,212 @@ function AppliedPage({ data, onReload, onReplace, onApps }: { data: ApplyData; o
 
   const named = shown.filter((app) => !app.companyMissing && !app.titleMissing);
   const unnamed = shown.filter((app) => app.companyMissing || app.titleMissing);
+  const stageCell = (app: App) => <StageControl app={app} onChange={(next) => void setStage(app, next)} />;
   const row = (app: App) => {
-            const expanded = open === app.id;
-            const stage = stageOf(app);
-            const posting = postingLink(app);
-            // Applied, nobody looked up yet: one press finds people to email there.
-            const canFind = stage !== "in_progress" && !app.companyMissing && app.contactsStatus === "idle" && !(app.contacts?.length);
-            const toggle = () => setOpen(expanded ? null : app.id);
-            return (
-              <li key={app.id} id={`job-${app.id}`} className="group border-b border-line">
-                <div className="flex items-center gap-3 py-3.5 sm:grid sm:grid-cols-[minmax(0,1fr)_7rem_9rem_6.5rem_2rem] sm:gap-4">
-                  <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={toggle} aria-expanded={expanded}>
-                    <CompanyLogo app={app} />
-                    <span className="min-w-0">
-                      <span className="block truncate font-medium">{app.companyMissing ? <span className="text-faint">{app.company || "No company"}</span> : app.company}</span>
-                      <span className="flex min-w-0 items-center gap-2 text-sm text-muted">
-                        <span className="truncate">{app.titleMissing ? <span className="text-faint">No job title</span> : app.title}</span>
-                        <span aria-hidden className="hidden text-faint sm:inline">·</span>
-                        <span className="hidden sm:inline-flex"><AtsBadge ats={app.ats} /></span>
-                        {app.fillReport?.fromEmail && <EmailBadge mark={app.fillReport.fromEmail} />}
-                      </span>
-                      <span className="mt-1 flex items-center gap-2 text-xs text-faint sm:hidden">
-                        <AtsBadge ats={app.ats} label />
-                        <span aria-hidden>·</span>
-                        <span>{when(appliedOn(app))}</span>
-                        <span aria-hidden>·</span>
-                        <span>{siteFor(app)}</span>
-                      </span>
-                    </span>
-                  </button>
-                  <span className="hidden min-w-0 text-sm text-muted tabular-nums sm:block">
-                    <span className="block">{when(appliedOn(app))}</span>
-                    {posting ? <a href={posting} target="_blank" rel="noreferrer" className="block truncate text-xs text-faint hover:text-white hover:underline" title={`Open the job posting on ${siteFor(app)}`}>{siteFor(app)} ↗</a> : <span className="block truncate text-xs text-faint">{siteFor(app)}</span>}
+    const expanded = open === app.id;
+    const stage = stageOf(app);
+    const posting = postingLink(app);
+    const people = app.contacts?.length ?? 0;
+    // Applied, nobody looked up yet: one press finds people to email there.
+    const canFind = stage !== "in_progress" && !app.companyMissing && app.contactsStatus === "idle" && !people;
+    const finding = app.contactsStatus === "finding" || app.contactsStatus === "writing";
+    const toggle = () => setOpen(expanded ? null : app.id);
+    const role = app.titleMissing ? <span className="text-faint">No job title</span> : app.title;
+    return (
+      <Fragment key={app.id}>
+        <tr id={`job-${app.id}`} className="border-t border-[#17171B]">
+          <td className="py-3.5 pr-2 align-middle font-medium">
+            <button type="button" onClick={toggle} aria-expanded={expanded} className="flex max-w-full items-start gap-1.5 text-left hover:text-white">
+              <span aria-hidden className={`mt-[3px] text-[10px] text-[#8B8B94] transition-transform ${expanded ? "rotate-90" : ""}`}>▶</span>
+              <span className="min-w-0 break-words">{app.companyMissing ? <span className="text-faint">{app.company || "No company"}</span> : app.company}</span>
+            </button>
+            <span className="mt-0.5 block pl-4 text-[13px] font-normal text-[#B4B4BC] sm:hidden">{role}</span>
+            <span className="mt-0.5 block pl-4 font-mono text-xs font-normal text-[#8B8B94] sm:hidden">{when(appliedOn(app))}</span>
+          </td>
+          <td className="hidden px-2 py-3.5 align-middle text-[#B4B4BC] sm:table-cell">
+            {role}
+            <span className="text-[#8B8B94]"> · {posting ? <a href={posting} target="_blank" rel="noreferrer" className="hover:text-white hover:underline" title={`Open the job posting on ${siteFor(app)}`}>{siteFor(app)} ↗</a> : siteFor(app)}</span>
+            {app.fillReport?.fromEmail && <span className="ml-2 inline-block align-middle"><EmailBadge mark={app.fillReport.fromEmail} /></span>}
+          </td>
+          <td className="hidden whitespace-nowrap px-2 py-3.5 align-middle font-mono text-xs text-[#8B8B94] sm:table-cell">{when(appliedOn(app))}</td>
+          <td className="px-1 py-3.5 align-middle sm:px-2">{stageCell(app)}</td>
+          <td className="py-2 pl-1 text-right align-middle sm:pl-2">
+            {people > 0 ? (
+              <button type="button" onClick={toggle} aria-expanded={expanded} className="whitespace-nowrap text-[13px] text-[#F7F7F8] hover:underline">{people} {people === 1 ? "person" : "people"} →</button>
+            ) : finding ? (
+              <span className="whitespace-nowrap text-xs text-[#8B8B94]">Finding…</span>
+            ) : canFind ? (
+              <button type="button" className="h-8 whitespace-nowrap rounded-lg border border-[#26262C] px-3 text-xs font-medium text-[#F7F7F8] hover:bg-white/5" onClick={() => { setOpen(app.id); void act("/retry-contacts", "POST", { applicationId: app.id }); }}>Find people</button>
+            ) : <span className="text-xs text-[#8B8B94]">—</span>}
+          </td>
+        </tr>
+        {(app.companyMissing || app.titleMissing) && <tr><td colSpan={5} className="pb-2"><AddCompany app={app} onSaved={onReplace} /></td></tr>}
+        {expanded && (
+          <tr>
+            <td colSpan={5} className="pb-4">
+              <div className="space-y-4 rounded-xl border border-line bg-panel p-4">
+                <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={() => void readLinks([app], app.id)} onSaved={onReplace} />
+                {stage === "in_progress" && <PostedBy app={app} />}
+                {stage === "in_progress" ? (
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
+                    <p>Not submitted yet. Open the application and press Fill in the Unnepo extension, or mark it applied if you sent it yourself.</p>
+                    <button type="button" className={secondary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
+                  </div>
+                ) : (
+                  <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} />
+                )}
+                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-faint">
+                  <span className="min-w-0">
+                    {app.status === "submitted" && app.confirmation
+                      ? app.confirmation.confidence === "likely" ? "Looks submitted: the page said so." : "Confirmed: the site accepted the submission."
+                      : app.status === "applied_manual" ? "Marked applied by you." : app.statusMessage}
                   </span>
-                  <StageControl app={app} onChange={(next) => void setStage(app, next)} />
-                  <button type="button" onClick={toggle} aria-expanded={expanded} className="hidden items-center justify-end gap-1 text-sm text-muted hover:text-white sm:inline-flex">
-                    {expanded ? "See less" : "See more"}
-                    <span aria-hidden className={`transition-transform ${expanded ? "rotate-90" : ""}`}>→</span>
-                  </button>
-                  <button type="button" onClick={() => remove(app)} aria-label={`Remove ${app.title} at ${app.company}`} title="Remove" className="-mr-1.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-faint transition-colors hover:bg-red-500/10 hover:text-red-300 sm:justify-self-end sm:opacity-40 sm:group-hover:opacity-100 sm:focus-visible:opacity-100">
-                    <svg aria-hidden viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 4h11M6.5 4V2.75h3V4M4 4l.7 9.25h6.6L12 4M6.75 6.75v4M9.25 6.75v4" /></svg>
-                  </button>
+                  <span className="flex flex-wrap gap-4">
+                    {app.confirmation?.receiptPath && <a className="hover:text-white" href={`/api/apply/receipt?applicationId=${encodeURIComponent(app.id)}`} target="_blank" rel="noreferrer">Receipt ↗</a>}
+                    {posting && <a className="hover:text-white" href={posting} target="_blank" rel="noreferrer">Job posting ↗</a>}
+                    {app.applicationUrl && app.applicationUrl !== posting && <a className="hover:text-white" href={app.applicationUrl} target="_blank" rel="noreferrer">Application ↗</a>}
+                    <button type="button" className="hover:text-red-300" onClick={() => remove(app)}>Remove</button>
+                  </span>
                 </div>
-                {(app.companyMissing || app.titleMissing) && <AddCompany app={app} onSaved={onReplace} />}
-                {canFind && (
-                  <div className="-mt-1.5 mb-3 pl-12">
-                    <button type="button" className={secondary} onClick={() => { setOpen(app.id); void act("/retry-contacts", "POST", { applicationId: app.id }); }}>Find people to reach out to</button>
-                  </div>
-                )}
-                {expanded && (
-                  <div className="mb-4 space-y-4 rounded-xl border border-line bg-panel p-4">
-                    <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={() => void readLinks([app], app.id)} onSaved={onReplace} />
-                    {stage === "in_progress" && <PostedBy app={app} />}
-                    {stage === "in_progress" ? (
-                      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
-                        <p>Not submitted yet. Open the application and press Fill in the Unnepo extension, or mark it applied if you sent it yourself.</p>
-                        <button type="button" className={secondary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
-                      </div>
-                    ) : (
-                      <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} />
-                    )}
-                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-faint">
-                      <span className="min-w-0">
-                        {app.status === "submitted" && app.confirmation
-                          ? app.confirmation.confidence === "likely" ? "Looks submitted: the page said so." : "Confirmed: the site accepted the submission."
-                          : app.status === "applied_manual" ? "Marked applied by you." : app.statusMessage}
-                      </span>
-                      <span className="flex flex-wrap gap-4">
-                        {app.confirmation?.receiptPath && <a className="hover:text-white" href={`/api/apply/receipt?applicationId=${encodeURIComponent(app.id)}`} target="_blank" rel="noreferrer">Receipt ↗</a>}
-                        {posting && <a className="hover:text-white" href={posting} target="_blank" rel="noreferrer">Job posting ↗</a>}
-                        {app.applicationUrl && app.applicationUrl !== posting && <a className="hover:text-white" href={app.applicationUrl} target="_blank" rel="noreferrer">Application ↗</a>}
-                        <button type="button" className="hover:text-red-300" onClick={() => remove(app)}>Remove</button>
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </li>
-            );
+              </div>
+            </td>
+          </tr>
+        )}
+      </Fragment>
+    );
+  };
+  const table = (list: App[], caption: string) => (
+    <div className="border-t border-[#1F1F24]">
+      <table className="w-full border-collapse text-sm">
+        <caption className="sr-only">{caption}</caption>
+        <thead>
+          <tr className="text-left font-mono text-[11px] uppercase tracking-[1.2px] text-[#8B8B94]">
+            <th scope="col" className="py-3 pr-2 font-medium">Company</th>
+            <th scope="col" className="hidden px-2 py-3 font-medium sm:table-cell">Role</th>
+            <th scope="col" className="hidden px-2 py-3 font-medium sm:table-cell">Applied</th>
+            <th scope="col" className="px-1 py-3 font-medium sm:px-2">Stage</th>
+            <th scope="col" className="py-3 pl-1 text-right font-medium sm:pl-2">People</th>
+          </tr>
+        </thead>
+        <tbody>{list.map(row)}</tbody>
+      </table>
+    </div>
+  );
+  const openJob = (appId: string) => {
+    setFilter("all");
+    setQuery("");
+    setOpen(appId);
+    requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Applied</h1>
-          <p className="mt-2 text-sm text-muted tabular-nums">
-            {stats.applied} {stats.applied === 1 ? "application" : "applications"} · {stats.thisWeek} this week
-            {stats.inProgress > 0 && ` · ${stats.inProgress} in progress`}
-          </p>
-        </div>
-        {apps.length > 0 && (
-          <FollowUpFacts
-            applied={apps.filter((app) => app.status === "submitted" || app.status === "applied_manual")}
-            school={data.school}
-            onOpen={(appId) => {
-              setFilter("all");
-              setQuery("");
-              setOpen(appId);
-              requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
-            }}
-          />
-        )}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="flex flex-wrap items-center gap-2">
-          <button type="button" className={secondary} onClick={() => setAdding((on) => !on)} aria-expanded={adding}>+ Add job</button>
-          <SessionBar apps={apps} session={data.session ?? null} onSession={(start) => act("/session", "POST", { start })} />
-        </span>
-        {apps.length > 0 && (
-          <label className="relative w-full sm:w-64">
-            <span className="sr-only">Search applications</span>
-            <svg aria-hidden viewBox="0 0 16 16" className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
-            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search company or role" className="w-full rounded-xl border border-line bg-card py-2 pl-9 pr-3 text-sm text-ink outline-none placeholder:text-faint focus:border-zinc-500" />
-          </label>
-        )}
-      </div>
-
-      {apps.length > 0 && (
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0" role="group" aria-label="Filter by status">
-          {FILTERS.filter(([id]) => id === "all" || counts[id]).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={filter === id}
-              onClick={() => setFilter(id)}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition-colors ${filter === id ? "border-white bg-white text-black" : "border-line text-muted hover:text-white"}`}
-            >
-              {id !== "all" && filter !== id && <StageDot stage={id} />}
-              {label}
-              <span className={`tabular-nums ${filter === id ? "text-black/60" : "text-faint"}`}>{counts[id] ?? 0}</span>
-            </button>
-          ))}
-        </div>
-      )}
-      {apps.length > 1 && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-          <label className="flex items-center gap-2 text-muted">Sort
-            <select value={sort} onChange={(event) => setSort(event.target.value as SortBy)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
-              {SORTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-muted">Applied
-            <select value={period} onChange={(event) => setPeriod(event.target.value as When)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
-              {WHENS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
-            </select>
-          </label>
-          {sites.length > 1 && (
-            <label className="flex items-center gap-2 text-muted">Site
-              <select value={site} onChange={(event) => setSite(event.target.value)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
-                <option value="">All sites</option>
-                {sites.map((item) => <option key={item.site} value={item.site}>{item.site} ({item.count})</option>)}
-              </select>
-            </label>
-          )}
-          <label className="flex items-center gap-2 text-muted">
-            <input type="checkbox" checked={notFollowed} onChange={(event) => setNotFollowed(event.target.checked)} className="h-4 w-4 accent-white" />
-            Not followed up yet
-          </label>
-          <span className="text-faint tabular-nums">{shown.length} shown</span>
-          {(narrowed || filter !== "all" || query) && <button type="button" onClick={clearFilters} className="text-ink underline-offset-4 hover:underline">Clear filters</button>}
-        </div>
-      )}
-
-      <FollowUpsDue
-        apps={apps}
-        onOpen={(appId) => {
-          setFilter("all");
-          setQuery("");
-          setOpen(appId);
-          requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
-        }}
-        onWrite={(appId, contactId) => act("/contact-email", "POST", { applicationId: appId, contactId, followUp: true })}
-        onSent={(contactId) => act("/contact", "PATCH", { contactId, status: "emailed", followedUp: true })}
-      />
-      {adding && <AddJobForm onDone={async (added) => { setAdding(false); if (added) await onReload(); }} />}
-      {problem && <p role="alert" className="text-sm text-red-300">{problem}</p>}
-
-      {apps.length === 0 ? (
-        <div className={`${card} flex flex-col items-start gap-3`}>
-          <p className="font-medium">No applications yet</p>
-          <p className="max-w-xl text-sm text-muted">Open a job application in Chrome and press Fill in the Unnepo extension. Every job you submit shows up here, with people at the company to email.</p>
-          <a href="/extension/connect" className={primary}>Connect the extension</a>
-        </div>
-      ) : shown.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted">Nothing matches. <button type="button" onClick={clearFilters} className="text-ink underline underline-offset-4">Clear filters</button></p>
-      ) : (
-        <>
-          {named.length > 0 && <ul className="border-t border-line">{named.map(row)}</ul>}
-          {unnamed.length > 0 && (
-            <section aria-labelledby="no-company" className="flex flex-col gap-2 pt-2">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h2 id="no-company" className="text-base font-semibold">Missing the company or job title <span className="text-sm font-normal text-faint tabular-nums">{unnamed.length}</span></h2>
-                  <p className="text-sm text-muted">These were saved without the company&apos;s name or the job&apos;s title. Unnepo can read each job&apos;s link for them, or type them in.</p>
-                </div>
-                <button type="button" className={secondary} disabled={reading !== null} onClick={() => void readLinks(unnamed, "unnamed")}>{reading === "unnamed" ? "Reading their links…" : "Fill in from their links"}</button>
+    <div className="flex flex-col gap-8">
+      <HomeHero name={userName} apps={apps} weeklyGoal={data.profile.weeklyGoal ?? null} onGoal={onGoal} school={data.school} spiderSkin={data.profile.spiderSkin ?? null} onSetup={onSetup} />
+      <HomeTiles apps={apps} />
+      <div className="flex flex-wrap items-start gap-8">
+        <section aria-labelledby="applied-title" className="flex min-w-0 flex-[999_1_640px] flex-col gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 id="applied-title" className="m-0 text-[22px] font-bold tracking-[-0.5px]">Applied <span className="text-sm font-medium tracking-normal text-[#8B8B94] tabular-nums">{stats.applied}</span></h2>
+            {apps.length > 0 && (
+              <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by stage">
+                {FILTERS.filter(([id]) => id === "all" || counts[id]).map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={filter === id}
+                    onClick={() => setFilter(id)}
+                    className={`h-8 rounded-full border px-3 text-xs font-medium ${filter === id ? "border-[#F7F7F8] bg-[#F7F7F8] text-[#070708]" : "border-[#26262C] text-[#9A9AA3] hover:text-white"}`}
+                  >
+                    {label} <span className={`tabular-nums ${filter === id ? "text-black/60" : "text-[#8B8B94]"}`}>{counts[id] ?? 0}</span>
+                  </button>
+                ))}
               </div>
-              {readNote.key === "unnamed" && readNote.text && reading === null && <p role="status" className="text-sm text-muted">{readNote.text}</p>}
-              <ul className="border-t border-line">{unnamed.map(row)}</ul>
-            </section>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <span className="flex flex-wrap items-center gap-2">
+              <button type="button" className={secondary} onClick={() => setAdding((on) => !on)} aria-expanded={adding}>+ Add job</button>
+              <SessionBar apps={apps} session={data.session ?? null} onSession={(start) => act("/session", "POST", { start })} />
+            </span>
+            {apps.length > 0 && (
+              <label className="relative w-full sm:w-64">
+                <span className="sr-only">Search applications</span>
+                <svg aria-hidden viewBox="0 0 16 16" className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></svg>
+                <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search company or role" className="w-full rounded-xl border border-line bg-card py-2 pl-9 pr-3 text-sm text-ink outline-none placeholder:text-faint focus:border-zinc-500" />
+              </label>
+            )}
+          </div>
+          {apps.length > 1 && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+              <label className="flex items-center gap-2 text-muted">Sort
+                <select value={sort} onChange={(event) => setSort(event.target.value as SortBy)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
+                  {SORTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-2 text-muted">Applied
+                <select value={period} onChange={(event) => setPeriod(event.target.value as When)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
+                  {WHENS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+                </select>
+              </label>
+              {sites.length > 1 && (
+                <label className="flex items-center gap-2 text-muted">Site
+                  <select value={site} onChange={(event) => setSite(event.target.value)} className="rounded-lg border border-line bg-card px-2 py-1.5 text-ink">
+                    <option value="">All sites</option>
+                    {sites.map((item) => <option key={item.site} value={item.site}>{item.site} ({item.count})</option>)}
+                  </select>
+                </label>
+              )}
+              <label className="flex items-center gap-2 text-muted">
+                <input type="checkbox" checked={notFollowed} onChange={(event) => setNotFollowed(event.target.checked)} className="h-4 w-4 accent-white" />
+                Not followed up yet
+              </label>
+              <span className="text-faint tabular-nums">{shown.length} shown</span>
+              {(narrowed || filter !== "all" || query) && <button type="button" onClick={clearFilters} className="text-ink underline-offset-4 hover:underline">Clear filters</button>}
+            </div>
           )}
-        </>
-      )}
+          {adding && <AddJobForm onDone={async (added) => { setAdding(false); if (added) await onReload(); }} />}
+          {problem && <p role="alert" className="text-sm text-red-300">{problem}</p>}
+
+          {apps.length === 0 ? (
+            <div className={`${card} flex flex-col items-start gap-3`}>
+              <p className="font-medium">No applications yet</p>
+              <p className="max-w-xl text-sm text-muted">Open a job application in Chrome and press Fill in the Unnepo extension. Every job you submit shows up here, with people at the company to email.</p>
+              <a href="/extension/connect" className={primary}>Connect the extension</a>
+            </div>
+          ) : shown.length === 0 ? (
+            <p className="py-10 text-center text-sm text-muted">Nothing matches. <button type="button" onClick={clearFilters} className="text-ink underline underline-offset-4">Clear filters</button></p>
+          ) : (
+            <>
+              {named.length > 0 && table(named, "Your applications")}
+              {unnamed.length > 0 && (
+                <section aria-labelledby="no-company" className="flex flex-col gap-2 pt-2">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <h2 id="no-company" className="text-base font-semibold">Missing the company or job title <span className="text-sm font-normal text-faint tabular-nums">{unnamed.length}</span></h2>
+                      <p className="text-sm text-muted">These were saved without the company&apos;s name or the job&apos;s title. Unnepo can read each job&apos;s link for them, or type them in.</p>
+                    </div>
+                    <button type="button" className={secondary} disabled={reading !== null} onClick={() => void readLinks(unnamed, "unnamed")}>{reading === "unnamed" ? "Reading their links…" : "Fill in from their links"}</button>
+                  </div>
+                  {readNote.key === "unnamed" && readNote.text && reading === null && <p role="status" className="text-sm text-muted">{readNote.text}</p>}
+                  {table(unnamed, "Applications missing the company or job title")}
+                </section>
+              )}
+            </>
+          )}
+        </section>
+
+        <aside className="flex min-w-0 flex-[1_1_320px] flex-col gap-6">
+          <PerDayCard apps={apps} />
+          <FollowUpsDue
+            apps={apps}
+            onOpen={openJob}
+            onWrite={(appId, contactId) => act("/contact-email", "POST", { applicationId: appId, contactId, followUp: true })}
+            onSent={(contactId) => act("/contact", "PATCH", { contactId, status: "emailed", followedUp: true })}
+          />
+          <NextSpider apps={apps} school={data.school} onSpiders={onSpiders} />
+        </aside>
+      </div>
+      <MoreStats apps={apps} />
 
       {removed.length > 0 && (
         <div role="status" className="fixed inset-x-4 bottom-5 z-20 mx-auto flex max-w-md items-center justify-between gap-4 rounded-xl border border-line bg-card px-4 py-3 text-sm shadow-2xl">
@@ -644,19 +604,24 @@ function PostedBy({ app }: { app: App }) {
 function FollowUpsDue({ apps, onOpen, onWrite, onSent }: { apps: App[]; onOpen: (appId: string) => void; onWrite: (appId: string, contactId: string) => Promise<void>; onSent: (contactId: string) => Promise<void> }) {
   const [busy, setBusy] = useState("");
   const due = followUpsDue(apps);
-  if (!due.length) return null;
+  const initials = (name: string) => name.split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
   return (
-    <section aria-labelledby="follow-ups" className="rounded-xl border border-[#3D8BFF]/50 bg-panel p-3">
-      <h2 id="follow-ups" className="text-sm font-semibold">Follow-ups due <span className="font-normal text-faint tabular-nums">{due.length}</span></h2>
-      <ul className="mt-2 flex flex-col gap-2">
-        {due.slice(0, 5).map((item) => (
-          <li key={item.contactId} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-            <span className="min-w-0 flex-1"><span className="font-medium">{item.name}</span> <span className="text-muted">at {item.company} · emailed {item.days} business days ago</span></span>
-            <button type="button" className="text-sm font-medium text-ink underline-offset-4 hover:underline disabled:opacity-50" disabled={busy === item.contactId} onClick={async () => { setBusy(item.contactId); await onWrite(item.applicationId, item.contactId); setBusy(""); onOpen(item.applicationId); }}>{busy === item.contactId ? "Writing…" : "Write follow-up"}</button>
-            <button type="button" className="text-xs text-muted hover:text-white" onClick={() => void onSent(item.contactId)}>I sent it</button>
-          </li>
-        ))}
-      </ul>
+    <section aria-labelledby="follow-ups" className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] p-5">
+      <h2 id="follow-ups" className="m-0 text-sm font-semibold">Follow-ups due <span className="font-medium text-[#8B8B94] tabular-nums">{due.length}</span></h2>
+      {due.length === 0 && <p className="m-0 text-[13px] text-[#8B8B94]">Nothing due. People you email show up here after five business days with no reply.</p>}
+      {due.slice(0, 5).map((item) => (
+        <div key={item.contactId} className="flex flex-wrap items-center gap-3">
+          <span aria-hidden className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[#16161A] text-[11px] font-semibold">{initials(item.name)}</span>
+          <span className="flex min-w-0 flex-1 basis-32 flex-col gap-px">
+            <span className="text-[13px] font-medium">{item.name}</span>
+            <span className="text-xs text-[#8B8B94]">{item.company} · emailed {item.days} business days ago</span>
+          </span>
+          <span className="flex items-center gap-2">
+            <button type="button" className="h-8 rounded-lg bg-[#F7F7F8] px-3 text-xs font-semibold text-[#070708] hover:bg-white disabled:opacity-50" disabled={busy === item.contactId} onClick={async () => { setBusy(item.contactId); await onWrite(item.applicationId, item.contactId); setBusy(""); onOpen(item.applicationId); }}>{busy === item.contactId ? "Writing…" : "Draft"}</button>
+            <button type="button" className="text-xs text-[#8B8B94] hover:text-white" onClick={() => void onSent(item.contactId)}>I sent it</button>
+          </span>
+        </div>
+      ))}
     </section>
   );
 }

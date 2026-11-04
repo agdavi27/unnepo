@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { App } from "@/components/unnepo/apply";
 import { AtsBadge } from "@/components/unnepo/company";
-import { applicationStats } from "@/lib/apply/stats";
 import { SKINS, schoolStyle, skinUnlocked, spiderSvg, wornSkin, type SkinId } from "@/lib/spiders";
 
 const card = "rounded-2xl border border-line bg-panel p-5";
@@ -17,52 +16,18 @@ function dayLabel(key: string, style: "short" | "long" = "short") {
   return style === "long" ? date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) : date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-function duration(minutes: number | null) {
+export function duration(minutes: number | null) {
   if (minutes === null) return "—";
   if (minutes < 1) return `${Math.max(1, Math.round(minutes * 60))}s`;
   if (minutes < 60) return `${Math.round(minutes)} min`;
   return `${(minutes / 60).toFixed(1)} h`;
 }
 
-type StatsProps = {
-  applications: App[];
-  weeklyGoal: number | null;
-  onGoal: (goal: number) => Promise<void>;
-  school: string;
-  spiderSkin: string | null;
-  onSpider: (skin: SkinId) => Promise<void>;
-};
-
-export function StatsPage({ applications, weeklyGoal, onGoal, school, spiderSkin, onSpider }: StatsProps) {
-  const stats = useMemo(() => applicationStats(applications), [applications]);
-  return (
-    <div className="flex flex-col gap-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Stats</h1>
-        <p className="mt-2 text-sm text-muted">How your search is going. Set an outcome on each job in Applied to fill in responses.</p>
-      </div>
-      <Spiders applied={stats.applied} school={school} picked={spiderSkin} onPick={onSpider} />
-      <Goal thisWeek={stats.thisWeek} daysLeft={stats.daysLeft} streak={stats.streak} goal={weeklyGoal} onGoal={onGoal} />
-      <section className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl border border-line bg-line lg:grid-cols-4" aria-label="Totals">
-        <Tile label="Applications" value={String(stats.applied)} note={stats.inProgress ? `${stats.inProgress} in progress` : "submitted"} />
-        <Tile label="Responses" value={String(stats.responses)} note={stats.applied ? `${Math.round(stats.responseRate * 100)}% response rate` : "none yet"} />
-        <Tile label="People reached" value={String(stats.peopleReached)} note="emailed or replied" />
-        <Tile label="Time per app" value={duration(stats.medianMinutes)} note="typical, open to submit" />
-      </section>
-      <PerDay days={stats.perDay} />
-      <div className="grid gap-4 lg:grid-cols-2">
-        <Funnel steps={[["Applied", stats.applied], ["Responded", stats.responses], ["Interviews", stats.interviews], ["Offers", stats.offers]]} />
-        <Systems rows={stats.bySystem} />
-      </div>
-    </div>
-  );
-}
-
 /**
  * The six spiders to collect: the school one from the start, the rest at 50, 150, 300, 500 and 1,000
  * applications. Locked ones are grey and say when they unlock. Picking one dresses the extension's spiders.
  */
-function Spiders({ applied, school, picked, onPick }: { applied: number; school: string; picked: string | null; onPick: (skin: SkinId) => Promise<void> }) {
+export function Spiders({ applied, school, picked, onPick }: { applied: number; school: string; picked: string | null; onPick: (skin: SkinId) => Promise<void> }) {
   const [state, setState] = useState("");
   const worn = wornSkin(picked, applied);
   const style = schoolStyle(school);
@@ -109,17 +74,18 @@ function Spiders({ applied, school, picked, onPick }: { applied: number; school:
   );
 }
 
-function Tile({ label, value, note }: { label: string; value: string; note: string }) {
+export function Tile({ label, value, note }: { label: string; value: string; note: string }) {
   return (
-    <div className="bg-panel p-5">
-      <p className="text-sm text-muted">{label}</p>
-      <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{value}</p>
-      <p className="mt-1 text-xs text-faint">{note}</p>
+    <div className="flex flex-col gap-1.5 border-r border-[#17171B] px-4 py-6 first:pl-0 last:border-r-0 sm:px-6">
+      <p className="m-0 text-[13px] text-[#8B8B94]">{label}</p>
+      <p className="m-0 text-[40px] font-bold leading-none tracking-[-1.6px] tabular-nums">{value}</p>
+      <p className="m-0 text-xs text-[#8B8B94]">{note}</p>
     </div>
   );
 }
 
-function Goal({ thisWeek, daysLeft, streak, goal, onGoal }: { thisWeek: number; daysLeft: number; streak: number; goal: number | null; onGoal: (goal: number) => Promise<void> }) {
+/** This week against the goal, the streak, and changing the goal. */
+export function GoalCard({ thisWeek, daysLeft, streak, goal, onGoal }: { thisWeek: number; daysLeft: number; streak: number; goal: number | null; onGoal: (goal: number) => Promise<void> }) {
   const [editing, setEditing] = useState(goal === null);
   const [draft, setDraft] = useState(String(goal ?? 10));
   const [state, setState] = useState("");
@@ -137,63 +103,56 @@ function Goal({ thisWeek, daysLeft, streak, goal, onGoal }: { thisWeek: number; 
     }
   }
   return (
-    <section className={`${card} flex flex-col gap-4`} aria-label="Weekly goal">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h2 className={sectionTitle}>This week</h2>
-          <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">
-            {thisWeek}
-            {goal !== null && <span className="text-lg font-normal text-muted"> / {goal} applications</span>}
-          </p>
-          <p className="mt-1 text-sm text-muted">
-            {goal === null ? "Set a weekly goal to track your pace." : thisWeek >= goal ? "Goal reached. Nice work." : `${goal - thisWeek} to go, ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left.`}
-          </p>
-        </div>
-        <div className="text-right">
-          <h2 className={sectionTitle}>Streak</h2>
-          <p className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{streak}<span className="text-lg font-normal text-muted"> {streak === 1 ? "day" : "days"}</span></p>
-          <p className="mt-1 text-sm text-muted">{streak ? "in a row with an application" : "apply today to start one"}</p>
-        </div>
+    <section aria-label="Weekly goal" className="flex min-w-60 flex-col gap-2.5 rounded-2xl border border-[#26262C] bg-[#0C0C0E]/90 p-[18px]">
+      <div className="flex items-baseline justify-between gap-4">
+        <span className="text-[13px] text-[#9A9AA3]">This week</span>
+        <span className="font-mono text-xs uppercase text-[#8B8B94]">{streak}-day streak</span>
       </div>
+      <p className="m-0 text-[32px] font-bold leading-tight tracking-[-1px] tabular-nums">
+        {thisWeek}
+        {goal !== null && <span className="text-base font-medium tracking-normal text-[#8B8B94]"> / {goal} goal</span>}
+      </p>
       {goal !== null && (
-        <div className="h-2 overflow-hidden rounded-full bg-card-2" role="progressbar" aria-valuemin={0} aria-valuemax={goal} aria-valuenow={Math.min(thisWeek, goal)} aria-label="Progress toward weekly goal">
-          <div className="h-full rounded-full transition-[width]" style={{ width: `${share * 100}%`, background: share >= 1 ? "#4ADE80" : ACCENT }} />
+        <div className="h-1.5 overflow-hidden rounded-md bg-[#1A1A1F]" role="progressbar" aria-valuemin={0} aria-valuemax={goal} aria-valuenow={Math.min(thisWeek, goal)} aria-label="Weekly goal">
+          <div className="h-full" style={{ width: `${share * 100}%`, background: share >= 1 ? "#4ADE80" : ACCENT }} />
         </div>
       )}
       {editing ? (
         <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-          <label className="text-sm text-muted" htmlFor="weekly-goal">Weekly goal</label>
-          <input id="weekly-goal" type="number" min={1} max={200} inputMode="numeric" value={draft} onChange={(event) => setDraft(event.target.value)} className="w-20 rounded-lg border border-line bg-card px-2.5 py-1.5 text-sm tabular-nums text-ink outline-none focus:border-zinc-500" />
-          <span className="text-sm text-muted">applications</span>
-          <button type="submit" className="rounded-lg bg-white px-3 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">Save</button>
-          {goal !== null && <button type="button" className="px-2 text-sm text-muted hover:text-white" onClick={() => { setEditing(false); setState(""); }}>Cancel</button>}
-          {state && <span className="text-xs text-muted">{state}</span>}
+          <label className="text-xs text-[#9A9AA3]" htmlFor="weekly-goal">Weekly goal</label>
+          <input id="weekly-goal" type="number" min={1} max={200} inputMode="numeric" value={draft} onChange={(event) => setDraft(event.target.value)} className="w-16 rounded-lg border border-[#26262C] bg-[#070708] px-2 py-1 text-sm tabular-nums text-ink outline-none focus:border-[#3D8BFF]" />
+          <button type="submit" className="rounded-lg bg-[#F7F7F8] px-2.5 py-1 text-xs font-semibold text-[#070708] hover:bg-white">Save</button>
+          {goal !== null && <button type="button" className="text-xs text-[#9A9AA3] hover:text-white" onClick={() => { setEditing(false); setState(""); }}>Cancel</button>}
+          {state && <span role="status" className="w-full text-xs text-[#9A9AA3]">{state}</span>}
         </form>
       ) : (
-        <button type="button" className="self-start text-sm text-muted underline-offset-4 hover:text-white hover:underline" onClick={() => { setDraft(String(goal ?? 10)); setEditing(true); }}>Change goal</button>
+        <div className="flex items-baseline justify-between gap-3 text-xs text-[#8B8B94]">
+          <span>{goal === null ? "" : thisWeek >= goal ? "Goal reached. Nice work." : `${goal - thisWeek} to go, ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`}</span>
+          <button type="button" className="shrink-0 underline-offset-4 hover:text-white hover:underline" onClick={() => { setDraft(String(goal ?? 10)); setEditing(true); }}>Change goal</button>
+        </div>
       )}
     </section>
   );
 }
 
 /** Applications per day, the last 14 days. Today is the accent bar. */
-function PerDay({ days }: { days: Array<{ date: string; count: number }> }) {
+export function PerDay({ days }: { days: Array<{ date: string; count: number }> }) {
   const [hover, setHover] = useState<number | null>(null);
   const max = Math.max(1, ...days.map((day) => day.count));
   const top = max <= 4 ? max : Math.ceil(max / 2) * 2;
   const total = days.reduce((sum, day) => sum + day.count, 0);
   return (
-    <section className={card} aria-labelledby="per-day-title">
+    <section className="rounded-2xl border border-[#1F1F24] p-5" aria-labelledby="per-day-title">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="per-day-title" className="text-sm font-semibold">Applications per day</h2>
-        <p className="text-xs text-faint tabular-nums">{total} in the last 14 days</p>
+        <h2 id="per-day-title" className="m-0 text-sm font-semibold">Applications per day</h2>
+        <p className="m-0 text-xs text-[#8B8B94] tabular-nums">{total} in 14 days</p>
       </div>
       <div className="relative mt-5" onMouseLeave={() => setHover(null)} aria-hidden>
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2">
           <span className="text-[10px] tabular-nums text-faint">{top}</span>
           <span className="h-px flex-1 border-t border-dashed border-line/70" />
         </div>
-        <div className="flex h-40 items-end gap-[2px] border-b border-line pt-4 sm:gap-1.5">
+        <div className="flex h-[110px] items-end gap-[3px] border-b border-[#26262C] pt-4">
           {days.map((day, index) => {
             const today = index === days.length - 1;
             return (
@@ -212,10 +171,9 @@ function PerDay({ days }: { days: Array<{ date: string; count: number }> }) {
             );
           })}
         </div>
-        <div className="mt-2 flex justify-between text-[11px] text-faint">
+        <div className="mt-2 flex justify-between font-mono text-[11px] uppercase text-[#8B8B94]">
           <span>{dayLabel(days[0].date)}</span>
-          <span>{dayLabel(days[7].date)}</span>
-          <span style={{ color: ACCENT }}>Today</span>
+          <span>Today</span>
         </div>
       </div>
       <table className="sr-only">
@@ -235,7 +193,7 @@ function Bar({ share, color }: { share: number; color: string }) {
   );
 }
 
-function Funnel({ steps }: { steps: Array<[string, number]> }) {
+export function Funnel({ steps }: { steps: Array<[string, number]> }) {
   const base = steps[0][1];
   return (
     <section className={card} aria-labelledby="funnel-title">
@@ -253,7 +211,7 @@ function Funnel({ steps }: { steps: Array<[string, number]> }) {
   );
 }
 
-function Systems({ rows }: { rows: Array<{ ats: App["ats"]; count: number }> }) {
+export function Systems({ rows }: { rows: Array<{ ats: App["ats"]; count: number }> }) {
   const max = Math.max(1, ...rows.map((row) => row.count));
   return (
     <section className={card} aria-labelledby="systems-title">

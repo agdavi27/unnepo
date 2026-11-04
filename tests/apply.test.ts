@@ -478,6 +478,13 @@ describe("tracking outcomes and goals", () => {
     const userId = await student();
     await saveApplicationProfile(userId, { accountConsent: true });
     await expect(saveApplicationProfile(userId, { weeklyGoal: 0 })).rejects.toThrow(/between 1 and 200/);
+    // A saved answer is edited in place; a blank one or one that isn't there is turned away.
+    const before = await applicationProfiles.get(userId);
+    await applicationProfiles.put(userId, { ...before!, saved: { "why here": { label: "Why here?", answer: "Old answer", updatedAt: "2026-01-01T00:00:00.000Z" } } });
+    const edited = await saveApplicationProfile(userId, { savedAnswer: { key: "why here", answer: "  New answer " } });
+    expect(edited.profile.saved["why here"]).toMatchObject({ label: "Why here?", answer: "New answer" });
+    await expect(saveApplicationProfile(userId, { savedAnswer: { key: "why here", answer: "  " } })).rejects.toThrow(/Type an answer/);
+    await expect(saveApplicationProfile(userId, { savedAnswer: { key: "gone", answer: "Hi" } })).rejects.toThrow(/isn't there/);
     await saveApplicationProfile(userId, { weeklyGoal: 12 });
     const state = await applyState(userId);
     expect(state.profile.weeklyGoal).toBe(12);

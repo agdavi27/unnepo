@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
 import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
 import { ENTERPRISE_PLAN, FREE_APPLICATIONS, FREE_COVER_LETTERS, PUBLIC_PLANS, creditMath } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
-import { ApplicationSettings, ApplyArea } from "@/components/unnepo/apply";
-import { EmailTracking } from "@/components/unnepo/email-tracking";
+import { ApplyArea, SpiderSettings } from "@/components/unnepo/apply";
+import { SetupPage } from "@/components/unnepo/setup";
+import { extensionHere } from "@/lib/extension-bridge";
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
@@ -25,12 +26,11 @@ type Workspace = {
 };
 
 // Applications are added by the Chrome extension. "Jobs for you" suggests postings that fit the resume.
-type View = "applied" | "stats" | "jobs" | "email" | "settings";
+type View = "home" | "jobs" | "setup" | "settings";
 const VIEWS: { id: View; label: string }[] = [
-  { id: "applied", label: "Applied" },
-  { id: "stats", label: "Stats" },
+  { id: "home", label: "Home" },
   { id: "jobs", label: "Jobs for you" },
-  { id: "email", label: "Email tracking" },
+  { id: "setup", label: "Setup" },
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
@@ -41,15 +41,37 @@ export function AppHome() {
   const [notice, setNotice] = useState("");
   const [resumeBusy, setResumeBusy] = useState(false);
   const [resumeVersion, setResumeVersion] = useState(0);
-  const [view, setView] = useState<View>("applied");
+  const [view, setView] = useState<View>("home");
   const [editing, setEditing] = useState(false);
-  // The extension's "Edit my info" opens /home?edit=profile.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [extension, setExtension] = useState<boolean | null>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=setup opens that tab.
   useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("edit") !== "profile") return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
-    setEditing(true);
-    window.history.replaceState(null, "", "/home");
+    const params = new URLSearchParams(window.location.search);
+    const tab = params.get("tab");
+    if (params.get("edit") === "profile") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
+      setEditing(true);
+      window.history.replaceState(null, "", "/home");
+    } else if (tab === "setup" || tab === "jobs") {
+      setView(tab);
+      window.history.replaceState(null, "", "/home");
+    }
+    void extensionHere().then(setExtension);
   }, []);
+  // The account menu closes on Escape or a click outside it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setMenuOpen(false); };
+    const onClick = (event: MouseEvent) => { if (!menu.current?.contains(event.target as Node)) setMenuOpen(false); };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onClick);
+    };
+  }, [menuOpen]);
   const [highlightsLoading, setHighlightsLoading] = useState(false);
   const [letter, setLetter] = useState<{ job: Job | null; jobs: Job[] } | null>(null);
 
@@ -182,56 +204,63 @@ export function AppHome() {
 
   const currentPlan = data?.credits.plan ?? "free";
   const hadResume = Boolean(data?.resume);
-  /** Attach or replace the resume from anywhere in the app. Shown in the top row on wider screens, beside the tabs on phones. */
-  const resumeButton = (placement: string) => data && !showOnboarding && (
-    <label title={data.resume ? `Your resume: ${data.resume.fileName}. Choose a file to replace it.` : "Attach your resume"} className={`${placement} max-w-[14rem] shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 sm:px-3 ${data.resume ? "border-line text-muted hover:text-white" : "border-white/60 text-white hover:bg-white/10"} ${resumeBusy ? "pointer-events-none opacity-60" : ""}`}>
-      <span aria-hidden>⇧</span>
-      {resumeBusy ? "Uploading…" : data.resume ? (
-        <><span className="hidden truncate text-ink md:inline">{data.resume.fileName}</span><span className="md:hidden">Resume</span><span className="hidden text-faint sm:inline">· Replace</span></>
-      ) : "Attach resume"}
-      <input
-        type="file"
-        className="sr-only"
-        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        disabled={resumeBusy}
-        onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void replaceResume(file); }}
-      />
-    </label>
-  );
+  const initials = (data?.user.name || data?.user.email || "").split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
+  const openJob = (appId: string) => {
+    window.history.replaceState(null, "", `/home?job=${encodeURIComponent(appId)}`);
+    setView("home");
+    window.scrollTo({ top: 0 });
+  };
 
   return (
     <div className="min-h-screen bg-bg text-ink [color-scheme:dark]">
-      <header className="sticky top-0 z-20 border-b border-line bg-bg/80 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 pt-4 sm:px-6 lg:px-8">
-          <Logo />
-          <div className="flex items-center gap-3 whitespace-nowrap text-sm sm:gap-4">
-            {resumeButton("hidden sm:flex")}
-            {data && <span className="rounded-full border border-line px-2.5 py-1 text-muted sm:px-3">{data.credits.unlimited ? <span className="text-ink">Unlimited credits</span> : <><span className="text-ink">{data.credits.balance}</span> credits</>}{data.credits.coverLetters?.left != null && <span className="ml-2 text-faint">· {data.credits.coverLetters.left} cover letters left</span>}</span>}
-            {data && !showOnboarding && <button type="button" onClick={() => setView("settings")} aria-current={view === "settings" ? "page" : undefined} className={view === "settings" ? "text-white" : "text-muted hover:text-white"}>Settings</button>}
-            <button type="button" onClick={logout} className="text-muted hover:text-white">Log out</button>
+      <header className="z-20 border-b sm:sticky sm:top-0 border-[#17171B] bg-bg/90 backdrop-blur">
+        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-[14px] sm:px-10">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-9 gap-y-2">
+            <Logo />
+            {data && !showOnboarding && (
+              <nav aria-label="App" className="flex gap-1">
+                {VIEWS.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setView(item.id)}
+                    aria-current={view === item.id ? "page" : undefined}
+                    className={`h-9 whitespace-nowrap rounded-full px-3.5 text-sm font-medium ${view === item.id ? "bg-[#F7F7F8] text-[#070708]" : "text-[#9A9AA3] hover:text-white"}`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </nav>
+            )}
+          </div>
+          <div className="flex items-center gap-3.5 whitespace-nowrap">
+            {data && !showOnboarding && extension !== null && (
+              extension
+                ? <span className="hidden items-center gap-2 text-[13px] text-[#9A9AA3] md:inline-flex"><span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#4ADE80]" />Extension installed</span>
+                : <a href="/extension/connect" className="hidden items-center gap-2 text-[13px] text-[#9A9AA3] hover:text-white md:inline-flex"><span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#8B8B94]" />Get the extension</a>
+            )}
+            {data && <span className="font-mono text-xs uppercase text-[#8B8B94]">{data.credits.unlimited ? "Unlimited credits" : `${data.credits.balance} ${data.credits.balance === 1 ? "credit" : "credits"}`}</span>}
+            {data ? (
+              <div className="relative" ref={menu}>
+                <button type="button" aria-label="Account and settings" aria-expanded={menuOpen} onClick={() => setMenuOpen((on) => !on)} className="h-9 w-9 rounded-full border border-[#26262C] bg-[#111114] text-[13px] font-semibold text-[#F7F7F8] hover:border-[#3D8BFF]">{initials || "?"}</button>
+                {menuOpen && (
+                  <div className="absolute right-0 top-11 z-30 flex w-64 flex-col rounded-xl border border-[#26262C] bg-[#0C0C0E] p-2 text-sm shadow-2xl">
+                    <p className="m-0 truncate px-2.5 pt-1 font-medium">{data.user.name || "Student"}</p>
+                    <p className="m-0 truncate px-2.5 text-xs text-[#8B8B94]">{data.user.email}</p>
+                    {data.credits.coverLetters?.left != null && <p className="m-0 px-2.5 pb-1 pt-1 text-xs text-[#8B8B94]">{data.credits.coverLetters.left} cover letters left</p>}
+                    <div className="my-1.5 h-px bg-[#1F1F24]" />
+                    {!showOnboarding && <button type="button" onClick={() => { setView("settings"); setMenuOpen(false); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Settings and plans</button>}
+                    {!showOnboarding && <button type="button" onClick={() => { setEditing(true); setMenuOpen(false); window.scrollTo({ top: 0 }); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Edit my info</button>}
+                    <a href="/demo" className="rounded-lg px-2.5 py-2 text-[#F7F7F8] hover:bg-white/5">See how it works</a>
+                    <button type="button" onClick={logout} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Log out</button>
+                  </div>
+                )}
+              </div>
+            ) : <button type="button" onClick={logout} className="text-sm text-muted hover:text-white">Log out</button>}
           </div>
         </div>
-        {data && !showOnboarding ? (
-          <nav className="mx-auto flex max-w-6xl gap-5 overflow-x-auto px-4 pt-4 text-sm [scrollbar-width:none] sm:gap-7 sm:px-6 lg:px-8" aria-label="Main">
-            {VIEWS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setView(item.id)}
-                aria-current={view === item.id ? "page" : undefined}
-                className={`shrink-0 border-b-2 pb-3 ${view === item.id ? "border-white text-white" : "border-transparent text-muted hover:text-white"}`}
-              >
-                {item.label}
-              </button>
-            ))}
-            <a href="/demo" className="shrink-0 border-b-2 border-transparent pb-3 text-muted hover:text-white">See how it works</a>
-            <div className="ml-auto pb-2">{resumeButton("flex sm:hidden")}</div>
-          </nav>
-        ) : (
-          <div className="pb-4" />
-        )}
       </header>
-      <main className="mx-auto flex max-w-6xl flex-col gap-8 px-4 py-10 sm:px-6 lg:px-8">
+      <main className="mx-auto flex max-w-[1240px] flex-col gap-8 overflow-x-clip px-4 pb-16 pt-6 sm:px-8">
         {error && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
             <p>{error}</p>
@@ -252,15 +281,19 @@ export function AppHome() {
             onDone={() => { setEditing(false); setResumeVersion((value) => value + 1); void load(); }}
           />
         )}
-        {data && !showOnboarding && (view === "applied" || view === "stats") && data.completeness < 100 && (
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel px-4 py-3 text-sm">
-            <p className="text-muted">Your profile is <span className="font-medium text-ink">{data.completeness}%</span> ready. A fuller profile means fewer fields to fill by hand.</p>
-            <button type="button" onClick={() => { setEditing(true); window.scrollTo({ top: 0 }); }} className="rounded-lg border border-line px-3 py-1 text-ink hover:bg-white/5">Finish profile</button>
-          </div>
-        )}
-        {data && !showOnboarding && (view === "applied" || view === "stats") && <ApplyArea view={view} refreshKey={resumeVersion} />}
+        {data && !showOnboarding && view === "home" && <ApplyArea refreshKey={resumeVersion} userName={data.user.name} onSetup={() => { setView("setup"); window.scrollTo({ top: 0 }); }} onSpiders={() => { setView("settings"); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
-        {data && !showOnboarding && view === "email" && <EmailTracking />}
+        {data && !showOnboarding && view === "setup" && (
+          <SetupPage
+            resume={data.resume}
+            completeness={data.completeness}
+            resumeBusy={resumeBusy}
+            onReplaceResume={(file) => void replaceResume(file)}
+            onEditProfile={() => { setEditing(true); window.scrollTo({ top: 0 }); }}
+            onOpenJob={openJob}
+            refreshKey={resumeVersion}
+          />
+        )}
         {data && !showOnboarding && view === "settings" && (
           <>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
@@ -281,8 +314,8 @@ export function AppHome() {
                 <p className="mt-3 text-sm text-muted">The extension fills applications from your profile in your own browser and logs each one you submit. Your job-site passwords stay in the extension.</p>
                 <a href="/extension/connect" className="mt-4 inline-flex rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Connect the extension</a>
               </div>
-              <ApplicationSettings />
             </section>
+            <SpiderSettings />
             <section className="space-y-4">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
