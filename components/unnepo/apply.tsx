@@ -17,7 +17,7 @@ const primary = `${btn} bg-white text-black hover:bg-zinc-200`;
 const secondary = `${btn} border border-line bg-transparent text-ink hover:bg-white/5`;
 const card = "rounded-2xl border border-line bg-panel p-5 sm:p-6";
 
-export type App = JobApplication & { missing: string[]; contacts?: ApplicationContact[]; companyMissing?: boolean; titleMissing?: boolean };
+export type App = JobApplication & { missing: string[]; contacts?: ApplicationContact[]; companyMissing?: boolean; titleMissing?: boolean; descriptionCut?: boolean };
 export type PublicProfile = Omit<ApplicationProfile, "jobSitePasswordEncrypted"> & { hasJobSitePassword: boolean };
 export type ApplyData = {
   applications: App[];
@@ -267,6 +267,39 @@ function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onR
       noExtension ? `${noExtension} ${noExtension === 1 ? "is a job board link" : "are job board links"}, which the Unnepo extension reads in Chrome. Open this page in Chrome with the extension connected.` : "",
     ].filter(Boolean).join(" ") });
   }
+  // Jobs short on details that Unnepo hasn't tried yet. Each job has its own button to try again.
+  const fillable = useMemo(() => apps.filter((app) => {
+    if (postingLink(app) || app.applicationUrl) return !app.description.trim() && !app.fillReport?.infoReadAt;
+    return !app.fillReport?.postingSearchedAt;
+  }), [apps]);
+  async function fillMissing() {
+    setReading("all");
+    setReadNote({ key: "all", text: "" });
+    const withLink = fillable.filter((app) => postingLink(app) || app.applicationUrl);
+    const links = withLink.length ? await fillJobsFromLinks(withLink) : { filled: 0, failed: 0, noExtension: 0 };
+    let found = 0;
+    let toPick = 0;
+    let notFound = 0;
+    for (const app of fillable.filter((item) => !withLink.includes(item))) {
+      try {
+        const result = await call<{ found: boolean; choices: number }>("/find-posting", "POST", { applicationId: app.id });
+        if (result.found) found += 1;
+        else if (result.choices) toPick += 1;
+        else notFound += 1;
+      } catch {
+        notFound += 1;
+      }
+    }
+    await onReload().catch(() => undefined);
+    setReading(null);
+    const count = (n: number) => `${n} ${n === 1 ? "job" : "jobs"}`;
+    setReadNote({ key: "all", text: [
+      found + links.filled ? `Filled in ${count(found + links.filled)}.` : "",
+      toPick ? `${count(toPick)} ${toPick === 1 ? "needs" : "need"} you to pick the posting: open ${toPick === 1 ? "it" : "them"} to choose.` : "",
+      notFound + links.failed ? `Couldn't find ${count(notFound + links.failed)}. Open ${notFound + links.failed === 1 ? "it" : "them"} to add a link or paste the description.` : "",
+      links.noExtension ? `${count(links.noExtension)} on job boards can only be read in Chrome with the extension connected.` : "",
+    ].filter(Boolean).join(" ") || "Nothing new to fill in." });
+  }
   const stats = useMemo(() => applicationStats(apps), [apps]);
   const counts = useMemo(() => {
     const result: Record<string, number> = { all: apps.length };
@@ -397,7 +430,7 @@ function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onR
           <tr>
             <td colSpan={5} className="pb-4">
               <div className="space-y-4 rounded-xl border border-line bg-panel p-4">
-                <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={() => void readLinks([app], app.id)} onSaved={onReplace} />
+                <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={(next) => void readLinks([next ?? app], app.id)} onSaved={onReplace} />
                 {stage === "in_progress" && <PostedBy app={app} />}
                 {stage === "in_progress" ? (
                   <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
@@ -475,10 +508,12 @@ function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onR
               </div>
             )}
           </div>
+          {readNote.key === "all" && readNote.text && reading === null && <p role="status" className="m-0 text-sm text-muted">{readNote.text}</p>}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="flex flex-wrap items-center gap-2">
               <button type="button" className={secondary} onClick={() => setAdding((on) => !on)} aria-expanded={adding}>+ Add job</button>
               <SessionBar apps={apps} session={data.session ?? null} onSession={(start) => act("/session", "POST", { start })} />
+              {fillable.length > 0 && <button type="button" className={secondary} disabled={reading !== null} onClick={() => void fillMissing()}>{reading === "all" ? "Filling in…" : `Fill in missing info (${fillable.length})`}</button>}
             </span>
             {apps.length > 0 && (
               <label className="relative w-full sm:w-64">
@@ -537,7 +572,7 @@ function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onR
                       <h2 id="no-company" className="text-base font-semibold">Missing the company or job title <span className="text-sm font-normal text-faint tabular-nums">{unnamed.length}</span></h2>
                       <p className="text-sm text-muted">These were saved without the company&apos;s name or the job&apos;s title. Unnepo can read each job&apos;s link for them, or type them in.</p>
                     </div>
-                    <button type="button" className={secondary} disabled={reading !== null} onClick={() => void readLinks(unnamed, "unnamed")}>{reading === "unnamed" ? "Reading their links…" : "Fill in from their links"}</button>
+                    {unnamed.some((app) => postingLink(app) || app.applicationUrl) && <button type="button" className={secondary} disabled={reading !== null} onClick={() => void readLinks(unnamed.filter((app) => postingLink(app) || app.applicationUrl), "unnamed")}>{reading === "unnamed" ? "Reading their links…" : "Fill in from their links"}</button>}
                   </div>
                   {readNote.key === "unnamed" && readNote.text && reading === null && <p role="status" className="text-sm text-muted">{readNote.text}</p>}
                   {table(unnamed, "Applications missing the company or job title")}
@@ -764,7 +799,7 @@ const HISTORY_LABEL: Record<string, string> = { applied: "Applied", incomplete: 
  * application as links. "Edit" changes any of it; "Fill in from the link" reads the link again for whatever is
  * missing. Below, the student's own quick notes, saved when they press Save.
  */
-function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; reading: boolean; disabled: boolean; note: string; onRead: () => void; onSaved: (app: App) => void }) {
+function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; reading: boolean; disabled: boolean; note: string; onRead: (next?: App) => void; onSaved: (app: App) => void }) {
   const posting = postingLink(app);
   const applied = app.fillReport?.activity?.find((event) => event.kind === "applied");
   const link = posting || app.applicationUrl || "";
@@ -774,23 +809,75 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
   const [busy, setBusy] = useState("");
   const [problem, setProblem] = useState("");
   const [saidSaved, setSaidSaved] = useState(false);
+  const [linkDraft, setLinkDraft] = useState("");
+  const [pasting, setPasting] = useState(false);
+  const [pasted, setPasted] = useState("");
+  const [choice, setChoice] = useState("");
+  const [told, setTold] = useState("");
+  const [full, setFull] = useState<string | null>(null);
+  const reply = (result: { application: App | null }) => {
+    if (result.application) onSaved({ ...app, ...result.application, contacts: app.contacts });
+    setFull(null);
+  };
+  /** The whole description: the list only carries the start of a long one. */
+  const wholeDescription = async () => {
+    if (!app.descriptionCut) return app.description;
+    if (full !== null) return full;
+    const result = await call<{ description: string }>(`/description?applicationId=${encodeURIComponent(app.id)}`, "GET");
+    setFull(result.description);
+    return result.description;
+  };
+  const findPosting = async () => {
+    setBusy("find");
+    setProblem("");
+    setTold("");
+    try {
+      const result = await call<{ found: boolean; choices: number; application: App | null }>("/find-posting", "POST", { applicationId: app.id });
+      reply(result);
+      setChoice("");
+      setTold(result.found ? "Found the posting." : result.choices ? "" : "Couldn't find the posting. Add its link or paste the description.");
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't look for it.");
+    } finally {
+      setBusy("");
+    }
+  };
+  const choose = async (url: string) => {
+    setBusy("choose");
+    setProblem("");
+    try {
+      reply(await call<{ application: App | null }>("/choose-posting", "POST", { applicationId: app.id, url }));
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't save it.");
+    } finally {
+      setBusy("");
+    }
+  };
   const save = async (key: string, body: Record<string, string>) => {
     setBusy(key);
     setProblem("");
     try {
       const result = await call<{ application: App }>("/details", "PATCH", { applicationId: app.id, ...body });
-      onSaved({ ...app, ...result.application, contacts: app.contacts });
-      return true;
+      const next = { ...app, ...result.application, contacts: app.contacts };
+      onSaved(next);
+      setFull(null);
+      return next;
     } catch (reason) {
       setProblem(reason instanceof Error ? reason.message : "Couldn't save it.");
-      return false;
+      return null;
     } finally {
       setBusy("");
     }
   };
-  const startEdit = () => {
-    setDraft({ title: app.titleMissing ? "" : app.title, company: app.companyMissing ? "" : app.company, location: app.location ?? "", url: posting, description: app.description });
-    setEditing(true);
+  const startEdit = async () => {
+    setProblem("");
+    try {
+      const description = await wholeDescription();
+      setDraft({ title: app.titleMissing ? "" : app.title, company: app.companyMissing ? "" : app.company, location: app.location ?? "", url: posting, description });
+      setEditing(true);
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't open it.");
+    }
   };
   const box = "w-full rounded-lg border border-line bg-card px-3 py-2 text-sm";
   const rows: Array<[string, React.ReactNode]> = [
@@ -798,21 +885,43 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
     ["Job", app.titleMissing ? <span key="title" className="text-[#F5A524]">Missing</span> : app.title],
     ["Location", app.location || <span key="location" className="text-faint">Not known</span>],
     ["Found on", siteFor(app)],
+    ...(app.fillReport?.jobNumber ? [["Job number", app.fillReport.jobNumber] as [string, React.ReactNode]] : []),
     ["Applied", app.submittedAt ? `${new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${applied?.how ? ` · ${HOW_LABEL[applied.how]}` : ""}` : "Not yet"],
   ];
   const links = [
     posting ? <a key="posting" href={posting} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-white">Job posting ↗</a> : null,
     app.applicationUrl && app.applicationUrl !== posting ? <a key="application" href={app.applicationUrl} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-white">Application ↗</a> : null,
   ].filter(Boolean);
+  const choices = app.fillReport?.postingChoices ?? [];
   if (links.length) rows.push(["Links", <span key="links" className="flex flex-wrap gap-4">{links}</span>]);
+  else rows.push(["Job posting", (
+    <form
+      key="add-link"
+      className="flex flex-wrap items-center gap-2"
+      onSubmit={async (event) => {
+        event.preventDefault();
+        const next = await save("link", { url: linkDraft.trim() });
+        if (next) {
+          setLinkDraft("");
+          onRead(next);
+        }
+      }}
+    >
+      <label className="sr-only" htmlFor={`link-${app.id}`}>Job posting link for {app.title}</label>
+      <input id={`link-${app.id}`} type="url" value={linkDraft} onChange={(event) => setLinkDraft(event.target.value)} placeholder="https://… paste the job's link" className="min-w-0 flex-1 basis-52 rounded-lg border border-line bg-card px-2.5 py-1.5 text-sm sm:max-w-sm" />
+      <button type="submit" className={secondary} disabled={busy === "link" || !linkDraft.trim()}>{busy === "link" ? "Saving…" : "Add link"}</button>
+      <button type="button" className={secondary} disabled={busy === "find" || disabled} onClick={() => void findPosting()}>{busy === "find" ? "Looking…" : "Find the posting"}</button>
+    </form>
+  )]);
+  const fromEmails = (app.fillReport?.statusHistory ?? []).filter((change) => change.source === "email").length;
   return (
     <section aria-label={`Info for ${app.title}`} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold">Info</h3>
         {!editing && (
           <span className="flex flex-wrap gap-4 text-xs">
-            {link && <button type="button" className="text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-40" disabled={disabled} onClick={onRead}>{reading ? "Reading the link…" : "Fill in from the link"}</button>}
-            <button type="button" className="text-muted underline-offset-4 hover:text-white hover:underline" onClick={startEdit}>Edit</button>
+            {link && <button type="button" className="text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-40" disabled={disabled} onClick={() => onRead()}>{reading ? "Reading the link…" : "Fill in from the link"}</button>}
+            <button type="button" className="text-muted underline-offset-4 hover:text-white hover:underline" onClick={() => void startEdit()}>Edit</button>
           </span>
         )}
       </div>
@@ -829,7 +938,7 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
           <label className="text-xs font-medium text-muted">Company<input className={`${box} mt-1`} value={draft.company} onChange={(event) => setDraft({ ...draft, company: event.target.value })} maxLength={200} required /></label>
           <label className="text-xs font-medium text-muted">Location<input className={`${box} mt-1`} value={draft.location} onChange={(event) => setDraft({ ...draft, location: event.target.value })} maxLength={200} placeholder="Boston, MA" /></label>
           <label className="text-xs font-medium text-muted">Job posting link<input type="url" className={`${box} mt-1`} value={draft.url} onChange={(event) => setDraft({ ...draft, url: event.target.value })} placeholder="https://…" /></label>
-          <label className="text-xs font-medium text-muted sm:col-span-2">Job description<textarea rows={5} className={`${box} mt-1`} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} maxLength={8000} /></label>
+          <label className="text-xs font-medium text-muted sm:col-span-2">Job description<textarea rows={5} className={`${box} mt-1`} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} maxLength={20000} /></label>
           <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
             <button type="submit" className={primary} disabled={busy === "edit" || draft.title.trim().length < 2 || draft.company.trim().length < 2}>{busy === "edit" ? "Saving…" : "Save changes"}</button>
             <button type="button" className={secondary} onClick={() => setEditing(false)}>Cancel</button>
@@ -842,6 +951,23 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
               <div key={term} className="contents"><dt className="text-faint">{term}</dt><dd className="min-w-0">{value}</dd></div>
             ))}
           </dl>
+          {told && <p role="status" className="m-0 text-xs text-muted">{told}</p>}
+          {choices.length > 0 && (
+            <form
+              className="flex flex-col gap-2 rounded-lg border border-[#3D8BFF]/50 p-3"
+              onSubmit={(event) => { event.preventDefault(); void choose(choice); }}
+            >
+              <label htmlFor={`choice-${app.id}`} className="text-sm font-medium">Is it one of these? {app.company} has {choices.length === 1 ? "this posting" : "these postings"}.</label>
+              <select id={`choice-${app.id}`} value={choice} onChange={(event) => setChoice(event.target.value)} className="w-full min-w-0 rounded-lg border border-line bg-card px-2.5 py-2 text-sm">
+                <option value="">Choose a posting…</option>
+                {choices.map((item) => <option key={item.url} value={item.url}>{item.title}{item.location ? ` · ${item.location}` : ""}</option>)}
+              </select>
+              <span className="flex flex-wrap items-center gap-2">
+                <button type="submit" className={primary} disabled={busy === "choose" || !choice}>{busy === "choose" ? "Saving…" : "Use this one"}</button>
+                <button type="button" className={secondary} disabled={busy === "choose"} onClick={() => void choose("")}>None of these</button>
+              </span>
+            </form>
+          )}
           {app.fillReport?.statusHistory?.length ? (
             <div className="text-sm">
               <h4 className="mb-1 text-xs font-medium text-faint">Status history</h4>
@@ -858,11 +984,36 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
             </div>
           ) : null}
           {app.description.trim() ? (
-            <details className="text-sm">
+            <details className="text-sm" onToggle={(event) => { if (event.currentTarget.open) void wholeDescription().catch(() => undefined); }}>
               <summary className="cursor-pointer select-none text-muted hover:text-white">Job description</summary>
-              <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-line text-muted">{app.description}</p>
+              <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-line text-muted">{full ?? app.description}</p>
+              <button type="button" className="mt-2 text-xs text-muted underline-offset-4 hover:text-white hover:underline" onClick={() => void startEdit()}>Edit description</button>
             </details>
-          ) : <p className="text-xs text-faint">No job description saved{link ? ". Fill in from the link to add it." : "."}</p>}
+          ) : pasting ? (
+            <form
+              className="flex flex-col gap-2"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                if (await save("description", { description: pasted })) {
+                  setPasting(false);
+                  setPasted("");
+                }
+              }}
+            >
+              <label htmlFor={`description-${app.id}`} className="text-sm text-muted">Job description</label>
+              <textarea id={`description-${app.id}`} autoFocus rows={6} className={box} value={pasted} onChange={(event) => setPasted(event.target.value)} maxLength={20000} placeholder="Paste the posting's text here" />
+              <span className="flex flex-wrap gap-2">
+                <button type="submit" className={primary} disabled={busy === "description" || pasted.trim().length < 2}>{busy === "description" ? "Saving…" : "Save description"}</button>
+                <button type="button" className={secondary} onClick={() => setPasting(false)}>Cancel</button>
+              </span>
+            </form>
+          ) : (
+            <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-faint">
+              No job description saved.
+              <button type="button" className="text-ink underline underline-offset-4 hover:text-white" onClick={() => setPasting(true)}>Paste description</button>
+            </p>
+          )}
+          {fromEmails > 0 && <JobEmails applicationId={app.id} count={fromEmails} />}
         </>
       )}
       <form
@@ -884,6 +1035,54 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
       </form>
       {(note || problem) && <p role={problem ? "alert" : "status"} className={`text-xs ${problem ? "text-red-300" : "text-muted"}`}>{problem || note}</p>}
     </section>
+  );
+}
+
+type JobEmail = { id: string; at: string; kind: string; summary: string; from: string; subject: string; text: string };
+
+/** The emails about a job: read only when opened, since each can be long. */
+function JobEmails({ applicationId, count }: { applicationId: string; count: number }) {
+  const [emails, setEmails] = useState<JobEmail[] | null>(null);
+  const [problem, setProblem] = useState("");
+  const load = async () => {
+    if (emails) return;
+    setProblem("");
+    try {
+      const response = await fetch(`/api/email/job?applicationId=${encodeURIComponent(applicationId)}`);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Couldn't load the emails.");
+      setEmails(payload.emails as JobEmail[]);
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't load the emails.");
+    }
+  };
+  return (
+    <details className="text-sm" onToggle={(event) => { if (event.currentTarget.open) void load(); }}>
+      <summary className="cursor-pointer select-none text-muted hover:text-white">Emails <span className="tabular-nums text-faint">{count}</span></summary>
+      {problem && <p role="alert" className="mt-2 text-xs text-red-300">{problem}</p>}
+      {!emails && !problem && <p className="mt-2 text-xs text-muted">Loading…</p>}
+      {emails && !emails.length && <p className="mt-2 text-xs text-muted">Its emails aren&apos;t saved any more.</p>}
+      {emails && emails.length > 0 && (
+        <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+          {emails.map((email) => (
+            <li key={email.id} className="rounded-lg border border-line p-3">
+              {email.text ? (
+                <details>
+                  <summary className="cursor-pointer select-none"><span className="font-medium">{email.subject || email.summary || "Email"}</span> <span className="text-xs text-faint tabular-nums">{new Date(email.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></summary>
+                  <p className="mb-0 mt-2 break-words text-xs text-faint">From {email.from}</p>
+                  <p className="mb-0 mt-2 max-h-72 overflow-y-auto whitespace-pre-line break-words text-muted">{email.text}</p>
+                </details>
+              ) : (
+                <>
+                  <p className="m-0"><span className="font-medium">{email.summary || "Email"}</span> <span className="text-xs text-faint tabular-nums">{new Date(email.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></p>
+                  <p className="mb-0 mt-1 text-xs text-faint">Only this summary was saved. Forward the email again to read it here.</p>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
   );
 }
 

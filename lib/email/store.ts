@@ -3,7 +3,8 @@ import { id, nowIso, persistenceMode, withLock } from "@/lib/db/file-store";
 import { supabaseTables } from "@/lib/db/remote";
 import { ServiceError } from "@/lib/errors";
 import { newToken } from "@/lib/email/address";
-import type { EmailEvent, EmailInbox } from "@/lib/email/types";
+import { decryptSecret, encryptSecret } from "@/lib/security";
+import type { EmailEvent, EmailInbox, EmailText } from "@/lib/email/types";
 
 /**
  * Storage for email tracking: the Supabase tables from supabase/migrations/0006_email_tracking.sql in
@@ -118,6 +119,16 @@ export const emailEvents = {
     return withLock((db) => (db.emailEvents ?? []).filter((row) => row.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit));
   },
 
+  /** Every email saved on one job, newest first. */
+  async forApplication(userId: string, applicationId: string): Promise<EmailEvent[]> {
+    if (onTables()) {
+      const { data, error } = await supabaseTables().from("email_events").select("data").eq("user_id", userId).eq("data->>applicationId", applicationId).order("created_at", { ascending: false }).limit(100);
+      if (error) throw tableError(error);
+      return (data ?? []).map((row) => row.data as EmailEvent);
+    }
+    return withLock((db) => (db.emailEvents ?? []).filter((row) => row.userId === userId && row.applicationId === applicationId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 100));
+  },
+
   async get(userId: string, eventId: string): Promise<EmailEvent | null> {
     if (onTables()) {
       const { data, error } = await supabaseTables().from("email_events").select("data").eq("user_id", userId).eq("id", eventId).maybeSingle();
@@ -144,3 +155,82 @@ export const emailEvents = {
     });
   },
 };
+
+export type SavedEmail = { from: string; subject: string; text: string };
+const MAX_TEXT = 30_000;
+
+/**
+ * The text of emails about a job, encrypted. If its table is missing (0007_email_texts.sql hasn't been run), or a
+ * row can't be read, the job still works: it shows the one-line summary instead of the email.
+ */
+export const emailTexts = {
+  async save(userId: string, eventId: string, email: SavedEmail) {
+    const row: EmailText = { eventId, userId, data: encryptSecret(JSON.stringify({ from: email.from.slice(0, 300), subject: email.subject.slice(0, 500), text: email.text.slice(0, MAX_TEXT) })), createdAt: nowIso() };
+    if (onTables()) {
+      const { error } = await supabaseTables().from("email_texts").upsert({ event_id: row.eventId, user_id: row.userId, data: row.data, created_at: row.createdAt });
+      if (error) console.error("email text not saved", error.code ?? "");
+      return;
+    }
+    await withLock((db) => {
+      db.emailTexts = [...(db.emailTexts ?? []).filter((item) => item.eventId !== eventId), row];
+    });
+  },
+
+  async read(userId: string, eventIds: string[]): Promise<Map<string, SavedEmail>> {
+    const found = new Map<string, SavedEmail>();
+    if (!eventIds.length) return found;
+    let rows: Array<{ eventId: string; data: string }> = [];
+    if (onTables()) {
+      const { data, error } = await supabaseTables().from("email_texts").select("event_id, data").eq("user_id", userId).in("event_id", eventIds);
+      if (error) return found;
+      rows = (data ?? []).map((row) => ({ eventId: row.event_id as string, data: row.data as string }));
+    } else {
+      rows = await withLock((db) => (db.emailTexts ?? []).filter((row) => row.userId === userId && eventIds.includes(row.eventId)));
+    }
+    for (const row of rows) {
+      try {
+        found.set(row.eventId, JSON.parse(decryptSecret(row.data)) as SavedEmail);
+      } catch {
+        // Can't be read any more (the server's secret changed): the summary stands in.
+      }
+    }
+    return found;
+  },
+
+  async remove(userId: string, eventIds: string[]) {
+    if (!eventIds.length) return;
+    if (onTables()) {
+      const { error } = await supabaseTables().from("email_texts").delete().eq("user_id", userId).in("event_id", eventIds);
+      if (error) console.error("email text not removed", error.code ?? "");
+      return;
+    }
+    await withLock((db) => {
+      db.emailTexts = (db.emailTexts ?? []).filter((row) => !(row.userId === userId && eventIds.includes(row.eventId)));
+    });
+  },
+};
+
+/** A job is deleted: the emails saved on it go too. */
+export async function removeEmailTextsFor(userId: string, applicationId: string) {
+  const events = await emailEvents.forApplication(userId, applicationId).catch(() => []);
+  await emailTexts.remove(userId, events.map((event) => event.id));
+}
+
+/** An account is deleted: its forwarding addresses stop working, and everything kept from its emails goes. */
+export async function removeEmailData(userId: string) {
+  if (onTables()) {
+    const client = supabaseTables();
+    const results = await Promise.all([
+      client.from("email_inboxes").delete().eq("user_id", userId),
+      client.from("email_events").delete().eq("user_id", userId),
+      client.from("email_texts").delete().eq("user_id", userId),
+    ]);
+    for (const { error } of results) if (error) console.error("email data not removed", error.code ?? "");
+    return;
+  }
+  await withLock((db) => {
+    db.emailInboxes = (db.emailInboxes ?? []).filter((row) => row.userId !== userId);
+    db.emailEvents = (db.emailEvents ?? []).filter((row) => row.userId !== userId);
+    db.emailTexts = (db.emailTexts ?? []).filter((row) => row.userId !== userId);
+  });
+}

@@ -275,7 +275,7 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
         <AddressRow address={state.address}>
           <button type="button" disabled={busy === "regenerate"} onClick={() => void regenerate()} className="h-[38px] rounded-[10px] border border-[#26262C] px-3.5 text-[13px] font-medium hover:bg-white/5 disabled:opacity-40">{busy === "regenerate" ? "Making a new one…" : "New address"}</button>
         </AddressRow>
-        <p className="m-0 text-xs leading-normal text-[#8B8B94]">It&apos;s yours alone. Anyone with it could send emails into your tracker, so keep it private. Unnepo keeps only the company, the job, the status and a one-line summary, never the email itself.</p>
+        <p className="m-0 text-xs leading-normal text-[#8B8B94]">It&apos;s yours alone. Anyone with it could send emails into your tracker, so keep it private. Unnepo saves the text of emails about a job, encrypted, so you can read them on that job. It doesn&apos;t keep emails that aren&apos;t about a job, or any attachments.</p>
         {codeIsNew && state.verification && (
           <div role="status" className="flex flex-wrap items-center gap-3.5 rounded-xl border border-[#3D8BFF] bg-[#070708] p-4">
             <span className="basis-full text-[13px] text-[#9A9AA3]">{state.verification.provider === "gmail" ? "Gmail" : "Outlook"} sent a confirmation code on {when(state.verification.at)}.</span>

@@ -19,8 +19,10 @@ import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExt
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionLearn, extensionMap, extensionMe, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { handlePostmark, webhookAuthorized } from "@/lib/email/inbound";
-import { emailState, pasteEmail, regenerateAddress, reviewInboxAction } from "@/lib/email/service";
-import { applyState, createApplication, deleteApplication, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
+import { emailState, emailsForJob, pasteEmail, regenerateAddress, reviewInboxAction } from "@/lib/email/service";
+import { removeEmailData } from "@/lib/email/store";
+import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
+import { applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
 export const maxDuration = 60;
@@ -211,6 +213,12 @@ async function handle(request: Request, slug: string[]) {
       if (!rateLimit(`read-link:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of links in an hour. Try again a bit later.", "rate_limited", 429);
       return json(await fillFromLink(user.id, await request.json()));
     }
+    if (action === "find-posting" && method === "POST") {
+      if (!rateLimit(`read-link:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of links in an hour. Try again a bit later.", "rate_limited", 429);
+      return json(await findPostingNow(user.id, await request.json()));
+    }
+    if (action === "choose-posting" && method === "POST") return json(await choosePosting(user.id, await request.json()));
+    if (action === "description" && method === "GET") return json(await jobDescription(user.id, new URL(request.url).searchParams.get("applicationId")));
     if (action === "maybe" && method === "POST") return json(await answerMaybe(user.id, await request.json()));
     if (action === "session" && method === "POST") return json(await setSession(user.id, Boolean((await request.json())?.start)));
     if (action === "add-job" && method === "POST") {
@@ -222,6 +230,7 @@ async function handle(request: Request, slug: string[]) {
   // Email tracking: the forwarding address, the paste box, and the Review Inbox.
   if (root === "email") {
     if (action === "state" && request.method === "GET") return json(await emailState(user.id));
+    if (action === "job" && request.method === "GET") return json(await emailsForJob(user.id, new URL(request.url).searchParams.get("applicationId")));
     if (action === "regenerate" && request.method === "POST") return json(await regenerateAddress(user.id));
     if (action === "paste" && request.method === "POST") {
       if (!rateLimit(`email-paste:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of emails in an hour. Try again a bit later.", "rate_limited", 429);
@@ -341,6 +350,7 @@ async function handle(request: Request, slug: string[]) {
     return json(await repo.exportUser(user.id));
   }
   if (root === "account" && request.method === "DELETE") {
+    await removeEmailData(user.id);
     await repo.deleteUser(user.id);
     await clearSessionCookie();
     return json({ ok: true });

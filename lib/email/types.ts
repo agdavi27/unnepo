@@ -16,8 +16,8 @@ export type EmailOutcome =
   | "verification"; // Gmail's or Outlook's forwarding confirmation
 
 /**
- * One email Unnepo processed. Only what was taken from it is kept: never its body. The Message-ID is stored
- * as a hash, only to tell the same email from a new one.
+ * One email Unnepo processed: what was taken from it. The text of an email about a job is kept apart, encrypted
+ * (EmailText). The Message-ID is stored as a hash, only to tell the same email from a new one.
  */
 export type EmailEvent = {
   id: string;
@@ -29,6 +29,11 @@ export type EmailEvent = {
   kind: EmailKind | "verification";
   company: string;
   jobTitle: string | null;
+  /** Where the job is, and its posting number, when the email says. */
+  location?: string | null;
+  jobNumber?: string | null;
+  /** Links in the email that lead to a job posting. */
+  jobLinks?: string[];
   confidence: number;
   summary: string;
   outcome: EmailOutcome;
@@ -43,3 +48,6 @@ export type EmailEvent = {
   verification?: { provider: "gmail" | "outlook"; code: string | null; link: string | null };
   createdAt: string;
 };
+
+/** The text of an email about a job, encrypted in `data`. Saved under its event's id. */
+export type EmailText = { eventId: string; userId: string; data: string; createdAt: string };

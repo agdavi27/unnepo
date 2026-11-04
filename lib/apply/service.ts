@@ -15,9 +15,16 @@ import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, 
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { hasUnlimitedCredits } from "@/lib/apply/limits";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
+import { removeEmailTextsFor } from "@/lib/email/store";
 import { profileReady } from "@/lib/profile/service";
 import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState, PostedRecruiter } from "@/lib/apply/types";
+
+/** A job's whole description: the list only carries the start of a long one. */
+export async function jobDescription(userId: string, applicationId: unknown) {
+  const app = await requireApp(userId, applicationId);
+  return { description: app.description };
+}
 
 /** Background work runs after the response is sent. Tests run it inline. */
 let defer: (task: () => Promise<void>) => void = (task) => after(task);
@@ -232,13 +239,13 @@ export async function learnAnswers(userId: string, info: Awaited<ReturnType<type
 
 export function summary(app: JobApplication) {
   const missing = missingAnswers(app.questions);
-  return { ...app, description: app.description.slice(0, 4000), missing: missing.map((question) => question.key), companyMissing: companyMissing(app), titleMissing: titleMissing(app.title) };
+  return { ...app, description: app.description.slice(0, 4000), descriptionCut: app.description.length > 4000, missing: missing.map((question) => question.key), companyMissing: companyMissing(app), titleMissing: titleMissing(app.title) };
 }
 
 /** What a job is saved as when the page didn't say its name. */
 export const NO_TITLE = "Job title missing";
 // Titles saved when nothing better was known: LinkedIn's stand-in, and page names.
-const STAND_IN_TITLE = /^(job title missing|linkedin easy apply job|a job|job|untitled|job application|apply|thank you.*)$/i;
+const STAND_IN_TITLE = /^(job title missing|unknown role|linkedin easy apply job|a job|job|untitled|job application|apply|thank you.*)$/i;
 
 /** Whether the saved title isn't the job's name: a stand-in, or a status line like "Applied on November 2, 2026". */
 export function titleMissing(title: string) {
@@ -285,7 +292,7 @@ export async function updateJobDetails(userId: string, raw: unknown) {
   const body = (raw ?? {}) as Record<string, unknown>;
   const app = await requireApp(userId, body.applicationId);
   const text = (key: string, max: number) => (typeof body[key] === "string" ? (body[key] as string).trim().slice(0, max) : undefined);
-  const [title, company, location, link, description, notes] = [text("title", 200), text("company", 200), text("location", 200), text("url", 2000), text("description", 8000), typeof body.notes === "string" ? body.notes.slice(0, 4000) : undefined];
+  const [title, company, location, link, description, notes] = [text("title", 200), text("company", 200), text("location", 200), text("url", 2000), text("description", 20000), typeof body.notes === "string" ? body.notes.slice(0, 4000) : undefined];
   if (title !== undefined && (title.length < 2 || notJobTitle(title))) throw new ServiceError("Type the job title.", "title", 400);
   if (company !== undefined && company.length < 2) throw new ServiceError("Type the company's name.", "company", 400);
   if (link !== undefined && link && !/^https:\/\/\S+\.\S+/i.test(link)) throw new ServiceError("The link should start with https://.", "url", 400);
@@ -824,6 +831,7 @@ export async function setOutcome(userId: string, raw: unknown) {
 
 export async function deleteApplication(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
+  await removeEmailTextsFor(userId, app.id);
   await applications.remove(userId, app.id);
   return { ok: true };
 }

@@ -54,8 +54,11 @@ export function fromPostmark(body: PostmarkInbound): { recipients: string[]; ema
   // The sender's own Message-ID, so the same email forwarded twice is one email. Postmark's id when it has none.
   const header = (body.Headers ?? []).find((item) => item.Name?.toLowerCase() === "message-id")?.Value;
   const from = body.FromFull?.Email ? `${body.FromFull.Name ?? ""} <${body.FromFull.Email}>`.trim() : body.From ?? "";
-  const text = body.TextBody?.trim() || (body.HtmlBody ? htmlToText(body.HtmlBody) : "");
-  return { recipients, email: unwrapForward({ from, subject: body.Subject ?? "", date: body.Date, text, messageId: header || body.MessageID }) };
+  // Some emails only say "view this in a browser" as text: the HTML is the real email then.
+  const plain = body.TextBody?.trim() ?? "";
+  const fromHtml = body.HtmlBody ? htmlToText(body.HtmlBody) : "";
+  const text = plain.length >= 200 || plain.length >= fromHtml.length ? plain : fromHtml;
+  return { recipients, email: unwrapForward({ from, subject: body.Subject ?? "", date: body.Date, text, messageId: header || body.MessageID, html: body.HtmlBody }) };
 }
 
 /** One post from Postmark. 403 for an address no student has (Postmark doesn't retry those). */

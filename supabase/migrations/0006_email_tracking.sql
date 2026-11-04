@@ -3,7 +3,7 @@
 --
 -- email_inboxes: one active address per student (the "u_..." part). Regenerating turns the old one off.
 -- email_events: one row per email processed, keyed by a hash of its Message-ID so it's never processed twice.
--- Only the extracted fields and a one-line summary are kept, in data. Never the email's body.
+-- Only the extracted fields and a one-line summary are kept, in data. The email's text, when kept, is in email_texts (0007).
 
 create table if not exists public.email_inboxes (
   token text primary key,

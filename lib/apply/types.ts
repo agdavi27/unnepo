@@ -107,6 +107,12 @@ export type FillReport = {
   infoReadAt?: string;
   /** The job board posting the student applied from, when they applied on another page (the company's site). */
   postingUrl?: string;
+  /** The posting's number ("R-10423"), when an email said it. */
+  jobNumber?: string;
+  /** When Unnepo last looked for this job's posting, so a new email doesn't pay to look again. */
+  postingSearchedAt?: string;
+  /** Postings it could be, when Unnepo couldn't tell which: the student picks. */
+  postingChoices?: PostingChoice[];
   /** What happened with this job, oldest first: opened, filled, applied (and how that was caught). */
   activity?: ActivityEvent[];
 };
@@ -115,6 +121,9 @@ export type FillReport = {
 export type AppliedHow = "site_confirmed" | "page_said" | "button_changed" | "board_saved" | "linkedin_easy_apply" | "you_marked" | "added_by_hand";
 /** One thing that happened with a job. `site`: where ("ZipRecruiter", "Workday"). `ms`: time it took, for fills. */
 export type ActivityEvent = { at: string; kind: "opened" | "filled" | "applied" | "not_confirmed"; site: string; how?: AppliedHow; fields?: number; needs?: number; ms?: number };
+
+/** A posting found for a job. `url` is the page to open, `readUrl` is where Unnepo reads its details. */
+export type PostingChoice = { title: string; location: string; url: string; readUrl: string };
 
 export type MaybeApplied = { id: string; url: string; title: string; company: string; site: string; description?: string; applicationId?: string; at: string };
 

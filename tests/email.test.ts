@@ -90,7 +90,7 @@ describe("forwarding confirmations", () => {
 
 describe("checking the AI's answer", () => {
   it("accepts JSON of the right shape and treats anything else as not sure", () => {
-    expect(parseClassification('Sure! {"type":"applied","company":"P&G","job_title":null,"confidence":0.92,"summary":"P&G confirmed your application."}')).toEqual({ type: "applied", company: "P&G", job_title: null, confidence: 0.92, summary: "P&G confirmed your application." });
+    expect(parseClassification('Sure! {"type":"applied","company":"P&G","job_title":null,"confidence":0.92,"summary":"P&G confirmed your application."}')).toMatchObject({ type: "applied", company: "P&G", job_title: null, confidence: 0.92, summary: "P&G confirmed your application." });
     expect(parseClassification('{"type":"interview","company":"Globex","job_title":"Unknown","confidence":0.8,"summary":"Interview."}').job_title).toBeNull();
     for (const bad of ["no json here", '{"type":"hired","company":"Acme","job_title":null,"confidence":0.9,"summary":""}', '{"type":"applied","company":"Acme","job_title":null,"confidence":1.4,"summary":""}', '{"type":"applied"']) {
       expect(parseClassification(bad).confidence).toBe(0);

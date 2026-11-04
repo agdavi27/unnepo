@@ -17,7 +17,7 @@ export const JOB_PHRASES = [
 // "Thank you for your submission for the Sales position" says none of the phrases above.
 const JOB_WORDS = [...JOB_PHRASES, "application", "applying", "applied", "candidacy", "candidate", "recruiter", "recruiting", "hiring", "position", "resume", "moving forward", "move forward"];
 
-export type InboundEmail = { from: string; subject: string; date?: string; text: string; messageId?: string };
+export type InboundEmail = { from: string; subject: string; date?: string; text: string; messageId?: string; html?: string };
 
 /** The sender's domain: "jobs@mail.greenhouse.io" and "Acme <no-reply@acme.com>" give "mail.greenhouse.io" and "acme.com". */
 export function senderDomain(from: string) {

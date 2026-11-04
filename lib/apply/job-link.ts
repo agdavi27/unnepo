@@ -97,7 +97,8 @@ export async function fillFromLink(userId: string, raw: unknown) {
     patch.location = info.location;
     changed.push("location");
   }
-  if (info.description.length > app.description.length + 200) {
+  // Anything beats nothing. Otherwise only a much fuller one, so a good description isn't replaced by a stub.
+  if ((!app.description.trim() && info.description.trim()) || info.description.length > app.description.length + 200) {
     patch.description = info.description;
     changed.push("description");
   }

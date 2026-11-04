@@ -3,7 +3,8 @@ import { applications } from "@/lib/apply/store";
 import { addressFor, inboundReady } from "@/lib/email/address";
 import { ATS_DOMAINS, JOB_PHRASES, gmailFilterQuery, type InboundEmail } from "@/lib/email/filter";
 import { SKIPPED_KEY, processEmail, reviewEmail } from "@/lib/email/process";
-import { emailEvents, emailInboxes } from "@/lib/email/store";
+import { applications as jobs } from "@/lib/apply/store";
+import { emailEvents, emailInboxes, emailTexts } from "@/lib/email/store";
 import { unwrapForward } from "@/lib/email/inbound";
 
 /** What the Email tracking page shows, and what it can do: regenerate the address, paste an email, review. */
@@ -44,6 +45,20 @@ export async function emailState(userId: string) {
     },
     // Every open application, for "Pick application".
     applications: apps.filter((app) => app.status === "submitted" || app.status === "applied_manual").map((app) => ({ id: app.id, title: app.title, company: app.company })),
+  };
+}
+
+/** The emails saved on one job, newest first, with the text of each that has it. */
+export async function emailsForJob(userId: string, applicationId: unknown) {
+  const app = await jobs.get(userId, String(applicationId ?? ""));
+  if (!app) throw new ServiceError("That job isn't on your list any more.", "not_found", 404);
+  const events = (await emailEvents.forApplication(userId, app.id)).filter((event) => ["created", "updated", "approved"].includes(event.outcome));
+  const texts = await emailTexts.read(userId, events.map((event) => event.id));
+  return {
+    emails: events.map((event) => {
+      const saved = texts.get(event.id);
+      return { id: event.id, at: event.receivedAt, kind: event.kind, summary: event.summary, from: saved?.from ?? event.fromDomain, subject: saved?.subject ?? "", text: saved?.text ?? "" };
+    }),
   };
 }
 

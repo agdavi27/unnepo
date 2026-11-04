@@ -1,13 +1,15 @@
 import { createHash } from "node:crypto";
 import { id, nowIso } from "@/lib/db/file-store";
 import { applications } from "@/lib/apply/store";
+import { findPostingLater } from "@/lib/apply/find-posting";
 import { minimalApplication } from "@/lib/apply/service";
 import type { ApplicationOutcome, FillReport, JobApplication, StatusChange } from "@/lib/apply/types";
 import { cleanCompanyName } from "@/lib/apply/job-title";
 import { classifyEmail, type Classification } from "@/lib/email/classify";
 import { passesPrefilter, senderDomain, type InboundEmail } from "@/lib/email/filter";
 import { matchApplication } from "@/lib/email/match";
-import { emailEvents, messageKey } from "@/lib/email/store";
+import { jobLinksIn } from "@/lib/email/links";
+import { emailEvents, emailTexts, messageKey } from "@/lib/email/store";
 import type { EmailEvent } from "@/lib/email/types";
 import { forwardingVerification } from "@/lib/email/verification";
 
@@ -15,8 +17,9 @@ import { forwardingVerification } from "@/lib/email/verification";
  * One email, start to finish: skipped if it was processed before (same Message-ID); a forwarding confirmation
  * keeps its code for the setup page; anything that isn't about a job is dropped before any AI call; the rest is
  * read by the AI and saved: a new application ("applied", no match), a status change, or the Review Inbox when
- * Unnepo isn't sure (confidence under 0.7) or more than one job fits. The email's text is only held in memory
- * while this runs. What's kept is the extracted fields and a one-line summary.
+ * Unnepo isn't sure (confidence under 0.7) or more than one job fits. What's kept is the extracted fields, a
+ * one-line summary and, for an email about a job, its text, encrypted, to read on that job. Unnepo then looks for
+ * the job's posting in the background.
  */
 
 export const MIN_CONFIDENCE = 0.7;
@@ -74,7 +77,7 @@ async function createFromEmail(userId: string, job: Classification, at: string) 
   // No link to the posting: a key of its own, so two emailed jobs at one company stay two jobs.
   const app = await minimalApplication(userId, { url: `https://unnepo.local/email/${id()}`, title, company, charge: false });
   const updated = await applications.update(userId, app.id, {
-    jobUrl: "", applicationUrl: null,
+    jobUrl: "", applicationUrl: null, location: job.location ?? null,
     ...(unfinished ? { statusMessage: "Added from a forwarded email. Not applied yet." } : { status: "applied_manual" as const, submittedAt: at, statusMessage: "Added from a forwarded email." }),
     fillReport: withEmailChange(app.fillReport, { at, status: unfinished ? "incomplete" : "applied", source: "email", summary: job.summary }, "added"),
   });
@@ -148,21 +151,26 @@ export async function processEmail(userId: string, email: InboundEmail, source: 
   }
 
   const job = await classifyEmail(email);
-  const fields = { kind: job.type, company: cleanCompanyName(job.company) || job.company, jobTitle: job.job_title, confidence: job.confidence, summary: job.summary };
+  const jobLinks = jobLinksIn(email);
+  const fields = { kind: job.type, company: cleanCompanyName(job.company) || job.company, jobTitle: job.job_title, location: job.location ?? null, jobNumber: job.job_number ?? null, jobLinks, confidence: job.confidence, summary: job.summary };
+  const keepText = (eventId: string) => emailTexts.save(userId, eventId, { from: email.from, subject: email.subject, text: email.text }).catch((error) => console.error("email text not saved", error instanceof Error ? error.message : ""));
   if (job.type === "not_job_related" && job.confidence >= MIN_CONFIDENCE) {
     // Kept only as "seen", so the same email isn't read by the AI twice.
-    const event = await emailEvents.add({ ...base, ...fields, company: "", jobTitle: null, outcome: "ignored", applicationId: null });
+    const event = await emailEvents.add({ ...base, ...fields, company: "", jobTitle: null, location: null, jobNumber: null, jobLinks: [], outcome: "ignored", applicationId: null });
     return event ? { outcome: "ignored", event } : { outcome: "duplicate" };
   }
   if (job.confidence < MIN_CONFIDENCE || !job.company.trim()) {
     const event = await emailEvents.add({ ...base, ...fields, outcome: "review", applicationId: null, reason: "low_confidence", candidates: [] });
+    if (event) await keepText(event.id);
     return event ? { outcome: "review", event } : { outcome: "duplicate" };
   }
   // Saved as seen first, so a second copy arriving at the same moment can't apply it twice.
   const event = await emailEvents.add({ ...base, ...fields, outcome: "review", applicationId: null });
   if (!event) return { outcome: "duplicate" };
+  await keepText(event.id);
   const result = await applyEmail(userId, job, at);
   const saved = await emailEvents.update(userId, event.id, { outcome: result.outcome, applicationId: result.applicationId, reason: result.reason, candidates: result.candidates });
+  if (result.applicationId) findPostingLater(userId, result.applicationId, { title: job.job_title, location: job.location, jobNumber: job.job_number, links: jobLinks });
   return { outcome: result.outcome, event: saved ?? event, applicationId: result.applicationId };
 }
 
@@ -171,8 +179,11 @@ export async function reviewEmail(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { eventId?: unknown; action?: unknown; applicationId?: unknown };
   const event = await emailEvents.get(userId, String(body.eventId ?? ""));
   if (!event || event.outcome !== "review") return { ok: false, event: null };
-  if (body.action === "dismiss") return { ok: true, event: await emailEvents.update(userId, event.id, { outcome: "dismissed" }) };
-  const job: Classification = { type: event.kind === "verification" ? "not_job_related" : event.kind, company: event.company, job_title: event.jobTitle, confidence: 1, summary: event.summary };
+  if (body.action === "dismiss") {
+    await emailTexts.remove(userId, [event.id]);
+    return { ok: true, event: await emailEvents.update(userId, event.id, { outcome: "dismissed" }) };
+  }
+  const job: Classification = { type: event.kind === "verification" ? "not_job_related" : event.kind, company: event.company, job_title: event.jobTitle, location: event.location, job_number: event.jobNumber, confidence: 1, summary: event.summary };
   if (job.type === "not_job_related" || !job.company.trim()) return { ok: false, event };
   let result: Awaited<ReturnType<typeof applyEmail>>;
   if (body.action === "pick") {
@@ -186,5 +197,6 @@ export async function reviewEmail(userId: string, raw: unknown) {
     if (result.outcome === "review" && result.reason === "several_matches") return { ok: false, event, error: "More than one job fits. Pick the application." };
     if (result.outcome === "review") result = await applyEmail(userId, job, event.receivedAt, null);
   } else return { ok: false, event };
+  if (result.applicationId) findPostingLater(userId, result.applicationId, { title: event.jobTitle, location: event.location, jobNumber: event.jobNumber, links: event.jobLinks });
   return { ok: true, event: await emailEvents.update(userId, event.id, { outcome: "approved", applicationId: result.applicationId }) };
 }
