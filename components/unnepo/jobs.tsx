@@ -1,7 +1,8 @@
 "use client";
 
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Bookmark, ListFilter, RefreshCw, X } from "lucide-react";
 import type { Highlight } from "@/components/unnepo/UnnepoForms";
 import { categoryColor, categoryOf } from "@/lib/jobs/category";
 
@@ -90,6 +91,9 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
 
   /** "Not for me": gone from the list now, and for good. */
   async function hide(job: Job) {
+    // The job after it takes its place in the panel.
+    const place = shown.findIndex((item) => item.id === job.id);
+    if (open === job.id) setOpen(shown[place + 1]?.id ?? shown[place - 1]?.id ?? null);
     setJobs((list) => (list ?? []).filter((item) => item.id !== job.id));
     await fetch("/api/app/jobs/dismiss", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: job.id }) }).catch(() => undefined);
   }
@@ -109,6 +113,8 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
   const shown = all.filter((job) => (savedOnly ? job.saved : !off.includes(job.category)));
   const savedCount = all.filter((job) => job.saved).length;
   const updated = cachedAt && now ? Math.max(0, Math.round((now - Date.parse(cachedAt)) / 60000)) : null;
+  // The job in the panel. A filter hiding it moves the panel to the best job still showing.
+  const current = open === null ? null : shown.find((job) => job.id === open) ?? shown[0] ?? null;
 
   if (editing) {
     return (
@@ -126,48 +132,36 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
     );
   }
 
+  const panelFor = (job: Job) => <JobPanel job={job} posted={postedLabel(job, now)} onClose={() => setOpen(null)} onCoverLetter={() => onCoverLetter(job, all)} onSave={() => void save(job)} onHide={() => void hide(job)} />;
+
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="flex min-w-0 flex-col gap-2">
-          <h1 className={heading}>Jobs for you {jobs && <span className="text-base font-medium tracking-normal text-[#8B8B94]">{shown.length} {shown.length === 1 ? "match" : "matches"}, best first</span>}</h1>
-          <div className="flex flex-wrap items-center gap-1.5 text-[13px] text-[#9A9AA3]">
-            {roles.length > 0 && "Matching"}
-            {roles.map((role) => (
-              <span key={role} className="inline-flex items-center gap-1.5 rounded-full border border-[#26262C] px-[9px] py-[3px] text-[#E4E4E8]">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ background: categoryOf(role).color }} />{role}
-              </span>
-            ))}
-            <button type="button" onClick={() => setEditing(true)} className="h-7 px-2.5 text-[13px] font-medium text-[#3D8BFF] hover:underline">Edit careers &amp; roles</button>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => void load(true)} disabled={loading} className="h-10 rounded-[10px] border border-[#26262C] px-3.5 text-[13px] font-medium hover:bg-white/5 disabled:opacity-50">{loading ? "Searching…" : "↻ Find new jobs"}</button>
-          <button type="button" onClick={() => onCoverLetter(null, all)} className="h-10 rounded-[10px] bg-[#F7F7F8] px-3.5 text-[13px] font-semibold text-[#070708] hover:bg-white">✦ Write me a cover letter</button>
+    <div className="flex flex-col gap-5 pt-3">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="m-0 text-[28px] font-bold tracking-[-0.03em]">Jobs for you {jobs && <span className="text-[15px] font-normal tracking-normal text-[#8B8B8B]">{shown.length} {shown.length === 1 ? "match" : "matches"} · best first</span>}</h1>
+        <div className="flex items-center gap-2">
+          <button type="button" aria-label={loading ? "Searching for new jobs" : "Find new jobs"} title="Find new jobs" onClick={() => void load(true)} disabled={loading} className="flex h-[38px] w-[38px] items-center justify-center rounded-full border border-[#2A2A2A] text-[#D4D4D4] hover:text-white disabled:opacity-60">
+            <RefreshCw aria-hidden size={15} className={loading ? "animate-spin motion-reduce:animate-none" : ""} />
+          </button>
+          <button type="button" onClick={() => onCoverLetter(null, all)} className="h-[38px] rounded-full border border-[#2A2A2A] px-4 text-[13px] font-medium hover:bg-white/5">✦ Cover letter</button>
+          <JobFilters
+            categories={categories.map((name) => ({ name, count: all.filter((job) => job.category === name).length }))}
+            off={off}
+            onOff={(name) => { setSavedOnly(false); setOff((list) => (list.includes(name) ? list.filter((item) => item !== name) : [...list, name])); }}
+            savedOnly={savedOnly}
+            savedCount={savedCount}
+            onSavedOnly={() => setSavedOnly((value) => !value)}
+            onClear={() => { setOff([]); setSavedOnly(false); }}
+            roles={roles}
+            onEdit={() => setEditing(true)}
+            updated={updated}
+          />
         </div>
       </div>
 
       {notice && <p role="status" className="m-0 rounded-[10px] border border-[#1F4D2E] bg-[#0B1A11] px-3.5 py-2.5 text-[13px] text-[#B4E8C5]">{notice}</p>}
       {error && <p role="alert" className="m-0 rounded-[10px] border border-red-900/60 bg-red-950/40 px-3.5 py-2.5 text-[13px] text-red-300">{error}</p>}
 
-      {jobs && all.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-2.5">
-          <div role="group" aria-label="Show jobs" className="flex flex-wrap gap-1.5">
-            {categories.map((name) => {
-              const on = !savedOnly && !off.includes(name);
-              return (
-                <button key={name} type="button" aria-pressed={on} onClick={() => { setSavedOnly(false); setOff((list) => (list.includes(name) ? list.filter((item) => item !== name) : [...list, name])); }} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium ${on ? chipOn : chipOff}`}>
-                  <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: categoryColor(name) }} />{name} <span className="opacity-70">{all.filter((job) => job.category === name).length}</span>
-                </button>
-              );
-            })}
-            {savedCount > 0 && <button type="button" aria-pressed={savedOnly} onClick={() => setSavedOnly((value) => !value)} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium ${savedOnly ? chipOn : chipOff}`}>Saved <span className="opacity-70">{savedCount}</span></button>}
-          </div>
-          <span className="text-xs text-[#8B8B94]">Greenhouse, Lever, Ashby, Remotive and The Muse · updated {updated === null || updated < 1 ? "just now" : `${updated} min ago`}</span>
-        </div>
-      )}
-
-      {loading && !jobs && <p className="m-0 rounded-2xl border border-[#1F1F24] p-8 text-center text-sm text-[#8B8B94]">Looking across job boards. This can take up to 20 seconds.</p>}
+      {loading && !jobs && <SpiderLoader label="Looking across job boards" note="Looking across job boards. This can take up to 20 seconds." />}
       {jobs && !shown.length && !loading && (
         <p className="m-0 p-8 text-center text-sm text-[#8B8B94]">
           {all.length ? "Nothing here with these filters." : "No matches right now."} <button type="button" onClick={() => setEditing(true)} className="font-medium text-[#F7F7F8] underline underline-offset-4">Add a role</button>
@@ -175,52 +169,128 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
       )}
 
       {shown.length > 0 && (
-        <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(280px,100%),1fr))] items-start gap-3 p-0">
-          {shown.map((job) => {
-            const on = open === job.id;
-            const panel = `job-card-${job.id.replace(/[^a-z0-9]/gi, "-")}`;
-            const posted = postedLabel(job, now);
-            return (
-              <li key={job.id} className={`flex min-w-0 flex-col rounded-2xl border ${on ? "border-[#3D8BFF] bg-[#0F0F12]" : "border-[#1F1F24] hover:border-[#3A3A42]"}`}>
-                <button type="button" aria-expanded={on} aria-controls={panel} onClick={() => setOpen(on ? null : job.id)} className="flex flex-col gap-2.5 p-4 text-left">
-                  <span className="flex items-center justify-between gap-2">
-                    <span className="inline-flex items-center gap-1.5 text-[11px] text-[#9A9AA3]"><span aria-hidden className="h-[7px] w-[7px] rounded-full" style={{ background: categoryColor(job.category) }} />{job.category}</span>
-                    <span className={`font-mono text-xs ${job.score >= 75 ? "text-[#3D8BFF]" : "text-[#9A9AA3]"}`}><span className="sr-only">Match: </span>{job.score}%</span>
-                  </span>
-                  <span className="break-words text-[15px] font-semibold leading-[1.3]">{job.title}</span>
-                  <span className="break-words text-xs text-[#8B8B94]">
-                    {[job.company, job.location, posted].filter(Boolean).join(" · ")}
-                    {job.isNew && <span className="text-[#3D8BFF]"> · New</span>}
-                    {job.saved && <span className="text-[#3D8BFF]"> · Saved</span>}
-                  </span>
-                </button>
-                {on && (
-                  <div id={panel} className="flex flex-col gap-3 px-4 pb-4">
-                    {job.reasons.length > 0 && (
-                      <ul aria-label="Why it matches" className="m-0 flex list-none flex-col gap-1.5 border-t border-[#1F1F24] p-0 pt-3">
-                        {job.reasons.map((reason) => <li key={reason} className="flex gap-2 text-xs text-[#E4E4E8]"><span aria-hidden className="text-[#3D8BFF]">✓</span><span className="min-w-0">{reason}</span></li>)}
-                      </ul>
-                    )}
-                    {job.description && (
-                      <details className="text-xs text-[#9A9AA3]">
-                        <summary className="cursor-pointer select-none hover:text-white">Read the description</summary>
-                        <p className="mb-0 mt-2 max-h-60 overflow-auto whitespace-pre-line break-words">{job.description}</p>
-                      </details>
-                    )}
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <a href={job.url} target="_blank" rel="noopener noreferrer" className="flex h-[38px] items-center justify-center rounded-[10px] bg-[#F7F7F8] text-[13px] font-semibold text-[#070708] hover:bg-white">Apply <span aria-hidden>&nbsp;↗</span></a>
-                      <button type="button" onClick={() => onCoverLetter(job, all)} className="h-[38px] rounded-[10px] border border-[#26262C] text-[13px] font-medium hover:bg-white/5">✦ Cover letter</button>
-                    </div>
-                    <div className="flex justify-between">
-                      <button type="button" onClick={() => void save(job)} aria-pressed={Boolean(job.saved)} className="h-8 text-xs font-medium hover:underline">{job.saved ? "✓ Saved" : "+ Save for later"}</button>
-                      <button type="button" onClick={() => void hide(job)} aria-label={`Not for me: hide ${job.title} at ${job.company}`} className="h-8 text-xs font-medium text-[#9A9AA3] hover:text-white">✕ Not for me</button>
-                    </div>
-                  </div>
-                )}
-              </li>
-            );
-          })}
+        <div className="flex items-start gap-5">
+          <ul className="m-0 flex min-w-0 flex-1 list-none flex-col p-0">
+            {shown.map((job) => {
+              const on = current?.id === job.id;
+              return (
+                <li key={job.id} className="border-b border-[#161616]">
+                  <button type="button" aria-pressed={on} onClick={() => setOpen(on ? null : job.id)} className={`flex w-full items-center gap-3.5 rounded-[10px] px-3.5 py-3.5 text-left ${on ? "bg-[#121A2C]" : "hover:bg-white/[0.03]"}`}>
+                    <span aria-hidden className="h-[7px] w-[7px] flex-none rounded-full" style={{ background: categoryColor(job.category) }} />
+                    <span className={`min-w-0 flex-1 truncate text-[15px] font-medium ${job.score >= 40 ? "text-[#F5F5F5]" : "text-[#D4D4D4]"}`}>
+                      {job.title}
+                      {job.isNew && <span className="ml-2 text-xs font-normal text-[#3D8BFF]">New</span>}
+                    </span>
+                    {job.saved && <Bookmark aria-label="Saved" size={13} fill="currentColor" className="flex-none text-[#3D8BFF]" />}
+                    <span className="max-w-[35%] flex-none truncate text-[13px] text-[#8B8B8B]">{job.company}</span>
+                    <span className="w-[34px] flex-none text-right font-mono text-xs text-[#8B8B8B]"><span className="sr-only">Match: </span>{job.score}%</span>
+                  </button>
+                  {on && <div className="py-3 lg:hidden">{panelFor(job)}</div>}
+                </li>
+              );
+            })}
+          </ul>
+          {current && <aside aria-label="Job details" className="sticky top-[76px] hidden max-h-[calc(100vh-92px)] w-[44%] max-w-[560px] flex-none overflow-y-auto lg:block">{panelFor(current)}</aside>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** One job in full: why it fits, its description, the way to the posting, and what to do with it. */
+function JobPanel({ job, posted, onClose, onCoverLetter, onSave, onHide }: { job: Job; posted: string; onClose: () => void; onCoverLetter: () => void; onSave: () => void; onHide: () => void }) {
+  const round = "flex h-[42px] w-[42px] flex-none items-center justify-center rounded-full border border-[#2A2A2A] text-[#9A9AA3] hover:text-white";
+  return (
+    <div className="rounded-[18px] border border-[#222] bg-[#0F0F0F] p-6">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-2 text-[13px] text-[#9A9AA3]"><span aria-hidden className="h-2 w-2 rounded-full" style={{ background: categoryColor(job.category) }} />{job.category}</span>
+        <button type="button" aria-label="Close details" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-full border border-[#2A2A2A] text-[#9A9AA3] hover:text-white"><X aria-hidden size={13} /></button>
+      </div>
+      <h2 className="m-0 mt-[18px] break-words text-2xl font-bold leading-[1.2] tracking-[-0.03em]">{job.title}</h2>
+      <p className="m-0 mt-2 text-sm text-[#9A9AA3]">{job.company}</p>
+      <dl className="m-0 mt-5 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2.5 text-[13px]">
+        <dt className="text-[#8B8B8B]">Match</dt>
+        <dd className="m-0 flex items-center gap-2.5"><span className="h-1 flex-1 rounded-sm bg-[#1F1F1F]"><span className="block h-1 rounded-sm bg-[#3D8BFF]" style={{ width: `${job.score}%` }} /></span><span className="font-mono">{job.score}%</span></dd>
+        <dt className="text-[#8B8B8B]">Location</dt>
+        <dd className="m-0 break-words">{job.location || "Not listed"}</dd>
+        {posted && <><dt className="text-[#8B8B8B]">{job.postedKind === "updated" ? "Updated" : "Posted"}</dt><dd className="m-0">{posted}</dd></>}
+      </dl>
+      {job.reasons.length > 0 && (
+        <ul aria-label="Why it matches" className="m-0 mt-5 flex list-none flex-col gap-2 border-t border-[#1A1A1A] p-0 pt-4 text-[13px] text-[#D4D4D4]">
+          {job.reasons.map((reason) => <li key={reason} className="flex gap-2"><span aria-hidden className="text-[#3D8BFF]">✓</span><span className="min-w-0">{reason}</span></li>)}
         </ul>
+      )}
+      {job.description && (
+        <details className="mt-4 text-[13px] text-[#9A9AA3]">
+          <summary className="cursor-pointer select-none hover:text-white">Read the description</summary>
+          <p className="mb-0 mt-2 max-h-60 overflow-auto whitespace-pre-line break-words">{job.description}</p>
+        </details>
+      )}
+      <a href={job.url} target="_blank" rel="noopener noreferrer" className="mt-6 flex h-[46px] items-center justify-center gap-1.5 rounded-full bg-[#F5F5F5] text-sm font-medium text-[#0A0A0A] hover:bg-white">View posting <span aria-hidden>↗</span></a>
+      <div className="mt-2 flex gap-2">
+        <button type="button" onClick={onCoverLetter} className="h-[42px] min-w-0 flex-1 rounded-full border border-[#2A2A2A] text-[13px] font-medium hover:bg-white/5">✦ Cover letter</button>
+        <button type="button" aria-label={job.saved ? "Saved. Remove from saved" : "Save for later"} title={job.saved ? "Saved" : "Save for later"} aria-pressed={Boolean(job.saved)} onClick={onSave} className={`${round} ${job.saved ? "!text-[#3D8BFF]" : ""}`}><Bookmark aria-hidden size={15} fill={job.saved ? "currentColor" : "none"} /></button>
+        <button type="button" aria-label={`Not for me: hide ${job.title} at ${job.company}`} title="Not for me" onClick={onHide} className={round}><X aria-hidden size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
+/** Everything that decides which jobs show, folded into one button. */
+function JobFilters({ categories, off, onOff, savedOnly, savedCount, onSavedOnly, onClear, roles, onEdit, updated }: {
+  categories: Array<{ name: string; count: number }>;
+  off: string[];
+  onOff: (name: string) => void;
+  savedOnly: boolean;
+  savedCount: number;
+  onSavedOnly: () => void;
+  onClear: () => void;
+  roles: string[];
+  onEdit: () => void;
+  updated: number | null;
+}) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const onClick = (event: MouseEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("mousedown", onClick);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("mousedown", onClick);
+    };
+  }, [open]);
+  const active = off.length + (savedOnly ? 1 : 0);
+  const chip = (on: boolean) => `inline-flex h-8 items-center gap-2 rounded-full border px-3 text-xs font-medium ${on ? chipOn : chipOff}`;
+  return (
+    <div ref={box} className="sm:relative">
+      <button type="button" aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen((on) => !on)} className="flex h-[38px] items-center gap-1.5 rounded-full border border-[#2A2A2A] px-4 text-[13px] font-medium hover:bg-white/5">
+        <ListFilter aria-hidden size={14} />Filters
+        {active > 0 && <span className="rounded-full bg-[#3D8BFF] px-1.5 text-[11px] font-semibold text-white tabular-nums"><span className="sr-only">, active: </span>{active}</span>}
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Filter jobs" className="absolute inset-x-3 z-30 mt-2 flex flex-col gap-4 rounded-2xl border border-[#26262C] bg-[#0C0C0E] p-4 shadow-2xl sm:inset-x-auto sm:right-0 sm:w-[340px]">
+          {categories.length > 0 && (
+            <div role="group" aria-label="Kind of work" className="flex flex-wrap gap-1.5">
+              {categories.map(({ name, count }) => (
+                <button key={name} type="button" aria-pressed={!savedOnly && !off.includes(name)} onClick={() => onOff(name)} className={chip(!savedOnly && !off.includes(name))}>
+                  <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: categoryColor(name) }} />{name} <span className="opacity-70">{count}</span>
+                </button>
+              ))}
+              {savedCount > 0 && <button type="button" aria-pressed={savedOnly} onClick={onSavedOnly} className={chip(savedOnly)}>Saved <span className="opacity-70">{savedCount}</span></button>}
+            </div>
+          )}
+          <div className="flex flex-col gap-2 border-t border-[#1F1F24] pt-3">
+            {roles.length > 0 && <p className="m-0 text-xs text-[#9A9AA3]">Matching {roles.join(", ")}</p>}
+            <button type="button" onClick={onEdit} className="self-start text-[13px] font-medium text-[#3D8BFF] hover:underline">Edit careers &amp; roles</button>
+          </div>
+          <div className="flex items-end justify-between gap-3 border-t border-[#1F1F24] pt-3 text-[11px] text-[#8B8B94]">
+            <span>Greenhouse, Lever, Ashby, Remotive and The Muse · updated {updated === null || updated < 1 ? "just now" : `${updated} min ago`}</span>
+            {active > 0 && <button type="button" onClick={onClear} className="flex-none text-xs text-[#F7F7F8] underline-offset-4 hover:underline">Clear filters</button>}
+          </div>
+        </div>
       )}
     </div>
   );
