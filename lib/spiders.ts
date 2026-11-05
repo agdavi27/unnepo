@@ -248,7 +248,9 @@ function greyOf(hex: string) {
 }
 
 /** Colors for the small crawling spider (extension/src/shared/sprite.ts keys). */
-export function crawlerColors(look: SpiderLook) {
+export function crawlerColors(look: SpiderLook): Partial<Record<string, string>> {
+  // The Unnepo spider: the sprite's own colors.
+  if (look.skin === "classic") return {};
   const palette = spiderPalette(look);
   return { b: palette.b, s: palette.h, l: palette.L };
 }

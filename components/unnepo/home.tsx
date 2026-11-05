@@ -1,47 +1,65 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { Lock, Pencil } from "lucide-react";
 import type { App } from "@/components/unnepo/apply";
-import { Funnel, GoalCard, PerDay, Systems, Tile, duration } from "@/components/unnepo/stats";
-import { followUpsDue } from "@/lib/apply/follow-ups";
+import { Funnel, PerDay, Systems, Tile, duration } from "@/components/unnepo/stats";
+import { H as SPRITE_H, W as SPRITE_W, spiderRects } from "@/extension/src/shared/sprite";
 import { applicationStats } from "@/lib/apply/stats";
-import { nextSkin, spiderSvg, wornSkin } from "@/lib/spiders";
+import { nextUp, type NextItem } from "@/lib/apply/next-up";
+import { crawlerColors, nextSkin, wornSkin, type SpiderLook } from "@/lib/spiders";
 
-/** The top and side of the Home tab: the day so far, the goal, the totals, and the next spider to unlock. */
+/** The Home tab: what to do next, how it's going, and the next spider to unlock. */
+
+export const DEFAULT_DAILY_GOAL = 3;
+export const DEFAULT_WEEKLY_GOAL = 10;
 
 const partOfDay = (hour: number) => (hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening");
-const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+const eyebrow = "m-0 font-mono text-[11px] font-medium uppercase tracking-[0.1em]";
+const READ_KEY = "unnepo-home-read";
 
-/** The faint web behind the greeting. */
-function Web() {
+/** The spider from job sites: it drops in on its thread and sways, with the same timing and colors. */
+function DroppingSpider({ look }: { look: SpiderLook }) {
+  const rects = useMemo(() => spiderRects(0, crawlerColors(look)), [look]);
   return (
-    <svg aria-hidden width="400" height="400" viewBox="0 0 400 400" fill="none" stroke="#1C1C22" strokeWidth="1.2" className="pointer-events-none absolute -right-10 -top-[140px]">
-      <polygon points="240,200 228.3,228.3 200,240 171.7,228.3 160,200 171.7,171.7 200,160 228.3,171.7" />
-      <polygon points="280,200 256.6,256.6 200,280 143.4,256.6 120,200 143.4,143.4 200,120 256.6,143.4" />
-      <polygon points="320,200 284.8,284.8 200,320 115.2,284.8 80,200 115.2,115.2 200,80 284.8,115.2" />
-      <polygon points="360,200 313.1,313.1 200,360 86.9,313.1 40,200 86.9,86.9 200,40 313.1,86.9" />
-      <path d="M200 200L400 200M200 200L341.4 341.4M200 200L200 400M200 200L58.6 341.4M200 200L0 200M200 200L58.6 58.6M200 200L200 0M200 200L341.4 58.6" />
-    </svg>
+    <div aria-hidden className="site-spider-drop pointer-events-none absolute bottom-[calc(100%-7px-46px)] right-5 flex sm:right-9 flex-col items-center">
+      <div className="h-[400px] w-0.5" style={{ background: "linear-gradient(90deg, #000 0 1px, #EAF6F2 1px 2px)" }} />
+      <div className="site-spider-sway" style={{ width: 54, height: Math.round((54 * SPRITE_H) / SPRITE_W), filter: "drop-shadow(2px 3px 0 rgba(0,0,0,.2))" }}>
+        <svg viewBox={`0 0 ${SPRITE_W} ${SPRITE_H}`} shapeRendering="crispEdges" className="block h-full w-full rotate-180" dangerouslySetInnerHTML={{ __html: rects }} />
+      </div>
+    </div>
   );
 }
 
-type HeroProps = {
+type HomeProps = {
   name: string;
   apps: App[];
+  dailyGoal: number | null;
   weeklyGoal: number | null;
-  onGoal: (goal: number) => Promise<void>;
+  onGoals: (goals: { dailyGoal: number; weeklyGoal: number }) => Promise<void>;
   school: string;
   spiderSkin: string | null;
+  onOpenJob: (appId: string, panel?: "emails") => void;
+  onWrite: (appId: string, contactId: string) => Promise<void>;
+  onSent: (contactId: string) => Promise<void>;
   onSetup: () => void;
+  onJobs: () => void;
+  onSpiders: () => void;
 };
 
-export function HomeHero({ name, apps, weeklyGoal, onGoal, school, spiderSkin, onSetup }: HeroProps) {
+export function HomePage({ name, apps, dailyGoal, weeklyGoal, onGoals, school, spiderSkin, onOpenJob, onWrite, onSent, onSetup, onJobs, onSpiders }: HomeProps) {
   const stats = useMemo(() => applicationStats(apps), [apps]);
-  const now = new Date();
-  const today = stats.perDay[stats.perDay.length - 1]?.count ?? 0;
-  const due = followUpsDue(apps).length;
-  // How many emails wait in the Review Inbox. Home works without it.
   const [toReview, setToReview] = useState(0);
+  // Replies already opened on this device, so they leave the list.
+  const [read, setRead] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(window.localStorage.getItem(READ_KEY) ?? "[]") as string[]);
+    } catch {
+      return new Set();
+    }
+  });
+  const [skipped, setSkipped] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/email/state")
@@ -50,28 +68,202 @@ export function HomeHero({ name, apps, weeklyGoal, onGoal, school, spiderSkin, o
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
-  const look = { skin: wornSkin(spiderSkin, stats.applied), school };
+  const items = useMemo(() => {
+    const all = nextUp(apps, { toReview, read });
+    return [...all.filter((item) => !skipped.includes(item.key)), ...skipped.flatMap((key) => all.filter((item) => item.key === key))];
+  }, [apps, toReview, read, skipped]);
+  const open = (item: NextItem) => {
+    if (item.kind === "review") return onSetup();
+    if (item.kind === "reply") {
+      const next = new Set(read).add(item.key);
+      setRead(next);
+      try { window.localStorage.setItem(READ_KEY, JSON.stringify([...next])); } catch { /* storage off: it stays on the list */ }
+      return onOpenJob(item.applicationId!, "emails");
+    }
+    onOpenJob(item.applicationId!);
+  };
+  const press = async (item: NextItem) => {
+    if (item.kind !== "follow_up") return open(item);
+    setBusy(true);
+    await onWrite(item.applicationId!, item.contactId!);
+    setBusy(false);
+    open(item);
+  };
+  const now = new Date();
   const first = name.trim().split(/\s+/)[0];
+  const look: SpiderLook = { skin: wornSkin(spiderSkin, stats.applied), school };
+  const current = items[0];
+  const then = items.slice(1, 4);
   return (
-    <section aria-label="Today" className="relative flex min-h-[260px] flex-wrap items-end justify-between gap-6 pt-8 sm:pt-12">
-      <Web />
-      <div className="relative flex max-w-[620px] flex-col gap-2.5">
-        <span className="font-mono text-xs uppercase tracking-[2px] text-[#8B8B94]">{now.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</span>
-        <h1 className="m-0 text-4xl font-extrabold leading-none tracking-[-1.8px] sm:text-5xl">Good {partOfDay(now.getHours())}{first ? `, ${first}` : ""}.</h1>
-        <p className="m-0 text-[17px] leading-normal text-[#9A9AA3]">
-          {plural(today, "application")} today.
-          {due > 0 && <> <span className="text-[#F7F7F8]">{plural(due, "follow-up")} due.</span></>}
-          {toReview > 0 && <> <button type="button" onClick={onSetup} className="text-[#F7F7F8] underline underline-offset-4 hover:text-white">{plural(toReview, "email")} need a look.</button></>}
-        </p>
+    <div className="mx-auto -mt-6 flex w-full max-w-[720px] flex-col overflow-y-clip pt-8 sm:pt-14">
+      <p className="m-0 mb-2 font-mono text-xs uppercase tracking-[0.12em] text-[#9A9AA3]">{now.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</p>
+      <h1 className="m-0 mb-8 pr-16 text-[30px] font-bold tracking-[-0.03em] sm:pr-0">Good {partOfDay(now.getHours())}{first ? `, ${first}` : ""}.</h1>
+
+      <section aria-labelledby="next-up" className="relative rounded-[20px] border border-[#222] bg-[#0F0F0F] p-7">
+        <DroppingSpider look={look} />
+        <div className="pr-16">
+          {current ? (
+            <>
+              <p className={`${eyebrow} text-[#3D8BFF]`}>Next up · 1 of {items.length}</p>
+              <h2 id="next-up" className="m-0 mb-1.5 mt-3 text-[22px] font-semibold tracking-[-0.02em]">{current.title}</h2>
+              <p className="m-0 text-sm text-[#9A9AA3]">{current.detail}</p>
+            </>
+          ) : apps.length === 0 ? (
+            <>
+              <p className={`${eyebrow} text-[#3D8BFF]`}>Next up</p>
+              <h2 id="next-up" className="m-0 mb-1.5 mt-3 text-[22px] font-semibold tracking-[-0.02em]">Start your first application</h2>
+              <p className="m-0 text-sm text-[#9A9AA3]">Open a job in Chrome and press Fill in the Unnepo extension. Every job you submit shows up here.</p>
+            </>
+          ) : (
+            <>
+              <p className={`${eyebrow} text-[#3D8BFF]`}>Next up</p>
+              <h2 id="next-up" className="m-0 mb-1.5 mt-3 text-[22px] font-semibold tracking-[-0.02em]">You&apos;re all caught up</h2>
+              <p className="m-0 text-sm text-[#9A9AA3]">Nothing needs you right now. Find your next job?</p>
+            </>
+          )}
+        </div>
+        <div className="mt-6 flex flex-wrap gap-2">
+          {current ? (
+            <>
+              <button type="button" disabled={busy} onClick={() => void press(current)} className={pill}>{busy ? "Writing…" : current.action}</button>
+              {current.kind === "follow_up" && <button type="button" onClick={() => void onSent(current.contactId!)} className={ghost}>I sent it</button>}
+              {items.length > 1 && <button type="button" onClick={() => setSkipped((list) => [...list.filter((key) => key !== current.key), current.key])} className={ghost}>Skip for now</button>}
+            </>
+          ) : apps.length === 0 ? (
+            <a href="/extension/connect" className={`${pill} inline-flex items-center`}>Connect the extension</a>
+          ) : (
+            <button type="button" onClick={onJobs} className={pill}>See jobs for you</button>
+          )}
+        </div>
+      </section>
+
+      {then.length > 0 && (
+        <section aria-labelledby="then" className="mt-8">
+          <h2 id="then" className={`${eyebrow} mb-2 text-[#9A9AA3]`}>Then</h2>
+          <ul className="m-0 list-none p-0">
+            {then.map((item) => (
+              <li key={item.key}>
+                <button type="button" onClick={() => open(item)} className="flex w-full items-center gap-3 border-b border-[#1A1A1A] px-1 py-3.5 text-left hover:bg-white/[0.02]">
+                  <span aria-hidden className={`h-2 w-2 flex-none rounded-full ${item.kind === "reply" || item.kind === "review" ? "bg-[#3D8BFF]" : "border-[1.5px] border-[#8B8B94]"}`} />
+                  <span className="min-w-0 flex-1 text-sm">{item.title}</span>
+                  <span className="flex-none text-[13px] text-[#8B8B94]">{item.when}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <Progress stats={stats} dailyGoal={dailyGoal ?? DEFAULT_DAILY_GOAL} weeklyGoal={weeklyGoal ?? DEFAULT_WEEKLY_GOAL} onGoals={onGoals} />
+      <UnlockStrip applied={stats.applied} school={school} onSpiders={onSpiders} />
+    </div>
+  );
+}
+
+const pill = "h-11 rounded-full bg-[#F5F5F5] px-[22px] text-sm font-medium text-[#0A0A0A] hover:bg-white disabled:opacity-50";
+const ghost = "h-11 rounded-full border border-[#2A2A2A] px-[18px] text-sm font-medium text-[#9A9AA3] hover:text-white";
+
+function Meter({ value, goal, label }: { value: number; goal: number; label: string }) {
+  return (
+    <div className="h-[3px] rounded-sm bg-[#1F1F1F]" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={goal} aria-valuenow={Math.min(value, goal)}>
+      <div className="h-[3px] rounded-sm bg-[#3D8BFF]" style={{ width: `${Math.min(100, (value / goal) * 100)}%` }} />
+    </div>
+  );
+}
+
+function Progress({ stats, dailyGoal, weeklyGoal, onGoals }: { stats: ReturnType<typeof applicationStats>; dailyGoal: number; weeklyGoal: number; onGoals: HomeProps["onGoals"] }) {
+  const [editing, setEditing] = useState(false);
+  const [daily, setDaily] = useState(String(dailyGoal));
+  const [weekly, setWeekly] = useState(String(weeklyGoal));
+  const [problem, setProblem] = useState("");
+  const [saving, setSaving] = useState(false);
+  const today = stats.perDay[stats.perDay.length - 1]?.count ?? 0;
+  const label = "m-0 font-mono text-[10px] uppercase tracking-[0.1em] text-[#9A9AA3]";
+  const big = "m-0 text-[26px] font-bold tracking-[-0.02em] tabular-nums";
+  const small = "text-sm font-normal tracking-normal text-[#8B8B94]";
+  const note = "m-0 text-xs text-[#8B8B94]";
+  const input = "mt-1 block w-24 rounded-lg border border-[#2A2A2A] bg-[#0F0F0F] px-2.5 py-1.5 text-sm text-[#F5F5F5]";
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const dailyGoal = Math.round(Number(daily));
+    const weeklyGoal = Math.round(Number(weekly));
+    if (!Number.isFinite(dailyGoal) || dailyGoal < 1 || dailyGoal > 50) return setProblem("Pick a daily goal from 1 to 50.");
+    if (!Number.isFinite(weeklyGoal) || weeklyGoal < 1 || weeklyGoal > 200) return setProblem("Pick a weekly goal from 1 to 200.");
+    setProblem("");
+    setSaving(true);
+    try {
+      await onGoals({ dailyGoal, weeklyGoal });
+      setEditing(false);
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't save your goals.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <section aria-labelledby="progress" className="mt-11">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 id="progress" className={`${eyebrow} text-[#9A9AA3]`}>Progress</h2>
+        <button type="button" aria-expanded={editing} onClick={() => { setDaily(String(dailyGoal)); setWeekly(String(weeklyGoal)); setProblem(""); setEditing((on) => !on); }} className="flex h-8 items-center gap-1.5 rounded-full border border-[#2A2A2A] px-3 text-xs font-medium text-[#D4D4D4] hover:text-white">
+          <Pencil aria-hidden size={13} />Edit goals
+        </button>
       </div>
-      <div className="relative flex items-end gap-5">
-        <GoalCard thisWeek={stats.thisWeek} daysLeft={stats.daysLeft} streak={stats.streak} goal={weeklyGoal} onGoal={onGoal} />
-        <div aria-hidden className="dash-bob relative mb-10 hidden h-[90px] w-[120px] flex-none sm:block">
-          <div className="absolute bottom-[calc(100%-9px)] left-[58px] h-[260px] w-[3px] bg-[#3A3A44]" />
-          <div className="absolute inset-0" dangerouslySetInnerHTML={{ __html: spiderSvg(look, { size: 120 }) }} />
+      {editing && (
+        <form onSubmit={(event) => void save(event)} className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border border-[#222] bg-[#0F0F0F] p-4">
+          <label className="text-xs text-[#9A9AA3]">Applications a day<input type="number" min={1} max={50} value={daily} onChange={(event) => setDaily(event.target.value)} className={input} /></label>
+          <label className="text-xs text-[#9A9AA3]">Applications a week<input type="number" min={1} max={200} value={weekly} onChange={(event) => setWeekly(event.target.value)} className={input} /></label>
+          <button type="submit" disabled={saving} className="h-9 rounded-full bg-[#F5F5F5] px-4 text-sm font-medium text-[#0A0A0A] hover:bg-white disabled:opacity-50">{saving ? "Saving…" : "Save"}</button>
+          <button type="button" onClick={() => setEditing(false)} className="h-9 rounded-full border border-[#2A2A2A] px-4 text-sm font-medium text-[#9A9AA3] hover:text-white">Cancel</button>
+          {problem && <p role="alert" className="m-0 w-full text-xs text-red-300">{problem}</p>}
+        </form>
+      )}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-4">
+        <div className="flex flex-col gap-2">
+          <p className={label}>Today</p>
+          <p className={big}>{today}<span className={small}>/{dailyGoal}</span></p>
+          <Meter value={today} goal={dailyGoal} label="Today's goal" />
+          <p className={note}>{today >= dailyGoal ? "Goal met" : `${dailyGoal - today} to go`}</p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className={label}>This week</p>
+          <p className={big}>{stats.thisWeek}<span className={small}>/{weeklyGoal}</span></p>
+          <Meter value={stats.thisWeek} goal={weeklyGoal} label="This week's goal" />
+          <p className={note}>{stats.daysLeft} {stats.daysLeft === 1 ? "day" : "days"} left</p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className={label}>Responses</p>
+          <p className={big}>{stats.responses}</p>
+          <p className={`${note} mt-1`}>{stats.applied ? `${Math.round(stats.responseRate * 100)}% rate` : "None yet"}</p>
+        </div>
+        <div className="flex flex-col gap-2">
+          <p className={label}>Streak</p>
+          <p className={big}>{stats.streak}<span className={small}> {stats.streak === 1 ? "day" : "days"}</span></p>
+          <p className={`${note} mt-1`}>{today > 0 ? "Applied today" : stats.streak ? "Apply today to keep it" : "Apply today to start one"}</p>
         </div>
       </div>
     </section>
+  );
+}
+
+/** The next spider to collect, and the way to the ones already unlocked. */
+function UnlockStrip({ applied, school, onSpiders }: { applied: number; school: string; onSpiders: () => void }) {
+  const next = nextSkin(applied);
+  const rects = useMemo(() => spiderRects(0, crawlerColors({ skin: next?.skin.id ?? "classic", school })), [next?.skin.id, school]);
+  return (
+    <button type="button" onClick={onSpiders} className="mt-7 flex w-full flex-wrap items-center gap-4 rounded-2xl border border-[#222] bg-[#0F0F0F] px-5 py-4 text-left hover:border-[#2A2A2A]">
+      <span aria-hidden className="relative flex-none">
+        <svg viewBox={`0 0 ${SPRITE_W} ${SPRITE_H}`} width={45} height={Math.round((45 * SPRITE_H) / SPRITE_W)} shapeRendering="crispEdges" className={`block rotate-180 ${next ? "opacity-55" : ""}`} dangerouslySetInnerHTML={{ __html: rects }} />
+        {next && <span className="absolute -bottom-1.5 -right-1.5 flex h-[18px] w-[18px] items-center justify-center rounded-full border border-[#2A2A2A] bg-[#1A1A1A] text-[#9A9AA3]"><Lock size={10} strokeWidth={2.5} /></span>}
+      </span>
+      <span className="min-w-40 flex-1">
+        <span className="flex justify-between gap-3 text-sm">
+          <span className="font-semibold">{next ? `${next.skin.name} spider unlocks at ${next.skin.unlockAt}` : "Every spider unlocked"}</span>
+          {next && <span className="flex-none text-[#9A9AA3]">{next.left} to go</span>}
+        </span>
+        <span className="mt-2.5 block h-1 rounded-sm bg-[#1F1F1F]"><span className="block h-1 rounded-sm bg-[#3D8BFF]" style={{ width: next ? `${Math.min(100, (applied / next.skin.unlockAt) * 100)}%` : "100%" }} /></span>
+      </span>
+      <span className="flex-none text-[13px] text-[#9A9AA3]">Your spiders →</span>
+    </button>
   );
 }
 
@@ -90,29 +282,6 @@ export function HomeTiles({ apps }: { apps: App[] }) {
 export function PerDayCard({ apps }: { apps: App[] }) {
   const stats = useMemo(() => applicationStats(apps), [apps]);
   return <PerDay days={stats.perDay} />;
-}
-
-/** The next spider to collect, and the way to the ones already unlocked. */
-export function NextSpider({ apps, school, onSpiders }: { apps: App[]; school: string; onSpiders: () => void }) {
-  const applied = useMemo(() => applicationStats(apps).applied, [apps]);
-  const next = nextSkin(applied);
-  return (
-    <section aria-labelledby="next-spider" className="flex items-center gap-4 rounded-2xl border border-[#1F1F24] p-5">
-      <span aria-hidden className="h-[60px] w-20 flex-none" dangerouslySetInnerHTML={{ __html: spiderSvg({ skin: next?.skin.id ?? wornSkin(null, applied), school }, { size: 80 }) }} />
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <h2 id="next-spider" className="m-0 text-sm font-semibold">{next ? `${next.skin.name} spider unlocks at ${next.skin.unlockAt}` : "Every spider unlocked"}</h2>
-        {next && (
-          <div className="h-1 overflow-hidden rounded bg-[#1A1A1F]" role="progressbar" aria-label={`Progress to the ${next.skin.name} spider`} aria-valuemin={0} aria-valuemax={next.skin.unlockAt} aria-valuenow={Math.min(applied, next.skin.unlockAt)}>
-            <div className="h-full bg-[#3D8BFF]" style={{ width: `${Math.min(100, (applied / next.skin.unlockAt) * 100)}%` }} />
-          </div>
-        )}
-        <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-xs text-[#8B8B94]">
-          {next && <span>{plural(next.left, "more application")} to go</span>}
-          <button type="button" onClick={onSpiders} className="underline-offset-4 hover:text-white hover:underline">Your spiders</button>
-        </span>
-      </div>
-    </section>
-  );
 }
 
 /** The fuller numbers that were on the old Stats page. */

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SKINS, nextSkin, schoolStyle, spiderArt, wornSkin } from "@/lib/spiders";
+import { SKINS, crawlerColors, nextSkin, schoolStyle, spiderArt, wornSkin } from "@/lib/spiders";
 
 describe("spiders to collect", () => {
   it("unlocks at 50, 150, 300, 500 and 1,000 applications, with the school spider from the start", () => {
@@ -20,5 +20,8 @@ describe("spiders to collect", () => {
     // The letters are drawn on the sweater.
     expect(spiderArt(false, { skin: "school", school: "Colby College" }).flat()).toContain("t");
     expect(spiderArt(false, { skin: "blue" }).flat()).not.toContain("t");
+    // The small spider on job sites and Home keeps its own dark colors unless another spider is picked.
+    expect(crawlerColors({ skin: "classic" })).toEqual({});
+    expect(crawlerColors({ skin: "blue" }).b).toBe("#3D8BFF");
   });
 });

@@ -289,7 +289,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
             onDone={() => { setEditing(false); setResumeVersion((value) => value + 1); void load(); }}
           />
         )}
-        {data && !showOnboarding && (view === "home" || view === "applications") && <ApplyArea page={view} onPage={setView} refreshKey={resumeVersion} userName={data.user.name} onSetup={() => { setView("setup"); window.scrollTo({ top: 0 }); }} onSpiders={() => { setView("settings"); window.scrollTo({ top: 0 }); }} />}
+        {data && !showOnboarding && (view === "home" || view === "applications") && <ApplyArea page={view} onPage={setView} refreshKey={resumeVersion} userName={data.user.name} onSetup={() => { setView("setup"); window.scrollTo({ top: 0 }); }} onJobs={() => { setView("jobs"); window.scrollTo({ top: 0 }); }} onSpiders={() => { setView("settings"); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
         {data && !showOnboarding && view === "setup" && (
           <SetupPage

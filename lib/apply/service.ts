@@ -79,6 +79,7 @@ export async function student(userId: string) {
     student: stored?.student,
     aiCache: stored?.aiCache,
     weeklyGoal: stored?.weeklyGoal,
+    dailyGoal: stored?.dailyGoal,
     spiderSkin: stored?.spiderSkin,
     autoFindPeople: stored?.autoFindPeople,
     maybeApplied: stored?.maybeApplied,
@@ -589,6 +590,11 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     const goal = Math.round(Number(body.weeklyGoal));
     if (!Number.isFinite(goal) || goal < 1 || goal > 200) throw new ServiceError("Pick a weekly goal between 1 and 200 applications.", "goal", 400);
     next.weeklyGoal = goal;
+  }
+  if (body.dailyGoal !== undefined) {
+    const goal = Math.round(Number(body.dailyGoal));
+    if (!Number.isFinite(goal) || goal < 1 || goal > 50) throw new ServiceError("Pick a daily goal between 1 and 50 applications.", "goal", 400);
+    next.dailyGoal = goal;
   }
   if (body.spiderSkin !== undefined) {
     const skin = SKINS.find((item) => item.id === body.spiderSkin);

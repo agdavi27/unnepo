@@ -84,57 +84,6 @@ export function Tile({ label, value, note }: { label: string; value: string; not
   );
 }
 
-/** This week against the goal, the streak, and changing the goal. */
-export function GoalCard({ thisWeek, daysLeft, streak, goal, onGoal }: { thisWeek: number; daysLeft: number; streak: number; goal: number | null; onGoal: (goal: number) => Promise<void> }) {
-  const [editing, setEditing] = useState(goal === null);
-  const [draft, setDraft] = useState(String(goal ?? 10));
-  const [state, setState] = useState("");
-  const share = goal ? Math.min(1, thisWeek / goal) : 0;
-  async function save() {
-    const value = Math.round(Number(draft));
-    if (!Number.isFinite(value) || value < 1 || value > 200) return setState("Pick a number from 1 to 200.");
-    setState("Saving…");
-    try {
-      await onGoal(value);
-      setEditing(false);
-      setState("");
-    } catch (reason) {
-      setState(reason instanceof Error ? reason.message : "Couldn't save.");
-    }
-  }
-  return (
-    <section aria-label="Weekly goal" className="flex min-w-60 flex-col gap-2.5 rounded-2xl border border-[#26262C] bg-[#0C0C0E]/90 p-[18px]">
-      <div className="flex items-baseline justify-between gap-4">
-        <span className="text-[13px] text-[#9A9AA3]">This week</span>
-        <span className="font-mono text-xs uppercase text-[#8B8B94]">{streak}-day streak</span>
-      </div>
-      <p className="m-0 text-[32px] font-bold leading-tight tracking-[-1px] tabular-nums">
-        {thisWeek}
-        {goal !== null && <span className="text-base font-medium tracking-normal text-[#8B8B94]"> / {goal} goal</span>}
-      </p>
-      {goal !== null && (
-        <div className="h-1.5 overflow-hidden rounded-md bg-[#1A1A1F]" role="progressbar" aria-valuemin={0} aria-valuemax={goal} aria-valuenow={Math.min(thisWeek, goal)} aria-label="Weekly goal">
-          <div className="h-full" style={{ width: `${share * 100}%`, background: share >= 1 ? "#4ADE80" : ACCENT }} />
-        </div>
-      )}
-      {editing ? (
-        <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
-          <label className="text-xs text-[#9A9AA3]" htmlFor="weekly-goal">Weekly goal</label>
-          <input id="weekly-goal" type="number" min={1} max={200} inputMode="numeric" value={draft} onChange={(event) => setDraft(event.target.value)} className="w-16 rounded-lg border border-[#26262C] bg-[#070708] px-2 py-1 text-sm tabular-nums text-ink outline-none focus:border-[#3D8BFF]" />
-          <button type="submit" className="rounded-lg bg-[#F7F7F8] px-2.5 py-1 text-xs font-semibold text-[#070708] hover:bg-white">Save</button>
-          {goal !== null && <button type="button" className="text-xs text-[#9A9AA3] hover:text-white" onClick={() => { setEditing(false); setState(""); }}>Cancel</button>}
-          {state && <span role="status" className="w-full text-xs text-[#9A9AA3]">{state}</span>}
-        </form>
-      ) : (
-        <div className="flex items-baseline justify-between gap-3 text-xs text-[#8B8B94]">
-          <span>{goal === null ? "" : thisWeek >= goal ? "Goal reached. Nice work." : `${goal - thisWeek} to go, ${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`}</span>
-          <button type="button" className="shrink-0 underline-offset-4 hover:text-white hover:underline" onClick={() => { setDraft(String(goal ?? 10)); setEditing(true); }}>Change goal</button>
-        </div>
-      )}
-    </section>
-  );
-}
-
 /** Applications per day, the last 14 days. Today is the accent bar. */
 export function PerDay({ days }: { days: Array<{ date: string; count: number }> }) {
   const [hover, setHover] = useState<number | null>(null);

@@ -230,6 +230,7 @@ export type ApplicationProfile = {
   resumeProfile?: ResumeProfile | null;
   /** Applications per week the student is aiming for. */
   weeklyGoal?: number;
+  dailyGoal?: number;
   /** Cover letters written this month ("2026-11"), for Free's monthly limit. */
   letters?: { month: string; count: number };
   /** "Did you apply to these?": jobs Apply was pressed on or filled that nothing confirmed. Shared by the panel and the web app. */

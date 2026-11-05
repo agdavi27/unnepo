@@ -2,7 +2,7 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, GraduationCap, Mail, Plus, StickyNote, User } from "lucide-react";
-import { HomeHero, HomeTiles, MoreStats, NextSpider, PerDayCard } from "@/components/unnepo/home";
+import { HomePage, HomeTiles, MoreStats, PerDayCard } from "@/components/unnepo/home";
 import type { Maybe, Session } from "@/components/unnepo/activity";
 import { extensionHere, readLinksInBrowser } from "@/lib/extension-bridge";
 import { followUpsDue } from "@/lib/apply/follow-ups";
@@ -118,7 +118,7 @@ function when(date: Date) {
 export type AppPage = "home" | "applications";
 
 /** The Home and Applications pages. They share their data, so moving between them is instant and nothing is lost. */
-export function ApplyArea({ page, onPage, refreshKey = 0, userName, onSetup, onSpiders }: { page: AppPage; onPage: (page: AppPage) => void; refreshKey?: number; userName: string; onSetup: () => void; onSpiders: () => void }) {
+export function ApplyArea({ page, onPage, refreshKey = 0, userName, onSetup, onJobs, onSpiders }: { page: AppPage; onPage: (page: AppPage) => void; refreshKey?: number; userName: string; onSetup: () => void; onJobs: () => void; onSpiders: () => void }) {
   const [data, setData] = useState<ApplyData | null>(null);
   const [error, setError] = useState("");
 
@@ -161,9 +161,10 @@ export function ApplyArea({ page, onPage, refreshKey = 0, userName, onSetup, onS
       data={data}
       userName={userName}
       onSetup={onSetup}
+      onJobs={onJobs}
       onSpiders={onSpiders}
-      onGoal={async (weeklyGoal) => {
-        const result = await call<{ profile: PublicProfile }>("/profile", "PUT", { weeklyGoal });
+      onGoals={async (goals) => {
+        const result = await call<{ profile: PublicProfile }>("/profile", "PUT", goals);
         setData((previous) => (previous ? { ...previous, profile: result.profile } : previous));
       }}
       onReload={load}
@@ -181,6 +182,7 @@ export function SpiderSettings() {
   }, []);
   if (!data) return null;
   return (
+    <>
     <Spiders
       applied={applicationStats(data.applications).applied}
       school={data.school}
@@ -190,6 +192,13 @@ export function SpiderSettings() {
         setData({ ...data, profile: result.profile });
       }}
     />
+    <section aria-labelledby="your-numbers" className="flex flex-col gap-4">
+      <h2 id="your-numbers" className="m-0 text-xl font-semibold tracking-tight">Your numbers</h2>
+      <HomeTiles apps={data.applications} />
+      <PerDayCard apps={data.applications} />
+      <MoreStats apps={data.applications} />
+    </section>
+    </>
   );
 }
 
@@ -225,12 +234,14 @@ const UNDO_MS = 5000;
 const deleteNow = (applicationId: string, keepalive = false) =>
   fetch("/api/apply/applications", { method: "DELETE", keepalive, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId }) });
 
-function AppliedPage({ page, onPage, data, userName, onSetup, onSpiders, onGoal, onReload, onReplace, onApps }: { page: AppPage; onPage: (page: AppPage) => void; data: ApplyData; userName: string; onSetup: () => void; onSpiders: () => void; onGoal: (goal: number) => Promise<void>; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
+function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders, onGoals, onReload, onReplace, onApps }: { page: AppPage; onPage: (page: AppPage) => void; data: ApplyData; userName: string; onSetup: () => void; onJobs: () => void; onSpiders: () => void; onGoals: (goals: { dailyGoal: number; weeklyGoal: number }) => Promise<void>; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
   const apps = data.applications;
   // Removing is instant: the row goes away and is deleted for real after a few seconds, unless undone.
   const [removed, setRemoved] = useState<App[]>([]);
   const pending = useRef(new Map<string, number>());
   const [open, setOpen] = useState<string | null>(null);
+  // The job Home sent the student to read the emails of.
+  const [openOn, setOpenOn] = useState<string | null>(null);
   // The extension's My jobs opens /home?job=<id>, which lands on Applications: that job's details, scrolled into view.
   const linked = useRef(false);
   useEffect(() => {
@@ -384,7 +395,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onSpiders, onGoal,
             <td colSpan={4} className="pb-4">
               <div className="space-y-4 rounded-xl border border-line bg-panel p-4">
                 <div className={`grid gap-5 ${app.contacts?.length ? "lg:grid-cols-2" : "lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]"}`}>
-                  <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={(next) => void readLinks([next ?? app], app.id)} onSaved={onReplace} />
+                  <JobInfo app={app} startOn={openOn === app.id ? "emails" : ""} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={(next) => void readLinks([next ?? app], app.id)} onSaved={onReplace} />
                   <div className="min-w-0">
                     {stage === "in_progress" ? (
                       <div className={peopleCard}>
@@ -444,8 +455,9 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onSpiders, onGoal,
       </table>
     </div>
   );
-  const openJob = (appId: string) => {
+  const openJob = (appId: string, panel?: "emails") => {
     clearFilters();
+    setOpenOn(panel ? appId : null);
     setOpen(appId);
     onPage("applications");
     requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
@@ -455,26 +467,21 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onSpiders, onGoal,
     <div className="flex flex-col gap-8">
       {page === "home" && (
         <>
-          <HomeHero name={userName} apps={apps} weeklyGoal={data.profile.weeklyGoal ?? null} onGoal={onGoal} school={data.school} spiderSkin={data.profile.spiderSkin ?? null} onSetup={onSetup} />
-          <HomeTiles apps={apps} />
-          {apps.length === 0 && (
-                <div className={`${card} flex flex-col items-start gap-3`}>
-                  <p className="font-medium">No applications yet</p>
-                  <p className="max-w-xl text-sm text-muted">Open a job application in Chrome and press Fill in the Unnepo extension. Every job you submit shows up here, with people at the company to email.</p>
-                  <a href="/extension/connect" className={primary}>Connect the extension</a>
-                </div>
-          )}
-          <div className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-3">
-            <PerDayCard apps={apps} />
-            <FollowUpsDue
-              apps={apps}
-              onOpen={openJob}
-              onWrite={(appId, contactId) => act("/contact-email", "POST", { applicationId: appId, contactId, followUp: true })}
-              onSent={(contactId) => act("/contact", "PATCH", { contactId, status: "emailed", followedUp: true })}
-            />
-            <NextSpider apps={apps} school={data.school} onSpiders={onSpiders} />
-          </div>
-          <MoreStats apps={apps} />
+          <HomePage
+            name={userName}
+            apps={apps}
+            dailyGoal={data.profile.dailyGoal ?? null}
+            weeklyGoal={data.profile.weeklyGoal ?? null}
+            onGoals={onGoals}
+            school={data.school}
+            spiderSkin={data.profile.spiderSkin ?? null}
+            onOpenJob={openJob}
+            onWrite={(appId, contactId) => act("/contact-email", "POST", { applicationId: appId, contactId, followUp: true })}
+            onSent={(contactId) => act("/contact", "PATCH", { contactId, status: "emailed", followedUp: true })}
+            onSetup={onSetup}
+            onJobs={onJobs}
+            onSpiders={onSpiders}
+          />
         </>
       )}
       {page === "applications" && (
@@ -558,34 +565,6 @@ function PostedBy({ app }: { app: App }) {
     </div>
   );
 }
-
-/** People emailed five business days ago or more with no reply yet: write the follow-up, or say it's sent. */
-function FollowUpsDue({ apps, onOpen, onWrite, onSent }: { apps: App[]; onOpen: (appId: string) => void; onWrite: (appId: string, contactId: string) => Promise<void>; onSent: (contactId: string) => Promise<void> }) {
-  const [busy, setBusy] = useState("");
-  const due = followUpsDue(apps);
-  const initials = (name: string) => name.split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
-  return (
-    <section aria-labelledby="follow-ups" className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] p-5">
-      <h2 id="follow-ups" className="m-0 text-sm font-semibold">Follow-ups due <span className="font-medium text-[#8B8B94] tabular-nums">{due.length}</span></h2>
-      {due.length === 0 && <p className="m-0 text-[13px] text-[#8B8B94]">Nothing due. People you email show up here after five business days with no reply.</p>}
-      {due.slice(0, 5).map((item) => (
-        <div key={item.contactId} className="flex flex-wrap items-center gap-3">
-          <span aria-hidden className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-[#16161A] text-[11px] font-semibold">{initials(item.name)}</span>
-          <span className="flex min-w-0 flex-1 basis-32 flex-col gap-px">
-            <span className="text-[13px] font-medium">{item.name}</span>
-            <span className="text-xs text-[#8B8B94]">{item.company} · emailed {item.days} business days ago</span>
-          </span>
-          <span className="flex items-center gap-2">
-            <button type="button" className="h-8 rounded-lg bg-[#F7F7F8] px-3 text-xs font-semibold text-[#070708] hover:bg-white disabled:opacity-50" disabled={busy === item.contactId} onClick={async () => { setBusy(item.contactId); await onWrite(item.applicationId, item.contactId); setBusy(""); onOpen(item.applicationId); }}>{busy === item.contactId ? "Writing…" : "Draft"}</button>
-            <button type="button" className="text-xs text-[#8B8B94] hover:text-white" onClick={() => void onSent(item.contactId)}>I sent it</button>
-          </span>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-/** A job saved without its company: the student types it in, and the job moves up to the main list. */
 
 /** "+ Add job": a job applied to somewhere Unnepo didn't see, or one to keep track of. Title and company are enough. */
 function AddJobForm({ onDone }: { onDone: (added: boolean) => void | Promise<void> }) {
@@ -760,7 +739,7 @@ const HISTORY_LABEL: Record<string, string> = { applied: "Applied", incomplete: 
  * application as links. "Edit" changes any of it; "Fill in from the link" reads the link again for whatever is
  * missing. Below, the student's own quick notes, saved when they press Save.
  */
-function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; reading: boolean; disabled: boolean; note: string; onRead: (next?: App) => void; onSaved: (app: App) => void }) {
+function JobInfo({ app, startOn, reading, disabled, note, onRead, onSaved }: { app: App; startOn: "" | "emails"; reading: boolean; disabled: boolean; note: string; onRead: (next?: App) => void; onSaved: (app: App) => void }) {
   const posting = postingLink(app);
   const applied = app.fillReport?.activity?.find((event) => event.kind === "applied");
   const link = posting || app.applicationUrl || "";
@@ -772,7 +751,7 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
   const [saidSaved, setSaidSaved] = useState(false);
   const [linkDraft, setLinkDraft] = useState("");
   const [addingLink, setAddingLink] = useState(false);
-  const [panel, setPanel] = useState<"" | "description" | "emails" | "notes">("");
+  const [panel, setPanel] = useState<"" | "description" | "emails" | "notes">(startOn);
   const [pasted, setPasted] = useState("");
   const [choice, setChoice] = useState("");
   const [told, setTold] = useState("");
