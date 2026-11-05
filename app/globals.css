@@ -95,6 +95,17 @@ body { font-family: var(--font-geist-sans), sans-serif; }
 .site-spider-sway { animation: site-spider-sway 3.2s steps(4) 1s infinite; transform-origin: 50% -96px; }
 @media (prefers-reduced-motion: reduce) { .site-spider-drop, .site-spider-sway { animation: none; } }
 
+/* The jumping spider while a page loads. */
+@keyframes spider-jump {
+  0%, 100% { transform: translateY(0) scale(1.1, .88); }
+  12%, 88% { transform: translateY(0) scale(.96, 1.05); }
+  50% { transform: translateY(-64px) scale(1, 1); }
+}
+@keyframes spider-jump-shadow { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(.55); opacity: .4; } }
+.spider-jump { animation: spider-jump .85s cubic-bezier(.45,.05,.55,.95) infinite; transform-origin: 50% 100%; }
+.spider-jump-shadow { animation: spider-jump-shadow .85s cubic-bezier(.45,.05,.55,.95) infinite; }
+@media (prefers-reduced-motion: reduce) { .spider-jump, .spider-jump-shadow { animation: none; } }
+
 /* The circles above Find people. */
 @keyframes people-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 .people-float { animation: people-float 3.2s ease-in-out infinite; }

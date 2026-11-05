@@ -1,5 +1,6 @@
 "use client";
 
+import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ApplyData } from "@/components/unnepo/apply";
 import { EmailTracking } from "@/components/unnepo/email-tracking";
@@ -101,7 +102,7 @@ export function SetupPage({ resume, completeness, resumeBusy, onReplaceResume, o
   // Paid plans look for people on applying unless turned off; Free only when turned on.
   const autoPeople = data?.plan && data.plan !== "free" ? data.profile.autoFindPeople !== false : data?.profile.autoFindPeople === true;
 
-  if (!data) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <p className="text-sm text-muted">Loading your setup…</p>;
+  if (!data) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <SpiderLoader label="Loading your setup…" />;
 
   async function saveProfile(change: Record<string, unknown>) {
     const result = await call<{ profile: ApplyData["profile"] }>("/profile", "PUT", change);
@@ -164,7 +165,7 @@ export function SetupPage({ resume, completeness, resumeBusy, onReplaceResume, o
       </nav>
       {note && <p role="status" className="m-0 text-sm text-[#9A9AA3]">{note}</p>}
       {problem && <p role="alert" className="m-0 text-sm text-red-300">{problem}</p>}
-      {!part && <p className="m-0 text-sm text-muted">Loading your setup…</p>}
+      {!part && <SpiderLoader label="Loading your setup…" />}
 
       {part === "answers" && (
         <>

@@ -1,5 +1,6 @@
 "use client";
 
+import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
@@ -275,7 +276,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
             <button type="button" onClick={() => { setError(""); void load(); }} className="rounded-lg border border-red-900/70 px-3 py-1 text-red-200 hover:bg-red-950/60">Try again</button>
           </div>
         )}
-        {!data && !error && <p className="text-sm text-muted">Loading your workspace…</p>}
+        {!data && !error && <SpiderLoader label="Loading your workspace…" />}
         {notice && (
           <div className="flex items-start justify-between gap-3 rounded-xl border border-line bg-card px-4 py-3 text-sm text-zinc-300">
             <p>{notice}</p>

@@ -494,6 +494,11 @@ describe("tracking outcomes and goals", () => {
     await expect(saveApplicationProfile(userId, { dailyGoal: 51 })).rejects.toThrow(/between 1 and 50/);
     await saveApplicationProfile(userId, { dailyGoal: 4 });
     expect((await applyState(userId)).profile.dailyGoal).toBe(4);
+    await expect(saveApplicationProfile(userId, { streakGoal: 1 })).rejects.toThrow(/between 2 and 365/);
+    await saveApplicationProfile(userId, { monthlyGoal: 40, weeklyEmailGoal: 5, monthlyInterviewGoal: 2, streakGoal: 7 });
+    expect((await applyState(userId)).profile).toMatchObject({ monthlyGoal: 40, weeklyEmailGoal: 5, monthlyInterviewGoal: 2, streakGoal: 7 });
+    await saveApplicationProfile(userId, { monthlyGoal: null });
+    expect((await applyState(userId)).profile.monthlyGoal).toBeUndefined();
     expect(state.profile.accountConsentAt).toBeTruthy();
   });
 
@@ -512,6 +517,9 @@ describe("tracking outcomes and goals", () => {
     expect(stats.applied).toBe(4);
     expect(stats.inProgress).toBe(1);
     expect(stats.thisWeek).toBe(3); // Monday Oct 26 onward
+    expect(stats.thisMonth).toBeGreaterThanOrEqual(stats.thisWeek);
+    expect(stats.emailedThisWeek).toBe(0);
+    expect(stats.interviewsThisMonth).toBe(0);
     expect(stats.daysLeft).toBe(4);
     expect(stats.streak).toBe(3);
     expect(stats.responses).toBe(2);

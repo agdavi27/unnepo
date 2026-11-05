@@ -1,8 +1,9 @@
 "use client";
 
+import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FileText, GraduationCap, Mail, Plus, StickyNote, User } from "lucide-react";
-import { HomePage, HomeTiles, MoreStats, PerDayCard } from "@/components/unnepo/home";
+import { HomePage, HomeTiles, MoreStats, PerDayCard, type Goals } from "@/components/unnepo/home";
 import type { Maybe, Session } from "@/components/unnepo/activity";
 import { extensionHere, readLinksInBrowser } from "@/lib/extension-bridge";
 import { followUpsDue } from "@/lib/apply/follow-ups";
@@ -152,7 +153,7 @@ export function ApplyArea({ page, onPage, refreshKey = 0, userName, onSetup, onJ
       </div>
     );
   }
-  if (!data) return <p className="text-sm text-muted">Loading your applications…</p>;
+  if (!data) return <SpiderLoader label="Loading your applications…" />;
 
   return (
     <AppliedPage
@@ -234,7 +235,7 @@ const UNDO_MS = 5000;
 const deleteNow = (applicationId: string, keepalive = false) =>
   fetch("/api/apply/applications", { method: "DELETE", keepalive, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId }) });
 
-function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders, onGoals, onReload, onReplace, onApps }: { page: AppPage; onPage: (page: AppPage) => void; data: ApplyData; userName: string; onSetup: () => void; onJobs: () => void; onSpiders: () => void; onGoals: (goals: { dailyGoal: number; weeklyGoal: number }) => Promise<void>; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
+function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders, onGoals, onReload, onReplace, onApps }: { page: AppPage; onPage: (page: AppPage) => void; data: ApplyData; userName: string; onSetup: () => void; onJobs: () => void; onSpiders: () => void; onGoals: (goals: Goals) => Promise<void>; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
   const apps = data.applications;
   // Removing is instant: the row goes away and is deleted for real after a few seconds, unless undone.
   const [removed, setRemoved] = useState<App[]>([]);
@@ -394,9 +395,11 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
           <tr>
             <td colSpan={4} className="pb-4">
               <div className="space-y-4 rounded-xl border border-line bg-panel p-4">
-                <div className={`grid gap-5 ${app.contacts?.length ? "lg:grid-cols-2" : "lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]"}`}>
+                <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
                   <JobInfo app={app} startOn={openOn === app.id ? "emails" : ""} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={(next) => void readLinks([next ?? app], app.id)} onSaved={onReplace} />
-                  <div className="min-w-0">
+                  {/* The people box stays this size whatever is in it, and scrolls inside. */}
+                  <div className="relative min-w-0 lg:min-h-[24rem]">
+                    <div className="h-full lg:absolute lg:inset-0">
                     {stage === "in_progress" ? (
                       <div className={peopleCard}>
                         <PeopleCircles />
@@ -408,6 +411,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
                     ) : (
                       <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} onReveal={(contactId) => act("/reveal-person", "POST", { applicationId: app.id, contactId })} onBounced={(contactId) => void act("/contact-bounced", "POST", { applicationId: app.id, contactId })} />
                     )}
+                    </div>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-faint">
@@ -470,8 +474,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
           <HomePage
             name={userName}
             apps={apps}
-            dailyGoal={data.profile.dailyGoal ?? null}
-            weeklyGoal={data.profile.weeklyGoal ?? null}
+            goals={data.profile}
             onGoals={onGoals}
             school={data.school}
             spiderSkin={data.profile.spiderSkin ?? null}
@@ -543,7 +546,7 @@ function PeopleCircles() {
   );
 }
 
-const peopleCard = "flex h-full min-h-56 flex-col items-center justify-center gap-3 rounded-xl border border-line bg-card p-5 text-center";
+const peopleCard = "flex h-full max-h-[32rem] min-h-56 flex-col items-center justify-center gap-3 overflow-y-auto rounded-xl border border-line bg-card p-5 text-center lg:max-h-none";
 
 /** The person the posting names, shown as soon as the job is saved, with the posting's own label for them. */
 function PostedBy({ app }: { app: App }) {
@@ -1148,12 +1151,12 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail, onReveal, onBo
       </div>
     );
   }
-  if (app.contactsStatus === "finding" && !cutOff) return <PeopleSearching message={app.contactsMessage || `Searching for relevant people at ${app.company}…`} />;
+  if (app.contactsStatus === "finding" && !cutOff) return <div className={peopleCard}><PeopleSearching message={app.contactsMessage || `Searching for relevant people at ${app.company}…`} /></div>;
   const links = app.fillReport?.peopleLinks ?? {};
   return (
-    <div className="space-y-3">
-      {contacts.length > 0 && (
-        <div className="flex items-center gap-3">
+    <div className="h-full max-h-[32rem] space-y-3 overflow-y-auto rounded-xl border border-line bg-card px-4 pb-4 lg:max-h-none">
+      {contacts.length > 0 ? (
+        <div className="sticky top-0 z-10 flex items-center gap-3 bg-card py-3">
           <div aria-hidden className="flex">
             {contacts.slice(0, 4).map((contact, index) => (
               <span key={contact.id} style={floatDelay(index)} className={`people-float ${index ? "-ml-2.5" : ""}`}><Avatar name={contact.name} photoUrl={contact.photoUrl} className="h-9 w-9 border-[#3A3A44] text-[11px]" /></span>
@@ -1161,7 +1164,7 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail, onReveal, onBo
           </div>
           <h3 className="m-0 min-w-0 text-sm font-semibold">{contacts.length} {contacts.length === 1 ? "person" : "people"} at {app.company}</h3>
         </div>
-      )}
+      ) : <div className="h-1" />}
       <PostedBy app={app} />
       {app.contactsMessage && <p className="text-xs text-faint">{app.contactsMessage}</p>}
       <HowWeSearched app={app} />

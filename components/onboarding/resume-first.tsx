@@ -1,5 +1,6 @@
 "use client";
 
+import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { useCallback, useEffect, useId, useState } from "react";
 import { CLASS_YEARS, EEO_OPTIONS, classYearOf, type Education, type Experience, type GapId, type Project, type StudentProfile } from "@/lib/profile/student";
 
@@ -363,7 +364,7 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
     }
   }
 
-  if (!state || !draft) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <p className="text-sm text-[#8B8B94]">Loading your profile…</p>;
+  if (!state || !draft) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <SpiderLoader label="Loading your profile…" />;
   const gap = state.missing[0];
 
   return (

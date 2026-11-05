@@ -80,6 +80,10 @@ export async function student(userId: string) {
     aiCache: stored?.aiCache,
     weeklyGoal: stored?.weeklyGoal,
     dailyGoal: stored?.dailyGoal,
+    monthlyGoal: stored?.monthlyGoal,
+    weeklyEmailGoal: stored?.weeklyEmailGoal,
+    monthlyInterviewGoal: stored?.monthlyInterviewGoal,
+    streakGoal: stored?.streakGoal,
     spiderSkin: stored?.spiderSkin,
     autoFindPeople: stored?.autoFindPeople,
     maybeApplied: stored?.maybeApplied,
@@ -570,6 +574,13 @@ function publicProfile(profile: ApplicationProfile) {
   return { ...rest, hasJobSitePassword: Boolean(jobSitePasswordEncrypted) };
 }
 
+const OPTIONAL_GOALS: Array<["monthlyGoal" | "weeklyEmailGoal" | "monthlyInterviewGoal" | "streakGoal", number, number, string]> = [
+  ["monthlyGoal", 1, 800, "a monthly goal"],
+  ["weeklyEmailGoal", 1, 100, "a goal for people emailed"],
+  ["monthlyInterviewGoal", 1, 50, "an interview goal"],
+  ["streakGoal", 2, 365, "a streak goal"],
+];
+
 export async function saveApplicationProfile(userId: string, raw: unknown) {
   const body = (raw ?? {}) as Record<string, unknown>;
   const info = await student(userId);
@@ -595,6 +606,17 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     const goal = Math.round(Number(body.dailyGoal));
     if (!Number.isFinite(goal) || goal < 1 || goal > 50) throw new ServiceError("Pick a daily goal between 1 and 50 applications.", "goal", 400);
     next.dailyGoal = goal;
+  }
+  // The optional goals: a blank turns one off.
+  for (const [key, least, most, words] of OPTIONAL_GOALS) {
+    if (body[key] === undefined) continue;
+    if (body[key] === null || body[key] === "") {
+      delete next[key];
+      continue;
+    }
+    const goal = Math.round(Number(body[key]));
+    if (!Number.isFinite(goal) || goal < least || goal > most) throw new ServiceError(`Pick ${words} between ${least} and ${most}.`, "goal", 400);
+    next[key] = goal;
   }
   if (body.spiderSkin !== undefined) {
     const skin = SKINS.find((item) => item.id === body.spiderSkin);

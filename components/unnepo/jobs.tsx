@@ -1,5 +1,6 @@
 "use client";
 
+import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { useCallback, useEffect, useState } from "react";
 import type { Highlight } from "@/components/unnepo/UnnepoForms";
 import { categoryColor, categoryOf } from "@/lib/jobs/category";
@@ -276,7 +277,7 @@ function EditCareers({ onClose, onSaved }: { onClose: () => void; onSaved: (role
   const title = "m-0 text-[17px] font-semibold";
   const back = <button type="button" onClick={onClose} className="h-8 self-start text-[13px] font-medium text-[#9A9AA3] hover:text-white">← Back to jobs</button>;
 
-  if (!draft) return <div className="mx-auto flex w-full max-w-[880px] flex-col gap-3">{back}{problem ? <p role="alert" className="m-0 text-sm text-red-300">{problem}</p> : <p className="m-0 text-sm text-[#8B8B94]">Loading your careers and roles…</p>}</div>;
+  if (!draft) return <div className="mx-auto flex w-full max-w-[880px] flex-col gap-3">{back}{problem ? <p role="alert" className="m-0 text-sm text-red-300">{problem}</p> : <SpiderLoader label="Loading your careers and roles…" />}</div>;
   const set = (change: Partial<Preferences>) => setDraft({ ...draft, ...change });
   const remoteOn = draft.remote !== "no";
   const onlyPlaces = draft.locations.length > 0;

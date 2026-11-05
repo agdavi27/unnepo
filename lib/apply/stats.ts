@@ -59,6 +59,8 @@ export function applicationStats(items: Item[], now = new Date(), days = 14) {
     cursor.setDate(cursor.getDate() - 1);
   }
 
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
   // From opening the job to submitting it. Longer than six hours means the student came back later, so it's left out.
   const minutes = applied
     .filter((app) => app.submittedAt)
@@ -74,6 +76,11 @@ export function applicationStats(items: Item[], now = new Date(), days = 14) {
     applied: applied.length,
     inProgress: items.length - applied.length,
     thisWeek: applied.filter((app) => appliedOn(app) >= weekStart(now)).length,
+    thisMonth: applied.filter((app) => appliedOn(app) >= monthStart).length,
+    /** People first emailed or followed up with this week. */
+    emailedThisWeek: items.reduce((sum, app) => sum + Object.values(app.fillReport?.emailedAt ?? {}).filter((at) => new Date(at) >= weekStart(now)).length, 0),
+    /** Jobs that moved to interviewing this month. */
+    interviewsThisMonth: items.filter((app) => (app.fillReport?.statusHistory ?? []).some((change) => change.status === "interviewing" && new Date(change.at) >= monthStart)).length,
     /** Days left in this week, today included. */
     daysLeft: 7 - Math.round((today.getTime() - weekStart(now).getTime()) / 86_400_000),
     responses,
