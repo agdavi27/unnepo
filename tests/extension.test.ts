@@ -14,7 +14,7 @@ import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
 import { jobLink, titleParts } from "@/extension/src/content/scan";
-import { arrange, postingLink, siteFor, sitesIn } from "@/lib/apply/applied-list";
+import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
 import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromDescription } from "@/lib/apply/extract";
 import { fillFromLink } from "@/lib/apply/job-link";
@@ -762,5 +762,38 @@ describe("the side panel's goal and pasted questions", () => {
     await applications.insert({ userId, jobKey: "a", jobUrl: "https://example.com/a", ats: "other", title: "Analyst", company: "Acme", companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: new Date().toISOString(), contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0 });
     expect((await extensionMe(userId)).goal?.appliedAt).toHaveLength(1);
     delete process.env.ANTHROPIC_API_KEY;
+  });
+});
+
+describe("the Applications list's columns", () => {
+  const now = Date.parse("2026-11-02T15:00:00.000Z");
+  const job = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+    id, company: id, title: `${id} role`, status, createdAt: "2026-10-30T12:00:00.000Z", submittedAt: "2026-10-30T12:00:00.000Z", fillReport: null, ...extra,
+  }) as unknown as Parameters<typeof sortByColumn>[0][number];
+  const ids = (list: Array<{ id: string }>) => list.map((item) => item.id);
+  const outcome = (value: string) => ({ fillReport: { outcome: value } });
+  const list = [
+    job("rejected", "submitted", outcome("rejected")),
+    job("submitted", "submitted"),
+    job("due", "submitted"),
+    job("started", "filling"),
+    job("interview", "submitted", outcome("interviewing")),
+  ];
+
+  it("puts interviews first, then in progress and follow-ups, submitted, then rejected", () => {
+    expect(ids(sortByColumn(list, "stage", true, new Set(["due"]), now))).toEqual(["interview", "due", "started", "submitted", "rejected"]);
+    expect(ids(sortByColumn(list, "stage", false, new Set(["due"]), now))).toEqual(["rejected", "submitted", "due", "started", "interview"]);
+  });
+
+  it("keeps blank companies and titles last in either direction", () => {
+    const blanks = [job("b", "submitted"), job("none", "submitted", { companyMissing: true, company: "Unknown" }), job("a", "submitted")];
+    expect(ids(sortByColumn(blanks, "company", true))).toEqual(["a", "b", "none"]);
+    expect(ids(sortByColumn(blanks, "company", false))).toEqual(["b", "a", "none"]);
+  });
+
+  it("sorts by the day applied", () => {
+    const dated = [job("old", "submitted", { submittedAt: "2026-10-01T12:00:00.000Z" }), job("new", "submitted", { submittedAt: "2026-11-01T12:00:00.000Z" })];
+    expect(ids(sortByColumn(dated, "applied", false))).toEqual(["new", "old"]);
+    expect(ids(sortByColumn(dated, "applied", true))).toEqual(["old", "new"]);
   });
 });

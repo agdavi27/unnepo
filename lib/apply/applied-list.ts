@@ -1,5 +1,5 @@
 import { siteOf } from "@/lib/apply/activity-stats";
-import { appliedOn, isApplied, weekStart } from "@/lib/apply/stats";
+import { appliedOn, isApplied, stageOf, weekStart } from "@/lib/apply/stats";
 import type { ActivityEvent, ApplicationContact, JobApplication } from "@/lib/apply/types";
 
 /**
@@ -60,6 +60,35 @@ export function arrange<T extends ListApp>(apps: T[], options: { sort: SortBy; s
     },
   };
   return [...list].sort(sorts[options.sort]);
+}
+
+export type Column = "company" | "role" | "applied" | "stage";
+
+/** Stage order: good news first, then what needs doing, then what's waiting, then what's over. */
+const STAGE_ORDER: Record<ReturnType<typeof stageOf>, number> = { offer: 0, interviewing: 1, assessment: 2, in_progress: 3, submitted: 4, no_response: 5, rejected: 6 };
+const FOLLOW_UP_DUE = STAGE_ORDER.in_progress;
+
+type SortApp = Pick<JobApplication, "id" | "company" | "title" | "status" | "createdAt" | "submittedAt" | "fillReport"> & { companyMissing?: boolean; titleMissing?: boolean };
+
+/**
+ * Sorts by a column title. A job waiting on a follow-up (ids in `followUps`) ranks with those in progress. Blank
+ * companies and titles stay last either way, and ties keep the order they came in.
+ */
+export function sortByColumn<T extends SortApp>(apps: T[], column: Column, ascending: boolean, followUps: ReadonlySet<string> = new Set(), now = Date.now()) {
+  const direction = ascending ? 1 : -1;
+  const words = (a: string, b: string) => a.localeCompare(b, "en", { sensitivity: "base" });
+  const blankLast = (a: string, b: string) => (!a !== !b ? (a ? -1 : 1) : direction * words(a, b));
+  const rank = (app: T) => {
+    const stage = stageOf(app, now);
+    return (stage === "submitted" || stage === "no_response") && followUps.has(app.id) ? FOLLOW_UP_DUE : STAGE_ORDER[stage];
+  };
+  const compare: Record<Column, (a: T, b: T) => number> = {
+    company: (a, b) => blankLast(a.companyMissing ? "" : a.company, b.companyMissing ? "" : b.company),
+    role: (a, b) => blankLast(a.titleMissing ? "" : a.title, b.titleMissing ? "" : b.title),
+    applied: (a, b) => direction * (appliedOn(a).getTime() - appliedOn(b).getTime()),
+    stage: (a, b) => direction * (rank(a) - rank(b)),
+  };
+  return [...apps].sort(compare[column]);
 }
 
 /** The sites in the list, most jobs first, for the site filter. */
