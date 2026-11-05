@@ -113,9 +113,55 @@ async function api<T>(method: "GET" | "POST" | "DELETE", path: string, body?: un
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const payload = await response.json().catch(() => ({}));
-  if (response.status === 401) await chrome.storage.local.remove("token");
+  if (response.status === 401) {
+    await chrome.storage.local.remove("token");
+    void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+  }
   if (!response.ok) throw new ApiError((payload as { error?: string }).error || `Unnepo answered ${response.status}.`, response.status, (payload as { code?: string }).code ?? "");
+  if (method !== "GET") await meChanged(path);
   return payload as T;
+}
+
+/**
+ * The student's account, kept here so the panel never waits on the server to redraw: it gets the copy at once, and
+ * a copy older than ME_FRESH_MS is read again behind it. After anything that changes the account the panel waits
+ * for the new one, except for the calls in QUIET, which happen many times during a fill and only move a counter.
+ */
+type Me = NonNullable<PanelState["me"]>;
+type MeCopy = { token: string; at: number; waitForNew: boolean; me: Me };
+const ME_FRESH_MS = 20_000;
+const QUIET = new Set(["activity", "attempts", "map", "answers", "read-link", "job-info"]);
+let meCalls = 0;
+let reading: { call: number; result: Promise<Me> } | null = null;
+
+const meCopy = async () => ((await chrome.storage.session.get("meCopy")).meCopy as MeCopy | undefined) ?? null;
+
+async function meChanged(path: string) {
+  meCalls += 1;
+  const copy = await meCopy();
+  if (copy) await chrome.storage.session.set({ meCopy: { ...copy, at: 0, waitForNew: copy.waitForNew || !QUIET.has(path) } });
+}
+
+function readMe(token: string) {
+  if (reading?.call === meCalls) return reading.result;
+  const call = meCalls;
+  const result = api<Me>("GET", "me").then(async (me) => {
+    const before = await meCopy();
+    // Something changed the account while this was on its way, so it's out of date.
+    if (call === meCalls) await chrome.storage.session.set({ meCopy: { token, at: Date.now(), waitForNew: false, me } });
+    if (before?.token === token && JSON.stringify(before.me) !== JSON.stringify(me)) void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+    return me;
+  }).finally(() => { if (reading?.call === call) reading = null; });
+  reading = { call, result };
+  return result;
+}
+
+async function currentMe(token: string): Promise<Me | null> {
+  const copy = await meCopy();
+  if (copy?.token !== token) return readMe(token).catch(() => null);
+  if (copy.waitForNew) return readMe(token).catch(() => copy.me);
+  if (Date.now() - copy.at > ME_FRESH_MS) void readMe(token).catch(() => undefined);
+  return copy.me;
 }
 
 /** The student's resume file from Unnepo. Says why when it can't (no resume, or the file is gone). */
@@ -322,7 +368,7 @@ async function state(): Promise<PanelState> {
   const { token, apiBase, autoSubmit } = await settings();
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   let me: PanelState["me"] = null;
-  if (token) me = await api<NonNullable<PanelState["me"]>>("GET", "me").catch(() => null);
+  if (token) me = await currentMe(token);
   // The page's spiders read the student's spider from here.
   if (me?.spider) void chrome.storage.local.set({ spider: me.spider });
   const saved = tab?.id !== undefined ? (await jobs())[tab.id] ?? null : null;

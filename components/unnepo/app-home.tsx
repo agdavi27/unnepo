@@ -206,6 +206,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Could not write that letter.");
     void load();
+    if (payload.addedToApplied) setNotice(`Added ${input.job.title} at ${input.job.company} to your applied jobs.`);
     return String(payload.body ?? "");
   }
 

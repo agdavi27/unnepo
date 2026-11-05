@@ -15,6 +15,7 @@ import { ServiceError } from "@/lib/errors";
 import { applicationProfiles, applications } from "@/lib/apply/store";
 import { rewriteLetterPart } from "@/lib/apply/cover-letter";
 import { student } from "@/lib/apply/service";
+import { addAppliedFromLetter } from "@/lib/apply/service";
 import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
 import { profileState, saveStudentProfile } from "@/lib/profile/service";
 
@@ -377,7 +378,9 @@ export async function generateWorkspaceCoverLetter(userId: string, raw: unknown)
   await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
   await repo.insertGeneration({ id: id(), userId, purpose: "cover_letter", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
   await countCoverLetter(userId);
-  return { body: letter.slice(0, 8000) };
+  // A letter means the student is going for this job, so it goes on Applied.
+  const addedToApplied = await addAppliedFromLetter(userId, { title, company, description, url: String(job.url ?? "").trim().slice(0, 2000) }).catch(() => false);
+  return { body: letter.slice(0, 8000), addedToApplied };
 }
 
 /** The web app's "rewrite just this part" for a cover letter: the selected part, changed as asked, put back. */

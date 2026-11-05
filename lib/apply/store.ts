@@ -67,6 +67,16 @@ export const applications = {
     return withLock((db) => (db.jobApplications ?? []).filter((app) => app.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   },
 
+  /** Just each job's status and dates: what the panel's goal and spider need, without every job's long description. */
+  async appliedTimes(userId: string): Promise<Array<Pick<JobApplication, "status" | "submittedAt" | "createdAt">>> {
+    if (onTables()) {
+      const { data, error } = await supabaseTables().from("job_applications").select("status,submitted_at,created_at").eq("user_id", userId);
+      if (error) throw tableError(error);
+      return (data ?? []).map((row) => ({ status: row.status, submittedAt: row.submitted_at, createdAt: row.created_at }));
+    }
+    return withLock((db) => (db.jobApplications ?? []).filter((app) => app.userId === userId).map(({ status, submittedAt, createdAt }) => ({ status, submittedAt, createdAt })));
+  },
+
   /** Every student's fill records from their most recently updated applications, for the admin's failure report. */
   async recentAttempts(limit = 1000): Promise<FillAttempt[][]> {
     if (onTables()) {
@@ -190,6 +200,22 @@ export const applications = {
 };
 
 export const applicationContacts = {
+  /** These people now belong to another job, listed after the `after` people already on it. */
+  async move(userId: string, contactIds: string[], applicationId: string, after: number) {
+    for (const [index, contactId] of contactIds.entries()) {
+      const patch = { applicationId, rank: after + index + 1, updatedAt: nowIso() };
+      if (onTables()) {
+        const { error } = await supabaseTables().from("application_contacts").update(toRow(patch, CONTACT_COLUMNS)).eq("user_id", userId).eq("id", contactId);
+        if (error) throw tableError(error);
+      } else {
+        await withLock((db) => {
+          const row = (db.applicationContacts ?? []).find((contact) => contact.userId === userId && contact.id === contactId);
+          if (row) Object.assign(row, patch);
+        });
+      }
+    }
+  },
+
   async list(userId: string, applicationIds: string[]): Promise<ApplicationContact[]> {
     if (!applicationIds.length) return [];
     if (onTables()) {

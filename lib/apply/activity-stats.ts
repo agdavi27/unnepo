@@ -15,6 +15,7 @@ export const HOW_LABEL: Record<AppliedHow, string> = {
   linkedin_easy_apply: "LinkedIn Easy Apply",
   you_marked: "You marked it",
   added_by_hand: "Added by you",
+  cover_letter: "You wrote a cover letter",
 };
 
 /** Caught by Unnepo itself, as opposed to the student saying so. */

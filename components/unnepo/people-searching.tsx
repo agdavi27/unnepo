@@ -1,47 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ART_W, artRects, spiderArt, spiderPalette } from "@/lib/spiders";
+import { typingSpiderSvg } from "@/extension/src/shared/hero-spider";
 
 /**
- * While Unnepo looks for people: the spider typing away on a laptop, and speech bubbles that float up as
+ * While Unnepo works (looking for people, writing a cover letter): the spider typing away on a laptop, and speech bubbles that float up as
  * each real step starts ("Searching for Acme's email format…"). The step text comes from the server as the
  * search runs. With reduced motion, the bubbles appear without floating and nothing bobs.
  */
 
-const W = 60;
-const H = 48;
-const LIFT = 11;
-
-/** The laptop, seen from behind its lid, in front of the spider: lid, glowing logo dot, and the base. */
-function laptop() {
-  const rects: string[] = [];
-  const rect = (x: number, y: number, w: number, h: number, fill: string, extra = "") => rects.push(`<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"${extra}/>`);
-  rect(13, 27, 34, 16, "#000000");
-  rect(14, 28, 32, 14, "#C9CDD6");
-  rect(14, 28, 32, 2, "#E6E9EF");
-  rect(14, 40, 32, 2, "#A9AEB9");
-  rect(29, 34, 2, 2, "#3D8BFF", ` class="logo"`);
-  rect(8, 43, 44, 3, "#000000");
-  rect(9, 43, 42, 2, "#9AA0AC");
-  rect(26, 43, 8, 1, "#7D8390");
-  return rects.join("");
-}
-
-/** The spider's two front feet, tapping on the keys in turn. */
-const FEET = `<g class="foot left"><rect x="10" y="40" width="4" height="3" fill="#000"/><rect x="11" y="40" width="2" height="2" fill="currentColor"/></g>`
-  + `<g class="foot right"><rect x="46" y="40" width="4" height="3" fill="#000"/><rect x="47" y="40" width="2" height="2" fill="currentColor"/></g>`;
-
 export function PeopleSearching({ message }: { message: string }) {
-  const svg = useMemo(() => {
-    const look = { skin: "classic" as const };
-    const palette = spiderPalette(look);
-    const spider = artRects(spiderArt(false, look), palette);
-    return `<svg viewBox="0 0 ${W} ${H}" width="168" height="${Math.round((168 * H) / W)}" shape-rendering="crispEdges" aria-hidden="true" style="color:${palette.l}">`
-      + `<g class="spider" transform="translate(${(W - ART_W) / 2} ${LIFT - 10})">${spider}</g>`
-      + `<rect x="18" y="26" width="24" height="2" fill="#3D8BFF" opacity=".35" class="glow"/>`
-      + laptop() + FEET + `</svg>`;
-  }, []);
+  const svg = useMemo(() => typingSpiderSvg(168), []);
 
   // Every step the search has reached, newest last; the last three float in the air.
   const [steps, setSteps] = useState<Array<{ id: number; text: string }>>([]);
@@ -67,7 +36,7 @@ export function PeopleSearching({ message }: { message: string }) {
         .people-searching .logo, .people-searching .glow { animation: glow 1.6s ease-in-out infinite; }
         @keyframes bubble-in { from { opacity: 0; transform: translateY(14px) scale(.9); } to { opacity: 1; transform: none; } }
         @keyframes bubble-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
-        @keyframes spider-bob { 0%, 100% { transform: translate(${(W - ART_W) / 2}px, ${LIFT - 10}px); } 50% { transform: translate(${(W - ART_W) / 2}px, ${LIFT - 9}px); } }
+        @keyframes spider-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
         @keyframes tap { 0% { transform: translateY(0); } 100% { transform: translateY(-1px); } }
         @keyframes glow { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
         @media (prefers-reduced-motion: reduce) {

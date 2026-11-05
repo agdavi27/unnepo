@@ -14,6 +14,7 @@ import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyF
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
+import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { removeEmailTextsFor } from "@/lib/email/store";
 import { profileReady, profileState } from "@/lib/profile/service";
@@ -378,7 +379,7 @@ const MANUAL_STAGES = ["applied", "in_progress", "assessment", "interviewing", "
  * A job the student adds to the tracker by hand: applied somewhere Unnepo didn't see, or one to keep track of.
  * Only a title and company are needed; a link, the date, the posting's text and how it's going are optional.
  */
-export async function addJobByHand(userId: string, raw: unknown) {
+export async function addJobByHand(userId: string, raw: unknown, how: "added_by_hand" | "cover_letter" = "added_by_hand") {
   const body = (raw ?? {}) as { title?: unknown; company?: unknown; url?: unknown; stage?: unknown; appliedOn?: unknown; description?: unknown; location?: unknown };
   const title = String(body.title ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
   const company = String(body.company ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -407,7 +408,7 @@ export async function addJobByHand(userId: string, raw: unknown) {
     ...(typeof body.location === "string" && body.location.trim() && !app.location ? { location: body.location.trim().slice(0, 200) } : {}),
     ...(stage === "assessment" || stage === "interviewing" || stage === "offer" || stage === "rejected" ? { fillReport: { ...report, outcome: stage } } : {}),
   });
-  if (applied) await addActivity(userId, app.id, { kind: "applied", how: "added_by_hand", site: link ? undefined : "Added by you" });
+  if (applied) await addActivity(userId, app.id, { kind: "applied", how, site: link ? undefined : "Added by you" });
   if (applied) await findPeopleOnApply(userId, app.id);
   return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }
@@ -439,7 +440,7 @@ export async function repairCompanies(userId: string, apps: JobApplication[]) {
 }
 
 export async function applyState(userId: string) {
-  const [saved, info] = await Promise.all([applications.list(userId), student(userId)]);
+  const [saved, info] = await Promise.all([applications.list(userId).then((apps) => mergeRepeats(userId, apps)), student(userId)]);
   const apps = await repairCompanies(userId, saved);
   // A new resume is read in the background, so blank details fill from it without waiting for an application.
   if (info.resumeText.trim() && !info.profile.resumeProfile && Date.now() - (resumeReads.get(userId) ?? 0) > 120_000) {
@@ -723,6 +724,29 @@ export async function markApplied(userId: string, raw: unknown) {
   await dropMaybe(userId, { applicationId: app.id });
   await findPeopleOnApply(userId, app.id);
   return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
+}
+
+/** The student wrote a cover letter for this job, so it counts as applied. True when that changed it. */
+export async function markAppliedFromLetter(userId: string, applicationId: string) {
+  const app = await applications.get(userId, applicationId);
+  if (!app || isApplied(app.status)) return false;
+  await ensureCharged(userId, app);
+  await applications.update(userId, app.id, { status: "applied_manual", browserSessionId: null, submittedAt: nowIso(), statusMessage: "Added when you wrote its cover letter." });
+  await addActivity(userId, app.id, { kind: "applied", how: "cover_letter" });
+  await dropMaybe(userId, { applicationId: app.id });
+  await findPeopleOnApply(userId, app.id);
+  return true;
+}
+
+/** The same for a job known only by name: the one already tracked, or a new one. */
+export async function addAppliedFromLetter(userId: string, job: { title: string; company: string; description?: string; url?: string }) {
+  const link = /^https:\/\/\S+\.\S+/i.test(job.url ?? "") ? job.url! : "";
+  const tracked = link
+    ? (await trackedAt(userId, link, job)).app
+    : (await applications.list(userId)).find((app) => plainName(app.title) && plainName(app.company) && sameJobName(app, job)) ?? null;
+  if (tracked) return markAppliedFromLetter(userId, tracked.id);
+  await addJobByHand(userId, { title: job.title, company: job.company, description: job.description, url: link || undefined, stage: "applied" }, "cover_letter");
+  return true;
 }
 
 // A search can't run past 60 seconds, so one this quiet was cut off.

@@ -539,6 +539,7 @@ export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoadi
   return (
     <div role="presentation" className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-3 sm:p-6">
       <div role="dialog" aria-modal="true" aria-label="Write a cover letter" className="max-h-[calc(100vh-1.5rem)] w-full max-w-3xl space-y-5 overflow-y-auto rounded-2xl border border-line bg-panel p-5 shadow-2xl sm:p-7">
+        {busy && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 px-4 backdrop-blur-sm"><PeopleSearching message="Writing your cover letter…" /></div>}
         <div className="flex justify-between gap-3">
           <div className="min-w-0">
             <h2 className="text-2xl font-bold">✦ Write a cover letter</h2>

@@ -123,7 +123,7 @@ export type FillReport = {
 };
 
 /** How Unnepo knew an application went through. */
-export type AppliedHow = "site_confirmed" | "page_said" | "button_changed" | "board_saved" | "linkedin_easy_apply" | "you_marked" | "added_by_hand";
+export type AppliedHow = "site_confirmed" | "page_said" | "button_changed" | "board_saved" | "linkedin_easy_apply" | "you_marked" | "added_by_hand" | "cover_letter";
 /** One thing that happened with a job. `site`: where ("ZipRecruiter", "Workday"). `ms`: time it took, for fills. */
 export type ActivityEvent = { at: string; kind: "opened" | "filled" | "applied" | "not_confirmed"; site: string; how?: AppliedHow; fields?: number; needs?: number; ms?: number };
 

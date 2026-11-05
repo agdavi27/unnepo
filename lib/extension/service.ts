@@ -2,11 +2,12 @@ import { APPLIED_HOW, addActivity, addMaybe, dropMaybe, liveMaybe, sessionNow } 
 import { nameCompanyFromDescription } from "@/lib/apply/job-link";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
-import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, coverLettersLeft, hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
+import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, planUsage } from "@/lib/apply/limits";
+import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { answerMaybe, companyMissing, createApplication, findPeopleOnApply, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { answerMaybe, companyMissing, createApplication, findPeopleOnApply, minimalApplication, trackedAt, repairCompanies, answerWith, addAppliedFromLetter, ensureCharged, learnAnswers, markAppliedFromLetter, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
 import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
@@ -73,7 +74,7 @@ export async function extensionSetup(userId: string, raw: unknown) {
 }
 
 export async function extensionMe(userId: string) {
-  const [user, credits, state, resume, stored, saved] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId), applicationProfiles.get(userId), applications.list(userId)]);
+  const [user, credits, state, resume, stored, saved, usage] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId), applicationProfiles.get(userId), applications.appliedTimes(userId), planUsage(userId)]);
   const applied = saved.filter((app) => isApplied(app.status));
   const weekAgo = Date.now() - 8 * 86_400_000;
   return {
@@ -81,17 +82,17 @@ export async function extensionMe(userId: string) {
     goal: { weekly: stored?.weeklyGoal ?? null, appliedAt: applied.map((app) => app.submittedAt ?? app.createdAt).filter((at) => Date.parse(at) >= weekAgo) },
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: credits?.balance ?? 0,
-    unlimitedCredits: await hasUnlimitedCredits(userId),
+    unlimitedCredits: usage.unlimited,
     setup: setupState(state.profile),
     maybe: liveMaybe(stored?.maybeApplied).map(({ id, title, company, site, at }) => ({ id, title, company, site, at })),
     session: sessionNow(stored?.session),
     plan: credits?.plan ?? "free",
-    coverLetters: await coverLettersLeft(userId),
+    coverLetters: { used: usage.letters.used, left: usage.free ? usage.letters.left : null },
     profileReady: state.ready,
     completeness: state.profile.completeness,
     // What the panel lists under "Missing": the parts of the profile still to fill in, required ones first.
     // What's left on the plan: credits, each kind of use, and a line for anything running low.
-    usage: await planUsage(userId),
+    usage,
     // The resume the extension attaches. `file` is false when only its text was kept, so it must be uploaded again.
     resume: resume ? { fileName: resume.fileName, uploadedAt: resume.createdAt, file: Boolean(resume.storagePath) && resume.byteSize > 0 } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
@@ -204,7 +205,7 @@ async function openJob(userId: string, raw: unknown) {
 
 /** The student's jobs for the panel's "My jobs": the newest first, with just what the list shows. */
 export async function extensionJobs(userId: string) {
-  const apps = await repairCompanies(userId, await applications.list(userId));
+  const apps = await repairCompanies(userId, await mergeRepeats(userId, await applications.list(userId)));
   return {
     jobs: apps.slice(0, 30).map((app) => ({
       id: app.id, title: app.title, company: app.company, status: app.status, url: app.applicationUrl || app.jobUrl,
@@ -443,7 +444,7 @@ export async function extensionLearn(userId: string, raw: unknown) {
 
 /** A cover letter for this job, as text and as a PDF to upload. Written once per job. */
 export async function extensionCoverLetter(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown; part?: unknown; ask?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; track?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown; part?: unknown; ask?: unknown };
   // No job on the page: the student pasted the job description instead. Nothing is opened in the tracker.
   const pasted = !body.applicationId && typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
   if (!body.applicationId && pasted.length < 80) throw new ServiceError("Paste the whole job description (at least a few sentences).", "description", 400);
@@ -480,11 +481,22 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   if (fresh) await assertCoverLetterAllowed(userId);
   const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText }, style));
   if (fresh && text) await countCoverLetter(userId);
+  // The student asked for this letter (autofill writing one for a form doesn't count), so the job goes on Applied.
+  const addedToApplied = fresh && Boolean(text) && body.track === true && await (app ? markAppliedFromLetter(userId, app.id) : addPastedJob(userId, pasted)).catch(() => false);
   if (!text) throw new ServiceError("Couldn't write a cover letter. Add your resume and profile first.", "cover_letter", 409);
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
   if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
-  return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64") };
+  return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64"), addedToApplied };
+}
+
+/** A letter from a pasted job description: the description says which job it was. Nothing is added if it doesn't. */
+async function addPastedJob(userId: string, description: string) {
+  const reply = await claudeAsk(userId, "letter_job")(`Reply with only JSON: {"title": string or null, "company": string or null}. Copy the job title and the hiring company's name exactly as this job description gives them. Use null if it doesn't say.`, description.slice(0, 6000));
+  const job = JSON.parse(reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1)) as { title?: unknown; company?: unknown };
+  const [title, company] = [job.title, job.company].map((value) => (typeof value === "string" ? value.trim().slice(0, 200) : ""));
+  if (title.length < 2 || company.length < 2) return false;
+  return addAppliedFromLetter(userId, { title, company, description });
 }
 
 /** Saves the confirmation screenshot the extension took. Only JPEG or PNG, at most about 2 MB. */

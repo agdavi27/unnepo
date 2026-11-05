@@ -1,6 +1,6 @@
 import { weekStart } from "@/lib/apply/stats";
 import type { SpiderLook } from "@/lib/spiders";
-import { heroSpiderSvg } from "../shared/hero-spider";
+import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { NEVER_READ, type Issue, type PanelState } from "../shared/types";
 
@@ -582,6 +582,7 @@ function pasteForm(big: boolean) {
       ${big ? `<div class="question"><span class="q-label">How long?</span><div class="choices">${choice("length", "short", "Short")}${choice("length", "standard", "Standard")}${choice("length", "detailed", "Detailed")}</div></div>
       <div class="question"><span class="q-label">What tone?</span><div class="choices">${choice("tone", "professional", "Professional")}${choice("tone", "warm", "Warm")}${choice("tone", "confident", "Confident")}${choice("tone", "enthusiastic", "Enthusiastic")}</div></div>` : ""}
       <button type="button" class="btn primary" id="paste-write" ${busy || pasteText.trim().length < 80 ? "disabled" : ""}>${SPARK_SMALL}${letterStep === "writing" ? "Writing…" : "Generate cover letter"}</button>
+      ${writingSpider()}
       ${letter && letterSource === "paste" ? writtenLetter(busy, false) : ""}
       ${letterNote && letterSource === "paste" ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}
     </section>`;
@@ -635,7 +636,7 @@ function wireAnswer(tabId: number) {
  * The cover letter writer: "Write cover letter" asks a few quick questions (length, tone, anything to
  * mention), writes it, then offers a box for edits. Kept across re-renders of the panel.
  */
-type Letter = { text: string; fileName: string; pdfBase64: string };
+type Letter = { text: string; fileName: string; pdfBase64: string; addedToApplied?: boolean };
 let letter: Letter | null = null;
 let letterStep: "closed" | "asking" | "writing" | "written" | "revising" | "saving" = "closed";
 let letterNote = "";
@@ -654,7 +655,7 @@ function letterBlock() {
   if (letterStep === "closed" || (letterSource === "paste" && letterStep !== "asking" && !busy)) {
     return `<div class="cv"><span class="sub">For the job on this page, written from your profile and resume.</span><button type="button" class="btn primary" id="letter-start">${SPARK_SMALL}Generate cover letter</button>${usesLine(usesNow?.letters.note)}</div>`;
   }
-  const questions = letterStep === "asking" || (letterStep === "writing" && !letter) ? `
+  const questions = letterStep === "asking" ? `
     <div class="letter-form" id="letter-form">
       <span class="eyebrow">Your cover letter</span>
       <div class="question"><span class="q-label">How long?</span>
@@ -672,8 +673,13 @@ function letterBlock() {
       </div>
     </div>` : "";
   const written = letter && letterStep !== "asking" && letterSource === "job" ? writtenLetter(busy, true) : "";
-  return `<div class="cv">${questions}${written}${letterNote ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}</div>`;
+  return `<div class="cv">${writingSpider()}${questions}${written}${letterNote ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}</div>`;
 }
+
+/** While the AI writes: the spider typing on his laptop. */
+const writingSpider = () => (letterStep === "writing" || letterStep === "revising"
+  ? `<div class="letter-writing" role="status">${typingSpiderSvg(150, spiderLook)}<span class="small">${letterStep === "writing" ? "Writing your cover letter…" : "Rewriting your cover letter…"}</span></div>`
+  : "");
 
 /** The letter, with Copy and PDF, and a box for edits. */
 function writtenLetter(busy: boolean, forJob: boolean) {
@@ -718,6 +724,8 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
   letterStep = save ? "saving" : revise || part ? "revising" : "writing";
   letterNote = "";
   letterSource = fromPaste ? "paste" : "job";
+  // Let go of the box, or the panel keeps it as it is and the spider never shows.
+  if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
   void render();
   const options = part
     ? { previous: letter?.text ?? "", part: part.part, ask: part.ask }
@@ -725,7 +733,7 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
     ? { text: letter?.text ?? "" }
     : revise
       ? { previous: letter?.text ?? "", edit: letterChoices.edit }
-      : { length: letterChoices.length, tone: letterChoices.tone, mention: fromPaste ? "" : letterChoices.mention };
+      : { length: letterChoices.length, tone: letterChoices.tone, mention: fromPaste ? "" : letterChoices.mention, track: true };
   type Result = { ok: boolean; doc?: Letter; error?: string };
   const result = await ask<Result>({ type: "generate-letter", tabId, options, ...(fromPaste ? { description: pasteText } : {}) }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
   if (result.ok && result.doc) {
@@ -734,6 +742,7 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
     letterEdited = false;
     if (revise) letterChoices.edit = "";
     if (save) letterNote = "Saved. The PDF has your edits.";
+    if (result.doc.addedToApplied) letterNote = "Added to your applied jobs.";
   } else {
     letterStep = letter ? "written" : fromPaste ? "closed" : "asking";
     letterNote = result.error ?? "Couldn't write the cover letter.";
@@ -1193,17 +1202,48 @@ document.getElementById("disconnect")!.addEventListener("click", async () => {
 
 /** Puts the student's spider at the top of the panel. */
 let dressed = "";
+let spiderLook: SpiderLook | undefined;
 function dressSpider(look?: SpiderLook) {
   const key = look ? `${look.skin}|${look.school ?? ""}` : "";
   if (!look || key === dressed) return;
   dressed = key;
+  spiderLook = look;
   const spider = document.getElementById("spider")!;
   spider.querySelector("svg")?.remove();
   spider.insertAdjacentHTML("beforeend", heroSpiderSvg(look));
 }
 
+/** The latest state, and what was last drawn from it, so a state that didn't change isn't drawn again. */
+let lastState: PanelState | null = null;
+let drawnFrom = "";
+let fetching = false;
+let fetchAgain = false;
+
+/** Asks for the state, one request at a time, and draws it only if it changed. */
+async function refresh() {
+  if (fetching) { fetchAgain = true; return; }
+  fetching = true;
+  try {
+    do {
+      fetchAgain = false;
+      const state = await ask<PanelState>({ type: "state" });
+      const json = JSON.stringify(state);
+      lastState = state;
+      if (json !== drawnFrom) drawnFrom = draw(state) ? json : "";
+    } while (fetchAgain);
+  } finally {
+    fetching = false;
+  }
+}
+
+/** A click answers at once from what's already known, then the state is checked behind it. */
 async function render() {
-  const state = await ask<PanelState>({ type: "state" });
+  if (lastState) draw(lastState);
+  await refresh();
+}
+
+/** Draws the panel. False when it left the page as it was, because the student is typing in it. */
+function draw(state: PanelState): boolean {
   usesNow = state.me?.usage ?? null;
   // A letter belongs to one job: opening another job (another tab, or another one in Handshake's search) closes it.
   // Keyed by the job's name, not the address, so the steps of one application keep it.
@@ -1223,14 +1263,14 @@ async function render() {
   app.setAttribute("aria-labelledby", `tab-${view}`);
   footer.hidden = !state.connected;
   // Don't wipe a code being typed when something else changes.
-  if (!state.connected && document.getElementById("code") === document.activeElement) return;
+  if (!state.connected && document.getElementById("code") === document.activeElement) return false;
   // Don't wipe what's being typed in the cover letter questions or edits box when the page changes.
   // The same for a problem being reported.
-  if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea, input")) return;
+  if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea, input")) return false;
   // Nor a new password being typed.
-  if (document.activeElement?.matches("#password input")) return;
+  if (document.activeElement?.matches("#password input")) return false;
   // Nor the job being checked before "I applied" saves it.
-  if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return;
+  if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return false;
   // The password is drawn on its own, so a redraw can't lose what's typed: it's moved out, then back into its slot.
   document.body.append(passwordSection);
   const views: Record<View, () => string> = { apply: () => applyView(state), write: () => writeView(), me: () => meView(state) };
@@ -1285,6 +1325,7 @@ async function render() {
     wireManualJob(state);
   }
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
+  return true;
 }
 
 tabs.querySelectorAll<HTMLButtonElement>("button").forEach((button) => button.addEventListener("click", () => {
@@ -1308,10 +1349,10 @@ chrome.runtime.onMessage.addListener((message) => {
   activityLog = null;
   // New problems may have been added; the open list reads them again.
   if (view === "me" && openParts.has("issues")) void loadIssues();
-  else void render();
+  else void refresh();
 });
 chrome.tabs.onUpdated.addListener((_id, info) => {
-  if (info.status === "complete") void render();
+  if (info.status === "complete") void refresh();
 });
 
 /** Tells the extension this panel is open, so the spider hanging on the page hides while it is. */

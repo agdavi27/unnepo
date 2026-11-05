@@ -191,3 +191,16 @@ details.part .view { padding: 12px 0 0; }
 .tag.needs { color: #FF8A3D; border-color: #FF8A3D; }
 .tag.check { color: #3D8BFF; border-color: #3D8BFF; }
 .resume-line { margin: 0; }
+
+/* While the AI writes a cover letter: the spider typing on his laptop. */
+.letter-writing { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0; }
+.letter-writing .spider { animation: letter-bob 1.2s ease-in-out infinite; }
+.letter-writing .foot.left { animation: letter-tap .36s steps(2) infinite; }
+.letter-writing .foot.right { animation: letter-tap .36s steps(2) .18s infinite; }
+.letter-writing .logo, .letter-writing .glow { animation: letter-glow 1.6s ease-in-out infinite; }
+@keyframes letter-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
+@keyframes letter-tap { 0% { transform: translateY(0); } 100% { transform: translateY(-1px); } }
+@keyframes letter-glow { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .letter-writing .spider, .letter-writing .foot, .letter-writing .logo, .letter-writing .glow { animation: none; }
+}
