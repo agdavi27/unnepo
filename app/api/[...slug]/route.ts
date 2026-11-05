@@ -4,7 +4,7 @@ import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVe
 import { persistenceMode, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file-store";
 import { readStoredResume, storeResume } from "@/lib/services/resume";
 import { applyVerifiedStripeEvent } from "@/lib/services/billing";
-import { autofillProblems, profitability } from "@/lib/services/admin";
+import { autofillProblems, peopleTest, profitability } from "@/lib/services/admin";
 import { beginOAuth, finishOAuth, oauthReady } from "@/lib/services/oauth";
 import { ServiceError } from "@/lib/errors";
 import { nowIso } from "@/lib/db/file-store";
@@ -22,7 +22,7 @@ import { handlePostmark, webhookAuthorized } from "@/lib/email/inbound";
 import { emailState, emailsForJob, pasteEmail, regenerateAddress, reviewInboxAction } from "@/lib/email/service";
 import { removeEmailData } from "@/lib/email/store";
 import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
-import { applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
+import { contactBounced, revealContact, applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
 export const maxDuration = 60;
@@ -202,6 +202,11 @@ async function handle(request: Request, slug: string[]) {
     if (action === "retry-contacts" && method === "POST") return json(await retryContacts(user.id, await request.json()));
     if (action === "outcome" && method === "PATCH") return json(await setOutcome(user.id, await request.json()));
     if (action === "contact" && method === "PATCH") return json(await updateOutreach(user.id, await request.json()));
+    if (action === "reveal-person" && method === "POST") {
+      if (!rateLimit(`reveal:${user.id}`, 40, 60 * 60 * 1000)) throw new ServiceError("That's a lot of people in an hour. Try again a bit later.", "rate_limited", 429);
+      return json(await revealContact(user.id, await request.json()));
+    }
+    if (action === "contact-bounced" && method === "POST") return json(await contactBounced(user.id, await request.json()));
     if (action === "contact-email" && method === "POST") return json(await writeContactEmail(user.id, await request.json()));
     if (action === "company" && method === "PATCH") return json(await setCompany(user.id, await request.json()));
     if (action === "details" && method === "PATCH") return json(await updateJobDetails(user.id, await request.json()));
@@ -345,6 +350,10 @@ async function handle(request: Request, slug: string[]) {
   if (root === "admin" && action === "metrics" && request.method === "GET") {
     if (!(await isAdminEmail(user))) throw new ServiceError("This page is limited to Unnepo operators.", "forbidden", 403);
     return json(await profitability());
+  }
+  if (root === "admin" && action === "people-test" && request.method === "POST") {
+    if (!(await isAdminEmail(user))) throw new ServiceError("This page is limited to Unnepo operators.", "forbidden", 403);
+    return json(await peopleTest(user.id, await request.json()));
   }
   if (root === "admin" && action === "autofill" && request.method === "GET") {
     if (!(await isAdminEmail(user))) throw new ServiceError("This page is limited to Unnepo operators.", "forbidden", 403);

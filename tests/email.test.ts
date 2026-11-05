@@ -10,6 +10,7 @@ import { matchApplication, normalizeCompany, sameCompany, sameTitle } from "@/li
 import { processEmail, reviewEmail } from "@/lib/email/process";
 import { setClassifierForTests } from "@/lib/email/classify";
 import { applications } from "@/lib/apply/store";
+import { repo } from "@/lib/db/file-store";
 import { stageOf } from "@/lib/apply/stats";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { POST } from "@/app/api/[...slug]/route";
@@ -301,6 +302,17 @@ describe("processing forwarded emails", () => {
       expect(result.outcome).toBe("created");
     }
     expect((await applications.list(userId)).filter((app) => app.charged)).toEqual([]);
+  });
+
+  it("learns a company's email format from a recruiter's own address, but keeps nothing else from it", async () => {
+    const userId = await student();
+    setClassifierForTests(async () => '{"type":"interview","company":"Globex","job_title":"Analyst","confidence":0.95,"summary":"Globex wants to talk."}');
+    await processEmail(userId, { messageId: "<rec@x>", from: "Sam Lee <sam.lee@globex.com>", subject: "Interview", text: "Your application." }, "forward");
+    expect(await repo.getEmailFormat("globex.com")).toMatchObject({ pattern: "{first}.{last}", source: "forwarded email" });
+    await processEmail(userId, { messageId: "<ats@x>", from: "Sam Lee <sam.lee@greenhouse.io>", subject: "Interview", text: "Your application." }, "forward");
+    await processEmail(userId, { messageId: "<free@x>", from: "Sam Lee <sam.lee@gmail.com>", subject: "Interview", text: "Your application." }, "forward");
+    expect(await repo.getEmailFormat("greenhouse.io")).toBeNull();
+    expect(await repo.getEmailFormat("gmail.com")).toBeNull();
   });
 
   it("says whether any forwarded email has arrived, for Setup", async () => {

@@ -32,7 +32,7 @@ export type ApplyData = {
 };
 
 const ROLE_LABEL: Record<ApplicationContact["role"], string> = {
-  alumni: "From your school",
+  alumni: "School connection",
   job_poster: "Named on posting",
   recruiter: "Recruiter",
   hiring_manager: "Hiring manager",
@@ -41,13 +41,14 @@ const ROLE_LABEL: Record<ApplicationContact["role"], string> = {
 
 /** Where each email came from, and whether it was checked. */
 const EMAIL_SOURCE: Record<NonNullable<ApplicationContact["emailSource"]>, string> = {
-  apollo: "Verified · via Apollo",
-  hunter: "Verified · via Hunter",
-  job_posting: "Verified · from the posting",
-  pattern: "Verified · built from the company's email format",
-  website: "Verified · from the company's website",
-  likely: "Guessed from the company's email format · not checked",
-  guess: "Best guess (first.last) · not checked",
+  apollo: "Verified",
+  hunter: "Verified",
+  job_posting: "From the job posting",
+  pattern: "Verified",
+  website: "From the company's website",
+  likely: "Likely · follows the company's format, not checked yet",
+  cant_check: "Can't be checked · this company accepts every address",
+  guess: "Best guess · the company's format isn't known",
 };
 
 const OUTREACH: Array<[OutreachState, string]> = [["not_contacted", "Not contacted"], ["emailed", "Emailed"], ["replied", "Replied"], ["no_response", "No response"]];
@@ -438,7 +439,7 @@ function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onR
                     <button type="button" className={secondary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
                   </div>
                 ) : (
-                  <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} />
+                  <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} onReveal={(contactId) => act("/reveal-person", "POST", { applicationId: app.id, contactId })} onBounced={(contactId) => void act("/contact-bounced", "POST", { applicationId: app.id, contactId })} />
                 )}
                 <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-faint">
                   <span className="min-w-0">
@@ -1148,12 +1149,22 @@ function EmailBox({ contact, onEmail }: { contact: NonNullable<App["contacts"]>[
   );
 }
 
-function ContactsPanel({ app, school, onStatus, onRetry, onEmail }: { app: App; school: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void; onEmail: (contactId: string, edit?: EmailEdit) => Promise<void> }) {
+function ContactsPanel({ app, school, onStatus, onRetry, onEmail, onReveal, onBounced }: { app: App; school: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void; onEmail: (contactId: string, edit?: EmailEdit) => Promise<void>; onReveal: (contactId: string) => Promise<void>; onBounced: (contactId: string) => void }) {
   const contacts = app.contacts ?? [];
   const [copied, setCopied] = useState("");
   const [website, setWebsite] = useState("");
-  // No website means Apollo had nowhere to look, so the student can give one.
-  const needsSite = !app.companyDomain && contacts.length === 0 && (app.contactsStatus === "done" || app.contactsStatus === "failed");
+  const [showing, setShowing] = useState("");
+  // Nobody found: the student can correct the website, and has LinkedIn searches to go on.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (app.contactsStatus !== "finding") return;
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [app.contactsStatus]);
+  const cutOff = app.contactsStatus === "finding" && now - Date.parse(app.updatedAt) > 2 * 60 * 1000;
+  const noOne = contacts.length === 0 && (app.contactsStatus === "done" || app.contactsStatus === "failed" || cutOff);
+  const hidden = app.fillReport?.peopleHidden ?? {};
+  const revealsLeft = (app.fillReport?.peopleReveals ?? 0) < 3;
   async function copy(key: string, text: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -1170,32 +1181,34 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail }: { app: App; 
         <PostedBy app={app} />
         <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
           <button type="button" className={primary} onClick={() => onRetry()}>Find people to reach out to</button>
-          <p>Up to 5 people at {app.company}: from your school, recruiters, and the team, with their emails and links.</p>
+          <p>People at {app.company} worth reaching: recruiters, the team, and anyone you have something in common with.</p>
         </div>
       </div>
     );
   }
-  if (app.contactsStatus === "finding") return <PeopleSearching message={app.contactsMessage || `Searching for relevant people at ${app.company}…`} school={school} />;
+  if (app.contactsStatus === "finding" && !cutOff) return <PeopleSearching message={app.contactsMessage || `Searching for relevant people at ${app.company}…`} school={school} />;
   const links = app.fillReport?.peopleLinks ?? {};
   return (
     <div className="space-y-3">
       <PostedBy app={app} />
       {app.contactsMessage && <p className="text-xs text-faint">{app.contactsMessage}</p>}
       <HowWeSearched app={app} />
-      {needsSite ? (
-        <form className="flex flex-wrap items-center gap-2 text-sm" onSubmit={(event) => { event.preventDefault(); onRetry(website.trim()); }}>
-          <label className="sr-only" htmlFor={`site-${app.id}`}>{app.company}&apos;s website</label>
-          <input id={`site-${app.id}`} value={website} onChange={(event) => setWebsite(event.target.value)} placeholder={`${app.company}'s website, like acme.com`} className="min-w-0 flex-1 rounded-lg border border-line bg-card px-3 py-2 text-sm" />
-          <button type="submit" className={secondary} disabled={!website.trim()}>Search again</button>
-        </form>
-      ) : (
-        <>
-          {app.contactsStatus === "failed" && <button type="button" className={secondary} onClick={() => onRetry()}>Try again</button>}
-          {contacts.length === 0 && app.contactsStatus === "done" && (
-            <div className="flex flex-wrap items-center gap-3 text-sm text-muted"><p>No one found yet.</p><button type="button" className={secondary} onClick={() => onRetry()}>Search again</button></div>
-          )}
-        </>
-      )}
+      {noOne ? (
+        <div className="flex flex-col gap-3 rounded-xl border border-line p-4 text-sm">
+          <p className="m-0 font-medium">{cutOff || app.contactsStatus === "failed" ? "That search didn't finish." : `Try these for ${app.company}:`}</p>
+          <div className="flex flex-wrap gap-2">
+            {[["Recruiters", `recruiter ${app.company}`], ["People on the team", `${app.department || app.title} ${app.company}`], ...(school ? [[`${school} alumni`, `${school} ${app.company}`]] : [])].map(([label, keywords]) => (
+              <a key={label} className="inline-flex items-center rounded-lg border border-line px-2.5 py-1.5 text-xs text-ink hover:bg-white/5" href={`https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords })}`} target="_blank" rel="noreferrer">{label} on LinkedIn ↗</a>
+            ))}
+            <button type="button" className={secondary} onClick={() => onRetry()}>Search again</button>
+          </div>
+          <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => { event.preventDefault(); onRetry(website.trim()); }}>
+            <label className="text-xs text-muted" htmlFor={`site-${app.id}`}>Wrong company? Give its website:</label>
+            <input id={`site-${app.id}`} value={website} onChange={(event) => setWebsite(event.target.value)} placeholder="acme.com" className="min-w-0 flex-1 basis-40 rounded-lg border border-line bg-card px-3 py-2 text-sm" />
+            <button type="submit" className={secondary} disabled={!website.trim()}>Search this site</button>
+          </form>
+        </div>
+      ) : app.contactsStatus === "failed" ? <button type="button" className={secondary} onClick={() => onRetry()}>Try again</button> : null}
       {contacts.map((contact) => {
         // The one to email first: the most relevant person with an email (the list is ranked).
         const first = contact.id === (contacts.find((item) => item.email) ?? contacts[0])?.id && contacts.length > 1;
@@ -1218,7 +1231,12 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail }: { app: App; 
             <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
               {contact.email ? (
                 <button type="button" className="text-ink underline-offset-4 hover:underline" onClick={() => void copy(`${contact.id}:email`, contact.email!)}>{copied === `${contact.id}:email` ? "Copied ✓" : contact.email}</button>
+              ) : hidden[contact.name.toLowerCase()] ? (
+                revealsLeft ? (
+                  <button type="button" className={secondary} disabled={showing !== ""} onClick={async () => { setShowing(contact.id); await onReveal(contact.id); setShowing(""); }}>{showing === contact.id ? "Looking…" : "Show person"}</button>
+                ) : <span className="text-muted">You&apos;ve shown 3 people for this job</span>
               ) : <span className="text-muted">No email yet</span>}
+              {contact.email && <button type="button" aria-label={`The email to ${contact.name} bounced`} title="Tell Unnepo this email bounced, so it gets fixed for everyone" className="text-[11px] text-faint underline-offset-4 hover:text-white hover:underline" onClick={() => onBounced(contact.id)}>Bounced?</button>}
               {contact.emailSource && (
                 <span className={`text-[11px] ${contact.emailSource === "likely" ? "rounded-full border border-[#F5A524]/50 px-2 py-0.5 text-[#F5A524]" : "text-faint"}`}>
                   {EMAIL_SOURCE[contact.emailSource]}
@@ -1235,7 +1253,7 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail }: { app: App; 
               ))}
             </div>
             {/* Keyed on the saved email, so a newly written one replaces what's in the boxes. */}
-            <EmailBox key={`${contact.id}:${contact.emailSubject ?? ""}:${contact.emailBody ?? ""}`} contact={contact} onEmail={onEmail} />
+            {!hidden[contact.name.toLowerCase()] && <EmailBox key={`${contact.id}:${contact.emailSubject ?? ""}:${contact.emailBody ?? ""}`} contact={contact} onEmail={onEmail} />}
           </article>
         );
       })}

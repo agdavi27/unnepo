@@ -1,7 +1,11 @@
 import { serverConfig } from "@/lib/config";
 import { repo } from "@/lib/db/file-store";
 import { applications } from "@/lib/apply/store";
-import type { FillAttempt } from "@/lib/apply/types";
+import { findPeopleForApplication } from "@/lib/apply/contacts";
+import { ServiceError } from "@/lib/errors";
+import { profileState } from "@/lib/profile/service";
+import { withoutUserLimit } from "@/lib/providers/contacts/router";
+import type { FillAttempt, JobApplication } from "@/lib/apply/types";
 
 export async function profitability() {
   const db = await repo.snapshot();
@@ -153,9 +157,16 @@ export async function autofillProblems() {
     groups.set(key, group);
   }
   const searches = await applications.recentPeopleSearches();
+  const costed = searches.filter((search) => typeof search.costCents === "number");
   const people = {
     searched: searches.length,
     foundNobody: searches.filter((search) => !search.chosen).length,
+    // Searches since these were recorded: what they cost, and how many ended with an email and a checked email.
+    measured: costed.length,
+    averageCents: costed.length ? Math.round((costed.reduce((sum, search) => sum + (search.costCents ?? 0), 0) / costed.length) * 10) / 10 : 0,
+    withEmail: costed.filter((search) => (search.withEmail ?? 0) > 0).length,
+    withVerified: costed.filter((search) => (search.verified ?? 0) > 0).length,
+    providerErrors: searches.filter((search) => search.steps.some((step) => step.error)).length,
     // Which group the person came from: school, recruiter, department.
     byGroup: Object.entries(searches.reduce<Record<string, number>>((counts, search) => {
       const group = search.chosen ? (search.chosen.role === "alumni" ? "From the school" : search.chosen.role === "team_member" ? "Department" : "Recruiter") : "No one";
@@ -174,5 +185,30 @@ export async function autofillProblems() {
     problems: [...groups.values()].sort((a, b) => b.count - a.count || b.lastAt.localeCompare(a.lastAt)).slice(0, 100),
     sites: [...sites.values()].sort((a, b) => b.failed - a.failed || b.tried - a.tried).slice(0, 30),
     methods: [...methods.values()].sort((a, b) => b.tried - a.tried).slice(0, 30),
+  };
+}
+
+/**
+ * The operator's test of the people search on a real company: runs it as it runs for a student, and reports what
+ * each step found and what it cost. Nothing is saved on any job. It spends real money, within the overall daily limit.
+ */
+export async function peopleTest(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { company?: unknown; title?: unknown; website?: unknown };
+  const company = String(body.company ?? "").trim().slice(0, 200);
+  if (company.length < 2) throw new ServiceError("Say which company to test.", "company", 400);
+  const title = String(body.title ?? "").trim().slice(0, 200) || "Marketing Intern";
+  const website = String(body.website ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const app = {
+    id: "", userId, jobKey: "", jobUrl: "", ats: "other", title, company, companyDomain: website || null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null,
+    status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null, contactsStatus: "finding", contactsMessage: "", charged: true, attempts: 0, createdAt: "", updatedAt: "",
+  } as JobApplication;
+  const { profile } = await profileState(userId);
+  const started = Date.now();
+  const result = await withoutUserLimit(userId, () => findPeopleForApplication(userId, app, { school: profile.education[0]?.school ?? "", facts: { pastEmployers: profile.experience.map((job) => job.company).filter(Boolean) } })).catch((error: unknown) => ({ failed: error instanceof Error ? error.message : "failed" }));
+  if ("failed" in result) return { company, found: 0, failed: result.failed, seconds: Math.round((Date.now() - started) / 1000) };
+  return {
+    company, found: result.people.length, reveals: result.reveals, costCents: result.search.costCents ?? 0, withEmail: result.search.withEmail ?? 0, verified: result.search.verified ?? 0, seconds: Math.round((Date.now() - started) / 1000), notes: result.notes,
+    people: result.people.map((person) => ({ name: person.name, title: person.title, email: person.email, emailSource: person.emailSource, why: person.relevance })),
+    steps: result.search.steps.map((step) => `${step.step}${step.domain ? ` @ ${step.domain}` : ""}: ${step.error ? `failed (${step.error})` : step.found}`),
   };
 }

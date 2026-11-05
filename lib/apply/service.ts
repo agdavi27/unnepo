@@ -8,7 +8,7 @@ import { splitProfileList } from "@/lib/profile/lists";
 import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
-import { findPeopleForApplication, hunterReady, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
+import { MAX_REVEALS, checkBeforeWriting, findPeopleForApplication, hunterReady, revealHiddenPerson, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
 import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
@@ -16,7 +16,9 @@ import { applicationContacts, applicationProfiles, applications } from "@/lib/ap
 import { hasUnlimitedCredits } from "@/lib/apply/limits";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { removeEmailTextsFor } from "@/lib/email/store";
-import { profileReady } from "@/lib/profile/service";
+import { profileReady, profileState } from "@/lib/profile/service";
+import { sameCompany } from "@/lib/email/match";
+import { patternOf } from "@/lib/apply/email-guess";
 import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState, PostedRecruiter } from "@/lib/apply/types";
 
@@ -701,7 +703,8 @@ export async function markApplied(userId: string, raw: unknown) {
   return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }
 
-const STALE_MS = 5 * 60 * 1000;
+// A search can't run past 60 seconds, so one this quiet was cut off.
+const STALE_MS = 2 * 60 * 1000;
 
 const contactsBusy = (app: JobApplication) => (app.contactsStatus === "finding" || app.contactsStatus === "writing") && Date.now() - Date.parse(app.updatedAt) < STALE_MS;
 
@@ -725,8 +728,13 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const info = await student(userId);
   try {
     // Each step is saved as the job's message, so the page's spider can say what it's doing.
+    const { profile: resume } = await profileState(userId);
+    const others = (await applications.list(userId)).filter((other) => other.id !== app.id && sameCompany(other.company, app.company));
+    const before = await applicationContacts.list(userId, others.map((other) => other.id));
     found = await findPeopleForApplication(userId, app, {
       school: info.context.school,
+      facts: { pastEmployers: resume.experience.map((job) => job.company).filter(Boolean) },
+      known: before.filter((row) => row.email && !row.name.includes("*")).map((row) => ({ email: row.email!, name: row.name, verified: row.emailSource === "apollo" || row.emailSource === "hunter" || row.emailSource === "pattern" || row.emailSource === "website" })),
       progress: async (text) => { await applications.update(userId, app.id, { contactsMessage: text }); },
     });
   } catch (error) {
@@ -752,7 +760,7 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const latest = (await applications.get(userId, app.id)) ?? app;
   const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
   // Emails are written only when the student asks, one person at a time.
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleSearch: found.search, peopleLinks, ...(charged ? { personCharged: true } : {}) } });
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, ...(charged ? { personCharged: true } : {}) } });
 }
 
 /**
@@ -770,10 +778,17 @@ export async function writeContactEmail(userId: string, raw: unknown) {
     const row = await applicationContacts.update(userId, contact.id, { emailSubject: String(body.subject ?? contact.emailSubject ?? "").trim().slice(0, 200), emailBody: text });
     return { contact: row };
   }
+  // An address that was never checked gets checked now, before anyone writes to it.
+  let writeTo = contact;
+  const domain = contact.email?.split("@")[1];
+  if (body.followUp !== true && contact.email && domain && (contact.emailSource === "likely" || contact.emailSource === "guess")) {
+    const checked = await checkBeforeWriting(userId, contact.name, domain, contact.email).catch(() => null);
+    if (checked && (checked.email !== contact.email || checked.emailSource !== contact.emailSource)) writeTo = (await applicationContacts.update(userId, contact.id, checked)) ?? contact;
+  }
   const info = await student(userId);
   // "Write follow-up": a short nudge on the email already sent, which stays in the thread.
   const followUp = body.followUp === true && contact.emailBody ? { subject: contact.emailSubject ?? "", body: contact.emailBody, sentAt: app.fillReport?.emailedAt?.[contact.id] ?? null } : undefined;
-  const [email] = await writeOutreachEmails(userId, app, [contact], { name: info.user.name, resumeText: info.resumeText, profile: info.profileText }, { followUp }).catch((error: unknown) => {
+  const [email] = await writeOutreachEmails(userId, app, [writeTo], { name: info.user.name, resumeText: info.resumeText, profile: info.profileText }, { followUp }).catch((error: unknown) => {
     throw new ServiceError(`The email couldn't be written. ${error instanceof Error ? error.message : ""}`.trim(), "write_failed", 502);
   });
   if (!email?.body) throw new ServiceError("The email couldn't be written. Try again.", "write_failed", 502);
@@ -795,12 +810,73 @@ export async function retryContacts(userId: string, raw: unknown) {
   return { ok: true };
 }
 
+/** "Show person": one more person on a job's list is revealed, up to the job's limit. */
+export async function revealContact(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; contactId?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  const contact = (await applicationContacts.list(userId, [app.id])).find((row) => row.id === String(body.contactId ?? ""));
+  if (!contact) throw new ServiceError("That person wasn't found.", "not_found", 404);
+  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  const key = contact.name.toLowerCase();
+  const hidden = report.peopleHidden?.[key];
+  if (!hidden) throw new ServiceError("This person can't be looked up any further.", "not_found", 404);
+  if ((report.peopleReveals ?? 0) >= MAX_REVEALS) throw new ServiceError(`You've shown ${MAX_REVEALS} people for this job, which is the limit.`, "reveal_limit", 429);
+  const info = await student(userId);
+  // The first email on a job's list is what its credit pays for.
+  const unlimited = await hasUnlimitedCredits(userId);
+  const paid = Boolean(report.personCharged) || unlimited;
+  if (!paid && ((await repo.getAccount(userId))?.balance ?? 0) < 1) throw new ServiceError("You're out of credits. 1 credit finds the people at a company for one job.", "credits", 402);
+  const base = contact.relevance.replace(/^(Also|May have) [^.]+\.\s*/g, "").replace(/^(Also|May have) [^.]+\.\s*/g, "");
+  const shown = await revealHiddenPerson(userId, app, hidden, info.context.school, base);
+  const { [key]: done, ...rest } = report.peopleHidden ?? {};
+  void done;
+  let charged = Boolean(report.personCharged);
+  if (shown?.email && !paid) {
+    const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: `person:${userId}:${app.id}`, note: `A person at ${app.company.slice(0, 80)}`, entryType: "unlock_debit" });
+    charged = !spent.insufficient;
+  }
+  const latest = (await applications.get(userId, app.id)) ?? app;
+  const latestReport = latest.fillReport ?? report;
+  await applications.update(userId, app.id, { fillReport: {
+    ...latestReport, peopleHidden: rest, peopleReveals: (latestReport.peopleReveals ?? 0) + 1, personCharged: charged || latestReport.personCharged,
+    ...(shown ? { peopleLinks: { ...(latestReport.peopleLinks ?? {}), [shown.name.toLowerCase()]: shown.links } } : {}),
+  } });
+  if (!shown) {
+    await applicationContacts.update(userId, contact.id, { relevance: "Apollo couldn't confirm this person still works here." });
+    return { ok: true, gone: true };
+  }
+  const { links, ...fields } = shown;
+  void links;
+  await applicationContacts.update(userId, contact.id, fields);
+  return { ok: true, gone: false };
+}
+
+/** The student's email bounced: the address goes, and so does the company's format unless a reply has proved it. */
+export async function contactBounced(userId: string, raw: unknown) {
+  const contactId = String((raw as { contactId?: unknown } | null)?.contactId ?? "");
+  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
+  const contact = (await applicationContacts.list(userId, [app.id])).find((row) => row.id === contactId);
+  if (!contact) throw new ServiceError("That person wasn't found.", "not_found", 404);
+  const domain = contact.email?.split("@")[1];
+  if (domain && contact.email) {
+    const format = await repo.getEmailFormat(domain);
+    if (format?.pattern && format.source !== "replied" && patternOf(contact.email, contact.name) === format.pattern) await repo.setEmailFormat(domain, { pattern: null, acceptAll: format.acceptAll, source: "bounced" });
+  }
+  await applicationContacts.update(userId, contact.id, { email: null, emailSource: null, relevance: `${contact.relevance} Their last email bounced.`.slice(0, 400) });
+  return { ok: true };
+}
+
 export async function updateOutreach(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { contactId?: unknown; status?: unknown; followedUp?: unknown };
   const status = String(body.status) as OutreachState;
   if (!OUTREACH_STATES.includes(status)) throw new ServiceError("Choose a valid status.", "status", 400);
   const row = await applicationContacts.update(userId, String(body.contactId ?? "").slice(0, 80), { outreachStatus: status });
   if (!row) throw new ServiceError("That contact wasn't found.", "not_found", 404);
+  // A reply proves the address works, so its format is right for everyone at that company.
+  if (status === "replied" && row.email) {
+    const pattern = patternOf(row.email, row.name);
+    if (pattern) await repo.setEmailFormat(row.email.split("@")[1], { pattern, acceptAll: false, source: "replied" }).catch(() => undefined);
+  }
   // When they were emailed, for the reminder to follow up five business days later.
   const app = await applications.get(userId, row.applicationId);
   if (app) {

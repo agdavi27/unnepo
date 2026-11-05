@@ -59,13 +59,24 @@ export async function spentTodayCents(userId?: string) {
     .reduce((sum, item) => sum + item.costCents, 0);
 }
 
+// The operator's own test run of many companies isn't one student's day. The overall daily limit still applies.
+const noUserLimit = new Set<string>();
+export async function withoutUserLimit<T>(userId: string, run: () => Promise<T>) {
+  noUserLimit.add(userId);
+  try {
+    return await run();
+  } finally {
+    noUserLimit.delete(userId);
+  }
+}
+
 export async function assertSpendAllowed(userId: string | null, additionalCents: number) {
   const config = serverConfig();
   const [globalSpend, userSpend] = await Promise.all([spentTodayCents(), userId ? spentTodayCents(userId) : Promise.resolve(0)]);
   if (globalSpend + additionalCents > config.dailyGlobalSpendCents) {
     throw new ServiceError("Daily contact provider budget has been reached. Try again tomorrow.", "spend_limit", 429);
   }
-  if (userId && userSpend + additionalCents > config.dailyUserSpendCents) {
+  if (userId && !noUserLimit.has(userId) && userSpend + additionalCents > config.dailyUserSpendCents) {
     throw new ServiceError("Your daily lookup budget has been reached.", "user_spend_limit", 429);
   }
 }
@@ -175,6 +186,12 @@ function personPatch(person: Record<string, unknown>, contact: Contact): Partial
   return patch;
 }
 
+/** Where a revealed person has been: the employers and schools on their history, to confirm what they share with a student. */
+function employers(person: Record<string, unknown> | null) {
+  const history = person?.employment_history;
+  return Array.isArray(history) ? history.map((item) => String((item as { organization_name?: unknown }).organization_name ?? "").trim()).filter(Boolean) : [];
+}
+
 /** Apollo bulk match takes at most 10 people per request. */
 const APOLLO_BULK_SIZE = 10;
 
@@ -184,7 +201,7 @@ const APOLLO_BULK_SIZE = 10;
  */
 export async function enrichPeopleBatch(contacts: Contact[], userId: string, report: { error?: string } = {}) {
   // `guess`: an address Apollo has but couldn't verify, worth checking another way.
-  const results = new Map<string, { email: string | null; emailStatus: Contact["emailStatus"]; patch: Partial<Contact>; guess?: string | null }>();
+  const results = new Map<string, { email: string | null; emailStatus: Contact["emailStatus"]; patch: Partial<Contact>; guess?: string | null; history: string[] }>();
   const apolloKey = await readApolloKey();
   if (!apolloKey) return results;
   const perPerson = estimateRequestCost("enrich").cents;
@@ -232,7 +249,7 @@ export async function enrichPeopleBatch(contacts: Contact[], userId: string, rep
         const email = person && typeof person.email === "string" ? person.email : null;
         const verified = Boolean(email) && person?.email_status === "verified" && isPersonalWorkEmail(email ?? "");
         const patch = person ? personPatch(person, contact) : {};
-        results.set(contact.id, { email: verified ? email : null, emailStatus: verified ? "verified" : email ? "unverified" : "unavailable", patch, guess: !verified && email && isPersonalWorkEmail(email) ? email : null });
+        results.set(contact.id, { email: verified ? email : null, emailStatus: verified ? "verified" : email ? "unverified" : "unavailable", patch, guess: !verified && email && isPersonalWorkEmail(email) ? email : null, history: employers(person) });
       });
       await recordUsage({ userId, provider: "apollo", operation: "enrich", success: true, latencyMs: Date.now() - started, costCents, estimated: true });
     } catch (error) {

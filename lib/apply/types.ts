@@ -89,6 +89,9 @@ export type FillReport = {
   peopleSearch?: PeopleSearch;
   /** Social links for each listed person, by name: the contacts table keeps only LinkedIn. */
   peopleLinks?: Record<string, Array<{ label: string; url: string }>>;
+  /** People on the list not revealed yet, by the name shown, and how many reveals this job has used. */
+  peopleHidden?: Record<string, HiddenPerson>;
+  peopleReveals?: number;
   /** When the student marked each person (by contact id) as emailed, for follow-up reminders. */
   emailedAt?: Record<string, string>;
   /** The credit for this job's person was spent, so searching again is free. */
@@ -181,7 +184,9 @@ export type ContactRole = "alumni" | "job_poster" | "recruiter" | "hiring_manage
 export type PeopleStep = { step: string; domain: string; found: number; error?: string };
 
 /** What the last people search tried, kept so "no one found" can be explained and fixed. */
-export type PeopleSearch = { at: string; company: string; domains: string[]; domain: string | null; school: string; steps: PeopleStep[]; chosen: { name: string; role: ContactRole; email: boolean } | null };
+export type PeopleSearch = { at: string; company: string; domains: string[]; domain: string | null; school: string; steps: PeopleStep[]; chosen: { name: string; role: ContactRole; email: boolean } | null; /** What this search spent, in cents, and how it went: for the admin page. */ costCents?: number; listed?: number; withEmail?: number; verified?: number };
+/** Someone on a job's list whose full name hasn't been paid for yet: what "Show person" needs. */
+export type HiddenPerson = { externalId: string; firstName: string; lastName: string; company: string; companyDomain: string | null; maybe: string[] };
 export type OutreachState = "not_contacted" | "emailed" | "replied" | "no_response";
 
 export type ApplicationContact = {
@@ -194,7 +199,7 @@ export type ApplicationContact = {
   title: string;
   email: string | null;
   /** "pattern": built from the company's email format and verified; "website": found on its site and verified; "likely": built from the format but couldn't be checked. */
-  emailSource: "apollo" | "hunter" | "job_posting" | "pattern" | "website" | "likely" | "guess" | null;
+  emailSource: "apollo" | "hunter" | "job_posting" | "pattern" | "website" | "likely" | "cant_check" | "guess" | null;
   relevance: string;
   linkedinUrl: string | null;
   photoUrl: string | null;

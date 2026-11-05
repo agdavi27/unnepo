@@ -229,7 +229,7 @@ export const applicationContacts = {
     });
   },
 
-  async update(userId: string, contactId: string, patch: Partial<Pick<ApplicationContact, "outreachStatus" | "emailSubject" | "emailBody">>) {
+  async update(userId: string, contactId: string, patch: Partial<Pick<ApplicationContact, "outreachStatus" | "emailSubject" | "emailBody" | "name" | "email" | "emailSource" | "linkedinUrl" | "photoUrl" | "relevance">>) {
     const next = { ...patch, updatedAt: nowIso() };
     if (onTables()) {
       const { data, error } = await supabaseTables().from("application_contacts").update(toRow(next, CONTACT_COLUMNS)).eq("user_id", userId).eq("id", contactId).select("*").maybeSingle();

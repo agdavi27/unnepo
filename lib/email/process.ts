@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
-import { id, nowIso } from "@/lib/db/file-store";
+import { id, nowIso, repo } from "@/lib/db/file-store";
 import { applications } from "@/lib/apply/store";
 import { findPostingLater } from "@/lib/apply/find-posting";
 import { minimalApplication } from "@/lib/apply/service";
 import type { ApplicationOutcome, FillReport, JobApplication, StatusChange } from "@/lib/apply/types";
 import { cleanCompanyName } from "@/lib/apply/job-title";
 import { classifyEmail, type Classification } from "@/lib/email/classify";
-import { passesPrefilter, senderDomain, type InboundEmail } from "@/lib/email/filter";
+import { ATS_DOMAINS, passesPrefilter, senderDomain, type InboundEmail } from "@/lib/email/filter";
+import { patternOf } from "@/lib/apply/email-guess";
+import { isPersonalWorkEmail } from "@/lib/providers/contacts/router";
 import { matchApplication } from "@/lib/email/match";
 import { jobLinksIn } from "@/lib/email/links";
 import { emailEvents, emailTexts, messageKey } from "@/lib/email/store";
@@ -131,6 +133,20 @@ export async function applyEmail(userId: string, job: Classification, at: string
   return { outcome: "updated", applicationId: target.id };
 }
 
+const FREE_MAIL = /^(gmail|googlemail|outlook|hotmail|live|yahoo|ymail|aol|icloud|me|proton|protonmail)\./i;
+
+/** A recruiter's own address teaches the company's email format, free. Only the format is kept, never the address. */
+async function learnSenderFormat(email: InboundEmail) {
+  const sender = email.from.match(/^\s*"?([^"<]+?)"?\s*<([^>]+)>/);
+  if (!sender) return;
+  const [name, address] = [sender[1].trim(), sender[2].trim().toLowerCase()];
+  const domain = senderDomain(address);
+  if (!domain || FREE_MAIL.test(domain) || ATS_DOMAINS.some((item) => domain === item || domain.endsWith(`.${item}`)) || !isPersonalWorkEmail(address)) return;
+  const pattern = patternOf(address, name);
+  if (!pattern || (await repo.getEmailFormat(domain))?.pattern) return;
+  await repo.setEmailFormat(domain, { pattern, acceptAll: false, source: "forwarded email" });
+}
+
 export async function processEmail(userId: string, email: InboundEmail, source: "forward" | "paste"): Promise<Processed> {
   const key = keyOf(email);
   if (await emailEvents.seen(userId, key)) return { outcome: "duplicate" };
@@ -151,6 +167,7 @@ export async function processEmail(userId: string, email: InboundEmail, source: 
   }
 
   const job = await classifyEmail(email);
+  if (job.type !== "not_job_related") await learnSenderFormat(email).catch(() => undefined);
   const jobLinks = jobLinksIn(email);
   const fields = { kind: job.type, company: cleanCompanyName(job.company) || job.company, jobTitle: job.job_title, location: job.location ?? null, jobNumber: job.job_number ?? null, jobLinks, confidence: job.confidence, summary: job.summary };
   const keepText = (eventId: string) => emailTexts.save(userId, eventId, { from: email.from, subject: email.subject, text: email.text }).catch((error) => console.error("email text not saved", error instanceof Error ? error.message : ""));

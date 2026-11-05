@@ -65,10 +65,11 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
         <p>We share only what each service needs to do its job:</p>
         <ul>
           <li><strong>Vercel</strong> hosts the website.</li>
+          <li><strong>MillionVerifier</strong>, when we use it, receives a work email address to check that it exists.</li>
           <li><strong>Hunter</strong> receives the names and company domains of people you&apos;re trying to reach, to find and verify their work emails.</li>
           <li><strong>Supabase</strong> stores the database and resume files.</li>
           <li><strong>Apollo.io</strong> receives the company and kinds of roles you&apos;re looking for (such as recruiters) to find people at companies you applied to and verify their emails.</li>
-          <li><strong>Anthropic</strong> receives your profile, resume text, a job&apos;s application questions, and emails you forward or paste, so its AI can prepare answers, drafts, highlights, and cover letters and read those emails. It also receives a job&apos;s company, title, and location to search the web for its posting. Anthropic does not use this data to train its models.</li>
+          <li><strong>Anthropic</strong> receives your profile, resume text, a job&apos;s application questions, and emails you forward or paste, so its AI can prepare answers, drafts, highlights, and cover letters and read those emails. It also receives a job&apos;s company, title, and location to search the web for its posting or for people who work there. Anthropic does not use this data to train its models.</li>
           <li><strong>Postmark</strong> receives the emails you forward to your Unnepo address and passes them to us.</li>
           <li><strong>Resend</strong> delivers account emails such as verification links.</li>
           <li><strong>Stripe</strong> processes payments if you buy a plan. We never see or store your full card number.</li>

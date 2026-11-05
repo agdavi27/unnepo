@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { repo } from "@/lib/db/file-store";
 import { setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
-import { buildEmail, emailsOnPage, guessEmail, learnFormat, nameParts, patternFromLocals, patternOf, robotsAllows } from "@/lib/apply/email-guess";
+import { buildEmail, checkEmail, emailsOnPage, guessEmail, learnFormat, nameParts, patternFromLocals, patternOf, robotsAllows } from "@/lib/apply/email-guess";
 import { useTempDb } from "./helpers";
 
 beforeEach(() => {
@@ -106,7 +106,7 @@ describe("guessing one person's email", () => {
   it("calls a catch-all company's address likely, not verified, and stops checking", async () => {
     const checked = hunter([], { acceptAll: true });
     const guess = await guessEmail("u1", "Jane Doe", "acme.com", { pattern: "{first}.{last}", acceptAll: false, source: "apollo", known: [] }, [], { checks: 6 });
-    expect(guess).toEqual({ email: "jane.doe@acme.com", verified: false, source: "likely" });
+    expect(guess).toEqual({ email: "jane.doe@acme.com", verified: false, source: "likely", uncheckable: true });
     expect(checked).toHaveLength(1);
     expect((await repo.getEmailFormat("acme.com"))?.acceptAll).toBe(true);
   });
@@ -129,5 +129,25 @@ describe("guessing one person's email", () => {
     const guess = await guessEmail("u1", "Jane Doe", "acme.com", { pattern: "{first}.{last}", acceptAll: false, source: "website", known: [{ email: "jdoe@acme.com", name: "Jane Doe" }] }, [], { checks: 6 });
     expect(guess).toEqual({ email: "jdoe@acme.com", verified: true, source: "website" });
     expect(checked).toEqual(["jdoe@acme.com"]);
+  });
+});
+
+describe("checking an address with the cheaper checker", () => {
+  it("uses MillionVerifier when its key is set, and reads its answers", async () => {
+    process.env.MILLIONVERIFIER_API_KEY = "mv";
+    const answers: Record<string, string> = { "good@acme.com": "ok", "gone@acme.com": "invalid", "any@acme.com": "catch_all", "odd@acme.com": "unknown" };
+    setContactFetcher(async (input) => {
+      const url = new URL(String(input));
+      expect(url.hostname).toBe("api.millionverifier.com");
+      return Response.json({ result: answers[url.searchParams.get("email") ?? ""] });
+    });
+    try {
+      expect(await checkEmail("u1", "good@acme.com")).toBe("valid");
+      expect(await checkEmail("u1", "gone@acme.com")).toBe("invalid");
+      expect(await checkEmail("u1", "any@acme.com")).toBe("accept_all");
+      expect(await checkEmail("u1", "odd@acme.com")).toBe("unknown");
+    } finally {
+      delete process.env.MILLIONVERIFIER_API_KEY;
+    }
   });
 });

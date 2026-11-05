@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setPeopleSearcherForTests } from "@/lib/apply/people-web";
+import { findPeopleForApplication, mixedList, placeBonus } from "@/lib/apply/contacts";
 import { repo } from "@/lib/db/file-store";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { saveStructuredProfile } from "@/lib/services/workspace";
@@ -17,7 +19,7 @@ import { supportedBy } from "@/lib/apply/questions";
 import { bestOption } from "@/lib/apply/options";
 import { checkSchool } from "@/lib/school-plans";
 import { classYearOf } from "@/lib/profile/student";
-import { applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
+import { contactBounced, revealContact, applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -535,7 +537,7 @@ describe("people after applying", () => {
   type Search = { q_organization_domains_list: string[]; person_titles?: string[]; q_keywords?: string; contact_email_status?: string[] };
 
   /** A student who applied to Acme's Greenhouse job, and an Apollo that answers searches with `people`. */
-  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }>; revealFails?: boolean; hunterEmails?: Array<{ value: string; first_name: string; last_name: string }> } = {}) {
+  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { reveal?: Record<string, Record<string, unknown>>; verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }>; revealFails?: boolean; hunterEmails?: Array<{ value: string; first_name: string; last_name: string; verification?: { status: string } }> } = {}) {
     process.env.APOLLO_API_KEY = "apollo";
     delete process.env.HUNTER_API_KEY;
     process.env.ANTHROPIC_API_KEY = "anthropic";
@@ -566,7 +568,7 @@ describe("people after applying", () => {
       if (url.includes("bulk_match") && options.revealFails) return Response.json({ error: "api/v1/people/bulk_match is not accessible with this api_key on a free plan." }, { status: 403 });
       if (url.includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
-        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@acme.com`, email_status: options.verified?.includes(item.id) ? "verified" : "guessed", photo_url: `https://img.example.com/${item.id}.jpg`, ...(options.twitter?.includes(item.id) ? { twitter_url: `https://x.com/${item.id}` } : {}) })) });
+        return Response.json({ matches: details.map((item) => ({ id: item.id, email: `${item.id}@acme.com`, email_status: options.verified?.includes(item.id) ? "verified" : "guessed", photo_url: `https://img.example.com/${item.id}.jpg`, ...(options.twitter?.includes(item.id) ? { twitter_url: `https://x.com/${item.id}` } : {}), ...(options.reveal?.[item.id] ?? {}) })) });
       }
       return new Response("unexpected", { status: 500 });
     });
@@ -587,7 +589,7 @@ describe("people after applying", () => {
     // The posting's recruiter first, then the school, campus recruiters, recruiters, the team; executives last. Five in all.
     expect(contacts.map((item) => [item.rank, item.role, item.name, item.email, item.emailSource])).toEqual([
       [1, "job_poster", "Jordan Smith", "jordan.smith@acme.com", "job_posting"],
-      [2, "alumni", "Casey Park", "a1@acme.com", "apollo"],
+      [2, "alumni", "Casey Park", "casey.park@acme.com", "likely"],
       [3, "recruiter", "Sam Lee", "sam.lee@acme.com", "likely"],
       [4, "recruiter", "Avery Kim", "avery.kim@acme.com", "likely"],
       [5, "team_member", "Riley Chen", "riley.chen@acme.com", "likely"],
@@ -603,6 +605,8 @@ describe("people after applying", () => {
     expect(edited.contact).toMatchObject({ emailSubject: "Hi", emailBody: "My own words." });
     // The format came from the posting's own recruiter's address, and is kept for every student.
     expect(application.contactsMessage).toContain("usual format (first.last@acme.com)");
+    // No reveals were paid for: everyone's name was already known and the format came free.
+    expect((await repo.snapshot()).usage.filter((row) => row.operation === "enrich" && row.success)).toEqual([]);
     expect((await repo.getEmailFormat("acme.com"))?.pattern).toBe("{first}.{last}");
     expect(application).toMatchObject({ contactsStatus: "done", companyDomain: "acme.com" });
     expect((await repo.getCompanyDomains(["Acme Corp"]))["acme corp"]).toEqual(["acme.com"]);
@@ -614,7 +618,8 @@ describe("people after applying", () => {
   });
 
   it("writes first.last as a best guess when the company's format is unknown, and keeps each person's links", async () => {
-    const { application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []), { poster: false, twitter: ["r1"] });
+    const hiddenName = { ...person("r1", "Avery", "", "Recruiter"), last_name_obfuscated: "K***m" };
+    const { application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [hiddenName] : []), { poster: false, twitter: ["r1"], reveal: { r1: { last_name: "Kim" } } });
     expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Avery Kim", "avery.kim@acme.com", "guess"]]);
     expect(application.contactsMessage).toContain("best guess");
     expect(application.fillReport?.peopleLinks?.["avery kim"]).toEqual([{ label: "LinkedIn", url: "https://linkedin.com/in/r1" }, { label: "X", url: "https://x.com/r1" }]);
@@ -623,14 +628,16 @@ describe("people after applying", () => {
   it("shows blurred last names as an initial with no email, unless Hunter knows the person, and says why", async () => {
     const blurred = (id: string, first: string, hidden: string, title: string) => ({ ...person(id, first, "", title), last_name_obfuscated: hidden });
     const { application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [blurred("r1", "Avery", "Ki***l", "Recruiter"), blurred("r2", "Sam", "Le***e", "Recruiter")] : []), {
-      poster: false, revealFails: true, hunterEmails: [{ value: "avery.kimball@acme.com", first_name: "Avery", last_name: "Kimball" }],
+      poster: false, revealFails: true, hunterEmails: [{ value: "avery.kimball@acme.com", first_name: "Avery", last_name: "Kimball", verification: { status: "valid" } }],
     });
     expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([
       ["Avery Kimball", "avery.kimball@acme.com", "hunter"],
       ["Sam L.", null, null],
     ]);
-    expect(application.contactsMessage).toBe("Apollo didn't reveal 1 person's last name, so they show by first name with no email. Find them on LinkedIn. Apollo said: (403): api/v1/people/bulk_match is not accessible with this api_key on a free plan.");
-    expect(application.fillReport?.peopleSearch?.steps.at(-1)).toMatchObject({ step: "Full names", found: 1, error: expect.stringContaining("free plan") });
+    expect(application.contactsMessage).toBe("");
+    // Hunter's verified address was enough: nothing was paid to Apollo, so Sam can be shown when asked.
+    expect(application.fillReport?.peopleSearch?.steps.at(-1)).toMatchObject({ step: "Full names", found: 1 });
+    expect(Object.keys(application.fillReport?.peopleHidden ?? {})).toEqual(["sam l."]);
     expect(application.fillReport?.peopleLinks?.["sam l."]?.[0]?.label).toBe("LinkedIn");
   });
 
@@ -663,6 +670,7 @@ describe("people after applying", () => {
     const blurred = (id: string, first: string) => ({ ...person(id, first, "", "Recruiter"), last_name_obfuscated: "K***m" });
     const noEmail = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [blurred("r1", "Avery")] : []), { poster: false, revealFails: true });
     expect(noEmail.contacts.map((item) => item.email)).toEqual([null]);
+    expect(noEmail.application.contactsMessage).toContain("Apollo said: (403)");
     expect((await repo.listLedger(noEmail.userId)).filter((entry) => entry.entryType === "unlock_debit")).toHaveLength(0);
   });
 
@@ -749,9 +757,145 @@ describe("people after applying", () => {
     const { contacts, application } = await appliedWith(() => [], { poster: false });
     expect(contacts).toEqual([]);
     expect(application).toMatchObject({ contactsStatus: "done", companyDomain: null });
-    expect(application.contactsMessage).toMatch(/Apollo found no one at Acme/);
+    expect(application.contactsMessage).toMatch(/None of the sources Unnepo checks know anyone at Acme/);
     expect(application.fillReport?.peopleSearch?.steps.length).toBeGreaterThanOrEqual(3);
     expect(await repo.getCompanyDomains(["Acme Corp"])).toEqual({});
+  });
+
+  describe("finding people the cheapest way that works", () => {
+    const blurred = (id: string, first: string, hidden: string, title: string, more = {}) => ({ ...person(id, first, "", title), last_name_obfuscated: hidden, linkedin_url: undefined, ...more }) as unknown as ReturnType<typeof person>;
+    const paid = async (userId: string, provider: string, operation: string) => (await repo.snapshot()).usage.filter((row) => row.userId === userId && row.provider === provider && row.operation === operation && row.success).length;
+
+    it("searches wider, for free, when the targeted searches find no one", async () => {
+      const { contacts, application } = await appliedWith((search) => ((search as { person_seniorities?: string[] }).person_seniorities ? [person("w1", "Morgan", "Bell", "Office Coordinator")] : []), { poster: false });
+      expect(contacts.map((item) => [item.name, item.title])).toEqual([["Morgan Bell", "Office Coordinator"]]);
+      expect(contacts[0].relevance).toBe("Office Coordinator at Acme Corp.");
+      expect(application.fillReport?.peopleSearch?.steps.map((step) => step.step)).toContain("Anyone at the company");
+    });
+
+    it("searches by the company's name when no website works, and keeps only people who work there", async () => {
+      const elsewhere = { ...person("x1", "Lee", "Fox", "Recruiter"), organization: { name: "Other Inc", primary_domain: "other.com" } };
+      const { contacts } = await appliedWith((search) => (search.q_keywords === "Acme Corp" ? [person("n1", "Dana", "Ward", "Recruiter"), elsewhere] : []), { poster: false });
+      expect(contacts.map((item) => item.name)).toEqual(["Dana Ward"]);
+    });
+
+    it("reveals only the top person, and leaves the rest for Show person", async () => {
+      const { userId, application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [blurred("r1", "Sam", "Le***e", "University Recruiter"), blurred("r2", "Avery", "Ki***m", "Recruiter"), blurred("r3", "Pat", "Do***e", "Recruiter")] : []), { poster: false, verified: ["r1"], reveal: { r1: { last_name: "Leone" }, r2: { last_name: "Kim" } } });
+      expect(await paid(userId, "apollo", "enrich")).toBe(1);
+      expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Sam Leone", "r1@acme.com", "apollo"], ["Avery K.", null, null], ["Pat D.", null, null]]);
+      const hidden = application.fillReport?.peopleHidden ?? {};
+      expect(Object.keys(hidden)).toEqual(["avery k.", "pat d."]);
+      // Showing one more pays for one more, and fills them in.
+      setContactFetcherOnce(contacts);
+      await revealContact(userId, { applicationId: application.id, contactId: contacts[1].id });
+      const after = await applicationContacts.list(userId, [application.id]);
+      expect(after[1]).toMatchObject({ name: "Avery Kim", emailSource: "apollo", email: "r2@acme.com" });
+      expect(await paid(userId, "apollo", "enrich")).toBe(2);
+      const report = (await applications.get(userId, application.id))!.fillReport!;
+      expect(report.peopleReveals).toBe(2);
+      expect(Object.keys(report.peopleHidden ?? {})).toEqual(["pat d."]);
+      // The job's limit.
+      await applications.update(userId, application.id, { fillReport: { ...report, peopleReveals: 3 } });
+      await expect(revealContact(userId, { applicationId: application.id, contactId: after[2].id })).rejects.toThrow(/limit/);
+    });
+    function setContactFetcherOnce(contacts: Array<{ id: string }>) {
+      void contacts;
+      setContactFetcher(async (_input, init) => {
+        const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
+        return Response.json({ matches: details.map((item) => ({ id: item.id, last_name: "Kim", email: `${item.id}@acme.com`, email_status: "verified" })) });
+      });
+    }
+
+    it("uses one Hunter search instead of paying for reveals when Hunter knows the people", async () => {
+      const { userId, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [blurred("r1", "Avery", "Ki***l", "Recruiter"), blurred("r2", "Sam", "Le***e", "Recruiter")] : []), {
+        poster: false,
+        hunterEmails: [{ value: "avery.kimball@acme.com", first_name: "Avery", last_name: "Kimball", verification: { status: "valid" } }, { value: "sam.leone@acme.com", first_name: "Sam", last_name: "Leone" }],
+      });
+      expect(await paid(userId, "apollo", "enrich")).toBe(0);
+      expect(await paid(userId, "hunter", "domain_search")).toBe(1);
+      expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Avery Kimball", "avery.kimball@acme.com", "hunter"], ["Sam Leone", "sam.leone@acme.com", "likely"]]);
+    });
+
+    it("moves to the next person when an email fails, and stops paying after two reveals", async () => {
+      const three = [blurred("r1", "Avery", "Ki***m", "Recruiter"), blurred("r2", "Sam", "Le***e", "Recruiter"), blurred("r3", "Pat", "Do***e", "Recruiter")];
+      const { userId, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? three : []), { poster: false, hunterValid: ["nobody@acme.com"], reveal: { r1: { last_name: "Kim" }, r2: { last_name: "Leone" }, r3: { last_name: "Doe" } } });
+      expect(await paid(userId, "apollo", "enrich")).toBe(2);
+      expect(contacts.map((item) => item.name)).toEqual(["Avery Kim", "Sam Leone", "Pat D."]);
+    });
+
+    it("drops someone Apollo says has left for another company", async () => {
+      const elsewhere = { ...blurred("r1", "Avery", "Ki***m", "Recruiter") };
+      const { contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [{ ...elsewhere, organization: { name: "Acme Holdings", primary_domain: "acme.com" } }, blurred("r2", "Sam", "Le***e", "Recruiter")] : []), {
+        poster: false, verified: ["r2"], reveal: { r1: { last_name: "Kim", organization: { primary_domain: "other.com" } }, r2: { last_name: "Leone" } },
+      });
+      expect(contacts.map((item) => item.name)).toEqual(["Sam Leone"]);
+    });
+
+    it("only says someone shares a school or employer once their history confirms it", async () => {
+      const { contacts } = await appliedWith((search) => (search.q_keywords === "Colby College" ? [blurred("a1", "Casey", "Pa***k", "Product Manager"), blurred("a2", "Jo", "Ra***y", "Analyst")] : []), {
+        poster: false, verified: ["a1"], reveal: { a1: { last_name: "Park", employment_history: [{ organization_name: "Colby College" }, { organization_name: "Acme Corp" }] } },
+      });
+      expect(contacts[0].relevance).toMatch(/^Also went to Colby College\./);
+      expect(contacts[1].relevance).toMatch(/^May have gone to Colby College\./);
+    });
+
+    it("ranks a person sharing a past employer up, and looks for them with free searches", async () => {
+      process.env.APOLLO_API_KEY = "apollo";
+      setContactFetcher(async (input, init) => {
+        const url = String(input);
+        if (!url.includes("api_search")) return Response.json({ organizations: [] });
+        const search = JSON.parse(String(init?.body));
+        if (search.q_keywords === "Patagonia") return Response.json({ people: [person("t1", "Riley", "Chen", "Analyst")] });
+        if (search.person_titles?.includes("recruiter")) return Response.json({ people: [person("r1", "Avery", "Kim", "Recruiter")] });
+        return Response.json({ people: [] });
+      });
+      const app = { id: "", userId: "u", jobKey: "", jobUrl: "", ats: "other", title: "Analyst", company: "Acme Corp", companyDomain: "acme.com", department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: null, contactsStatus: "finding", contactsMessage: "", charged: true, attempts: 0, createdAt: "", updatedAt: "" } as unknown as Parameters<typeof findPeopleForApplication>[1];
+      const found = await findPeopleForApplication("u", app, { facts: { pastEmployers: ["Patagonia", "Acme Corp"] } });
+      expect(found.people.map((item) => item.name)).toEqual(["Avery Kim", "Riley Chen"]);
+      expect(found.people[1].relevance).toMatch(/^May have worked at Patagonia\./);
+      expect(found.search.steps.map((step) => step.step)).not.toContain("Also at Acme Corp");
+    });
+
+    it("searches public pages last, and keeps only people the page really names", async () => {
+      setPeopleSearcherForTests(async () => { setJobPageFetcherForTests(async () => new Response("<h1>Acme team</h1><p>Robin Vale leads people.</p>", { status: 200 })); return [{ name: "Robin Vale", title: "Head of People", url: "https://acme.com/team" }, { name: "Made Up", title: "Recruiter", url: "https://acme.com/team" }, { name: "Link Person", title: "Recruiter", url: "https://www.linkedin.com/in/x" }]; });
+      try {
+        const { contacts, application } = await appliedWith(() => [], { poster: false, companies: [{ name: "Acme Corp", primary_domain: "acme.com" }] });
+        expect(contacts.map((item) => [item.name, item.role, item.email])).toEqual([["Robin Vale", "recruiter", "robin.vale@acme.com"]]);
+        expect(application.fillReport?.peopleSearch?.steps.map((step) => step.step)).toContain("Public web pages");
+      } finally {
+        setPeopleSearcherForTests(null);
+        setJobPageFetcherForTests(null);
+      }
+    });
+
+    it("forgets a format that bounced, and trusts one a reply proved", async () => {
+      await repo.setEmailFormat("acme.com", { pattern: "{first}.{last}", acceptAll: false, source: "website" });
+      const { userId, application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []), { poster: false });
+      expect(contacts[0].email).toBe("avery.kim@acme.com");
+      await contactBounced(userId, { applicationId: application.id, contactId: contacts[0].id });
+      expect((await repo.getEmailFormat("acme.com"))?.pattern).toBeNull();
+      expect((await applicationContacts.list(userId, [application.id]))[0]).toMatchObject({ email: null, emailSource: null });
+      await repo.setEmailFormat("acme.com", { pattern: "{f}{last}", acceptAll: false, source: "website" });
+      const rows = await applicationContacts.replace(userId, application.id, [{ ...contacts[0], applicationId: application.id, userId, email: "akim@acme.com", emailSource: "likely" }]);
+      void rows;
+      const [row] = await applicationContacts.list(userId, [application.id]);
+      await updateOutreach(userId, { contactId: row.id, status: "replied" });
+      expect((await repo.getEmailFormat("acme.com"))?.source).toBe("replied");
+      await contactBounced(userId, { applicationId: application.id, contactId: row.id });
+      expect((await repo.getEmailFormat("acme.com"))?.pattern).toBe("{f}{last}");
+    });
+
+    it("mixes the list: at most three recruiters while anyone else is available", () => {
+      const row = (role: "recruiter" | "team_member", title: string) => ({ person: { role, title }, bonus: 0 });
+      const list = mixedList([row("recruiter", "Recruiter"), row("recruiter", "Recruiter"), row("recruiter", "Recruiter"), row("recruiter", "Recruiter"), row("recruiter", "Recruiter"), row("team_member", "Analyst"), row("team_member", "Manager")], 5);
+      expect(list.filter((item) => item.person.role === "recruiter")).toHaveLength(3);
+    });
+
+    it("counts a recruiter abroad down and one near the job up", () => {
+      expect(placeBonus("Bengaluru, India", "Boston, MA")).toBeLessThan(0);
+      expect(placeBonus("Boston, MA", "Boston, MA")).toBeGreaterThan(0);
+      expect(placeBonus("", "Boston, MA")).toBe(0);
+    });
   });
 
   it("asks to try again when every search fails", async () => {

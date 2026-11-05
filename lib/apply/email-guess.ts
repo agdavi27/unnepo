@@ -120,11 +120,51 @@ function hunterKey() {
 
 export const hunterReady = () => Boolean(hunterKey());
 
-async function recordHunter(userId: string, operation: string, success: boolean, started: number, error?: string) {
-  await repo.insertUsage({ id: id(), userId, provider: "hunter", operation, success, latencyMs: Date.now() - started, costCents: success ? HUNTER_CENTS : 0, estimated: true, error: error ?? null, createdAt: nowIso() });
+const verifierKey = () => process.env.MILLIONVERIFIER_API_KEY?.trim() || "";
+/** Whether an address can be checked at all: MillionVerifier when its key is set, else Hunter. */
+export const checkerReady = () => Boolean(verifierKey() || hunterKey());
+export const VERIFIER_CENTS = 0.4;
+// What one Hunter credit costs on its smaller plans. Hunter says how many credits each call used.
+const HUNTER_CREDIT_CENTS = 2;
+
+async function recordHunter(userId: string, operation: string, success: boolean, started: number, error?: string, credits?: number) {
+  const costCents = !success ? 0 : credits === undefined ? HUNTER_CENTS : credits * HUNTER_CREDIT_CENTS;
+  await repo.insertUsage({ id: id(), userId, provider: "hunter", operation, success, latencyMs: Date.now() - started, costCents, estimated: true, error: error ?? null, createdAt: nowIso() });
 }
 
+const creditsUsed = (response: Response) => {
+  const header = response.headers.get("x-credits-used");
+  const credits = header === null ? Number.NaN : Number(header);
+  return Number.isFinite(credits) ? credits : undefined;
+};
+
 export type CheckStatus = "valid" | "invalid" | "accept_all" | "unknown";
+
+/** MillionVerifier's check for one address: the cheaper checker. Null when it isn't set up or the check failed. */
+async function verifierCheck(userId: string, email: string): Promise<CheckStatus | null> {
+  const key = verifierKey();
+  if (!key) return null;
+  await assertSpendAllowed(userId, VERIFIER_CENTS);
+  const started = Date.now();
+  const record = (success: boolean, error?: string) => repo.insertUsage({ id: id(), userId, provider: "millionverifier", operation: "email_verifier", success, latencyMs: Date.now() - started, costCents: success ? VERIFIER_CENTS : 0, estimated: true, error: error ?? null, createdAt: nowIso() });
+  try {
+    const response = await contactFetch(`https://api.millionverifier.com/api/v3/?${new URLSearchParams({ api: key, email, timeout: "10" })}`, { signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) throw new Error(`millionverifier_${response.status}`);
+    const result = String(((await response.json()) as { result?: unknown }).result ?? "");
+    await record(true);
+    if (result === "ok") return "valid";
+    if (result === "catch_all") return "accept_all";
+    return result === "invalid" || result === "disposable" ? "invalid" : "unknown";
+  } catch (error) {
+    await record(false, error instanceof Error ? error.message : "verifier_failed");
+    return null;
+  }
+}
+
+/** Checks one address with the cheapest checker that's set up. Null when none is, or it failed. */
+export async function checkEmail(userId: string, email: string): Promise<CheckStatus | null> {
+  return verifierKey() ? verifierCheck(userId, email) : hunterCheck(userId, email);
+}
 
 /** Hunter's verifier for one address. Null when Hunter isn't set up or the check failed. */
 export async function hunterCheck(userId: string, email: string): Promise<CheckStatus | null> {
@@ -145,7 +185,23 @@ export async function hunterCheck(userId: string, email: string): Promise<CheckS
   }
 }
 
-type HunterDomain = { pattern: string | null; acceptAll: boolean; emails: Array<{ email: string; name: string }> };
+export type KnownEmail = { email: string; name: string; title?: string; linkedin?: string | null; verified?: boolean };
+type HunterDomain = { pattern: string | null; acceptAll: boolean; emails: KnownEmail[] };
+
+/** How many people Hunter has at a company. Free, so a search that would find nothing is never paid for. Null if unknown. */
+export async function hunterCount(domain: string) {
+  const key = hunterKey();
+  if (!key) return null;
+  try {
+    const response = await contactFetch(`https://api.hunter.io/v2/email-count?${new URLSearchParams({ domain, api_key: key })}`, { signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) return null;
+    const total = ((await response.json()) as { data?: { personal_emails?: unknown; total?: unknown } }).data;
+    const count = Number(total?.personal_emails ?? total?.total);
+    return Number.isFinite(count) ? count : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Hunter's domain search: the company's format, whether it accepts every address, and people it knows there. */
 export async function hunterDomain(userId: string, domain: string): Promise<HunterDomain | null> {
@@ -156,14 +212,17 @@ export async function hunterDomain(userId: string, domain: string): Promise<Hunt
   try {
     const response = await contactFetch(`https://api.hunter.io/v2/domain-search?${new URLSearchParams({ domain, limit: "10", api_key: key })}`, { signal: AbortSignal.timeout(20_000) });
     if (!response.ok) throw new Error(`hunter_${response.status}`);
-    const body = (await response.json()) as { data?: { pattern?: string | null; accept_all?: boolean; emails?: Array<{ value?: string; first_name?: string | null; last_name?: string | null }> } };
-    await recordHunter(userId, "domain_search", true, started);
+    const body = (await response.json()) as { data?: { pattern?: string | null; accept_all?: boolean; emails?: Array<{ value?: string; first_name?: string | null; last_name?: string | null; position?: string | null; linkedin?: string | null; verification?: { status?: string | null } | null }> } };
+    await recordHunter(userId, "domain_search", true, started, undefined, creditsUsed(response));
     // Hunter writes formats the way Unnepo does: "{first}.{last}".
     const pattern = body.data?.pattern?.trim().toLowerCase() ?? null;
     return {
       pattern: pattern && COMMON_FORMATS.includes(pattern) ? pattern : null,
       acceptAll: Boolean(body.data?.accept_all),
-      emails: (body.data?.emails ?? []).filter((item) => item.value).map((item) => ({ email: String(item.value).toLowerCase(), name: `${item.first_name ?? ""} ${item.last_name ?? ""}`.trim() })),
+      emails: (body.data?.emails ?? []).filter((item) => item.value).map((item) => ({
+        email: String(item.value).toLowerCase(), name: `${item.first_name ?? ""} ${item.last_name ?? ""}`.trim(), title: item.position?.trim() ?? "",
+        linkedin: item.linkedin ? `https://www.linkedin.com/in/${String(item.linkedin).replace(/^.*\/in\//, "").replace(/\/$/, "")}` : null, verified: item.verification?.status === "valid",
+      })),
     };
   } catch (error) {
     await recordHunter(userId, "domain_search", false, started, error instanceof Error ? error.message : "hunter_failed");
@@ -171,13 +230,14 @@ export async function hunterDomain(userId: string, domain: string): Promise<Hunt
   }
 }
 
-export type EmailFormat = { pattern: string | null; acceptAll: boolean; source: string; known: Array<{ email: string; name: string }> };
+export type EmailFormat = { pattern: string | null; acceptAll: boolean; source: string; known: KnownEmail[] };
 
 /**
  * The company's email format, cheapest source first: a format learned before, an address Unnepo already
- * knows there with its owner's name, the company's own website, then Hunter. Saved for every student.
+ * knows there with its owner's name, the company's own website, then Hunter. Saved for every student. Only the
+ * format is shared: never a person or an address. `useHunter: false` leaves out the paid step.
  */
-export async function learnFormat(userId: string, domain: string, known: Array<{ email: string; name: string }>, people: string[]): Promise<EmailFormat> {
+export async function learnFormat(userId: string, domain: string, known: KnownEmail[], people: string[], options: { useHunter?: boolean } = {}): Promise<EmailFormat> {
   const atDomain = known.filter((item) => item.email.toLowerCase().endsWith(`@${domain.toLowerCase()}`));
   const saved = await repo.getEmailFormat(domain);
   if (saved?.pattern || saved?.acceptAll) return { pattern: saved.pattern, acceptAll: saved.acceptAll, source: saved.source, known: atDomain };
@@ -194,16 +254,16 @@ export async function learnFormat(userId: string, domain: string, known: Array<{
   const fromSite = named[0]?.pattern ?? patternFromLocals(site.map((email) => email.split("@")[0]));
   const siteKnown = [...atDomain, ...named.map(({ email, name }) => ({ email, name }))];
   if (fromSite) return keep({ pattern: fromSite, acceptAll: false, source: "website", known: siteKnown });
-  const hunter = await hunterDomain(userId, domain);
+  const hunter = options.useHunter === false ? null : await hunterDomain(userId, domain);
   if (hunter) return keep({ pattern: hunter.pattern, acceptAll: hunter.acceptAll, source: "hunter", known: [...siteKnown, ...hunter.emails] });
   return { pattern: null, acceptAll: false, source: "none", known: siteKnown };
 }
 
-export type Guess = { email: string; verified: boolean; source: "pattern" | "website" | "likely" };
+export type Guess = { email: string; verified: boolean; source: "pattern" | "website" | "likely"; /** The company's mail server accepts every address, so no check can tell. */ uncheckable?: boolean };
 
 /**
  * One person's address: one that's already known for them, else built from the format (or the most
- * common formats when the format is unknown), each checked with Hunter until one is valid. `budget`
+ * common formats when the format is unknown), each checked until one is valid. `budget`
  * counts the checks left for this search. A guess Hunter can't check comes back as likely.
  */
 export async function guessEmail(userId: string, name: string, domain: string, format: EmailFormat, extra: string[], budget: { checks: number }): Promise<Guess | null> {
@@ -216,12 +276,13 @@ export async function guessEmail(userId: string, name: string, domain: string, f
   // company's format, or is Apollo's guess and fits their name.
   const plausible = [...mine, ...(format.pattern ? built : []), ...extra.filter((email) => patternOf(email, name))].map((email) => email.toLowerCase()).filter(isPersonalWorkEmail);
   const likely = plausible.length ? { email: plausible[0], verified: false, source: "likely" as const } : null;
-  if (format.acceptAll || !hunterReady()) return likely;
+  if (format.acceptAll) return likely ? { ...likely, uncheckable: true } : null;
+  if (!checkerReady()) return likely;
   let unchecked: Guess | null = null;
   for (const email of candidates) {
     if (budget.checks <= 0) break;
     budget.checks -= 1;
-    const status = await hunterCheck(userId, email);
+    const status = await checkEmail(userId, email);
     if (status === "valid") {
       if (!format.pattern) {
         const pattern = patternOf(email, name);
@@ -231,7 +292,7 @@ export async function guessEmail(userId: string, name: string, domain: string, f
     }
     if (status === "accept_all") {
       await repo.setEmailFormat(domain, { pattern: format.pattern, acceptAll: true, source: format.source }).catch(() => undefined);
-      return likely ?? { email, verified: false, source: "likely" };
+      return { ...(likely ?? { email, verified: false, source: "likely" as const }), uncheckable: true };
     }
     if (status === "unknown" && !unchecked && (format.pattern || fromSite.has(email))) unchecked = { email, verified: false, source: "likely" };
   }

@@ -4,10 +4,14 @@ import type { Contact } from "@/lib/db/types";
 import { contactFetch } from "@/lib/providers/contacts/http";
 import { ServiceError } from "@/lib/errors";
 import { safeGet } from "@/lib/apply/safe-fetch";
-import { HUNTER_CENTS, buildEmail, hunterCheck, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, type EmailFormat } from "@/lib/apply/email-guess";
-import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, searchCompanies, searchPeopleQuery } from "@/lib/providers/contacts/router";
+import { HUNTER_CENTS, buildEmail, checkerReady, guessEmail, hunterCheck, hunterCount, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, siteEmails, type EmailFormat, type KnownEmail } from "@/lib/apply/email-guess";
+import { ATS_DOMAINS } from "@/lib/email/filter";
+import { emailEvents } from "@/lib/email/store";
+import { sameCompany } from "@/lib/email/match";
+import { peopleFromWeb } from "@/lib/apply/people-web";
+import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, searchCompanies, searchPeopleQuery, spentTodayCents } from "@/lib/providers/contacts/router";
 import { COMPANY_DOMAINS, RECRUITER_TITLES, type ApolloPeopleQuery } from "@/lib/providers/contacts/apollo";
-import type { ApplicationContact, ContactRole, JobApplication, PeopleSearch } from "@/lib/apply/types";
+import type { ApplicationContact, ContactRole, HiddenPerson, JobApplication, PeopleSearch } from "@/lib/apply/types";
 
 /**
  * After a student applies, finds the one best real person to email about the role: someone from their
@@ -191,6 +195,12 @@ async function companyDomains(userId: string, app: JobApplication) {
   };
   add(app.companyDomain);
   add(siteDomain(app.applicationUrl) ?? siteDomain(app.jobUrl));
+  // Who the company's own emails come from, when the address fits its name.
+  const skip = new RegExp(`(^|\\.)(${ATS_DOMAINS.map((item) => item.replace(/\./g, "\\.")).join("|")})$`, "i");
+  for (const event of app.id ? await emailEvents.forApplication(userId, app.id).catch(() => []) : []) {
+    const own = siteDomain(`https://${event.fromDomain}`);
+    if (own && !skip.test(event.fromDomain) && domainFits(own, app.company)) add(own);
+  }
   const names = companyNames(app);
   const cached = await repo.getCompanyDomains(names);
   for (const name of names) for (const domain of [...(COMPANY_DOMAINS[name.toLowerCase()] ?? []), ...(cached[name.toLowerCase()] ?? [])]) add(domain);
@@ -254,18 +264,69 @@ function found(contact: Contact, role: ContactRole, relevance: string): FoundPer
 
 /** How many people the list shows for a job. */
 export const LIST_SIZE = 5;
+/** Paid reveals: the search stops after this many on its own, and "Show person" stops at the second number. */
+export const AUTO_REVEALS = 2;
+export const MAX_REVEALS = 3;
+// A search has 60 seconds. Past this it stops starting new work and keeps what it has.
+const TIME_BUDGET_MS = 45_000;
 
 /** Campus and university recruiters before the rest: they hire students. */
 const CAMPUS = /\b(campus|university|college|early (career|talent)|emerging talent|intern)/i;
 const TOO_SENIOR = /\b(chief|ceo|cfo|coo|cto|president|founder|owner|board|vp|vice president|svp|evp|partner)\b/i;
+const RECRUITING = /recruit|talent|sourcer|\bhr\b|human resources|head of people|people (ops|operations|partner|team)/i;
+const MANAGES = /\b(manager|head|lead|director|supervisor)\b/i;
+const HR_TITLES = ["human resources", "hr manager", "hr business partner", "people operations", "talent partner", "hiring manager"];
+const WORKING_LEVELS = ["entry", "senior", "manager", "director"];
+const ABROAD_PLACE = /\b(uk|united kingdom|london|ireland|dublin|germany|berlin|france|paris|spain|netherlands|amsterdam|canada|toronto|india|bangalore|bengaluru|hyderabad|singapore|japan|tokyo|china|shanghai|australia|sydney|philippines|manila|poland|brazil|mexico)\b/i;
 
 /** A full name Unnepo can build an address from (Apollo hides last names until it enriches them: "Jane D."). */
 const fullName = (name: string) => /^\S{2,}( \S+)* [^\s*.]{2,}$/.test(name.trim()) && !name.includes("*");
 
-/** Who's most worth emailing first: the student's school, then recruiters (campus first), then the team; executives last. */
-export function relevance(person: Pick<FoundPerson, "role" | "title">) {
-  const base = person.role === "job_poster" ? 100 : person.role === "alumni" ? 80 : person.role === "recruiter" ? 60 + (CAMPUS.test(person.title) ? 10 : 0) : 40;
-  return base - (TOO_SENIOR.test(person.title) ? 30 : 0);
+/** What a student has that someone at the company might share. */
+export type StudentFacts = { school?: string; pastEmployers?: string[]; city?: string };
+
+/**
+ * Who's most worth emailing first: the person the posting names, a school connection, recruiters (campus first),
+ * a manager on the job's team, then the team; executives last. `bonus` adds what was found about this person.
+ */
+export function relevance(person: Pick<FoundPerson, "role" | "title">, bonus = 0) {
+  const base = person.role === "job_poster" ? 100 : person.role === "alumni" ? 80 : person.role === "recruiter" ? 60 + (CAMPUS.test(person.title) ? 10 : 0) : 40 + (MANAGES.test(person.title) ? 8 : 0);
+  return base + bonus - (TOO_SENIOR.test(person.title) ? 30 : 0);
+}
+
+/** What a person's place adds: near the job helps, and a recruiter on another continent doesn't hire for it. */
+export function placeBonus(place: string, jobLocation: string | null) {
+  const where = place.toLowerCase();
+  const job = (jobLocation ?? "").toLowerCase();
+  if (!where) return 0;
+  const city = job.split(",")[0].trim();
+  if (city.length >= 3 && where.includes(city)) return 6;
+  return ABROAD_PLACE.test(where) && !ABROAD_PLACE.test(job) ? -25 : 0;
+}
+
+/** The list: most relevant first, with at most three recruiters, so it's a mix of who to talk to. */
+export function mixedList<T extends { person: Pick<FoundPerson, "role" | "title">; bonus: number }>(pool: T[], size: number) {
+  const ranked = [...pool].sort((a, b) => relevance(b.person, b.bonus) - relevance(a.person, a.bonus));
+  const recruiters = ranked.filter((item) => item.person.role === "recruiter");
+  const held = new Set(recruiters.slice(3));
+  return [...ranked.filter((item) => !held.has(item)), ...recruiters.slice(3)].slice(0, size);
+}
+
+/** What's confirmed about a person once their history is known: "Also went to Colby College". Null if it isn't there. */
+export function confirmed(maybe: string, history: string[]) {
+  const wanted = maybe.toLowerCase();
+  return history.some((place) => place.toLowerCase().includes(wanted) || wanted.includes(place.toLowerCase()) && place.length >= 4) ? maybe : null;
+}
+
+/** The sentence for why someone's on the list, saying only what's known. */
+function whyLine(base: string, maybe: string[], history: string[] | null, school: string) {
+  const parts = maybe.map((place) => {
+    const sure = history ? confirmed(place, history) : null;
+    const isSchool = place === school;
+    return sure ? `Also ${isSchool ? "went to" : "worked at"} ${place}.` : `May have ${isSchool ? "gone to" : "worked at"} ${place}.`;
+  });
+  // What's confirmed goes first, so the email writer can tell.
+  return [...parts.filter((part) => part.startsWith("Also")), ...parts.filter((part) => !part.startsWith("Also")), base].filter(Boolean).join(" ");
 }
 
 export type ListedPerson = FoundPerson & { links: Array<{ label: string; url: string }> };
@@ -273,15 +334,38 @@ export type ListedPerson = FoundPerson & { links: Array<{ label: string; url: st
 /** Progress the page shows in the spider's bubbles while the search runs. */
 type Progress = (text: string) => Promise<void> | void;
 
+const sameSite = (a: string | null | undefined, b: string | null | undefined) => {
+  const [x, y] = [(a ?? "").toLowerCase(), (b ?? "").toLowerCase()];
+  return !x || !y || x === y || x.endsWith(`.${y}`) || y.endsWith(`.${x}`);
+};
+const asApollo = (person: HiddenPerson) => ({ id: `apollo_${person.externalId}`, provider: "apollo", externalId: person.externalId, firstName: person.firstName, lastName: person.lastName, fullName: `${person.firstName} ${person.lastName}`, company: person.company, companyDomain: person.companyDomain }) as unknown as Contact;
+const withLimit = async <T,>(work: Promise<T>, ms: number, otherwise: T) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<T>((resolve) => { timer = setTimeout(() => resolve(otherwise), ms); });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+const linkList = (values: Array<[string, unknown]>) => values.filter((pair): pair is [string, string] => typeof pair[1] === "string" && /^https?:\/\//.test(pair[1])).map(([label, url]) => ({ label, url }));
+const linkedinSearch = (keywords: string) => `https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords })}`;
+const roleForTitle = (title: string): ContactRole => (RECRUITING.test(title) ? "recruiter" : "team_member");
+
 /**
- * Lists up to LIST_SIZE people who work at the company, most relevant first: the person the posting names,
- * people from the student's school, recruiters, then people on the job's team. Each gets an email built from
- * the company's email format (or the one Apollo or Hunter already has for them) and their social links.
- * Emails aren't checked yet: each says where it came from. Every person comes from the posting, Apollo or
- * Hunter. Nobody is invented. Each search is recorded, so "no one found" says why.
+ * Lists up to LIST_SIZE people who work at the company, the cheapest way that works. Free first: the person the
+ * posting names, Apollo's free searches (targeted, then wider), and the company's own pages. Then Hunter, which
+ * can complete several people for one search. Then a paid Apollo reveal of the top person, and one more if that
+ * person's email fails. Then, for a company none of these know, a web search of public pages. It stops paying as
+ * soon as one person has a usable email: the rest of the list is revealed when the student asks.
+ * Every person comes from one of these sources. Nobody is invented. Each search is recorded, so a result can be traced.
  */
-export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; progress?: Progress } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch }> {
-  const school = (options.school ?? "").trim();
+export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; facts?: StudentFacts; known?: KnownEmail[]; progress?: Progress } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch; hidden: Record<string, HiddenPerson>; reveals: number }> {
+  const started = Date.now();
+  const spentBefore = await spentTodayCents(userId).catch(() => 0);
+  const over = () => Date.now() - started > TIME_BUDGET_MS;
+  const school = (options.school ?? options.facts?.school ?? "").trim();
+  const pastEmployers = (options.facts?.pastEmployers ?? []).filter((name) => name.trim().length >= 3 && !sameCompany(name, app.company)).slice(0, 2);
   const say = async (text: string) => { await options.progress?.(text); };
   await say(`Searching for ${app.company}'s website…`);
   const domains = await companyDomains(userId, app);
@@ -289,141 +373,313 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   const team = departmentOf(app);
   const core = coreTitle(app.title);
   let failures: unknown = null;
+  let lastFailed = false;
 
-  /** One Apollo search (free); a failure is recorded and the next one runs anyway. */
+  /** One Apollo search (free). A hiccup gets one more try, and a failure is recorded and the next one runs anyway. */
   const look = async (step: string, domain: string, query: ApolloPeopleQuery) => {
+    const ask = () => searchPeopleQuery(userId, { ...query, ...(domain ? { q_organization_domains_list: [domain] } : {}) }, 1, 10, { verifiedOnly: false });
     try {
-      const { people } = await searchPeopleQuery(userId, { ...query, q_organization_domains_list: [domain] }, 1, 10, { verifiedOnly: false });
-      const kept = people.filter((person) => looksLikePerson(person.firstName, person.lastName, person.company || app.company));
+      const { people } = await ask().catch(async (error) => {
+        if (lastFailed) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return ask();
+      });
+      lastFailed = false;
+      // Not this company's people: a wrong website, or someone who just mentions it.
+      const fits = (person: Contact) => !person.company || sameCompany(person.company, app.company) || Boolean(domain && (domainFits(domain, app.company) || domain === app.companyDomain));
+      const kept = people.filter((person) => looksLikePerson(person.firstName, person.lastName, person.company || app.company) && fits(person));
       search.steps.push({ step, domain, found: kept.length });
       return kept;
     } catch (error) {
       failures ??= error;
+      lastFailed = true;
       search.steps.push({ step, domain, found: 0, error: error instanceof Error ? error.message.replace(/\s*No credits were used\.?/i, "").slice(0, 200) : "failed" });
       return [];
     }
   };
 
-  let pool: Array<{ person: FoundPerson; source: Contact }> = [];
+  type Pooled = { person: FoundPerson; source: Contact; bonus: number; maybe: string[]; base: string };
+  const trimmedCompany = app.company.trim();
+  let pool: Pooled[] = [];
   let winner: string | null = null;
+  const titles = [...new Set([team, core].filter(Boolean))];
+
+  const gather = async (domain: string) => {
+    const seen = new Map<string, Pooled>();
+    const take = (people: Contact[], role: ContactRole | null, base: (person: Contact) => string, bonus: number, maybe?: string) => {
+      for (const source of people) {
+        const held = seen.get(source.id);
+        if (held) {
+          if (maybe && !held.maybe.includes(maybe)) { held.maybe.push(maybe); held.bonus += 15; }
+          continue;
+        }
+        const pickedRole = role ?? roleForTitle(source.title);
+        seen.set(source.id, { person: found(source, pickedRole, ""), source, bonus: bonus + (maybe ? (role === "alumni" ? 0 : 15) : 0) + placeBonus(source.location, app.location), maybe: maybe ? [maybe] : [], base: base(source) });
+      }
+    };
+    const worksThere = (person: Contact) => `${person.title || "Works"} at ${trimmedCompany}.`;
+    if (school) take(await look(`From ${school}`, domain, { q_keywords: school }), "alumni", (person) => (person.title ? `Now ${person.title}.` : ""), 0, school);
+    for (const employer of pastEmployers) take(await look(`Also at ${employer}`, domain, { q_keywords: employer }), null, worksThere, 0, employer);
+    take(await look("Recruiters", domain, { person_titles: RECRUITER_TITLES }), "recruiter", (person) => recruiterWhy(app, person), 0);
+    if (titles.length) take(await look(team ? `${team} department` : `${core} roles`, domain, { person_titles: titles }), "team_member", (person) => `${person.title || "Works"} in ${team || "the same kind of role"}, the team this job is in.`, 0);
+    // Not enough yet: wider, still free, and worth less on the list.
+    if (seen.size < LIST_SIZE && !over()) take(await look("HR and people teams", domain, { person_titles: HR_TITLES }), "recruiter", worksThere, -15);
+    if (seen.size < LIST_SIZE && !over()) take(await look("Anyone at the company", domain, { person_seniorities: WORKING_LEVELS }), null, worksThere, -20);
+    return [...seen.values()];
+  };
+
   for (const domain of domains) {
+    if (over()) break;
     await say(`Searching for relevant people at ${app.company}…`);
-    const titles = [...new Set([team, core].filter(Boolean))];
-    const groups: Array<[ContactRole, Contact[], (person: Contact) => string]> = [
-      ["alumni", school ? await look(`From ${school}`, domain, { q_keywords: school }) : [], (person) => `From ${school}${person.title ? `, now ${person.title}` : ""}.`],
-      ["recruiter", await look("Recruiters", domain, { person_titles: RECRUITER_TITLES }), (person) => recruiterWhy(app, person)],
-      ["team_member", titles.length ? await look(team ? `${team} department` : `${core} roles`, domain, { person_titles: titles }) : [], (person) => `${person.title || "Works"} in ${team || "the same kind of role"}, the team this job is in.`],
-    ];
-    const seen = new Set<string>();
-    pool = groups.flatMap(([role, people, why]) => people.map((source) => ({ person: found(source, role, why(source)), source })))
-      .filter(({ source }) => (seen.has(source.id) ? false : (seen.add(source.id), true)));
+    pool = await gather(domain);
     if (pool.length) {
       winner = domain;
       break;
     }
   }
-  if (!pool.length && domains.length && search.steps.length && search.steps.every((step) => step.error)) {
-    throw failures instanceof ServiceError ? failures : new ServiceError("Couldn't look up people right now.", "provider_failed", 502);
+  // No website worked: the company's name, keeping only people Apollo says work there.
+  if (!pool.length && !over()) {
+    const byName = (await look("By company name", "", { q_keywords: trimmedCompany })).filter((person) => person.company && sameCompany(person.company, app.company));
+    pool = byName.map((source) => ({ person: found(source, roleForTitle(source.title), ""), source, bonus: -10 + placeBonus(source.location, app.location), maybe: [], base: `${source.title || "Works"} at ${trimmedCompany}.` }));
+    const site = byName.map((person) => person.companyDomain).find(Boolean);
+    if (site) winner = site;
   }
-
   await say("Ranking people by how relevant they are to you…");
-  const top = pool.sort((a, b) => relevance(b.person) - relevance(a.person)).slice(0, LIST_SIZE - (app.postedRecruiter ? 1 : 0));
+  const top = mixedList(pool, LIST_SIZE - (app.postedRecruiter ? 1 : 0));
   const domain = winner ?? domains[0] ?? null;
 
-  // Full names, LinkedIn and other links for the people shown (Apollo reveals them per person).
-  await say("Getting their names and profiles…");
-  const reveal: { error?: string } = {};
-  const enriched = top.length ? await enrichPeopleBatch(top.map((item) => item.source), userId, reveal) : new Map();
-  const listed: Array<ListedPerson & { guess: string | null }> = top.map(({ person, source }) => {
-    const result = enriched.get(source.id);
-    const patch = result?.patch ?? {};
-    const links = [["LinkedIn", patch.profileUrl ?? source.profileUrl], ["X", patch.twitterUrl ?? source.twitterUrl], ["GitHub", patch.githubUrl ?? source.githubUrl], ["Facebook", patch.facebookUrl ?? source.facebookUrl]]
-      .filter((pair): pair is [string, string] => typeof pair[1] === "string" && /^https?:\/\//.test(pair[1]))
-      .map(([label, url]) => ({ label, url }));
-    const verified = result?.emailStatus === "verified" && result.email ? result.email : null;
-    return {
-      ...person,
-      name: patch.lastName ? `${source.firstName} ${patch.lastName}`.trim() : person.name,
-      photoUrl: patch.photoUrl ?? person.photoUrl,
-      linkedinUrl: patch.profileUrl ?? person.linkedinUrl,
-      email: verified,
-      emailSource: verified ? "apollo" as const : null,
-      links,
-      guess: result?.guess ?? null,
-    };
-  });
-  // Anyone Apollo didn't reveal still has a blurred last name ("Sm***h"): look for them among the people
-  // Hunter lists at the company, and otherwise show just the first name and initial, with no email.
-  let hunterKnown: Array<{ email: string; name: string }> = [];
-  const blurred = listed.filter((person) => person.name.includes("*"));
-  if (blurred.length && domain) {
-    hunterKnown = (await hunterDomain(userId, domain).catch(() => null))?.emails ?? [];
-    for (const person of blurred) {
-      const match = unblur(person.name, hunterKnown);
-      if (match) {
-        person.name = match.name;
-        person.email = match.email;
-        person.emailSource = "hunter";
-      } else {
-        person.name = person.name.replace(/\s(\S)\S*\*\S*$/, (_, initial: string) => ` ${initial.toUpperCase()}.`);
-        if (!person.linkedinUrl) person.links.push({ label: "Find on LinkedIn", url: `https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords: `${person.name.split(" ")[0]} ${app.company}` })}` });
-      }
-    }
-  }
-  const hidden = listed.filter((person) => / \S\.$/.test(person.name)).length;
-  search.steps.push({ step: "Full names", domain: domain ?? "", found: listed.length - hidden, ...(reveal.error ? { error: reveal.error.slice(0, 200) } : {}) });
-
-  // The person the posting names goes first, as the posting gives them.
+  type Row = ListedPerson & { guess: string | null; source?: Contact; maybe: string[]; base: string; history: string[] | null; checked: boolean };
+  const listed: Row[] = top.map(({ person, source, maybe, base }) => ({ ...person, email: null, emailSource: null, relevance: whyLine(base, maybe, null, school), links: linkList([["LinkedIn", source.profileUrl], ["X", source.twitterUrl], ["GitHub", source.githubUrl], ["Facebook", source.facebookUrl]]), guess: null, source, maybe, base, history: null, checked: false }));
   if (app.postedRecruiter) {
     const named = app.postedRecruiter;
     listed.unshift({
       rank: 1, role: "job_poster", name: named.name, title: named.title ?? "", email: named.email, emailSource: named.email ? "job_posting" : null,
       relevance: named.linkedinUrl ? "Shown under \"Meet the hiring team\" on this job." : "Named on the job posting.",
-      linkedinUrl: named.linkedinUrl ?? null, photoUrl: null, links: named.linkedinUrl ? [{ label: "LinkedIn", url: named.linkedinUrl }] : [], guess: null,
+      linkedinUrl: named.linkedinUrl ?? null, photoUrl: null, links: named.linkedinUrl ? [{ label: "LinkedIn", url: named.linkedinUrl }] : [], guess: null, maybe: [], base: "", history: null, checked: Boolean(named.email),
     });
   }
 
-  // Emails from the company's format, for everyone without one.
+  // Free again: addresses published on the company's own pages, when Apollo has no one.
+  if (!top.length && domain && !over()) {
+    const onSite = await withLimit(siteEmails(domain).catch(() => [] as string[]), 12_000, [] as string[]);
+    for (const email of onSite.slice(0, LIST_SIZE)) {
+      const words = email.split("@")[0].match(/^([a-z]{2,})[._]([a-z]{2,})$/);
+      if (!words) continue;
+      const name = `${words[1][0].toUpperCase()}${words[1].slice(1)} ${words[2][0].toUpperCase()}${words[2].slice(1)}`;
+      listed.push({ rank: 1, role: "team_member", name, title: "", email, emailSource: "website", relevance: `Listed on ${app.company}'s website.`, linkedinUrl: null, photoUrl: null, links: [], guess: null, maybe: [], base: "", history: null, checked: true });
+    }
+    search.steps.push({ step: "Company website", domain, found: listed.filter((person) => person.emailSource === "website").length });
+  }
+
+  // Addresses this student already has at the company cost nothing to use again.
+  const fromBefore: KnownEmail[] = (options.known ?? []).filter((item) => !domain || item.email.toLowerCase().endsWith(`@${domain.toLowerCase()}`));
+  const complete = (person: Row, match: KnownEmail, source: FoundPerson["emailSource"]) => {
+    person.name = match.name;
+    person.email = match.email;
+    person.emailSource = source;
+    person.checked = source === "hunter" || source === "pattern" || source === "website" || source === "apollo";
+    if (match.linkedin && !person.linkedinUrl) {
+      person.linkedinUrl = match.linkedin;
+      person.links.push({ label: "LinkedIn", url: match.linkedin });
+    }
+  };
+  const blurredNow = () => listed.filter((person) => person.name.includes("*"));
+  for (const person of blurredNow()) {
+    const match = unblur(person.name, fromBefore);
+    if (match) complete(person, match, match.verified ? "hunter" : "likely");
+  }
+
+  // The company's format, from what's free.
   let format: EmailFormat | null = null;
-  if (domain && listed.some((person) => !person.email)) {
+  if (domain) {
     await say(`Searching for ${app.company}'s email format…`);
-    const known = [...listed.filter((person) => person.email).map((person) => ({ email: person.email!, name: person.name })), ...hunterKnown];
-    format = await learnFormat(userId, domain, known, listed.map((person) => person.name)).catch(() => null);
-    await say("Writing out their emails…");
-    for (const person of listed) {
-      if (person.email || !fullName(person.name)) continue;
-      const hunter = format?.known.find((item) => item.name && plain(item.name) === plain(person.name))?.email;
-      const apollo = person.guess && patternOf(person.guess, person.name) ? person.guess : null;
-      const built = format?.pattern ? buildEmail(format.pattern, person.name, domain) : null;
-      const fallback = buildEmail("{first}.{last}", person.name, domain);
-      if (hunter) [person.email, person.emailSource] = [hunter, "hunter"];
-      else if (built) [person.email, person.emailSource] = [built, "likely"];
-      else if (apollo) [person.email, person.emailSource] = [apollo, "likely"];
-      else if (fallback) [person.email, person.emailSource] = [fallback, "guess"];
+    const known = [...listed.filter((person) => person.email && fullName(person.name)).map((person) => ({ email: person.email!, name: person.name })), ...fromBefore];
+    format = await withLimit(learnFormat(userId, domain, known, listed.map((person) => person.name), { useHunter: false }).catch(() => null), 15_000, null);
+  }
+
+  // Hunter next: one search can complete several people, for less than one Apollo reveal. Its free count says
+  // whether it's worth asking. It also lists people when Apollo had no one.
+  let hunterKnown: KnownEmail[] = [];
+  const stillNeedsHunter = () => domain && hunterReady() && !over() && (blurredNow().length > 0 || !listed.length || !format?.pattern);
+  if (stillNeedsHunter() && (await hunterCount(domain!)) !== 0) {
+    await say(`Checking who Hunter knows at ${app.company}…`);
+    const hunter = await hunterDomain(userId, domain!).catch(() => null);
+    hunterKnown = hunter?.emails ?? [];
+    search.steps.push({ step: "Hunter", domain: domain!, found: hunterKnown.length });
+    if (hunter && (hunter.pattern || hunter.acceptAll)) {
+      format = { pattern: format?.pattern ?? hunter.pattern, acceptAll: hunter.acceptAll, source: format?.pattern ? format.source : "hunter", known: [...(format?.known ?? []), ...hunterKnown] };
+      await repo.setEmailFormat(domain!, { pattern: format.pattern, acceptAll: format.acceptAll, source: format.source }).catch(() => undefined);
+    } else if (format) format = { ...format, known: [...format.known, ...hunterKnown] };
+    for (const person of blurredNow()) {
+      const match = unblur(person.name, hunterKnown);
+      if (match) complete(person, match, match.verified ? "hunter" : "likely");
+    }
+    if (!listed.length) {
+      for (const item of hunterKnown.filter((entry) => fullName(entry.name) && isPersonalWorkEmail(entry.email)).slice(0, LIST_SIZE)) {
+        const row: Row = { rank: 1, role: roleForTitle(item.title ?? ""), name: item.name, title: item.title ?? "", email: null, emailSource: null, relevance: `${item.title || "Works"} at ${trimmedCompany}.`, linkedinUrl: null, photoUrl: null, links: [], guess: null, maybe: [], base: "", history: null, checked: false };
+        complete(row, item, item.verified ? "hunter" : "likely");
+        listed.push(row);
+      }
+      listed.sort((a, b) => relevance(b) - relevance(a));
     }
   }
 
-  const people: ListedPerson[] = listed.map((person, index) => {
-    const { guess, ...rest } = person;
-    void guess;
+  // A web search of public pages, only when nobody at all has turned up.
+  if (!listed.length && !over()) {
+    await say(`Searching public pages for people at ${app.company}…`);
+    const onWeb = await peopleFromWeb(userId, app);
+    search.steps.push({ step: "Public web pages", domain: domain ?? "", found: onWeb.length });
+    for (const item of onWeb) listed.push({ rank: 1, role: roleForTitle(item.title), name: item.name, title: item.title, email: null, emailSource: null, relevance: `${item.title || "Works"} at ${trimmedCompany}, named on a public page.`, linkedinUrl: null, photoUrl: null, links: [{ label: "Source", url: item.url }], guess: null, maybe: [], base: "", history: null, checked: false });
+    listed.sort((a, b) => relevance(b) - relevance(a));
+  }
+
+  if (!listed.length && search.steps.length && search.steps.every((step) => step.error || step.found === 0) && search.steps.some((step) => step.error) && search.steps.filter((step) => !step.error).every((step) => ["Company website", "Public web pages", "Hunter"].includes(step.step))) {
+    throw failures instanceof ServiceError ? failures : new ServiceError("Couldn't look up people right now.", "provider_failed", 502);
+  }
+
+  // Now pay, only as far as it takes: down the list until one person has a usable email.
+  const reveal: { error?: string } = {};
+  let reveals = 0;
+  const dropped = new Set<Row>();
+  const revealRow = async (person: Row) => {
+    reveals += 1;
+    const result = (await enrichPeopleBatch([person.source!], userId, reveal)).get(person.source!.id);
+    if (!result) return;
+    const patch = result.patch;
+    // Apollo says they've moved on: they don't work here any more.
+    if (domain && patch.companyDomain && !sameSite(patch.companyDomain, domain) && !sameSite(patch.companyDomain, person.source!.companyDomain)) {
+      dropped.add(person);
+      return;
+    }
+    if (patch.lastName) person.name = `${person.source!.firstName} ${patch.lastName}`.trim();
+    person.photoUrl = patch.photoUrl ?? person.photoUrl;
+    person.linkedinUrl = patch.profileUrl ?? person.linkedinUrl;
+    person.links = linkList([["LinkedIn", patch.profileUrl ?? person.source!.profileUrl], ["X", patch.twitterUrl ?? person.source!.twitterUrl], ["GitHub", patch.githubUrl ?? person.source!.githubUrl], ["Facebook", patch.facebookUrl ?? person.source!.facebookUrl]]);
+    person.history = result.history;
+    person.relevance = whyLine(person.base, person.maybe, result.history, school);
+    person.guess = result.guess ?? null;
+    if (result.emailStatus === "verified" && result.email) {
+      person.email = result.email;
+      person.emailSource = "apollo";
+      person.checked = true;
+    }
+  };
+  const usable = (person: Row) => Boolean(person.email && person.checked);
+  await say("Finding the best person's email…");
+  for (const person of listed) {
+    if (listed.some(usable) || over()) break;
+    if (!fullName(person.name)) {
+      if (reveals >= AUTO_REVEALS || reveal.error || !person.source) continue;
+      await say("Getting their name and profile…");
+      await revealRow(person);
+      if (dropped.has(person) || usable(person) || !fullName(person.name)) continue;
+    }
+    if (!domain || !format) continue;
+    const guess = await guessEmail(userId, person.name, domain, format, person.guess ? [person.guess] : [], { checks: 3 }).catch(() => null);
+    if (guess) {
+      person.email = guess.email;
+      person.emailSource = guess.verified ? guess.source : guess.uncheckable ? "cant_check" : "likely";
+      person.checked = guess.verified || Boolean(guess.uncheckable);
+      // Nothing to check it with: this is as sure as it gets, so stop paying.
+      if (!checkerReady()) break;
+    } else if (checkerReady()) {
+      person.email = null;
+      person.emailSource = null;
+    }
+  }
+
+  // Everyone else: an address from the format, labeled as not checked, and a first name until they're revealed.
+  const hidden: Record<string, HiddenPerson> = {};
+  const kept = listed.filter((person) => !dropped.has(person));
+  for (const person of kept) {
+    const blurred = person.name.includes("*");
+    if (blurred) {
+      person.name = person.name.replace(/\s(\S)\S*\*\S*$/, (_, initial: string) => ` ${initial.toUpperCase()}.`);
+      if (!person.linkedinUrl) person.links.push({ label: "Find on LinkedIn", url: linkedinSearch(`${person.name.split(" ")[0]} ${app.company}`) });
+      if (person.source?.externalId) hidden[person.name.toLowerCase()] = { externalId: person.source.externalId, firstName: person.source.firstName, lastName: person.source.lastName, company: person.source.company, companyDomain: person.source.companyDomain, maybe: person.maybe };
+      continue;
+    }
+    if (person.email || !domain || !fullName(person.name)) continue;
+    const onFile = format?.known.find((item) => item.name && plain(item.name) === plain(person.name));
+    const apollo = person.guess && patternOf(person.guess, person.name) ? person.guess : null;
+    const built = format?.pattern ? buildEmail(format.pattern, person.name, domain) : null;
+    const fallback = buildEmail("{first}.{last}", person.name, domain);
+    if (onFile) [person.email, person.emailSource] = [onFile.email, onFile.verified ? "hunter" : "likely"];
+    else if (built) [person.email, person.emailSource] = [built, format?.acceptAll ? "cant_check" : "likely"];
+    else if (apollo) [person.email, person.emailSource] = [apollo, "likely"];
+    else if (fallback) [person.email, person.emailSource] = [fallback, "guess"];
+  }
+
+  const people: ListedPerson[] = kept.map((person, index) => {
+    const { guess, source, maybe, base, history, checked, ...rest } = person;
+    void guess; void source; void maybe; void base; void history; void checked;
     return { ...rest, rank: index + 1 };
   });
+  const hiddenCount = Object.keys(hidden).length;
+  search.steps.push({ step: "Full names", domain: domain ?? "", found: people.length - hiddenCount, ...(reveal.error ? { error: reveal.error.slice(0, 200) } : {}) });
   // Only a search that turned people up proves the website: the posting's own name says nothing about it.
-  const proven = top.length ? winner : null;
+  const proven = top.length || hunterKnown.length ? winner ?? domain : null;
   search.domain = proven;
   search.chosen = people[0] ? { name: people[0].name, role: people[0].role, email: Boolean(people[0].email) } : null;
-  if (proven && proven !== app.companyDomain) await repo.setCompanyDomains(app.company, [proven]).catch(() => undefined);
+  search.listed = people.length;
+  search.withEmail = people.filter((person) => person.email).length;
+  search.verified = people.filter((person) => person.emailSource === "apollo" || person.emailSource === "hunter" || person.emailSource === "pattern" || person.emailSource === "website").length;
+  search.costCents = Math.max(0, Math.round(((await spentTodayCents(userId).catch(() => spentBefore)) - spentBefore) * 10) / 10);
+  if (proven && proven !== app.companyDomain && top.length) await repo.setCompanyDomains(app.company, [proven]).catch(() => undefined);
 
   const notes: string[] = [];
-  if (!domains.length && !people.length) notes.push(`Couldn't find ${app.company}'s website, so there was nowhere to look for people. Add it under the job and search again.`);
-  else if (!people.length) notes.push(`Apollo found no one at ${app.company} (${domains.join(", ")})${school ? ` from ${school},` : ""} in recruiting, or in ${team || "this kind of role"}.`);
-  else if (people.some((person) => person.emailSource === "likely" || person.emailSource === "guess")) notes.push(format?.pattern ? `Emails follow ${app.company}'s usual format (${format.pattern.replace(/[{}]/g, "")}@${domain}). They aren't checked yet.` : `Couldn't learn ${app.company}'s email format, so emails are a best guess (first.last). They aren't checked yet.`);
-  if (hidden) notes.push(`Apollo didn't reveal ${hidden === 1 ? "1 person's last name" : `${hidden} people's last names`}, so they show by first name with no email. Find them on LinkedIn.${reveal.error ? ` Apollo said: ${reveal.error.replace(/^Apollo bulk match failed /, "").slice(0, 160)}` : ""}`);
-  return { people, domain: proven, notes, search };
+  const apolloFailed = search.steps.some((step) => step.error && step.step !== "Full names");
+  if (!domains.length && !people.length) notes.push(`Couldn't find ${app.company}'s website or anyone there. Add its website below, or try LinkedIn.`);
+  else if (!people.length) notes.push(`${apolloFailed ? "The people search had trouble just now, and nobody else knows" : "None of the sources Unnepo checks know anyone at"} ${app.company}${domains.length ? ` (${domains.join(", ")})` : ""}. Check the website below, or try LinkedIn.`);
+  else if (people.some((person) => person.emailSource === "likely" || person.emailSource === "guess")) notes.push(format?.pattern ? `Emails marked as not checked follow ${app.company}'s usual format (${format.pattern.replace(/[{}]/g, "")}@${domain}).` : `Couldn't learn ${app.company}'s email format, so some emails are a best guess (first.last).`);
+  if (over()) notes.push("This search ran out of time, so it shows what it found. Search again for more.");
+  if (hiddenCount && reveal.error) notes.push(`Apollo didn't reveal ${hiddenCount === 1 ? "1 person's last name" : `${hiddenCount} people's last names`}, so they show by first name with no email. Find them on LinkedIn. Apollo said: ${reveal.error.replace(/^Apollo bulk match failed /, "").slice(0, 160)}`);
+  return { people, domain: proven, notes, search, hidden, reveals };
+}
+
+/** "Show person": pays to reveal one person on the list, then finds and checks their email. Null if they've left. */
+export async function revealHiddenPerson(userId: string, app: JobApplication, hiddenPerson: HiddenPerson, school: string, base: string) {
+  const report: { error?: string } = {};
+  const source = asApollo(hiddenPerson);
+  const result = (await enrichPeopleBatch([source], userId, report)).get(source.id);
+  if (report.error) throw new ServiceError(/budget/i.test(report.error) ? "You've reached today's limit for looking people up. Try again tomorrow." : "Apollo couldn't show this person right now. Try again in a bit.", "reveal_failed", 502);
+  if (!result?.patch.lastName) return null;
+  const domain = app.companyDomain ?? hiddenPerson.companyDomain;
+  if (domain && result.patch.companyDomain && !sameSite(result.patch.companyDomain, domain) && !sameSite(result.patch.companyDomain, hiddenPerson.companyDomain)) return null;
+  const name = `${hiddenPerson.firstName} ${result.patch.lastName}`.trim();
+  let email = result.emailStatus === "verified" ? result.email : null;
+  let emailSource: FoundPerson["emailSource"] = email ? "apollo" : null;
+  if (!email && domain) {
+    const format = await learnFormat(userId, domain, [], [name], { useHunter: false }).catch(() => null);
+    if (format) {
+      const guess = await guessEmail(userId, name, domain, format, result.guess ? [result.guess] : [], { checks: 3 }).catch(() => null);
+      if (guess) [email, emailSource] = [guess.email, guess.verified ? guess.source : guess.uncheckable ? "cant_check" : "likely"];
+      else if (!checkerReady()) {
+        const fallback = buildEmail("{first}.{last}", name, domain);
+        if (fallback) [email, emailSource] = [fallback, "guess"];
+      }
+    }
+  }
+  return {
+    name, email, emailSource,
+    linkedinUrl: result.patch.profileUrl ?? null, photoUrl: result.patch.photoUrl ?? null,
+    links: linkList([["LinkedIn", result.patch.profileUrl], ["X", result.patch.twitterUrl], ["GitHub", result.patch.githubUrl], ["Facebook", result.patch.facebookUrl]]),
+    relevance: whyLine(base, hiddenPerson.maybe, result.history, school),
+  };
+}
+
+/** Before an email is written to someone whose address was never checked: check it now. "bad": it won't arrive. */
+export async function checkBeforeWriting(userId: string, name: string, domain: string, current: string): Promise<{ email: string | null; emailSource: FoundPerson["emailSource"] } | null> {
+  if (!checkerReady() || !fullName(name)) return null;
+  const format = await learnFormat(userId, domain, [], [name], { useHunter: false }).catch(() => null);
+  if (!format) return null;
+  const guess = await guessEmail(userId, name, domain, format, [current], { checks: 3 }).catch(() => null);
+  if (!guess) return { email: null, emailSource: null };
+  return { email: guess.email, emailSource: guess.verified ? guess.source : guess.uncheckable ? "cant_check" : "likely" };
 }
 
 /** A blurred name ("Sam Le***e") matched to a real one Hunter lists at the company: same first name, and a last name that fits the letters shown. */
-export function unblur(name: string, known: Array<{ email: string; name: string }>) {
+export function unblur<T extends { email: string; name: string }>(name: string, known: T[]) {
   const [first, ...rest] = name.trim().split(/\s+/);
   const blurred = rest.join(" ").toLowerCase();
   const [start, end] = [blurred.split("*")[0].replace(/[^a-z]/g, ""), blurred.split("*").pop()!.replace(/[^a-z]/g, "")];
@@ -440,12 +696,12 @@ function recruiterWhy(app: JobApplication, person: Contact) {
 }
 
 export const OUTREACH_EMAIL_PROMPT = `You write short cold emails from a college student to people at a company where the student just applied.
-Use only facts from the student's resume and profile, the job posting, and the person's name and title. Never invent experience, mutual connections, numbers, or anything about the person beyond their name and title.
+Use only facts from the student's resume and profile, the job posting, and the person's name and title. Never invent experience, mutual connections, numbers, or anything about the person beyond their name and title. If a person has something "confirmed in common with the student", open with it. Otherwise don't claim anything in common.
 Each email: mention the specific role the student applied to, one or two real experiences that fit the job's requirements, and a small ask fitting the person (a recruiter: a quick look at the application; a hiring manager or teammate: a short chat about the team). Under 120 words. Plain text, a greeting with the person's first name, and a sign-off with the student's name. No placeholders in brackets.
 Return only JSON: {"emails":[{"index":1,"subject":"...","body":"..."}]} with one entry per person, using the index given.`;
 
 /** One model call writes an email for every person, from the student's resume and the posting. */
-export async function writeOutreachEmails(userId: string, app: JobApplication, people: Array<Pick<ApplicationContact, "name" | "title" | "role">>, student: { name: string; resumeText: string; profile: string }, options: { followUp?: { subject: string; body: string; sentAt: string | null } } = {}) {
+export async function writeOutreachEmails(userId: string, app: JobApplication, people: Array<Pick<ApplicationContact, "name" | "title" | "role"> & { relevance?: string }>, student: { name: string; resumeText: string; profile: string }, options: { followUp?: { subject: string; body: string; sentAt: string | null } } = {}) {
   if (!people.length) return [];
   const apiKey = await readAnthropicKey();
   if (!apiKey) throw new Error("AI writing is not configured.");
@@ -456,7 +712,12 @@ export async function writeOutreachEmails(userId: string, app: JobApplication, p
     app.requirements.length ? `Requirements from the posting:\n${app.requirements.slice(0, 12).map((item) => `- ${item}`).join("\n")}` : `Job description:\n${app.description.slice(0, 3000)}`,
     student.resumeText ? `Resume:\n${student.resumeText.slice(0, 5000)}` : "",
     student.profile ? `Profile:\n${student.profile.slice(0, 3000)}` : "",
-    `People:\n${people.map((person, index) => `${index + 1}. ${person.name}, ${person.title || "title unknown"} (${person.role.replace("_", " ")})`).join("\n")}`,
+    // Only what's confirmed goes to the writer: "May have gone to Colby" isn't a fact to put in an email.
+    `People:\n${people.map((person, index) => {
+      const shared = person.relevance?.match(/^Also [^.]+\./)?.[0];
+      const role = person.role === "alumni" ? "works at the company" : person.role.replace("_", " ");
+      return `${index + 1}. ${person.name}, ${person.title || "title unknown"} (${role})${shared ? `. Confirmed in common with the student: ${shared.replace(/^Also /, "they ")}` : ""}`;
+    }).join("\n")}`,
     options.followUp ? `This is a follow-up. The student sent this email${options.followUp.sentAt ? ` on ${options.followUp.sentAt.slice(0, 10)}` : ""} and hasn't heard back:\nSubject: ${options.followUp.subject}\n${options.followUp.body.slice(0, 1500)}\n\nWrite a polite follow-up of 2 to 3 sentences: a quick nudge that restates interest in the role and the small ask. No guilt, no "just checking in" cliché. Subject: "Re: " and the original subject.` : "",
   ].filter(Boolean).join("\n\n");
   const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
