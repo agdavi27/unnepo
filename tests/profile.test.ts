@@ -4,7 +4,7 @@ import { creditsForPeople, prepareSearchDebit, prepareUnlockDebit, assertCreditC
 import { acceptModelFacts, factIsGrounded, mergeQuizFacts, parseHighlights, parseModelProfile, PROFILE_ORGANIZE_PROMPT, quizSourceText } from "@/lib/profile/quiz-model";
 import { profileIntelligence } from "@/lib/profile/intelligence";
 import { dismissRecommendedJob, resetStructuredProfile, saveStructuredProfile, generateWorkspaceCoverLetter, listRecommendedJobs, jobPreferences, saveJobPreferences, saveRecommendedJob, refreshProfileHighlights, workspaceState } from "@/lib/services/workspace";
-import { PUBLIC_PLANS, creditMath, serverConfig } from "@/lib/config";
+import { FREE_CREDITS, PUBLIC_PLANS, creditMath, serverConfig } from "@/lib/config";
 import { roleFit, scoreJob, setJobFetcherForTests } from "@/lib/jobs/recommend";
 import { isPersonalWorkEmail, looksLikePerson } from "@/lib/providers/contacts/router";
 import { COLLEGE_SUGGESTIONS, brandsForInterests, rankSuggestions } from "@/lib/suggestions";
@@ -123,14 +123,16 @@ describe("structured profile", () => {
   });
 
   it("offers Free, Pro and Premium, monthly or by the semester, with 1 credit per company", () => {
-    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 3], ["pro", "$24", "or $69 a semester", 40], ["premium", "$44", "or $119 a semester", 100]]);
+    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 5], ["pro", "$24", "or $69 a semester", 40], ["premium", "$44", "or $119 a semester", 75]]);
     expect(creditMath(1)).toBe("People at 1 company");
     expect(creditMath(40)).toBe("People at 40 companies");
     const saved = process.env.SIGNUP_CREDITS;
     delete process.env.SIGNUP_CREDITS;
-    expect(serverConfig().signupCredits).toBe(3);
+    expect(serverConfig().signupCredits).toBe(5);
+    expect(FREE_CREDITS).toBe(55);
     expect(serverConfig().proMonthlyCredits).toBe(40);
-    expect(serverConfig().premiumMonthlyCredits).toBe(100);
+    expect(serverConfig().premiumMonthlyCredits).toBe(75);
+    expect(serverConfig().packPriceCents).toBe(1000);
     expect(serverConfig().proSemesterPriceCents).toBe(6900);
     process.env.SIGNUP_CREDITS = saved;
   });

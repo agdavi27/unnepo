@@ -96,6 +96,8 @@ export type FillReport = {
   emailedAt?: Record<string, string>;
   /** The credit for this job's person was spent, so searching again is free. */
   personCharged?: boolean;
+  /** This job has used one of the plan's autofills, so filling it again is free. */
+  autofillCounted?: boolean;
   /** Every question the extension tried to fill, newest last, so autofill failures can be counted and fixed. */
   attempts?: FillAttempt[];
   /** Every status change, oldest first. */
@@ -210,6 +212,8 @@ export type ApplicationContact = {
   updatedAt: string;
 };
 
+export type UsageCounts = { letters?: number; answers?: number; autofills?: number };
+
 /** Reusable answers for application forms. Only what the student typed or what appears in their resume. */
 export type ApplicationProfile = {
   firstName: string;
@@ -236,8 +240,8 @@ export type ApplicationProfile = {
   weeklyEmailGoal?: number;
   monthlyInterviewGoal?: number;
   streakGoal?: number;
-  /** Cover letters written this month ("2026-11"), for Free's monthly limit. */
-  letters?: { month: string; count: number };
+  /** Plan uses: every one ever, for Free's one-time allowance, and this month's ("2026-11"), for the paid plans' fair-use cap. */
+  uses?: { total: UsageCounts; month: string; monthly: UsageCounts };
   /** "Did you apply to these?": jobs Apply was pressed on or filled that nothing confirmed. Shared by the panel and the web app. */
   maybeApplied?: MaybeApplied[];
   /** An applying session: when it started, and the last thing that happened in it (it ends after 15 idle minutes). */
@@ -248,7 +252,7 @@ export type ApplicationProfile = {
   jobFeed?: { seen: Record<string, string>; dismissed: string[]; round: number; saved?: SavedFeedJob[] };
   /** The spider the student picked on the Stats page (lib/spiders.ts); worn once it's unlocked. */
   spiderSkin?: string;
-  /** CVs Unnepo has written for the student; 1 credit covers CVS_PER_CREDIT of them. */
+  /** CVs Unnepo has written for the student. */
   cvCount?: number;
   /** Answers the AI wrote for questions, by question and options, so the same question costs nothing next time. */
   aiCache?: Record<string, { values: string[]; why: string; at: string }>;

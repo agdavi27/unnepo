@@ -1,15 +1,15 @@
-import { FREE_COVER_LETTERS } from "@/lib/config";
+import { CREDIT_COST, FREE_LIMITS, FREE_PEOPLE, PUBLIC_PLANS, serverConfig } from "@/lib/config";
 import { repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { applicationProfiles } from "@/lib/apply/store";
 
 /**
- * Plan limits beyond credits. Free writes FREE_COVER_LETTERS cover letters a month; paid plans have no limit.
+ * Plan limits beyond people searches. Free has a one-time allowance of each; paid plans have a monthly fair-use cap.
  * Accounts listed in UNLIMITED_CREDIT_EMAILS (comma-separated, set in Vercel) never run out of credits and
  * aren't charged them, but keep their plan, so a Free account still sees every Free limit.
  */
 
-export { FREE_COVER_LETTERS };
+export type UsageKind = keyof typeof FREE_LIMITS;
 
 export async function hasUnlimitedCredits(userId: string) {
   const list = (process.env.UNLIMITED_CREDIT_EMAILS || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
@@ -20,25 +20,69 @@ export async function hasUnlimitedCredits(userId: string) {
 
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
-/** Cover letters written this month, and how many Free has left (null: no limit). */
-export async function coverLettersLeft(userId: string) {
-  const [account, stored] = await Promise.all([repo.getAccount(userId), applicationProfiles.get(userId)]);
-  if (account && account.plan !== "free") return { used: 0, left: null as number | null };
-  const used = stored?.letters?.month === thisMonth() ? stored.letters.count : 0;
-  return { used, left: Math.max(0, FREE_COVER_LETTERS - used) };
+const NAMES: Record<UsageKind | "people", [string, string]> = {
+  letters: ["cover letter", "cover letters"],
+  answers: ["chat answer", "chat answers"],
+  autofills: ["autofill", "autofills"],
+  people: ["people search", "people searches"],
+};
+
+/** "Only 2 autofills left": empty until the number is worth a mention. Free's low point is a few uses; a paid cap's is 20. */
+function usesNote(kind: UsageKind | "people", left: number, free: boolean, cap: number) {
+  const [one, many] = NAMES[kind];
+  if (left <= 0) {
+    if (kind === "people") return free ? `No ${many} left. Pro includes ${PUBLIC_PLANS[1].credits} a month.` : `No ${many} left until your plan renews.`;
+    return free ? `No ${many} left. Pro has no limit.` : `You've used this month's ${cap} ${many}. More next month.`;
+  }
+  const low = kind === "people" ? (free ? 2 : 5) : free ? (kind === "letters" ? 2 : 3) : 20;
+  return left <= low ? `Only ${left} ${left === 1 ? one : many} left` : "";
 }
 
-/** Before writing a cover letter: Free stops at its monthly number. */
-export async function assertCoverLetterAllowed(userId: string) {
-  const { left } = await coverLettersLeft(userId);
-  if (left === 0) throw new ServiceError(`Free writes ${FREE_COVER_LETTERS} cover letters a month. Pro has no limit.`, "letters", 402);
+/** What the student has left on their plan, in uses and in credits, and the line to show for anything running low. */
+export async function planUsage(userId: string) {
+  const [account, stored, unlimited] = await Promise.all([repo.getAccount(userId), applicationProfiles.get(userId), hasUnlimitedCredits(userId)]);
+  const free = !account || account.plan === "free";
+  const config = serverConfig();
+  const fairUse = account?.plan === "premium" ? config.premiumAiLimit : config.proAiLimit;
+  const uses = stored?.uses;
+  const count = (kind: UsageKind) => (free ? uses?.total?.[kind] : uses?.month === thisMonth() ? uses.monthly?.[kind] : 0) ?? 0;
+  const one = (kind: UsageKind) => {
+    const limit = free ? FREE_LIMITS[kind] : fairUse;
+    const left = Math.max(0, limit - count(kind));
+    return { used: count(kind), limit, left, note: usesNote(kind, left, free, limit) };
+  };
+  const [letters, answers, autofills] = [one("letters"), one("answers"), one("autofills")];
+  const peopleLeft = account?.balance ?? (free ? FREE_PEOPLE : 0);
+  const people = { left: peopleLeft, note: unlimited ? "" : usesNote("people", peopleLeft, free, 0) };
+  const writing = free ? letters.left * CREDIT_COST.letters + answers.left * CREDIT_COST.answers + autofills.left * CREDIT_COST.autofills : 0;
+  return { free, unlimited, credits: unlimited ? null : writing + peopleLeft * CREDIT_COST.people, letters, answers, autofills, people };
 }
 
-/** After a cover letter is written: one more this month. Edits the student types themselves don't count. */
-export async function countCoverLetter(userId: string) {
+/** Before an AI use: stops at the plan's number. */
+export async function assertUseAllowed(userId: string, kind: UsageKind) {
+  const usage = await planUsage(userId);
+  if (usage[kind].left === 0) throw new ServiceError(usage[kind].note, kind, usage.free ? 402 : 429);
+}
+
+/** After a use that worked: one more. Edits the student types themselves don't count. */
+export async function countUse(userId: string, kind: UsageKind) {
   const stored = await applicationProfiles.get(userId);
   if (!stored) return;
   const month = thisMonth();
-  const count = stored.letters?.month === month ? stored.letters.count + 1 : 1;
-  await applicationProfiles.put(userId, { ...stored, letters: { month, count } });
+  const uses = stored.uses;
+  const monthly = uses?.month === month ? uses.monthly : {};
+  await applicationProfiles.put(userId, { ...stored, uses: {
+    total: { ...uses?.total, [kind]: (uses?.total?.[kind] ?? 0) + 1 },
+    month,
+    monthly: { ...monthly, [kind]: (monthly[kind] ?? 0) + 1 },
+  } });
 }
+
+/** Cover letters used, and how many Free has left (null: a paid plan, nothing to count down). */
+export async function coverLettersLeft(userId: string) {
+  const usage = await planUsage(userId);
+  return { used: usage.letters.used, left: usage.free ? usage.letters.left : (null as number | null) };
+}
+
+export const assertCoverLetterAllowed = (userId: string) => assertUseAllowed(userId, "letters");
+export const countCoverLetter = (userId: string) => countUse(userId, "letters");

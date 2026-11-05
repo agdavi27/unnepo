@@ -344,7 +344,7 @@ describe("applications", () => {
     await expect(createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" })).rejects.toThrow(/Finish your profile/);
   });
 
-  it("doesn't spend credits on applications, and stops Free after 25", async () => {
+  it("doesn't spend credits on applications, and tracks any number on Free", async () => {
     const userId = await student();
     const before = (await repo.getAccount(userId))!.balance;
     await createApplication(userId, { url: "https://job-boards.greenhouse.io/acme/jobs/123" });
@@ -358,13 +358,7 @@ describe("applications", () => {
       });
       ids.push(app.id);
     }
-    // The Greenhouse job above was the first; 24 more make 25.
-    for (const applicationId of ids.slice(0, 24)) await markApplied(userId, { applicationId });
-    await expect(markApplied(userId, { applicationId: ids[24] })).rejects.toThrow(/Free covers 25 applications/);
-    expect((await applications.get(userId, ids[24]))?.status).toBe("extracted");
-    // Pro has no limit.
-    await repo.setAccountForTests(userId, { plan: "pro" });
-    await markApplied(userId, { applicationId: ids[24] });
+    for (const applicationId of ids) await markApplied(userId, { applicationId });
     expect((await applications.get(userId, ids[24]))?.status).toBe("applied_manual");
     expect((await repo.getAccount(userId))!.balance).toBe(before);
   });

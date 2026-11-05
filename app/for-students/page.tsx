@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FREE_APPLICATIONS, PUBLIC_PLANS } from "@/lib/config";
+import { FREE_LIMITS, FREE_PEOPLE } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 
 export default function ForStudentsPage() {
@@ -45,7 +45,7 @@ export default function ForStudentsPage() {
         </p>
 
         <Link href="/signup" className="mt-8 inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black">
-          Start free: {FREE_APPLICATIONS} applications and {PUBLIC_PLANS[0].credits} people to reach
+          Start free: {FREE_LIMITS.autofills} autofills and people at {FREE_PEOPLE} companies
         </Link>
       </main>
     </div>

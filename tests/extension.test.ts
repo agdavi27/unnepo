@@ -440,15 +440,13 @@ describe("resume from the extension", () => {
 });
 
 describe("CV generator", () => {
-  it("writes a CV from the student's facts, drops invented numbers, and charges 1 credit per 5", async () => {
+  it("writes a CV from the student's facts, drops invented numbers, and counts it with cover letters", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
     const startCredits = (await repo.getAccount(userId))!.balance;
-    const before = await (await call("GET", "me", token)).json();
-    expect(before.cv).toEqual({ usesLeft: startCredits * 5, perCredit: 5 });
 
-    const cv = "EDUCATION\nColby College: B.A., Economics (May 2027)\n\nEXPERIENCE\nPresident, Colby Data Club\n• Built dashboards for 40 students\n• Grew membership by 300%\n\nSKILLS\nSQL, Tableau";
+    const cv = "EDUCATION\nColby College: B.A., Economics (May 2027)\n\nEXPERIENCE\nPresident, Colby Data Club\n• Built dashboards for 40 students\n• Grew membership 300%\n\nSKILLS\nExcel, Python";
     for (let index = 0; index < 6; index += 1) model.replies.push(cv);
     const first = await (await call("POST", "cv", token, {})).json();
     expect(first.text).toContain("EDUCATION");
@@ -456,25 +454,70 @@ describe("CV generator", () => {
     // "300%" isn't in the profile or resume, so that line is gone.
     expect(first.text).not.toContain("300%");
     expect(Buffer.from(first.pdfBase64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
-    expect((await repo.getAccount(userId))!.balance).toBe(startCredits - 1);
-    expect(first.usesLeft).toBe(4 + (startCredits - 1) * 5);
+    expect((await repo.getAccount(userId))!.balance).toBe(startCredits);
+    expect(first.usesLeft).toBe(4);
 
-    // The next four come out of the same credit; the sixth spends another.
     for (let index = 0; index < 4; index += 1) await call("POST", "cv", token, {});
-    expect((await repo.getAccount(userId))!.balance).toBe(startCredits - 1);
-    await call("POST", "cv", token, {});
-    expect((await repo.getAccount(userId))!.balance).toBe(startCredits - 2);
-  });
-
-  it("stops before writing when there are no credits left", async () => {
-    const userId = await readyStudent();
-    process.env.ANTHROPIC_API_KEY = "anthropic";
-    await repo.setAccountForTests(userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
-    const { token } = await issueExtensionToken(userId);
     const calls = model.calls;
     const response = await call("POST", "cv", token, {});
     expect(response.status).toBe(402);
     expect(model.calls).toBe(calls);
+  });
+});
+
+describe("plan limits", () => {
+  it("shows credits left and warns only when a tool runs low", async () => {
+    const userId = await readyStudent();
+    await repo.setAccountForTests(userId, { balance: 5 });
+    const { token } = await issueExtensionToken(userId);
+    const { usage } = await (await call("GET", "me", token)).json();
+    expect(usage.credits).toBe(55);
+    expect(usage.autofills).toMatchObject({ left: 10, note: "" });
+    expect(usage.people).toMatchObject({ left: 5, note: "" });
+    await repo.setAccountForTests(userId, { balance: 1 });
+    const low = (await (await call("GET", "me", token)).json()).usage;
+    expect(low.credits).toBe(35);
+    expect(low.people.note).toBe("Only 1 people search left");
+  });
+
+  it("stops Free at 10 chat answers", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    for (let index = 0; index < 10; index += 1) {
+      model.replies.push("I led the Colby Data Club.");
+      expect((await call("POST", "write", token, { question: "Describe a time you led a team" })).status).toBe(200);
+    }
+    const blocked = await call("POST", "write", token, { question: "Describe a time you led a team" });
+    expect(blocked.status).toBe(402);
+    expect((await blocked.json()).error).toBe("No chat answers left. Pro has no limit.");
+  });
+
+  it("counts a job's autofill once it worked, and lets Free refill that job after the limit", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const fields = [{ id: "first", label: "First name", type: "text", required: true, options: [] }];
+    const ok = [{ site: "example.com", label: "First name", type: "text", answer: "Ada", method: "value", ok: true }];
+    const failed = [{ site: "example.com", label: "First name", type: "text", answer: "", method: "value", ok: false, problem: "error" }];
+    const jobs: string[] = [];
+    for (let index = 0; index < 11; index += 1) {
+      const job = await (await call("POST", "jobs", token, { url: `https://careers.globex.example/apply/${index}`, title: "Data Intern", company: "Globex" })).json();
+      jobs.push(job.application.id);
+    }
+    // A fill where nothing stuck doesn't count; the same job filled twice counts once.
+    await call("POST", "attempts", token, { applicationId: jobs[0], attempts: failed });
+    expect((await (await call("GET", "me", token)).json()).usage.autofills.used).toBe(0);
+    await call("POST", "attempts", token, { applicationId: jobs[0], attempts: ok });
+    await call("POST", "attempts", token, { applicationId: jobs[0], attempts: ok });
+    expect((await (await call("GET", "me", token)).json()).usage.autofills.used).toBe(1);
+    for (const applicationId of jobs.slice(1, 10)) await call("POST", "attempts", token, { applicationId, attempts: ok });
+
+    const blocked = await call("POST", "map", token, { applicationId: jobs[10], fields, ai: false });
+    expect(blocked.status).toBe(402);
+    expect((await blocked.json()).error).toBe("No autofills left. Pro has no limit.");
+    expect((await call("POST", "map", token, { applicationId: jobs[0], fields, ai: false })).status).toBe(200);
+    await repo.setAccountForTests(userId, { plan: "pro" });
+    expect((await call("POST", "map", token, { applicationId: jobs[10], fields, ai: false })).status).toBe(200);
   });
 });
 
@@ -586,7 +629,7 @@ describe("Free's cover letter limit", () => {
     }
     const blocked = await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" });
     expect(blocked.status).toBe(402);
-    expect((await blocked.json()).error).toMatch(/5 cover letters a month/);
+    expect((await blocked.json()).error).toBe("No cover letters left. Pro has no limit.");
     expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 4.");
     expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id, text: "My own letter." })).json()).text).toBe("My own letter.");
     expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 5, left: 0 });

@@ -141,6 +141,12 @@ function jobFound(state: PanelState) {
   return onWeb && Boolean(job?.applicationId || job?.running || job?.report || page?.fields || page?.posting);
 }
 
+/** What's left on the plan, from the latest state. */
+let usesNow: NonNullable<PanelState["me"]>["usage"] | null = null;
+
+/** "Only 2 autofills left": nothing until a tool's uses run low. */
+const usesLine = (note?: string) => (note ? `<span class="small uses-left" role="status" style="color: var(--warn)">${escape(note)}</span>` : "");
+
 /** The Autofill section: only with a job form on this tab. */
 function pageCard(state: PanelState) {
   if (!jobFound(state)) return "";
@@ -178,6 +184,7 @@ function pageCard(state: PanelState) {
       ${named ? `<div><div class="title">${escape(title || site || "This job")}</div><div class="sub">${escape(detail)}</div></div>` : ""}
       ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
       ${fill}
+      ${usesLine(me?.usage?.autofills.note)}
       <span class="sub">Beta: check every field before you submit.</span>
       ${job?.running || report ? `<p class="small resume-line">Resume: ${escape(me!.resume?.fileName ?? "none yet")}${me!.resume?.file ? " ✓" : ""}</p>` : ""}
       ${todo.length ? `<p class="note${report?.needsYou.length ? " warn" : ""}">Left to do · ${todo.length} <span class="small">(the checklist on the page walks you through)</span>:</p>
@@ -589,6 +596,7 @@ function answerForm(big: boolean) {
       ${label}
       <textarea class="field letter-input" id="answer-q" rows="3" maxlength="600" placeholder="e.g. Describe a time you led a team">${escape(answering.question)}</textarea>
       <button type="button" class="btn${big ? "" : " primary"}" id="answer-go" ${answering.busy || !answering.question.trim() ? "disabled" : ""}>${SPARK_SMALL}${answering.busy ? "Writing…" : "Answer with AI"}</button>
+      ${usesLine(usesNow?.answers.note)}
       ${answering.answer ? `
         <label class="q-label" for="answer-text">Your answer. Check it, change it, then copy it.</label>
         <textarea class="cv-text" id="answer-text">${escape(answering.answer)}</textarea>
@@ -644,7 +652,7 @@ function letterBlock() {
   const busy = letterStep === "writing" || letterStep === "revising" || letterStep === "saving";
   // A letter from a pasted description belongs on Write, not on this job.
   if (letterStep === "closed" || (letterSource === "paste" && letterStep !== "asking" && !busy)) {
-    return `<div class="cv"><span class="sub">For the job on this page, written from your profile and resume.</span><button type="button" class="btn primary" id="letter-start">${SPARK_SMALL}Generate cover letter</button></div>`;
+    return `<div class="cv"><span class="sub">For the job on this page, written from your profile and resume.</span><button type="button" class="btn primary" id="letter-start">${SPARK_SMALL}Generate cover letter</button>${usesLine(usesNow?.letters.note)}</div>`;
   }
   const questions = letterStep === "asking" || (letterStep === "writing" && !letter) ? `
     <div class="letter-form" id="letter-form">
@@ -887,7 +895,8 @@ function profileCard(state: PanelState) {
     <section class="stack tight" aria-label="Your profile">
       <div class="row-between"><span class="heading">Your profile</span><span class="mono">${me.completeness}% READY</span></div>
       <div class="bar" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}"><div style="width:${me.completeness}%"></div></div>
-      <span class="small">${escape(me.user.email)} · ${me.unlimitedCredits ? "unlimited credits" : `${me.credits} ${me.credits === 1 ? "credit" : "credits"}`}${me.coverLetters?.left != null ? ` · ${me.coverLetters.left} cover letters left` : ""}</span>
+      <span class="small">${escape(me.user.email)} · ${me.unlimitedCredits ? "unlimited credits" : `${me.usage?.credits ?? me.credits * 5} credits left`}</span>
+      ${me.usage?.free ? `<span class="small">${me.usage.letters.left} cover letters · ${me.usage.answers.left} chat answers · ${me.usage.autofills.left} autofills${me.usage.unlimited ? "" : ` · ${me.usage.people.left} people searches`} left</span>` : ""}
       <a class="btn" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">Edit my info</a>
       ${me.profileReady ? "" : `<span class="small" style="color: var(--warn)">Finish your profile so there's something to fill with.</span>`}
       ${missing.length ? `<span class="small">Missing: ${missing.map(escape).join(", ")}</span>` : ""}
@@ -1195,6 +1204,7 @@ function dressSpider(look?: SpiderLook) {
 
 async function render() {
   const state = await ask<PanelState>({ type: "state" });
+  usesNow = state.me?.usage ?? null;
   // A letter belongs to one job: opening another job (another tab, or another one in Handshake's search) closes it.
   // Keyed by the job's name, not the address, so the steps of one application keep it.
   const jobName = (state.job?.title || state.page?.title || "").toLowerCase();

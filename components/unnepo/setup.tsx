@@ -119,7 +119,7 @@ export function SetupPage({ resume, completeness, resumeBusy, onReplaceResume, o
   }
   async function findForAll() {
     const count = noPeople.length;
-    if (!window.confirm(`Find people for ${count} ${count === 1 ? "job" : "jobs"}? This uses up to ${count} ${count === 1 ? "credit" : "credits"}: 1 per job, only when someone with an email is found.`)) return;
+    if (!window.confirm(`Find people for ${count} ${count === 1 ? "job" : "jobs"}? This uses up to ${count * 5} credits: 5 per job, only when someone with an email is found.`)) return;
     setFinding(true);
     setNote("");
     let started = 0;
@@ -217,7 +217,7 @@ export function SetupPage({ resume, completeness, resumeBusy, onReplaceResume, o
             </div>
             <label className={toggleLabel}>
               <input type="checkbox" className={check} checked={Boolean(autoPeople)} onChange={(event) => void toggle({ autoFindPeople: event.target.checked })} />
-              <span>Find people as soon as a job is marked applied, so the list is ready when I open it. 1 credit per job, only when someone with an email is found.</span>
+              <span>Find people as soon as a job is marked applied, so the list is ready when I open it. 5 credits per job, only when someone with an email is found.</span>
             </label>
             {noPeople.length > 0 && <button type="button" disabled={finding} onClick={() => void findForAll()} className={`${nextButton} disabled:opacity-50`}>{finding ? "Starting…" : `Find people for ${noPeople.length} ${noPeople.length === 1 ? "job" : "jobs"}`}</button>}
           </section>

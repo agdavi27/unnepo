@@ -1,5 +1,4 @@
-import { hasUnlimitedCredits } from "@/lib/apply/limits";
-import { repo } from "@/lib/db/file-store";
+import { assertUseAllowed, countUse, planUsage } from "@/lib/apply/limits";
 import { ServiceError } from "@/lib/errors";
 import { claudeAsk } from "@/lib/apply/fast/pipeline";
 import { requireApp, student } from "@/lib/apply/service";
@@ -7,11 +6,9 @@ import { applicationProfiles } from "@/lib/apply/store";
 
 /**
  * The CV generator: a one-page CV written from the student's own profile and resume, put in the order
- * that fits the job they're applying to. One AI call; nothing the student didn't say. 1 credit covers
- * CVS_PER_CREDIT CVs, charged on the 1st, 6th, 11th… like applications.
+ * that fits the job they're applying to. One AI call; nothing the student didn't say. Counts with cover
+ * letters toward the plan's writing allowance.
  */
-
-export const CVS_PER_CREDIT = 5;
 
 export const CV_PROMPT = `You write a one-page CV for a college student, as plain text.
 
@@ -40,12 +37,6 @@ Comma-separated skills
 Two to four bullets per role. No summary or objective line, no name or contact details (those are added
 separately), no markdown, no commentary before or after the CV.`;
 
-/** Uses the student has left: what remains of the credit already spent, plus CVS_PER_CREDIT per credit. */
-export function cvUsesLeft(cvCount: number, credits: number) {
-  const remainder = cvCount % CVS_PER_CREDIT;
-  return (remainder === 0 ? 0 : CVS_PER_CREDIT - remainder) + Math.max(0, credits) * CVS_PER_CREDIT;
-}
-
 /**
  * Drops any line with a number the student never wrote (a made-up percentage, count, or year), so the CV
  * can't claim what the profile and resume don't.
@@ -64,9 +55,7 @@ export async function generateCv(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { applicationId?: unknown };
   const info = await student(userId);
   const count = info.profile.cvCount ?? 0;
-  const account = await repo.getAccount(userId);
-  const needsCredit = count % CVS_PER_CREDIT === 0 && !(await hasUnlimitedCredits(userId));
-  if (needsCredit && (account?.balance ?? 0) < 1) throw new ServiceError(`You're out of credits. 1 credit covers ${CVS_PER_CREDIT} CVs.`, "credits", 402);
+  await assertUseAllowed(userId, "letters");
 
   const app = typeof body.applicationId === "string" && body.applicationId ? await requireApp(userId, body.applicationId) : null;
   const facts = JSON.stringify({
@@ -86,24 +75,19 @@ export async function generateCv(userId: string, raw: unknown) {
   const text = groundNumbers(written.replace(/```[a-z]*\n?|```/g, "").trim(), `${facts}\n${resume}`);
   if (text.length < 80) throw new ServiceError("Couldn't write the CV from your profile. Try again.", "ai", 503);
 
-  // Charged only once a CV was written.
-  if (needsCredit) {
-    const block = Math.floor(count / CVS_PER_CREDIT);
-    const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: `cv-block:${userId}:${block}`, note: `CVs ${block * CVS_PER_CREDIT + 1}–${(block + 1) * CVS_PER_CREDIT}`, entryType: "cv_debit" });
-    if (spent.insufficient) throw new ServiceError(`You're out of credits. 1 credit covers ${CVS_PER_CREDIT} CVs.`, "credits", 402);
-  }
+  // Counted only once a CV was written.
   const stored = (await applicationProfiles.get(userId)) ?? info.profile;
   await applicationProfiles.put(userId, { ...stored, cvCount: count + 1 });
+  await countUse(userId, "letters");
 
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || "Your Name";
   const contact = [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin].filter((part): part is string => Boolean(part?.trim()));
   const pdf = await cvPdf(text, { name, contact });
-  const credits = (await repo.getAccount(userId))?.balance ?? 0;
   return {
     text: `${name}\n${contact.join(" | ")}\n\n${text}`,
     fileName: `${name} CV${app ? ` - ${app.company}` : ""}.pdf`.replace(/[\\/:*?"<>|]+/g, ""),
     pdfBase64: pdf.toString("base64"),
-    usesLeft: cvUsesLeft(count + 1, credits),
+    usesLeft: (await planUsage(userId)).letters.left,
   };
 }
 

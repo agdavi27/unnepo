@@ -101,7 +101,8 @@ async function grantFromCheckout(object: StripeObject, eventId: string) {
     demo: false,
     createdAt: nowIso(),
   });
-  if (grant.granted) await repo.setAccountForTests(userId, { plan: "pack" });
+  // Extra people on a paid plan keep that plan.
+  if (grant.granted && (await repo.getAccount(userId))?.plan === "free") await repo.setAccountForTests(userId, { plan: "pack" });
   return { duplicate: false, granted: grant.granted ? credits : 0 };
 }
 
@@ -227,6 +228,7 @@ export async function createStripeCheckout(userId: string, kind: CheckoutKind) {
   const secret = process.env.STRIPE_SECRET_KEY;
   const config = serverConfig();
   const offer = checkoutOffer(kind, config);
+  if (kind === "pack" && (await repo.getAccount(userId))?.plan === "free") throw new ServiceError("Extra people are for Pro and Premium.", "plan", 409);
   if (!secret) throw new ServiceError("Checkout isn't set up.", "stripe", 409);
   const Stripe = (await import("stripe")).default;
   const stripe = new Stripe(secret);

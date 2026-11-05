@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import { SKINS, skinUnlocked } from "@/lib/spiders";
 import { isApplied } from "@/lib/apply/stats";
-import { FREE_APPLICATIONS, serverConfig } from "@/lib/config";
+import { serverConfig } from "@/lib/config";
 import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { splitProfileList } from "@/lib/profile/lists";
@@ -13,7 +13,7 @@ import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
-import { hasUnlimitedCredits } from "@/lib/apply/limits";
+import { hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { removeEmailTextsFor } from "@/lib/email/store";
 import { profileReady, profileState } from "@/lib/profile/service";
@@ -88,7 +88,7 @@ export async function student(userId: string) {
     autoFindPeople: stored?.autoFindPeople,
     maybeApplied: stored?.maybeApplied,
     session: stored?.session,
-    letters: stored?.letters,
+    uses: stored?.uses,
     jobFeed: stored?.jobFeed,
     cvCount: stored?.cvCount,
   };
@@ -452,7 +452,7 @@ export async function applyState(userId: string) {
     profile: publicProfile(info.profile),
     resume: info.resume ? { fileName: info.resume.fileName, stored: Boolean(info.resume.storagePath) } : null,
     ready: { hunter: hunterReady(), profile: await profileReady(userId) },
-    freeApplications: FREE_APPLICATIONS,
+    usage: await planUsage(userId),
     school: info.context.school,
     plan: (await repo.getAccount(userId))?.plan ?? "free",
     maybe: liveMaybe(info.profile.maybeApplied).map(({ description, ...item }) => (void description, item)),
@@ -529,7 +529,6 @@ export async function createApplication(userId: string, raw: unknown) {
     attempts: 0,
   });
   if (timings && created) logTimings(app.id, "mapping", timings);
-  // Free covers FREE_APPLICATIONS jobs; paid plans have no limit.
   if (created) await ensureCharged(userId, app);
   return { application: summary(app), duplicate: !created, message: created ? "Job added." : "You already added this job." };
 }
@@ -638,14 +637,9 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
   return { profile: publicProfile(next) };
 }
 
-/** Free covers FREE_APPLICATIONS applications; paid plans and school plans have no limit. Credits aren't spent here. */
+/** Marks a job as tracked. Tracking is free on every plan, however many jobs; only autofill is counted. */
 export async function ensureCharged(userId: string, app: JobApplication) {
   if (app.charged) return;
-  const account = await repo.getAccount(userId);
-  if (!account || account.plan === "free") {
-    const count = await applications.countCharged(userId);
-    if (count >= FREE_APPLICATIONS) throw new ServiceError(`Free covers ${FREE_APPLICATIONS} applications. Pro has no limit.`, "credits", 402);
-  }
   await applications.update(userId, app.id, { charged: true });
 }
 
@@ -749,7 +743,7 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const alreadyPaid = Boolean(app.fillReport?.personCharged);
   const unlimited = await hasUnlimitedCredits(userId);
   if (!alreadyPaid && !unlimited && ((await repo.getAccount(userId))?.balance ?? 0) < 1) {
-    await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds the people at a company for one job." });
+    await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 5 credits find the people at a company for one job." });
     return;
   }
   let found: Awaited<ReturnType<typeof findPeopleForApplication>>;
@@ -777,7 +771,7 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   if (found.people.some((person) => person.email) && !charged && !unlimited) {
     const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: paidKey, note: `A person at ${app.company.slice(0, 80)}`, entryType: "unlock_debit" });
     if (spent.insufficient) {
-      await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 1 credit finds the people at a company for one job." });
+      await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 5 credits find the people at a company for one job." });
       return;
     }
     charged = true;
@@ -853,7 +847,7 @@ export async function revealContact(userId: string, raw: unknown) {
   // The first email on a job's list is what its credit pays for.
   const unlimited = await hasUnlimitedCredits(userId);
   const paid = Boolean(report.personCharged) || unlimited;
-  if (!paid && ((await repo.getAccount(userId))?.balance ?? 0) < 1) throw new ServiceError("You're out of credits. 1 credit finds the people at a company for one job.", "credits", 402);
+  if (!paid && ((await repo.getAccount(userId))?.balance ?? 0) < 1) throw new ServiceError("You're out of credits. 5 credits find the people at a company for one job.", "credits", 402);
   const base = contact.relevance.replace(/^(Also|May have) [^.]+\.\s*/g, "").replace(/^(Also|May have) [^.]+\.\s*/g, "");
   const shown = await revealHiddenPerson(userId, app, hidden, info.context.school, base);
   const { [key]: done, ...rest } = report.peopleHidden ?? {};

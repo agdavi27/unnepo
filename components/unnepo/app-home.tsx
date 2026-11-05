@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
 import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
-import { ENTERPRISE_PLAN, FREE_APPLICATIONS, FREE_COVER_LETTERS, PUBLIC_PLANS, creditMath } from "@/lib/config";
+import { CREDIT_COST, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
+import type { PlanUsage } from "@/components/unnepo/apply";
 import { Logo } from "@/components/brand/logo";
 import { ApplyArea, SpiderSettings } from "@/components/unnepo/apply";
 import { SetupPage } from "@/components/unnepo/setup";
@@ -15,7 +16,7 @@ import { extensionHere } from "@/lib/extension-bridge";
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
   user: { name: string; email: string };
-  credits: { balance: number; plan: string; includedAllowance: number; unlimited?: boolean; coverLetters?: { used: number; left: number | null } };
+  credits: { balance: number; plan: string; includedAllowance: number; unlimited?: boolean; coverLetters?: { used: number; left: number | null }; usage?: PlanUsage };
   profile: { ready: boolean; form: Profile; organizedProfile: unknown | null } | null;
   /** The resume-first profile is confirmed (or the student finished the old onboarding). */
   ready: boolean;
@@ -204,14 +205,25 @@ export function AppHome({ start = "home" }: { start?: View }) {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(payload.error || "Could not write that letter.");
+    void load();
     return String(payload.body ?? "");
   }
+
+  // The Applications page reloads what's left after every action, so the header keeps up.
+  const onUsage = useCallback((next: PlanUsage) => setData((previous) => (previous ? { ...previous, credits: { ...previous.credits, balance: next.people.left, usage: next } } : previous)), []);
 
   const showOnboarding = !data?.ready || editing;
 
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
 
   const currentPlan = data?.credits.plan ?? "free";
+  const usage = data?.credits.usage;
+  const creditsLeft = usage?.credits ?? (data?.credits.balance ?? 0) * CREDIT_COST.people;
+  const creditsLabel = data?.credits.unlimited ? "Unlimited credits" : `${creditsLeft} ${creditsLeft === 1 ? "credit" : "credits"} left`;
+  const usesLeft = usage ? [
+    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"}`, `${usage.answers.left} ${usage.answers.left === 1 ? "chat answer" : "chat answers"}`, `${usage.autofills.left} ${usage.autofills.left === 1 ? "autofill" : "autofills"}`] : []),
+    ...(usage.unlimited ? [] : [`${usage.people.left} ${usage.people.left === 1 ? "people search" : "people searches"}`]),
+  ] : [];
   const hadResume = Boolean(data?.resume);
   const initials = (data?.user.name || data?.user.email || "").split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
   const openJob = (appId: string) => {
@@ -248,7 +260,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
                 ? <span className="hidden items-center gap-2 text-[13px] text-[#9A9AA3] md:inline-flex"><span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#4ADE80]" />Extension installed</span>
                 : <a href="/extension/connect" className="hidden items-center gap-2 text-[13px] text-[#9A9AA3] hover:text-white md:inline-flex"><span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#8B8B94]" />Get the extension</a>
             )}
-            {data && <span className="font-mono text-xs uppercase text-[#8B8B94]">{data.credits.unlimited ? "Unlimited credits" : `${data.credits.balance} ${data.credits.balance === 1 ? "credit" : "credits"}`}</span>}
+            {data && <span className="font-mono text-xs uppercase text-[#8B8B94]">{creditsLabel}</span>}
             {data ? (
               <div className="relative" ref={menu}>
                 <button type="button" aria-label="Account and settings" aria-expanded={menuOpen} onClick={() => setMenuOpen((on) => !on)} className="h-9 w-9 rounded-full border border-[#26262C] bg-[#111114] text-[13px] font-semibold text-[#F7F7F8] hover:border-[#3D8BFF]">{initials || "?"}</button>
@@ -256,7 +268,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
                   <div className="absolute right-0 top-11 z-30 flex w-64 flex-col rounded-xl border border-[#26262C] bg-[#0C0C0E] p-2 text-sm shadow-2xl">
                     <p className="m-0 truncate px-2.5 pt-1 font-medium">{data.user.name || "Student"}</p>
                     <p className="m-0 truncate px-2.5 text-xs text-[#8B8B94]">{data.user.email}</p>
-                    {data.credits.coverLetters?.left != null && <p className="m-0 px-2.5 pb-1 pt-1 text-xs text-[#8B8B94]">{data.credits.coverLetters.left} cover letters left</p>}
+                    {usesLeft.length > 0 && <p className="m-0 px-2.5 pb-1 pt-1 text-xs text-[#8B8B94]">{usesLeft.join(" · ")} left</p>}
                     <div className="my-1.5 h-px bg-[#1F1F24]" />
                     {!showOnboarding && <button type="button" onClick={() => { setView("settings"); setMenuOpen(false); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Settings and plans</button>}
                     {!showOnboarding && <button type="button" onClick={() => { setEditing(true); setMenuOpen(false); window.scrollTo({ top: 0 }); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Edit my info</button>}
@@ -290,7 +302,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
             onDone={() => { setEditing(false); setResumeVersion((value) => value + 1); void load(); }}
           />
         )}
-        {data && !showOnboarding && (view === "home" || view === "applications") && <ApplyArea page={view} onPage={setView} refreshKey={resumeVersion} userName={data.user.name} onSetup={() => { setView("setup"); window.scrollTo({ top: 0 }); }} onJobs={() => { setView("jobs"); window.scrollTo({ top: 0 }); }} onSpiders={() => { setView("settings"); window.scrollTo({ top: 0 }); }} />}
+        {data && !showOnboarding && (view === "home" || view === "applications") && <ApplyArea page={view} onPage={setView} refreshKey={resumeVersion} userName={data.user.name} onUsage={onUsage} onSetup={() => { setView("setup"); window.scrollTo({ top: 0 }); }} onJobs={() => { setView("jobs"); window.scrollTo({ top: 0 }); }} onSpiders={() => { setView("settings"); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
         {data && !showOnboarding && view === "setup" && (
           <SetupPage
@@ -330,10 +342,10 @@ export function AppHome({ start = "home" }: { start?: View }) {
                 <div>
                   <h2 className="text-xl font-semibold tracking-tight">Plans</h2>
                   <p className="mt-1 text-sm text-muted">
-                    You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {data.credits.unlimited ? "unlimited credits" : `${data.credits.balance} ${data.credits.balance === 1 ? "credit" : "credits"} left`}{data.credits.coverLetters?.left != null ? ` and ${data.credits.coverLetters.left} of ${FREE_COVER_LETTERS} cover letters left this month` : ""}.
+                    You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {creditsLabel.toLowerCase()}{usesLeft.length ? `: ${usesLeft.join(", ")}` : ""}.
                   </p>
                 </div>
-                <p className="text-xs text-faint">1 credit = up to 5 people at one company · Free covers {FREE_APPLICATIONS} applications</p>
+                <p className="text-xs text-faint">{CREDIT_COST.people} credits = up to 5 people at one company</p>
               </div>
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                 {PUBLIC_PLANS.map((plan) => {
@@ -352,7 +364,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
                       {plan.semesterLabel && <p className="mt-1 text-xs text-faint">{plan.semesterLabel}</p>}
                       <p className="mt-1 text-sm text-muted">{plan.blurb}</p>
                       <p className="mt-4 text-sm font-medium">{plan.applicationsLabel}</p>
-                      <p className="text-sm text-muted">{creditMath(plan.credits)}{plan.monthly ? " each month" : " to start"}</p>
+                      <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-sm text-muted">{plan.features.map((feature) => <li key={feature}>{feature}</li>)}</ul>
                       <div className="mt-auto pt-5">
                         {current ? (
                           <p className="text-center text-sm text-muted">Your plan</p>
@@ -388,6 +400,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
           highlightsLoading={highlightsLoading}
           onClose={() => setLetter(null)}
           onGenerate={writeCoverLetter}
+          usesNote={usage?.letters.note ?? ""}
         />
       )}
     </div>

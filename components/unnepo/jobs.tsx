@@ -462,13 +462,14 @@ function EditCareers({ onClose, onSaved }: { onClose: () => void; onSaved: (role
   );
 }
 
-export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoading, onClose, onGenerate }: {
+export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoading, onClose, onGenerate, usesNote = "" }: {
   jobs: Job[];
   initialJob: Job | null;
   highlights: Highlight[];
   highlightsLoading: boolean;
   onClose: () => void;
   onGenerate: (input: LetterInput) => Promise<string>;
+  usesNote?: string;
 }) {
   const [step, setStep] = useState(initialJob ? 1 : 0);
   const [jobId, setJobId] = useState(initialJob?.id ?? "");
@@ -542,6 +543,7 @@ export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoadi
           <div className="min-w-0">
             <h2 className="text-2xl font-bold">✦ Write a cover letter</h2>
             <p className="truncate text-sm text-muted">{jobReady ? `${job.title} · ${job.company}` : "Pick a job or paste one in"}</p>
+            {usesNote && <p role="status" className="m-0 mt-1 text-xs font-medium text-[#F5A524]">{usesNote}</p>}
           </div>
           <button aria-label="Close" className={secondary} onClick={onClose}>✕</button>
         </div>

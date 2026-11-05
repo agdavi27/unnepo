@@ -2,7 +2,7 @@ import { APPLIED_HOW, addActivity, addMaybe, dropMaybe, liveMaybe, sessionNow } 
 import { nameCompanyFromDescription } from "@/lib/apply/job-link";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
-import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits } from "@/lib/apply/limits";
+import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, coverLettersLeft, hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
@@ -14,7 +14,6 @@ import { WRITING_STYLE, classifyQuestion, normalizeLabel, plainWriting, shortAns
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { isApplied } from "@/lib/apply/stats";
 import { wornSkin } from "@/lib/spiders";
-import { CVS_PER_CREDIT, cvUsesLeft } from "@/lib/apply/cv";
 import type { FillAttempt, FillProblem, JobApplication, PostedRecruiter } from "@/lib/apply/types";
 import { profileReady, profileState, saveStudentProfile } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
@@ -91,8 +90,8 @@ export async function extensionMe(userId: string) {
     profileReady: state.ready,
     completeness: state.profile.completeness,
     // What the panel lists under "Missing": the parts of the profile still to fill in, required ones first.
-    // CVs the student can still generate with the credits they have.
-    cv: { usesLeft: cvUsesLeft(stored?.cvCount ?? 0, credits?.balance ?? 0), perCredit: CVS_PER_CREDIT },
+    // What's left on the plan: credits, each kind of use, and a line for anything running low.
+    usage: await planUsage(userId),
     // The resume the extension attaches. `file` is false when only its text was kept, so it must be uploaded again.
     resume: resume ? { fileName: resume.fileName, uploadedAt: resume.createdAt, file: Boolean(resume.storagePath) && resume.byteSize > 0 } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
@@ -302,6 +301,7 @@ export async function extensionWrite(userId: string, raw: unknown) {
   if (classifyQuestion(question).sensitive) throw new ServiceError("Unnepo doesn't answer questions about you like this one. Answer it yourself.", "sensitive", 400);
   // No job: a question pasted in the panel, answered from the student's details alone.
   const app = body.applicationId ? await requireApp(userId, body.applicationId) : null;
+  await assertUseAllowed(userId, "answers");
   if ((await aiCallsToday(userId)) >= DAILY_AI_CALLS) throw new ServiceError("That's today's AI limit. Write this one yourself, or try again tomorrow.", "limit", 429);
   const info = await student(userId);
   const context = runContext(userId, info, app ?? { title: "", company: "" });
@@ -315,6 +315,7 @@ export async function extensionWrite(userId: string, raw: unknown) {
   });
   const answer = shortAnswer(question, plainWriting(text.trim().replace(/^["“]|["”]$/g, ""))).slice(0, 4000);
   if (!answer || /^none\.?$/i.test(answer)) throw new ServiceError("Your resume doesn't say enough to answer this one. Answer it yourself.", "no_facts", 422);
+  await countUse(userId, "answers");
   return { answer };
 }
 
@@ -326,6 +327,8 @@ export async function extensionWrite(userId: string, raw: unknown) {
 export async function extensionMap(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { applicationId?: unknown; fields?: unknown; ai?: unknown };
   const app = await requireApp(userId, body.applicationId);
+  // Filling a job again is free once it has counted; a new one needs a use left.
+  if (!app.fillReport?.autofillCounted) await assertUseAllowed(userId, "autofills");
   const fields = Array.isArray(body.fields) ? (body.fields as PageField[]) : [];
   // ai: false answers only from the student's data and saved answers, with no model call, so the extension can
   // start filling at once; it asks again for what's left.
@@ -418,7 +421,10 @@ export async function extensionAttempts(userId: string, raw: unknown) {
   });
   if (!attempts.length) return { saved: 0 };
   const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
-  await applications.update(userId, app.id, { fillReport: { ...report, attempts: [...(report.attempts ?? []), ...attempts].slice(-ATTEMPTS_PER_APP) } });
+  // A successful autofill: at least one answer stuck on the form. Each job counts once.
+  const counts = !report.autofillCounted && attempts.some((attempt) => attempt.ok);
+  await applications.update(userId, app.id, { fillReport: { ...report, ...(counts ? { autofillCounted: true } : {}), attempts: [...(report.attempts ?? []), ...attempts].slice(-ATTEMPTS_PER_APP) } });
+  if (counts) await countUse(userId, "autofills");
   return { saved: attempts.length };
 }
 

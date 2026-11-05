@@ -75,9 +75,11 @@ export const NEVER_READ = /(^|\.)linkedin\.com$/i;
 /** The quick questions asked once before the first fill. Null or "": not answered yet. */
 export type Setup = { salaryExpectation: string; earliestStart: string; willingToRelocate: boolean | null; inPerson: boolean | null; authorizedUS: boolean | null; needsSponsorship: boolean | null; classYear: string; hasSchool: boolean };
 
+export type UsageLine = { used: number; limit: number; left: number; note: string };
+
 export type PanelState = {
   connected: boolean;
-  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; coverLetters?: { used: number; left: number | null }; setup?: Setup; maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>; session?: { startedAt: string; lastAt: string; active: boolean } | null; profileReady: boolean; completeness: number; missing?: string[]; cv?: { usesLeft: number; perCredit: number }; goal?: { weekly: number | null; appliedAt: string[] }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
+  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; coverLetters?: { used: number; left: number | null }; usage?: { free: boolean; unlimited: boolean; credits: number | null; letters: UsageLine; answers: UsageLine; autofills: UsageLine; people: { left: number; note: string } }; setup?: Setup; maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>; session?: { startedAt: string; lastAt: string; active: boolean } | null; profileReady: boolean; completeness: number; missing?: string[]; goal?: { weekly: number | null; appliedAt: string[] }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
   /** What's on the tab before Fill is pressed: the job, how many fields, and whether there's an account to make. */
   page: { site: string; title: string; company: string; fields: number; posting: boolean; account: "new" | "sign_in" | null; mentionsCv: boolean } | null;
   tab: { id: number; url: string; title: string } | null;

@@ -2,7 +2,8 @@
 
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileText, GraduationCap, Mail, Plus, StickyNote, User } from "lucide-react";
+import { createPortal } from "react-dom";
+import { FileText, GraduationCap, Mail, Plus, StickyNote, User, X } from "lucide-react";
 import { HomePage, HomeTiles, MoreStats, PerDayCard, type Goals } from "@/components/unnepo/home";
 import type { Maybe, Session } from "@/components/unnepo/activity";
 import { extensionHere, readLinksInBrowser } from "@/lib/extension-bridge";
@@ -13,6 +14,7 @@ import { stageOf, appliedOn, applicationStats, type Stage } from "@/lib/apply/st
 import { HOW_LABEL } from "@/lib/apply/activity-stats";
 import { WHENS, arrange, postingLink, siteFor, sitesIn, sortByColumn, type Column, type When } from "@/lib/apply/applied-list";
 import type { ApplicationContact, ApplicationProfile, JobApplication, OutreachState } from "@/lib/apply/types";
+import type { planUsage } from "@/lib/apply/limits";
 
 const btn = "inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 const primary = `${btn} bg-white text-black hover:bg-zinc-200`;
@@ -21,12 +23,13 @@ const card = "rounded-2xl border border-line bg-panel p-5 sm:p-6";
 
 export type App = JobApplication & { missing: string[]; contacts?: ApplicationContact[]; companyMissing?: boolean; titleMissing?: boolean; descriptionCut?: boolean };
 export type PublicProfile = Omit<ApplicationProfile, "jobSitePasswordEncrypted"> & { hasJobSitePassword: boolean };
+export type PlanUsage = Awaited<ReturnType<typeof planUsage>>;
 export type ApplyData = {
   applications: App[];
   profile: PublicProfile;
   resume: { fileName: string; stored: boolean } | null;
   ready: { hunter: boolean; profile: boolean };
-  freeApplications: number;
+  usage?: PlanUsage;
   school: string;
   plan?: string;
   maybe?: Maybe[];
@@ -119,9 +122,11 @@ function when(date: Date) {
 export type AppPage = "home" | "applications";
 
 /** The Home and Applications pages. They share their data, so moving between them is instant and nothing is lost. */
-export function ApplyArea({ page, onPage, refreshKey = 0, userName, onSetup, onJobs, onSpiders }: { page: AppPage; onPage: (page: AppPage) => void; refreshKey?: number; userName: string; onSetup: () => void; onJobs: () => void; onSpiders: () => void }) {
+export function ApplyArea({ page, onPage, refreshKey = 0, userName, onUsage, onSetup, onJobs, onSpiders }: { page: AppPage; onPage: (page: AppPage) => void; refreshKey?: number; userName: string; onUsage?: (usage: PlanUsage) => void; onSetup: () => void; onJobs: () => void; onSpiders: () => void }) {
   const [data, setData] = useState<ApplyData | null>(null);
   const [error, setError] = useState("");
+  const usage = data?.usage;
+  useEffect(() => { if (usage) onUsage?.(usage); }, [usage, onUsage]);
 
   const load = useCallback(async () => {
     try {
@@ -409,7 +414,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
                         <div className="w-full text-left empty:hidden"><PostedBy app={app} /></div>
                       </div>
                     ) : (
-                      <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} onReveal={(contactId) => act("/reveal-person", "POST", { applicationId: app.id, contactId })} onBounced={(contactId) => void act("/contact-bounced", "POST", { applicationId: app.id, contactId })} />
+                      <ContactsPanel app={app} school={data.school} peopleNote={data.usage?.people.note ?? ""} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} onReveal={(contactId) => act("/reveal-person", "POST", { applicationId: app.id, contactId })} onBounced={(contactId) => void act("/contact-bounced", "POST", { applicationId: app.id, contactId })} />
                     )}
                     </div>
                   </div>
@@ -873,9 +878,10 @@ function JobInfo({ app, startOn, reading, disabled, note, onRead, onSaved }: { a
   }));
   const sections = [
     { id: "description" as const, label: "Description", Icon: FileText, count: 0, on: Boolean(app.description.trim()) },
-    ...(fromEmails > 0 ? [{ id: "emails" as const, label: "Emails", Icon: Mail, count: fromEmails, on: false }] : []),
+    { id: "emails" as const, label: "Emails", Icon: Mail, count: fromEmails + sentEmails(app).length, on: false },
     { id: "notes" as const, label: "Notes", Icon: StickyNote, count: 0, on: Boolean((app.fillReport?.notes ?? "").trim()) },
   ];
+  const closeEmails = useCallback(() => setPanel(""), []);
   const openPanel = (next: typeof panel) => {
     setPanel((now) => (now === next ? "" : next));
     if (next === "description") void wholeDescription().catch(() => undefined);
@@ -950,7 +956,7 @@ function JobInfo({ app, startOn, reading, disabled, note, onRead, onSaved }: { a
           )}
           <div className="flex flex-wrap gap-1 border-t border-line pt-2.5">
             {sections.map(({ id, label, Icon, count, on }) => (
-              <button key={id} type="button" aria-expanded={panel === id} onClick={() => openPanel(id)} className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[13px] hover:text-white ${panel === id ? "bg-white/5 text-ink" : "text-muted"}`}>
+              <button key={id} type="button" aria-expanded={id === "emails" ? undefined : panel === id} aria-haspopup={id === "emails" ? "dialog" : undefined} onClick={() => openPanel(id)} className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[13px] hover:text-white ${panel === id ? "bg-white/5 text-ink" : "text-muted"}`}>
                 <Icon aria-hidden size={14} strokeWidth={1.7} />
                 {label}
                 {count ? <span className="tabular-nums text-faint">{count}</span> : null}
@@ -979,7 +985,7 @@ function JobInfo({ app, startOn, reading, disabled, note, onRead, onSaved }: { a
               </span>
             </form>
           ))}
-          {panel === "emails" && <JobEmails applicationId={app.id} />}
+          {panel === "emails" && <JobEmailsDialog app={app} onClose={closeEmails} />}
           {panel === "notes" && (
             <form
               className="flex flex-col gap-2"
@@ -1008,47 +1014,87 @@ function JobInfo({ app, startOn, reading, disabled, note, onRead, onSaved }: { a
 
 type JobEmail = { id: string; at: string; kind: string; summary: string; from: string; subject: string; text: string };
 
-/** The emails about a job: read only when opened, since each can be long. */
-function JobEmails({ applicationId }: { applicationId: string }) {
-  const [emails, setEmails] = useState<JobEmail[] | null>(null);
+const emailDate = (at: string) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+
+/** What the student emailed people about this job: written in Unnepo and marked as sent. */
+const sentEmails = (app: App) => (app.contacts ?? [])
+  .filter((contact) => contact.emailBody && (contact.outreachStatus === "emailed" || contact.outreachStatus === "replied"))
+  .map((contact) => ({ id: contact.id, at: app.fillReport?.emailedAt?.[contact.id] ?? contact.updatedAt, to: contact.email ? `${contact.name} (${contact.email})` : contact.name, subject: contact.emailSubject ?? "", text: contact.emailBody ?? "" }));
+
+/** Every email about one job, in a popup over the blurred page. The ones received are read only when it opens, since each can be long. */
+function JobEmailsDialog({ app, onClose }: { app: App; onClose: () => void }) {
+  const [received, setReceived] = useState<JobEmail[] | null>(null);
   const [problem, setProblem] = useState("");
+  const close = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     let cancelled = false;
-    void fetch(`/api/email/job?applicationId=${encodeURIComponent(applicationId)}`)
+    void fetch(`/api/email/job?applicationId=${encodeURIComponent(app.id)}`)
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || "Couldn't load the emails.");
-        if (!cancelled) setEmails(payload.emails as JobEmail[]);
+        if (!cancelled) setReceived(payload.emails as JobEmail[]);
       })
       .catch((reason) => { if (!cancelled) setProblem(reason instanceof Error ? reason.message : "Couldn't load the emails."); });
     return () => { cancelled = true; };
-  }, [applicationId]);
-  return (
-    <div className="text-sm">
-      {problem && <p role="alert" className="m-0 text-xs text-red-300">{problem}</p>}
-      {!emails && !problem && <p className="m-0 text-xs text-muted">Loading…</p>}
-      {emails && !emails.length && <p className="m-0 text-xs text-muted">Its emails aren&apos;t saved any more.</p>}
-      {emails && emails.length > 0 && (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0">
-          {emails.map((email) => (
-            <li key={email.id} className="rounded-lg border border-line p-3">
-              {email.text ? (
-                <details>
-                  <summary className="cursor-pointer select-none"><span className="font-medium">{email.subject || email.summary || "Email"}</span> <span className="text-xs text-faint tabular-nums">{new Date(email.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></summary>
-                  <p className="mb-0 mt-2 break-words text-xs text-faint">From {email.from}</p>
-                  <p className="mb-0 mt-2 max-h-72 overflow-y-auto whitespace-pre-line break-words text-muted">{email.text}</p>
-                </details>
-              ) : (
-                <>
-                  <p className="m-0"><span className="font-medium">{email.summary || "Email"}</span> <span className="text-xs text-faint tabular-nums">{new Date(email.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span></p>
-                  <p className="mb-0 mt-1 text-xs text-faint">Only this summary was saved. Forward the email again to read it here.</p>
-                </>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+  }, [app.id]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
+    const before = document.body.style.overflow;
+    const opener = document.activeElement as HTMLElement | null;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    close.current?.focus();
+    return () => {
+      document.body.style.overflow = before;
+      document.removeEventListener("keydown", onKey);
+      opener?.focus();
+    };
+  }, [onClose]);
+  const emails = [
+    ...(received ?? []).map((email) => ({ key: `in-${email.id}`, at: email.at, line: `From ${email.from}`, subject: email.subject || email.summary || "Email", summary: email.subject ? email.summary : "", text: email.text, sent: false })),
+    ...sentEmails(app).map((email) => ({ key: `out-${email.id}`, at: email.at, line: `To ${email.to}`, subject: email.subject || "Email", summary: "", text: email.text, sent: true })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+  const loading = received === null && !problem;
+  const job = [app.titleMissing ? "" : app.title, app.companyMissing ? "" : app.company].filter(Boolean).join(" at ");
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 backdrop-blur-md sm:p-6"
+      onClick={(event) => event.stopPropagation()}
+      onMouseDown={(event) => { event.stopPropagation(); if (event.target === event.currentTarget) onClose(); }}
+    >
+      <div role="dialog" aria-modal="true" aria-labelledby="job-emails-title" className="flex max-h-full w-full max-w-2xl flex-col rounded-[20px] border border-[#222] bg-[#0F0F0F]">
+        <div className="flex items-start justify-between gap-3 border-b border-[#1A1A1A] p-5">
+          <div className="min-w-0">
+            <h2 id="job-emails-title" className="m-0 text-lg font-semibold tracking-[-0.02em]">Emails</h2>
+            {job && <p className="m-0 mt-0.5 truncate text-sm text-muted">{job}</p>}
+          </div>
+          <button ref={close} type="button" aria-label="Close" onClick={onClose} className="flex h-8 w-8 flex-none items-center justify-center rounded-full text-[#9A9AA3] hover:bg-white/5 hover:text-white"><X aria-hidden size={16} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5 text-sm">
+          {problem && <p role="alert" className="m-0 mb-3 text-xs text-red-300">{problem}</p>}
+          {loading && <p className="m-0 text-muted">Loading…</p>}
+          {!loading && !emails.length && !problem && <p className="m-0 text-muted">No emails about this job yet. Emails you forward to Unnepo and emails you send to people here show up in this list.</p>}
+          {emails.length > 0 && (
+            <ul className="m-0 flex list-none flex-col gap-3 p-0">
+              {emails.map((email) => (
+                <li key={email.key} className="rounded-xl border border-line p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="m-0 min-w-0 break-words font-medium">{email.subject}</p>
+                    <span className="flex-none text-xs tabular-nums text-faint">{emailDate(email.at)}</span>
+                  </div>
+                  <p className="m-0 mt-1 break-words text-xs text-faint"><span className={email.sent ? "text-[#3D8BFF]" : ""}>{email.sent ? "Sent" : "Received"}</span> · {email.line}</p>
+                  {email.summary && <p className="m-0 mt-2 text-xs text-muted">{email.summary}</p>}
+                  {email.text
+                    ? <p className="m-0 mt-3 whitespace-pre-line break-words text-muted">{email.text}</p>
+                    : <p className="m-0 mt-2 text-xs text-faint">Only this summary was saved. Forward the email again to read it here.</p>}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1114,7 +1160,7 @@ function EmailBox({ contact, onEmail }: { contact: NonNullable<App["contacts"]>[
   );
 }
 
-function ContactsPanel({ app, school, onStatus, onRetry, onEmail, onReveal, onBounced }: { app: App; school: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void; onEmail: (contactId: string, edit?: EmailEdit) => Promise<void>; onReveal: (contactId: string) => Promise<void>; onBounced: (contactId: string) => void }) {
+function ContactsPanel({ app, school, peopleNote, onStatus, onRetry, onEmail, onReveal, onBounced }: { app: App; school: string; peopleNote: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void; onEmail: (contactId: string, edit?: EmailEdit) => Promise<void>; onReveal: (contactId: string) => Promise<void>; onBounced: (contactId: string) => void }) {
   const contacts = app.contacts ?? [];
   const [copied, setCopied] = useState("");
   const [website, setWebsite] = useState("");
@@ -1147,6 +1193,7 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail, onReveal, onBo
         <p className="m-0 text-sm font-medium">People at {app.companyMissing ? "this company" : app.company}</p>
         <p className="m-0 max-w-xs text-[13px] text-muted">Recruiters, the team, and people you have something in common with</p>
         <button type="button" className={primary} onClick={() => onRetry()}>Find people</button>
+        {peopleNote && <p role="status" className="m-0 text-xs font-medium text-[#F5A524]">{peopleNote}</p>}
         <div className="w-full text-left empty:hidden"><PostedBy app={app} /></div>
       </div>
     );

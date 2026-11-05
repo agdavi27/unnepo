@@ -8,21 +8,21 @@ function intEnv(name: string, fallback: number) {
 /** Pricing, credit rules, and spend caps. All of these are environment-configurable. */
 export function serverConfig() {
   return {
-    signupCredits: intEnv("SIGNUP_CREDITS", 3),
+    signupCredits: intEnv("SIGNUP_CREDITS", 5),
     unlockCreditCost: intEnv("UNLOCK_CREDIT_COST", 1),
     referralCredits: intEnv("REFERRAL_CREDITS", 25),
     referralDailyCap: intEnv("REFERRAL_DAILY_CAP", 10),
     grindPriceCents: intEnv("GRIND_PRICE_CENTS", 2900),
     grindMonthlyCredits: intEnv("GRIND_MONTHLY_CREDITS", 30),
-    packPriceCents: intEnv("PACK_PRICE_CENTS", 500),
-    packCredits: intEnv("PACK_CREDITS", 25),
+    packPriceCents: intEnv("PACK_PRICE_CENTS", 1000),
+    packCredits: intEnv("PACK_CREDITS", 20),
     proPriceCents: intEnv("PRO_PRICE_CENTS", 2400),
     proMonthlyCredits: intEnv("PRO_MONTHLY_CREDITS", 40),
     proSemesterPriceCents: intEnv("PRO_SEMESTER_PRICE_CENTS", 6900),
     premiumPriceCents: intEnv("PREMIUM_PRICE_CENTS", 4400),
-    premiumMonthlyCredits: intEnv("PREMIUM_MONTHLY_CREDITS", 100),
+    premiumMonthlyCredits: intEnv("PREMIUM_MONTHLY_CREDITS", 75),
     premiumSemesterPriceCents: intEnv("PREMIUM_SEMESTER_PRICE_CENTS", 11900),
-    proAiLimit: intEnv("PRO_AI_LIMIT", 200),
+    proAiLimit: intEnv("PRO_AI_LIMIT", 300),
     premiumAiLimit: intEnv("PREMIUM_AI_LIMIT", 600),
     dailyGlobalSpendCents: intEnv("DAILY_GLOBAL_SPEND_CENTS", 25000),
     dailyUserSpendCents: intEnv("DAILY_USER_SPEND_CENTS", 2500),
@@ -42,15 +42,17 @@ export function serverConfig() {
 }
 
 /**
- * Pricing: autofill is cheap to run, so applications aren't metered by credits. Free covers
- * FREE_APPLICATIONS of them; Pro and Premium have no limit beyond a daily fair-use cap on AI. What costs
- * real money is finding people, so 1 credit = the list of people at the company for one job, charged only when
- * one is found.
+ * Pricing: Free is a one-time allowance, kept in separate buckets so its cost stays capped: FREE_LIMITS, plus
+ * people at FREE_PEOPLE companies. Pro and Premium have no limit on writing or autofill beyond a monthly fair-use
+ * cap. What costs real money is finding people, so that's what separates the plans. `balance` on an account counts
+ * people searches (1 = the list of people at the company for one job, charged only when someone is found); students
+ * see it in credits, at CREDIT_COST.people each.
  */
-export const FREE_APPLICATIONS = 25;
-
-/** Cover letters Free writes each month. Paid plans have no limit. */
-export const FREE_COVER_LETTERS = 5;
+export const FREE_LIMITS = { letters: 5, answers: 10, autofills: 10 };
+export const FREE_PEOPLE = 5;
+export const CREDIT_COST = { letters: 2, answers: 1, autofills: 1, people: 5 };
+/** What Free starts with, in credits: 10 for cover letters, 10 for chat answers, 10 for autofills, 25 for people. */
+export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers + FREE_LIMITS.autofills * CREDIT_COST.autofills + FREE_PEOPLE * CREDIT_COST.people;
 
 /** A semester plan: four months paid up front, with four months of credits at once. */
 export const SEMESTER_MONTHS = 4;
@@ -67,13 +69,14 @@ export const PUBLIC_PLANS = [
     priceLabel: "$0",
     semesterLabel: null,
     cadence: "When you join",
-    blurb: "Start here",
+    blurb: "Try it out",
     cta: "Get started free",
     popular: false,
     monthly: false,
-    credits: 3,
-    applicationsLabel: `${FREE_APPLICATIONS} applications`,
-    features: [`Autofill ${FREE_APPLICATIONS} applications`, "People to reach at 3 companies", `${FREE_COVER_LETTERS} cover letters a month, and the tracker`],
+    credits: FREE_PEOPLE,
+    semesterCredits: null,
+    applicationsLabel: `${FREE_CREDITS} credits to start`,
+    features: [`${FREE_LIMITS.letters} cover letters`, `${FREE_LIMITS.answers} chat answers`, `${FREE_LIMITS.autofills} successful autofills`, `People at ${FREE_PEOPLE} companies`, "Tracker and job matches"],
   },
   {
     id: "pro" as const,
@@ -81,13 +84,14 @@ export const PUBLIC_PLANS = [
     priceLabel: "$24",
     semesterLabel: "or $69 a semester",
     cadence: "Billed monthly or each semester",
-    blurb: "For an active search",
+    blurb: "About 10 companies a week",
     cta: "Choose Pro",
     popular: true,
     monthly: true,
     credits: 40,
-    applicationsLabel: "Unlimited applications",
-    features: ["Unlimited autofill and cover letters", "People to reach at 40 companies a month", "Everything in Free"],
+    semesterCredits: 160,
+    applicationsLabel: "Unlimited autofill and writing",
+    features: ["Unlimited cover letters, chat answers and autofills", "People at 40 companies a month, or 160 a semester", "Tracker and job matches", "20 more companies for $10"],
   },
   {
     id: "premium" as const,
@@ -95,13 +99,14 @@ export const PUBLIC_PLANS = [
     priceLabel: "$44",
     semesterLabel: "or $119 a semester",
     cadence: "Billed monthly or each semester",
-    blurb: "For a full search",
+    blurb: "About 20 companies a week",
     cta: "Choose Premium",
     popular: false,
     monthly: true,
-    credits: 100,
-    applicationsLabel: "Unlimited applications",
-    features: ["People to reach at 100 companies a month", "More any time: 25 companies for $5", "Everything in Pro"],
+    credits: 75,
+    semesterCredits: 300,
+    applicationsLabel: "Unlimited autofill and writing",
+    features: ["Everything in Pro", "People at 75 companies a month, or 300 a semester", "20 more companies for $10"],
   },
 ];
 
