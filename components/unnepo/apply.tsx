@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FileText, GraduationCap, Mail, Plus, StickyNote, User } from "lucide-react";
 import { HomeHero, HomeTiles, MoreStats, NextSpider, PerDayCard } from "@/components/unnepo/home";
 import type { Maybe, Session } from "@/components/unnepo/activity";
 import { extensionHere, readLinksInBrowser } from "@/lib/extension-bridge";
@@ -372,7 +373,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onSpiders, onGoal,
           </td>
           <td className="hidden px-2 py-3.5 align-middle text-[#B4B4BC] sm:table-cell">
             {role}
-            <span className="text-[#8B8B94]">{role ? " · " : ""}{posting ? <a href={posting} target="_blank" rel="noreferrer" className="hover:text-white hover:underline" title={`Open the job posting on ${siteFor(app)}`}>{siteFor(app)} ↗</a> : siteFor(app)}</span>
+            <span className="text-[#8B8B94]">{role ? " · " : ""}{posting ? <a href={posting} target="_blank" rel="noreferrer" className="hover:text-white hover:underline" title={`Open the job posting on ${siteFor(app)}`}>{siteFor(app)} ↗</a> : foundOn(app)}</span>
             {fromEmail && <span className="ml-2 inline-block align-middle">{fromEmail}</span>}
           </td>
           <td className="hidden whitespace-nowrap px-2 py-3.5 align-middle font-mono text-xs text-[#8B8B94] sm:table-cell">{when(appliedOn(app))}</td>
@@ -382,27 +383,31 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onSpiders, onGoal,
           <tr>
             <td colSpan={4} className="pb-4">
               <div className="space-y-4 rounded-xl border border-line bg-panel p-4">
-                <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={(next) => void readLinks([next ?? app], app.id)} onSaved={onReplace} />
-                {stage === "in_progress" && <PostedBy app={app} />}
-                {stage === "in_progress" ? (
-                  <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted">
-                    <p>Not submitted yet. Open the application and press Fill in the Unnepo extension, or mark it applied if you sent it yourself.</p>
-                    <button type="button" className={secondary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
+                <div className={`grid gap-5 ${app.contacts?.length ? "lg:grid-cols-2" : "lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]"}`}>
+                  <JobInfo app={app} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={(next) => void readLinks([next ?? app], app.id)} onSaved={onReplace} />
+                  <div className="min-w-0">
+                    {stage === "in_progress" ? (
+                      <div className={peopleCard}>
+                        <PeopleCircles />
+                        <p className="m-0 text-sm font-medium">Not submitted yet</p>
+                        <p className="m-0 max-w-xs text-[13px] text-muted">Open the application and press Fill in the Unnepo extension, or mark it applied if you sent it yourself.</p>
+                        <button type="button" className={primary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
+                        <div className="w-full text-left empty:hidden"><PostedBy app={app} /></div>
+                      </div>
+                    ) : (
+                      <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} onReveal={(contactId) => act("/reveal-person", "POST", { applicationId: app.id, contactId })} onBounced={(contactId) => void act("/contact-bounced", "POST", { applicationId: app.id, contactId })} />
+                    )}
                   </div>
-                ) : (
-                  <ContactsPanel app={app} school={data.school} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} onReveal={(contactId) => act("/reveal-person", "POST", { applicationId: app.id, contactId })} onBounced={(contactId) => void act("/contact-bounced", "POST", { applicationId: app.id, contactId })} />
-                )}
+                </div>
                 <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-line pt-3 text-xs text-faint">
                   <span className="min-w-0">
                     {app.status === "submitted" && app.confirmation
                       ? app.confirmation.confidence === "likely" ? "Looks submitted: the page said so." : "Confirmed: the site accepted the submission."
-                      : app.status === "applied_manual" ? "Marked applied by you." : app.statusMessage}
+                      : app.status === "applied_manual" ? app.statusMessage || "Marked applied by you." : app.statusMessage}
                   </span>
                   <span className="flex flex-wrap gap-4">
                     {app.confirmation?.receiptPath && <a className="hover:text-white" href={`/api/apply/receipt?applicationId=${encodeURIComponent(app.id)}`} target="_blank" rel="noreferrer">Receipt ↗</a>}
-                    {posting && <a className="hover:text-white" href={posting} target="_blank" rel="noreferrer">Job posting ↗</a>}
-                    {app.applicationUrl && app.applicationUrl !== posting && <a className="hover:text-white" href={app.applicationUrl} target="_blank" rel="noreferrer">Application ↗</a>}
-                    <button type="button" className="hover:text-red-300" onClick={() => remove(app)}>Remove</button>
+                    <button type="button" className="hover:text-red-300" onClick={() => remove(app)}>Remove job</button>
                   </span>
                 </div>
               </div>
@@ -506,14 +511,32 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onSpiders, onGoal,
   );
 }
 
-function Avatar({ name, photoUrl }: { name: string; photoUrl: string | null }) {
+function Avatar({ name, photoUrl, className = "h-12 w-12 border-line text-sm" }: { name: string; photoUrl: string | null; className?: string }) {
   const [failed, setFailed] = useState(false);
   const initials = name.split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
   if (photoUrl && !failed) {
-    return <img src={photoUrl} alt="" className="h-12 w-12 shrink-0 rounded-full border border-line object-cover" onError={() => setFailed(true)} />;
+    return <img src={photoUrl} alt="" className={`${className} shrink-0 rounded-full border object-cover`} onError={() => setFailed(true)} />;
   }
-  return <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line bg-card text-sm font-medium text-muted">{initials}</span>;
+  return <span className={`${className} flex shrink-0 items-center justify-center rounded-full border bg-card font-medium text-muted`}>{initials}</span>;
 }
+
+const floatDelay = (index: number) => ({ animationDelay: `${index * 0.45}s` });
+
+/** Empty circles floating above Find people: nobody's face until real people are found. */
+function PeopleCircles() {
+  const circles = [{ Icon: User, dashed: false }, { Icon: User, dashed: true }, { Icon: GraduationCap, dashed: false }, { Icon: Plus, dashed: true }];
+  return (
+    <div aria-hidden className="flex pt-1">
+      {circles.map(({ Icon, dashed }, index) => (
+        <span key={index} style={floatDelay(index)} className={`people-float flex h-11 w-11 items-center justify-center rounded-full border bg-panel text-muted ${index ? "-ml-2.5" : ""} ${dashed ? "border-dashed border-[#3A3A44]" : "border-[#3A3A44]"}`}>
+          <Icon size={17} strokeWidth={1.7} />
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const peopleCard = "flex h-full min-h-56 flex-col items-center justify-center gap-3 rounded-xl border border-line bg-card p-5 text-center";
 
 /** The person the posting names, shown as soon as the job is saved, with the posting's own label for them. */
 function PostedBy({ app }: { app: App }) {
@@ -725,6 +748,11 @@ function FiltersMenu({ query, onQuery, period, onPeriod, site, onSite, sites, no
   );
 }
 
+/** Where the job came from, in words. A job a forwarded email added wasn't added by the student. */
+const foundOn = (app: App) => (siteFor(app) === "Added by you" && app.fillReport?.fromEmail === "added" ? "Forwarded email" : siteFor(app));
+
+const historyColor = (status: string) => (status === "applied" ? STAGE.submitted.color : status === "incomplete" ? STAGE.in_progress.color : STAGE[status as Stage]?.color ?? STAGE.submitted.color);
+
 const HISTORY_LABEL: Record<string, string> = { applied: "Applied", incomplete: "Not finished", assessment: "Assessment", interviewing: "Interviewing", offer: "Offer", rejected: "Rejected" };
 
 /**
@@ -743,7 +771,8 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
   const [problem, setProblem] = useState("");
   const [saidSaved, setSaidSaved] = useState(false);
   const [linkDraft, setLinkDraft] = useState("");
-  const [pasting, setPasting] = useState(false);
+  const [addingLink, setAddingLink] = useState(false);
+  const [panel, setPanel] = useState<"" | "description" | "emails" | "notes">("");
   const [pasted, setPasted] = useState("");
   const [choice, setChoice] = useState("");
   const [told, setTold] = useState("");
@@ -813,13 +842,14 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
     }
   };
   const box = "w-full rounded-lg border border-line bg-card px-3 py-2 text-sm";
+  const addMissing = (label: string) => <button key={label} type="button" className="text-faint underline-offset-4 hover:text-white hover:underline" onClick={() => void startEdit()}>{label}</button>;
   const rows: Array<[string, React.ReactNode]> = [
-    ["Company", app.companyMissing ? <span key="company" className="text-[#F5A524]">Missing</span> : app.company],
-    ["Job", app.titleMissing ? <span key="title" className="text-[#F5A524]">Missing</span> : app.title],
-    ["Location", app.location || <span key="location" className="text-faint">Not known</span>],
-    ["Found on", siteFor(app)],
-    ...(app.fillReport?.jobNumber ? [["Job number", app.fillReport.jobNumber] as [string, React.ReactNode]] : []),
+    ["Company", app.companyMissing ? addMissing("Add company") : app.company],
+    ["Job", app.titleMissing ? addMissing("Add job title") : app.title],
+    ["Location", app.location || addMissing("Add location")],
     ["Applied", app.submittedAt ? `${new Date(app.submittedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}${applied?.how ? ` · ${HOW_LABEL[applied.how]}` : ""}` : "Not yet"],
+    ["Found on", foundOn(app)],
+    ...(app.fillReport?.jobNumber ? [["Job number", app.fillReport.jobNumber] as [string, React.ReactNode]] : []),
   ];
   const links = [
     posting ? <a key="posting" href={posting} target="_blank" rel="noreferrer" className="text-ink underline underline-offset-4 hover:text-white">Job posting ↗</a> : null,
@@ -827,7 +857,13 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
   ].filter(Boolean);
   const choices = app.fillReport?.postingChoices ?? [];
   if (links.length) rows.push(["Links", <span key="links" className="flex flex-wrap gap-4">{links}</span>]);
-  else rows.push(["Job posting", (
+  else rows.push(["Posting", !addingLink ? (
+    <span key="posting-actions" className="text-faint">
+      <button type="button" className="text-ink underline underline-offset-4 hover:text-white" onClick={() => setAddingLink(true)}>Add link</button>
+      {" or "}
+      <button type="button" className="text-ink underline underline-offset-4 hover:text-white disabled:opacity-40" disabled={busy === "find" || disabled} onClick={() => void findPosting()}>{busy === "find" ? "looking…" : "find it"}</button>
+    </span>
+  ) : (
     <form
       key="add-link"
       className="flex flex-wrap items-center gap-2"
@@ -836,21 +872,36 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
         const next = await save("link", { url: linkDraft.trim() });
         if (next) {
           setLinkDraft("");
+          setAddingLink(false);
           onRead(next);
         }
       }}
     >
       <label className="sr-only" htmlFor={`link-${app.id}`}>Job posting link for {app.title}</label>
-      <input id={`link-${app.id}`} type="url" value={linkDraft} onChange={(event) => setLinkDraft(event.target.value)} placeholder="https://… paste the job's link" className="min-w-0 flex-1 basis-52 rounded-lg border border-line bg-card px-2.5 py-1.5 text-sm sm:max-w-sm" />
+      <input id={`link-${app.id}`} autoFocus type="url" value={linkDraft} onChange={(event) => setLinkDraft(event.target.value)} placeholder="https://…" className="min-w-0 flex-1 basis-40 rounded-lg border border-line bg-card px-2.5 py-1.5 text-sm" />
       <button type="submit" className={secondary} disabled={busy === "link" || !linkDraft.trim()}>{busy === "link" ? "Saving…" : "Add link"}</button>
-      <button type="button" className={secondary} disabled={busy === "find" || disabled} onClick={() => void findPosting()}>{busy === "find" ? "Looking…" : "Find the posting"}</button>
+      <button type="button" className={secondary} onClick={() => setAddingLink(false)}>Cancel</button>
     </form>
   )]);
   const fromEmails = (app.fillReport?.statusHistory ?? []).filter((change) => change.source === "email").length;
+  // Newest first. One email can change the status twice; its sentence shows once, on the newest change.
+  const history = [...(app.fillReport?.statusHistory ?? [])].reverse().map((change, index, list) => ({
+    ...change,
+    note: change.source === "email" && change.summary && !list.slice(0, index).some((newer) => newer.summary === change.summary) ? change.summary : "",
+  }));
+  const sections = [
+    { id: "description" as const, label: "Description", Icon: FileText, count: 0, on: Boolean(app.description.trim()) },
+    ...(fromEmails > 0 ? [{ id: "emails" as const, label: "Emails", Icon: Mail, count: fromEmails, on: false }] : []),
+    { id: "notes" as const, label: "Notes", Icon: StickyNote, count: 0, on: Boolean((app.fillReport?.notes ?? "").trim()) },
+  ];
+  const openPanel = (next: typeof panel) => {
+    setPanel((now) => (now === next ? "" : next));
+    if (next === "description") void wholeDescription().catch(() => undefined);
+  };
   return (
-    <section aria-label={`Info for ${app.title}`} className="flex flex-col gap-3">
+    <section aria-label={`Details for ${app.title}`} className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold">Info</h3>
+        <h3 className="text-sm font-semibold">Details</h3>
         {!editing && (
           <span className="flex flex-wrap gap-4 text-xs">
             {link && <button type="button" className="text-muted underline-offset-4 hover:text-white hover:underline disabled:opacity-40" disabled={disabled} onClick={() => onRead()}>{reading ? "Reading the link…" : "Fill in from the link"}</button>}
@@ -879,9 +930,9 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
         </form>
       ) : (
         <>
-          <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+          <dl className="m-0 grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
             {rows.map(([term, value]) => (
-              <div key={term} className="contents"><dt className="text-faint">{term}</dt><dd className="min-w-0">{value}</dd></div>
+              <div key={term} className="contents"><dt className="text-faint">{term}</dt><dd className="m-0 min-w-0">{value}</dd></div>
             ))}
           </dl>
           {told && <p role="status" className="m-0 text-xs text-muted">{told}</p>}
@@ -901,71 +952,73 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
               </span>
             </form>
           )}
-          {app.fillReport?.statusHistory?.length ? (
+          {history.length > 0 && (
+            <ol aria-label="Status history" className="m-0 flex list-none flex-col gap-1.5 border-t border-line p-0 pt-3 text-sm">
+              {history.map((change, index) => (
+                <li key={`${change.at}-${index}`} className="grid grid-cols-[0.5rem_minmax(0,1fr)] items-baseline gap-x-2.5">
+                  <span aria-hidden className="h-[7px] w-[7px] rounded-full" style={{ background: historyColor(change.status) }} />
+                  <span>
+                    {HISTORY_LABEL[change.status] ?? change.status}
+                    <span className="text-faint"> {new Date(change.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })} · {change.source === "email" ? "from email" : "by you"}</span>
+                  </span>
+                  {change.note && <span className="col-start-2 text-xs text-muted">{change.note}</span>}
+                </li>
+              ))}
+            </ol>
+          )}
+          <div className="flex flex-wrap gap-1 border-t border-line pt-2.5">
+            {sections.map(({ id, label, Icon, count, on }) => (
+              <button key={id} type="button" aria-expanded={panel === id} onClick={() => openPanel(id)} className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-2 text-[13px] hover:text-white ${panel === id ? "bg-white/5 text-ink" : "text-muted"}`}>
+                <Icon aria-hidden size={14} strokeWidth={1.7} />
+                {label}
+                {count ? <span className="tabular-nums text-faint">{count}</span> : null}
+                {on && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[#3D8BFF]" />}
+              </button>
+            ))}
+          </div>
+          {panel === "description" && (app.description.trim() ? (
             <div className="text-sm">
-              <h4 className="mb-1 text-xs font-medium text-faint">Status history</h4>
-              <ol className="flex flex-col gap-1">
-                {[...app.fillReport.statusHistory].reverse().map((change, index) => (
-                  <li key={`${change.at}-${index}`} className="flex flex-wrap gap-x-2 text-muted">
-                    <span className="w-16 flex-none text-faint tabular-nums">{new Date(change.at).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
-                    <span className="text-ink">{HISTORY_LABEL[change.status] ?? change.status}</span>
-                    <span className="text-faint">{change.source === "email" ? "from email" : "by you"}</span>
-                    {change.source === "email" && change.summary && <span className="min-w-0">· {change.summary}</span>}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
-          {app.description.trim() ? (
-            <details className="text-sm" onToggle={(event) => { if (event.currentTarget.open) void wholeDescription().catch(() => undefined); }}>
-              <summary className="cursor-pointer select-none text-muted hover:text-white">Job description</summary>
-              <p className="mt-2 max-h-72 overflow-y-auto whitespace-pre-line text-muted">{full ?? app.description}</p>
+              <p className="m-0 max-h-72 overflow-y-auto whitespace-pre-line text-muted">{full ?? app.description}</p>
               <button type="button" className="mt-2 text-xs text-muted underline-offset-4 hover:text-white hover:underline" onClick={() => void startEdit()}>Edit description</button>
-            </details>
-          ) : pasting ? (
+            </div>
+          ) : (
             <form
               className="flex flex-col gap-2"
               onSubmit={async (event) => {
                 event.preventDefault();
-                if (await save("description", { description: pasted })) {
-                  setPasting(false);
-                  setPasted("");
-                }
+                if (await save("description", { description: pasted })) setPasted("");
               }}
             >
-              <label htmlFor={`description-${app.id}`} className="text-sm text-muted">Job description</label>
+              <label htmlFor={`description-${app.id}`} className="text-xs text-muted">No description saved yet</label>
               <textarea id={`description-${app.id}`} autoFocus rows={6} className={box} value={pasted} onChange={(event) => setPasted(event.target.value)} maxLength={20000} placeholder="Paste the posting's text here" />
               <span className="flex flex-wrap gap-2">
                 <button type="submit" className={primary} disabled={busy === "description" || pasted.trim().length < 2}>{busy === "description" ? "Saving…" : "Save description"}</button>
-                <button type="button" className={secondary} onClick={() => setPasting(false)}>Cancel</button>
+                <button type="button" className={secondary} onClick={() => setPanel("")}>Cancel</button>
               </span>
             </form>
-          ) : (
-            <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-faint">
-              No job description saved.
-              <button type="button" className="text-ink underline underline-offset-4 hover:text-white" onClick={() => setPasting(true)}>Paste description</button>
-            </p>
+          ))}
+          {panel === "emails" && <JobEmails applicationId={app.id} />}
+          {panel === "notes" && (
+            <form
+              className="flex flex-col gap-2"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                if (await save("notes", { notes })) {
+                  setSaidSaved(true);
+                  setTimeout(() => setSaidSaved(false), 2500);
+                }
+              }}
+            >
+              <label htmlFor={`notes-${app.id}`} className="sr-only">Quick notes</label>
+              <textarea id={`notes-${app.id}`} autoFocus rows={3} className={box} value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={4000} placeholder="Who you talked to, the next step, anything to remember…" />
+              <span className="flex items-center gap-3">
+                <button type="submit" className={secondary} disabled={busy === "notes" || notes === (app.fillReport?.notes ?? "")}>{busy === "notes" ? "Saving…" : "Save notes"}</button>
+                {saidSaved && <span role="status" className="text-xs text-muted">Saved.</span>}
+              </span>
+            </form>
           )}
-          {fromEmails > 0 && <JobEmails applicationId={app.id} count={fromEmails} />}
         </>
       )}
-      <form
-        className="flex flex-col gap-2"
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (await save("notes", { notes })) {
-            setSaidSaved(true);
-            setTimeout(() => setSaidSaved(false), 2500);
-          }
-        }}
-      >
-        <label htmlFor={`notes-${app.id}`} className="text-sm font-semibold">Quick notes</label>
-        <textarea id={`notes-${app.id}`} rows={3} className={box} value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={4000} placeholder="Who you talked to, the next step, anything to remember…" />
-        <span className="flex items-center gap-3">
-          <button type="submit" className={secondary} disabled={busy === "notes" || notes === (app.fillReport?.notes ?? "")}>{busy === "notes" ? "Saving…" : "Save notes"}</button>
-          {saidSaved && <span role="status" className="text-xs text-muted">Saved.</span>}
-        </span>
-      </form>
       {(note || problem) && <p role={problem ? "alert" : "status"} className={`text-xs ${problem ? "text-red-300" : "text-muted"}`}>{problem || note}</p>}
     </section>
   );
@@ -974,29 +1027,27 @@ function JobInfo({ app, reading, disabled, note, onRead, onSaved }: { app: App; 
 type JobEmail = { id: string; at: string; kind: string; summary: string; from: string; subject: string; text: string };
 
 /** The emails about a job: read only when opened, since each can be long. */
-function JobEmails({ applicationId, count }: { applicationId: string; count: number }) {
+function JobEmails({ applicationId }: { applicationId: string }) {
   const [emails, setEmails] = useState<JobEmail[] | null>(null);
   const [problem, setProblem] = useState("");
-  const load = async () => {
-    if (emails) return;
-    setProblem("");
-    try {
-      const response = await fetch(`/api/email/job?applicationId=${encodeURIComponent(applicationId)}`);
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Couldn't load the emails.");
-      setEmails(payload.emails as JobEmail[]);
-    } catch (reason) {
-      setProblem(reason instanceof Error ? reason.message : "Couldn't load the emails.");
-    }
-  };
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(`/api/email/job?applicationId=${encodeURIComponent(applicationId)}`)
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "Couldn't load the emails.");
+        if (!cancelled) setEmails(payload.emails as JobEmail[]);
+      })
+      .catch((reason) => { if (!cancelled) setProblem(reason instanceof Error ? reason.message : "Couldn't load the emails."); });
+    return () => { cancelled = true; };
+  }, [applicationId]);
   return (
-    <details className="text-sm" onToggle={(event) => { if (event.currentTarget.open) void load(); }}>
-      <summary className="cursor-pointer select-none text-muted hover:text-white">Emails <span className="tabular-nums text-faint">{count}</span></summary>
-      {problem && <p role="alert" className="mt-2 text-xs text-red-300">{problem}</p>}
-      {!emails && !problem && <p className="mt-2 text-xs text-muted">Loading…</p>}
-      {emails && !emails.length && <p className="mt-2 text-xs text-muted">Its emails aren&apos;t saved any more.</p>}
+    <div className="text-sm">
+      {problem && <p role="alert" className="m-0 text-xs text-red-300">{problem}</p>}
+      {!emails && !problem && <p className="m-0 text-xs text-muted">Loading…</p>}
+      {emails && !emails.length && <p className="m-0 text-xs text-muted">Its emails aren&apos;t saved any more.</p>}
       {emails && emails.length > 0 && (
-        <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
+        <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {emails.map((email) => (
             <li key={email.id} className="rounded-lg border border-line p-3">
               {email.text ? (
@@ -1015,7 +1066,7 @@ function JobEmails({ applicationId, count }: { applicationId: string; count: num
           ))}
         </ul>
       )}
-    </details>
+    </div>
   );
 }
 
@@ -1109,12 +1160,12 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail, onReveal, onBo
   // Nobody is looked up until the student asks.
   if (app.contactsStatus === "idle") {
     return (
-      <div className="space-y-3">
-        <PostedBy app={app} />
-        <div className="flex flex-wrap items-center gap-3 text-sm text-muted">
-          <button type="button" className={primary} onClick={() => onRetry()}>Find people to reach out to</button>
-          <p>People at {app.company} worth reaching: recruiters, the team, and anyone you have something in common with.</p>
-        </div>
+      <div className={peopleCard}>
+        <PeopleCircles />
+        <p className="m-0 text-sm font-medium">People at {app.companyMissing ? "this company" : app.company}</p>
+        <p className="m-0 max-w-xs text-[13px] text-muted">Recruiters, the team, and people you have something in common with</p>
+        <button type="button" className={primary} onClick={() => onRetry()}>Find people</button>
+        <div className="w-full text-left empty:hidden"><PostedBy app={app} /></div>
       </div>
     );
   }
@@ -1122,6 +1173,16 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail, onReveal, onBo
   const links = app.fillReport?.peopleLinks ?? {};
   return (
     <div className="space-y-3">
+      {contacts.length > 0 && (
+        <div className="flex items-center gap-3">
+          <div aria-hidden className="flex">
+            {contacts.slice(0, 4).map((contact, index) => (
+              <span key={contact.id} style={floatDelay(index)} className={`people-float ${index ? "-ml-2.5" : ""}`}><Avatar name={contact.name} photoUrl={contact.photoUrl} className="h-9 w-9 border-[#3A3A44] text-[11px]" /></span>
+            ))}
+          </div>
+          <h3 className="m-0 min-w-0 text-sm font-semibold">{contacts.length} {contacts.length === 1 ? "person" : "people"} at {app.company}</h3>
+        </div>
+      )}
       <PostedBy app={app} />
       {app.contactsMessage && <p className="text-xs text-faint">{app.contactsMessage}</p>}
       <HowWeSearched app={app} />
