@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Lock, Pencil, X } from "lucide-react";
 import type { App } from "@/components/unnepo/apply";
 import { Funnel, PerDay, Systems, Tile, duration } from "@/components/unnepo/stats";
-import { H as SPRITE_H, W as SPRITE_W, spiderRects } from "@/extension/src/shared/sprite";
+import { H as SPRITE_H, ON_DARK, W as SPRITE_W, spiderRects } from "@/extension/src/shared/sprite";
 import { applicationStats } from "@/lib/apply/stats";
 import { nextUp, type NextItem } from "@/lib/apply/next-up";
 import { crawlerColors, nextSkin, wornSkin, type SpiderLook } from "@/lib/spiders";
@@ -20,7 +20,7 @@ const READ_KEY = "unnepo-home-read";
 
 /** The spider from job sites: it drops in on its thread and sways, with the same timing and colors. */
 function DroppingSpider({ look }: { look: SpiderLook }) {
-  const rects = useMemo(() => spiderRects(0, crawlerColors(look)), [look]);
+  const rects = useMemo(() => spiderRects(0, { ...ON_DARK, ...crawlerColors(look) }), [look]);
   return (
     <div aria-hidden className="site-spider-drop pointer-events-none absolute bottom-[calc(100%-7px-46px)] right-5 flex sm:right-9 flex-col items-center">
       <div className="h-[400px] w-0.5" style={{ background: "linear-gradient(90deg, #000 0 1px, #EAF6F2 1px 2px)" }} />
@@ -328,7 +328,7 @@ function Progress({ stats, goals, onGoals }: { stats: ReturnType<typeof applicat
 /** The next spider to collect, and the way to the ones already unlocked. */
 function UnlockStrip({ applied, school, onSpiders }: { applied: number; school: string; onSpiders: () => void }) {
   const next = nextSkin(applied);
-  const rects = useMemo(() => spiderRects(0, crawlerColors({ skin: next?.skin.id ?? "classic", school })), [next?.skin.id, school]);
+  const rects = useMemo(() => spiderRects(0, { ...ON_DARK, ...crawlerColors({ skin: next?.skin.id ?? "classic", school }) }), [next?.skin.id, school]);
   return (
     <button type="button" onClick={onSpiders} className="mt-7 flex w-full flex-wrap items-center gap-4 rounded-2xl border border-[#222] bg-[#0F0F0F] px-5 py-4 text-left hover:border-[#2A2A2A]">
       <span aria-hidden className="relative flex-none">

@@ -10,6 +10,9 @@ export const W = 20;
 export const H = 17;
 export const COLORS: Record<string, string> = { o: "#000000", b: "#2B2531", s: "#4A4252", l: "#1B171F", w: "#EAF6F2", p: "#1B171F", c: "#F2949E" };
 
+/** On the website's dark pages: lighter legs and body, so the spider doesn't read as a black blob. Skins override these. */
+export const ON_DARK: Record<string, string> = { b: "#3D3546", s: "#5C5368", l: "#8F86A0" };
+
 type Point = [number, number];
 
 /** The spider as a grid of color keys ("" is empty), outlined in black. */

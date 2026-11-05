@@ -4,6 +4,7 @@ import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bookmark, ListFilter, RefreshCw, X } from "lucide-react";
 import type { Highlight } from "@/components/unnepo/UnnepoForms";
+import { PeopleSearching } from "@/components/unnepo/people-searching";
 import { categoryColor, categoryOf } from "@/lib/jobs/category";
 
 export type Job = {
@@ -161,7 +162,7 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
       {notice && <p role="status" className="m-0 rounded-[10px] border border-[#1F4D2E] bg-[#0B1A11] px-3.5 py-2.5 text-[13px] text-[#B4E8C5]">{notice}</p>}
       {error && <p role="alert" className="m-0 rounded-[10px] border border-red-900/60 bg-red-950/40 px-3.5 py-2.5 text-[13px] text-red-300">{error}</p>}
 
-      {loading && !jobs && <SpiderLoader label="Looking across job boards" note="Looking across job boards. This can take up to 20 seconds." />}
+      {loading && !jobs && <LookingForJobs />}
       {jobs && !shown.length && !loading && (
         <p className="m-0 p-8 text-center text-sm text-[#8B8B94]">
           {all.length ? "Nothing here with these filters." : "No matches right now."} <button type="button" onClick={() => setEditing(true)} className="font-medium text-[#F7F7F8] underline underline-offset-4">Add a role</button>
@@ -193,6 +194,22 @@ export function JobsPage({ onCoverLetter }: { onCoverLetter: (job: Job | null, j
           {current && <aside aria-label="Job details" className="sticky top-[76px] hidden max-h-[calc(100vh-92px)] w-[44%] max-w-[560px] flex-none overflow-y-auto lg:block">{panelFor(current)}</aside>}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The first search: the spider on its laptop in the middle of the screen. */
+function LookingForJobs() {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), 6000);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <div className="pointer-events-none fixed inset-0 z-10 flex items-center justify-center px-4">
+      <div className="w-full">
+        <PeopleSearching message={slow ? "Still looking. This can take up to 20 seconds." : "Looking across job boards…"} />
+      </div>
     </div>
   );
 }
