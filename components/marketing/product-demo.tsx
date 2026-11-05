@@ -72,7 +72,7 @@ export function ProductDemo({ id }: { id?: string }) {
   const pressing = t >= PRESS_AT - 200 && t < PRESS_AT;
 
   return (
-    <section id={id} aria-label="Unnepo filling in an application" className="mx-auto w-full max-w-6xl scroll-mt-8 px-4 sm:px-6">
+    <section id={id} aria-label="Unnepo filling in an application" className="mx-auto w-full max-w-[1600px] scroll-mt-8 px-4 sm:px-5">
       <style>{`
         @keyframes demo-crawl-a { 0% { left: 6%; top: 18%; transform: rotate(120deg) } 30% { left: 52%; top: 46%; transform: rotate(160deg) } 60% { left: 28%; top: 74%; transform: rotate(250deg) } 100% { left: 80%; top: 14%; transform: rotate(30deg) } }
         @keyframes demo-crawl-b { 0% { left: 84%; top: 70%; transform: rotate(-60deg) } 40% { left: 40%; top: 30%; transform: rotate(-20deg) } 70% { left: 66%; top: 52%; transform: rotate(80deg) } 100% { left: 12%; top: 58%; transform: rotate(200deg) } }

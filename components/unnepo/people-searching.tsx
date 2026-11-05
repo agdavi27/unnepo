@@ -32,16 +32,16 @@ function laptop() {
 const FEET = `<g class="foot left"><rect x="10" y="40" width="4" height="3" fill="#000"/><rect x="11" y="40" width="2" height="2" fill="currentColor"/></g>`
   + `<g class="foot right"><rect x="46" y="40" width="4" height="3" fill="#000"/><rect x="47" y="40" width="2" height="2" fill="currentColor"/></g>`;
 
-export function PeopleSearching({ message, school }: { message: string; school?: string }) {
+export function PeopleSearching({ message }: { message: string }) {
   const svg = useMemo(() => {
-    const look = { skin: "school" as const, school };
+    const look = { skin: "classic" as const };
     const palette = spiderPalette(look);
     const spider = artRects(spiderArt(false, look), palette);
     return `<svg viewBox="0 0 ${W} ${H}" width="168" height="${Math.round((168 * H) / W)}" shape-rendering="crispEdges" aria-hidden="true" style="color:${palette.l}">`
       + `<g class="spider" transform="translate(${(W - ART_W) / 2} ${LIFT - 10})">${spider}</g>`
       + `<rect x="18" y="26" width="24" height="2" fill="#3D8BFF" opacity=".35" class="glow"/>`
       + laptop() + FEET + `</svg>`;
-  }, [school]);
+  }, []);
 
   // Every step the search has reached, newest last; the last three float in the air.
   const [steps, setSteps] = useState<Array<{ id: number; text: string }>>([]);

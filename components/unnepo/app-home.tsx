@@ -26,40 +26,48 @@ type Workspace = {
 };
 
 // Applications are added by the Chrome extension. "Jobs for you" suggests postings that fit the resume.
-type View = "home" | "jobs" | "setup" | "settings";
+type View = "home" | "applications" | "jobs" | "setup" | "settings";
 const VIEWS: { id: View; label: string }[] = [
   { id: "home", label: "Home" },
+  { id: "applications", label: "Applications" },
   { id: "jobs", label: "Jobs for you" },
   { id: "setup", label: "Setup" },
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
 
-export function AppHome() {
+export function AppHome({ start = "home" }: { start?: View }) {
   const router = useRouter();
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [resumeBusy, setResumeBusy] = useState(false);
   const [resumeVersion, setResumeVersion] = useState(0);
-  const [view, setView] = useState<View>("home");
+  const [view, setView] = useState<View>(start);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [extension, setExtension] = useState<boolean | null>(null);
   const menu = useRef<HTMLDivElement>(null);
-  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=setup opens that tab.
+  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=setup opens that tab; /home?job=<id> opens that job in Applications.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
     if (params.get("edit") === "profile") {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
       setEditing(true);
-      window.history.replaceState(null, "", "/home");
+      window.history.replaceState(null, "", window.location.pathname);
     } else if (tab === "setup" || tab === "jobs") {
       setView(tab);
       window.history.replaceState(null, "", "/home");
+    } else if (params.get("job")) {
+      setView("applications");
     }
     void extensionHere().then(setExtension);
   }, []);
+  // Applications has its own address, so a refresh or a saved link stays on it.
+  useEffect(() => {
+    const path = view === "applications" ? "/applications" : "/home";
+    if (window.location.pathname !== path) window.history.replaceState(null, "", path + window.location.search);
+  }, [view]);
   // The account menu closes on Escape or a click outside it.
   useEffect(() => {
     if (!menuOpen) return;
@@ -206,15 +214,15 @@ export function AppHome() {
   const hadResume = Boolean(data?.resume);
   const initials = (data?.user.name || data?.user.email || "").split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
   const openJob = (appId: string) => {
-    window.history.replaceState(null, "", `/home?job=${encodeURIComponent(appId)}`);
-    setView("home");
+    window.history.replaceState(null, "", `/applications?job=${encodeURIComponent(appId)}`);
+    setView("applications");
     window.scrollTo({ top: 0 });
   };
 
   return (
     <div className="min-h-screen bg-bg text-ink [color-scheme:dark]">
       <header className="z-20 border-b sm:sticky sm:top-0 border-[#17171B] bg-bg/90 backdrop-blur">
-        <div className="mx-auto flex max-w-[1320px] flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-[14px] sm:px-10">
+        <div className="mx-auto flex max-w-[1920px] flex-wrap items-center justify-between gap-x-4 gap-y-3 px-3 py-[14px] sm:px-5">
           <div className="flex min-w-0 flex-wrap items-center gap-x-9 gap-y-2">
             <Logo />
             {data && !showOnboarding && (
@@ -260,7 +268,7 @@ export function AppHome() {
           </div>
         </div>
       </header>
-      <main className="mx-auto flex max-w-[1240px] flex-col gap-8 overflow-x-clip px-4 pb-16 pt-6 sm:px-8">
+      <main className="mx-auto flex max-w-[1920px] flex-col gap-8 overflow-x-clip px-3 pb-16 pt-6 sm:px-5">
         {error && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
             <p>{error}</p>
@@ -281,7 +289,7 @@ export function AppHome() {
             onDone={() => { setEditing(false); setResumeVersion((value) => value + 1); void load(); }}
           />
         )}
-        {data && !showOnboarding && view === "home" && <ApplyArea refreshKey={resumeVersion} userName={data.user.name} onSetup={() => { setView("setup"); window.scrollTo({ top: 0 }); }} onSpiders={() => { setView("settings"); window.scrollTo({ top: 0 }); }} />}
+        {data && !showOnboarding && (view === "home" || view === "applications") && <ApplyArea page={view} onPage={setView} refreshKey={resumeVersion} userName={data.user.name} onSetup={() => { setView("setup"); window.scrollTo({ top: 0 }); }} onSpiders={() => { setView("settings"); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
         {data && !showOnboarding && view === "setup" && (
           <SetupPage

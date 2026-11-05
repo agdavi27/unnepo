@@ -3,10 +3,10 @@ import { SKINS, nextSkin, schoolStyle, spiderArt, wornSkin } from "@/lib/spiders
 
 describe("spiders to collect", () => {
   it("unlocks at 50, 150, 300, 500 and 1,000 applications, with the school spider from the start", () => {
-    expect(SKINS.map((skin) => skin.unlockAt)).toEqual([0, 50, 150, 300, 500, 1000]);
-    expect(wornSkin("blue", 49)).toBe("school");
+    expect(SKINS.map((skin) => skin.unlockAt)).toEqual([0, 0, 50, 150, 300, 500, 1000]);
+    expect(wornSkin("blue", 49)).toBe("classic");
     expect(wornSkin("blue", 50)).toBe("blue");
-    expect(wornSkin("nonsense", 900)).toBe("school");
+    expect(wornSkin("nonsense", 900)).toBe("classic");
     expect(nextSkin(120)).toMatchObject({ skin: { id: "green" }, left: 30 });
     expect(nextSkin(1000)).toBeNull();
   });

@@ -22,7 +22,7 @@ const SCHOOLS: Array<{ name: string; style: string }> = [
 
 export function Schools() {
   return (
-    <section aria-labelledby="schools-title" className="mx-auto w-full max-w-[1360px] px-6 pb-20 sm:px-10">
+    <section aria-labelledby="schools-title" className="mx-auto w-full max-w-[1600px] px-4 pb-20 sm:px-5">
       <div className="relative border-4 border-[#F7F7F8] shadow-[12px_12px_0_#17171B]">
         <h2
           id="schools-title"

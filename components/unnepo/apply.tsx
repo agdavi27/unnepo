@@ -114,7 +114,10 @@ function when(date: Date) {
 }
 
 /** The Home tab: the day so far, the totals, and the list of jobs, from one data load. */
-export function ApplyArea({ refreshKey = 0, userName, onSetup, onSpiders }: { refreshKey?: number; userName: string; onSetup: () => void; onSpiders: () => void }) {
+export type AppPage = "home" | "applications";
+
+/** The Home and Applications pages. They share their data, so moving between them is instant and nothing is lost. */
+export function ApplyArea({ page, onPage, refreshKey = 0, userName, onSetup, onSpiders }: { page: AppPage; onPage: (page: AppPage) => void; refreshKey?: number; userName: string; onSetup: () => void; onSpiders: () => void }) {
   const [data, setData] = useState<ApplyData | null>(null);
   const [error, setError] = useState("");
 
@@ -152,6 +155,8 @@ export function ApplyArea({ refreshKey = 0, userName, onSetup, onSpiders }: { re
 
   return (
     <AppliedPage
+      page={page}
+      onPage={onPage}
       data={data}
       userName={userName}
       onSetup={onSetup}
@@ -221,20 +226,20 @@ const UNDO_MS = 5000;
 const deleteNow = (applicationId: string, keepalive = false) =>
   fetch("/api/apply/applications", { method: "DELETE", keepalive, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId }) });
 
-function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onReplace, onApps }: { data: ApplyData; userName: string; onSetup: () => void; onSpiders: () => void; onGoal: (goal: number) => Promise<void>; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
+function AppliedPage({ page, onPage, data, userName, onSetup, onSpiders, onGoal, onReload, onReplace, onApps }: { page: AppPage; onPage: (page: AppPage) => void; data: ApplyData; userName: string; onSetup: () => void; onSpiders: () => void; onGoal: (goal: number) => Promise<void>; onReload: () => Promise<void>; onReplace: (app: App) => void; onApps: (change: (apps: App[]) => App[]) => void }) {
   const apps = data.applications;
   // Removing is instant: the row goes away and is deleted for real after a few seconds, unless undone.
   const [removed, setRemoved] = useState<App[]>([]);
   const pending = useRef(new Map<string, number>());
   const [open, setOpen] = useState<string | null>(null);
-  // The extension's My jobs opens /home?job=<id>: that job's details, scrolled into view.
+  // The extension's My jobs opens /home?job=<id>, which lands on Applications: that job's details, scrolled into view.
   const linked = useRef(false);
   useEffect(() => {
     if (linked.current || !apps.length) return;
     const wanted = new URLSearchParams(window.location.search).get("job");
     if (!wanted) return;
     linked.current = true;
-    window.history.replaceState(null, "", "/home");
+    window.history.replaceState(null, "", window.location.pathname);
     if (!apps.some((app) => app.id === wanted)) return;
     setOpen(wanted);
     requestAnimationFrame(() => document.getElementById(`job-${wanted}`)?.scrollIntoView({ block: "center" }));
@@ -482,17 +487,40 @@ function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onR
     setFilter("all");
     setQuery("");
     setOpen(appId);
+    onPage("applications");
     requestAnimationFrame(() => document.getElementById(`job-${appId}`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
   };
 
   return (
     <div className="flex flex-col gap-8">
-      <HomeHero name={userName} apps={apps} weeklyGoal={data.profile.weeklyGoal ?? null} onGoal={onGoal} school={data.school} spiderSkin={data.profile.spiderSkin ?? null} onSetup={onSetup} />
-      <HomeTiles apps={apps} />
-      <div className="flex flex-wrap items-start gap-8">
-        <section aria-labelledby="applied-title" className="flex min-w-0 flex-[999_1_640px] flex-col gap-4">
+      {page === "home" && (
+        <>
+          <HomeHero name={userName} apps={apps} weeklyGoal={data.profile.weeklyGoal ?? null} onGoal={onGoal} school={data.school} spiderSkin={data.profile.spiderSkin ?? null} onSetup={onSetup} />
+          <HomeTiles apps={apps} />
+          {apps.length === 0 && (
+                <div className={`${card} flex flex-col items-start gap-3`}>
+                  <p className="font-medium">No applications yet</p>
+                  <p className="max-w-xl text-sm text-muted">Open a job application in Chrome and press Fill in the Unnepo extension. Every job you submit shows up here, with people at the company to email.</p>
+                  <a href="/extension/connect" className={primary}>Connect the extension</a>
+                </div>
+          )}
+          <div className="grid items-start gap-6 md:grid-cols-2 xl:grid-cols-3">
+            <PerDayCard apps={apps} />
+            <FollowUpsDue
+              apps={apps}
+              onOpen={openJob}
+              onWrite={(appId, contactId) => act("/contact-email", "POST", { applicationId: appId, contactId, followUp: true })}
+              onSent={(contactId) => act("/contact", "PATCH", { contactId, status: "emailed", followedUp: true })}
+            />
+            <NextSpider apps={apps} school={data.school} onSpiders={onSpiders} />
+          </div>
+          <MoreStats apps={apps} />
+        </>
+      )}
+      {page === "applications" && (
+        <section aria-labelledby="applied-title" className="flex min-w-0 flex-col gap-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 id="applied-title" className="m-0 text-[22px] font-bold tracking-[-0.5px]">Applied <span className="text-sm font-medium tracking-normal text-[#8B8B94] tabular-nums">{stats.applied}</span></h2>
+            <h1 id="applied-title" className="m-0 text-3xl font-bold tracking-[-1px]">Applications <span className="text-sm font-medium tracking-normal text-[#8B8B94] tabular-nums">{stats.applied}</span></h1>
             {apps.length > 0 && (
               <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by stage">
                 {FILTERS.filter(([id]) => id === "all" || counts[id]).map(([id, label]) => (
@@ -582,19 +610,7 @@ function AppliedPage({ data, userName, onSetup, onSpiders, onGoal, onReload, onR
             </>
           )}
         </section>
-
-        <aside className="flex min-w-0 flex-[1_1_320px] flex-col gap-6">
-          <PerDayCard apps={apps} />
-          <FollowUpsDue
-            apps={apps}
-            onOpen={openJob}
-            onWrite={(appId, contactId) => act("/contact-email", "POST", { applicationId: appId, contactId, followUp: true })}
-            onSent={(contactId) => act("/contact", "PATCH", { contactId, status: "emailed", followedUp: true })}
-          />
-          <NextSpider apps={apps} school={data.school} onSpiders={onSpiders} />
-        </aside>
-      </div>
-      <MoreStats apps={apps} />
+      )}
 
       {removed.length > 0 && (
         <div role="status" className="fixed inset-x-4 bottom-5 z-20 mx-auto flex max-w-md items-center justify-between gap-4 rounded-xl border border-line bg-card px-4 py-3 text-sm shadow-2xl">
@@ -1186,7 +1202,7 @@ function ContactsPanel({ app, school, onStatus, onRetry, onEmail, onReveal, onBo
       </div>
     );
   }
-  if (app.contactsStatus === "finding" && !cutOff) return <PeopleSearching message={app.contactsMessage || `Searching for relevant people at ${app.company}…`} school={school} />;
+  if (app.contactsStatus === "finding" && !cutOff) return <PeopleSearching message={app.contactsMessage || `Searching for relevant people at ${app.company}…`} />;
   const links = app.fillReport?.peopleLinks ?? {};
   return (
     <div className="space-y-3">

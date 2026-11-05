@@ -9,7 +9,7 @@ const check = (
 
 export function Pricing() {
   return (
-    <section id="pricing" aria-labelledby="pricing-title" className="mx-auto w-full max-w-6xl scroll-mt-8 px-6 py-20">
+    <section id="pricing" aria-labelledby="pricing-title" className="mx-auto w-full max-w-[1600px] scroll-mt-8 px-4 py-20 sm:px-5">
       <div className="flex flex-col items-center text-center">
         <p className="m-0 font-mono text-xs uppercase tracking-[1.2px] text-[#8B8B94]">Pricing</p>
         <h2 id="pricing-title" className="m-0 mt-3 max-w-2xl text-[clamp(32px,4.6vw,46px)] font-bold leading-[1.05] tracking-[-1.4px]">Free to start. Upgrade when you&apos;re applying a lot.</h2>

@@ -153,7 +153,7 @@ const FEATURES = [
 
 export function Features() {
   return (
-    <section aria-labelledby="features-title" className="mx-auto flex w-full max-w-6xl flex-col gap-16 px-6 py-20">
+    <section aria-labelledby="features-title" className="mx-auto flex w-full max-w-[1600px] flex-col gap-16 px-4 py-20 sm:px-5">
       <div className="flex flex-col items-center gap-3 text-center">
         <p className="m-0 font-mono text-xs uppercase tracking-[1.2px] text-[#8B8B94]">What it does</p>
         <h2 id="features-title" className="m-0 max-w-2xl text-[clamp(28px,4vw,40px)] font-bold leading-[1.05] tracking-[-1.2px]">Apply faster. Then actually hear back.</h2>

@@ -5,11 +5,12 @@
  * the student picked.
  */
 
-export type SkinId = "school" | "blue" | "green" | "purple" | "gold" | "pink";
+export type SkinId = "classic" | "school" | "blue" | "green" | "purple" | "gold" | "pink";
 
 export type Skin = { id: SkinId; name: string; unlockAt: number; color: string };
 
 export const SKINS: Skin[] = [
+  { id: "classic", name: "Unnepo", unlockAt: 0, color: "#6E5B6E" },
   { id: "school", name: "School spirit", unlockAt: 0, color: "#6E5B6E" },
   { id: "blue", name: "Blue", unlockAt: 50, color: "#3D8BFF" },
   { id: "green", name: "Green", unlockAt: 150, color: "#2FBF71" },
@@ -22,10 +23,10 @@ export const isSkin = (value: unknown): value is SkinId => SKINS.some((skin) => 
 
 export const skinUnlocked = (skin: Skin, applied: number) => applied >= skin.unlockAt;
 
-/** The skin to wear: the one picked if it's unlocked, else the school spider. */
+/** The skin to wear: the one picked if it's unlocked, else the Unnepo spider from the website. */
 export function wornSkin(picked: string | undefined | null, applied: number): SkinId {
   const skin = SKINS.find((item) => item.id === picked);
-  return skin && skinUnlocked(skin, applied) ? skin.id : "school";
+  return skin && skinUnlocked(skin, applied) ? skin.id : "classic";
 }
 
 /** The next spider to unlock and how many applications it takes. */
@@ -120,6 +121,13 @@ export type SpiderLook = { skin: SkinId; school?: string | null };
 
 /** The colors for each pixel key, from the skin (and the school, for the school spider). */
 export function spiderPalette(look: SpiderLook) {
+  // The Unnepo spider: the same colors as the one hanging on the website's front page.
+  if (look.skin === "classic") {
+    return {
+      o: "#000000", b: "#6E5B6E", h: "#B48FAE", d: "#4E3549", a: "#3D8BFF", e: "#3D8BFF", k: "#7E6580", K: "#5A4258",
+      l: "#6E5B6E", L: "#4E3549", w: "#FFFFFF", m: "#1A0E14", f: "#F7F7F8", p: "#965E8C", t: "#FFFFFF", r: "#4E3549",
+    } as Record<string, string>;
+  }
   const skin = SKINS.find((item) => item.id === look.skin) ?? SKINS[0];
   const style = look.skin === "school" ? schoolStyle(look.school) : null;
   const body = skin.color;
@@ -130,15 +138,17 @@ export function spiderPalette(look: SpiderLook) {
     k: shade(body, 0.12), K: shade(body, -0.15),
     l: body, L: shade(body, -0.3),
     a: skin.id === "school" ? "#3D8BFF" : shade(body, 0.55),
+    e: skin.id === "school" ? "#3D8BFF" : shade(body, 0.55),
     t: style?.text ?? "#FFFFFF",
     r: shade(back, -0.45),
-    m: "#1A0E14", w: "#FFFFFF", f: "#F7F7F8", p: "#E2627E", c: "#FF9DB0",
+    m: "#1A0E14", w: "#FFFFFF", f: "#F7F7F8", p: "#965E8C",
   } as Record<string, string>;
 }
 
 /**
- * The hanging spider, 40×30, facing the viewer: a round back (a sweater with letters for the school spider),
- * a face with big shiny eyes, pink cheeks and a smile, and four legs a side. `open` opens the mouth.
+ * The hanging spider, 40×30, the same drawing as the website's front page (components/marketing/spider-dialogue.tsx):
+ * a round back with a mark (a sweater with letters for the school spider), a face with glowing eyes and fangs,
+ * and four legs a side. `open` opens the mouth.
  */
 export function spiderArt(open: boolean, look: SpiderLook): string[][] {
   const W = ART_W, H = ART_H;
@@ -186,18 +196,16 @@ export function spiderArt(open: boolean, look: SpiderLook): string[][] {
     for (const [x, y] of [[19, 7], [20, 7], [18, 8], [21, 8], [19, 9], [20, 9], [19, 10], [20, 10]]) set(x, y, "a");
   }
   blob(20, 17.8, 6.8, 5.2, "k", "h", "K");
-  // Big round eyes with a sparkle in each, pink cheeks, and a little smile.
-  for (const ex of [15, 22]) {
-    for (let dx = 0; dx < 3; dx++) for (let dy = 0; dy < 3; dy++) set(ex + dx, 14 + dy, "m");
-    set(ex, 14, "w"); set(ex + 1, 14, "w"); set(ex, 15, "w"); set(ex + 2, 16, "w");
-  }
-  set(14, 18, "c"); set(15, 18, "c"); set(24, 18, "c"); set(25, 18, "c");
+  for (const [x, y] of [[16, 15], [17, 15], [16, 16], [17, 16], [22, 15], [23, 15], [22, 16], [23, 16]]) set(x, y, "e");
+  set(16, 15, "w"); set(22, 15, "w"); set(14, 14, "e"); set(25, 14, "e");
   if (open) {
-    for (let x = 18; x <= 21; x++) { set(x, 19, "m"); set(x, 20, "m"); }
-    set(19, 21, "m"); set(20, 21, "m");
-    set(19, 20, "p"); set(20, 20, "p");
+    for (let x = 17; x <= 22; x++) { set(x, 19, "m"); set(x, 20, "m"); }
+    for (let x = 18; x <= 21; x++) set(x, 21, "m");
+    set(19, 21, "p"); set(20, 21, "p");
+    set(18, 19, "f"); set(18, 20, "f"); set(21, 19, "f"); set(21, 20, "f");
   } else {
-    set(18, 19, "m"); set(19, 20, "m"); set(20, 20, "m"); set(21, 19, "m");
+    for (let x = 18; x <= 21; x++) set(x, 20, "m");
+    set(18, 21, "f"); set(21, 21, "f");
   }
   const out = g.map((row) => row.slice());
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {

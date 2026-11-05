@@ -17,7 +17,7 @@ export function Landing() {
   const cta = EXTENSION_URL || "/signup";
   return (
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-bg text-ink">
-      <header className="relative z-[2] flex flex-wrap items-center justify-between gap-4 px-6 py-6 sm:px-10">
+      <header className="relative z-[2] flex flex-wrap items-center justify-between gap-4 px-4 py-6 sm:px-5">
         <Logo href="/" className="text-xl font-bold tracking-[-0.6px]" />
         <nav aria-label="Main" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
           <Link href="/demo" className="py-3 text-[#9A9AA3] hover:text-white">See how it works</Link>

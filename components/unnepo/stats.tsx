@@ -47,7 +47,7 @@ export function Spiders({ applied, school, picked, onPick }: { applied: number; 
         <h2 className={sectionTitle}>Your spiders</h2>
         <p className="text-xs text-faint" role="status">{state || "Pick one to wear in the extension."}</p>
       </div>
-      <ul className="mt-4 grid list-none grid-cols-3 gap-3 p-0 sm:grid-cols-6">
+      <ul className="mt-4 grid list-none grid-cols-3 gap-3 p-0 sm:grid-cols-7">
         {SKINS.map((skin) => {
           const open = skinUnlocked(skin, applied);
           const name = skin.id === "school" ? (school ? `${school}` : "School spirit") : skin.name;
@@ -64,7 +64,7 @@ export function Spiders({ applied, school, picked, onPick }: { applied: number; 
               >
                 <span className={`block ${open ? "" : "opacity-60"}`} dangerouslySetInnerHTML={{ __html: spiderSvg(look, { size: 72, grey: !open }) }} />
                 <span className="line-clamp-2 text-xs font-medium">{skin.id === "school" && style ? `${style.letters} sweater` : skin.name}</span>
-                <span className="text-[11px] text-faint">{open ? (worn === skin.id ? "Wearing" : skin.id === "school" ? "Unlocked" : `${skin.unlockAt} apps`) : `Unlocks after ${skin.unlockAt} applications`}</span>
+                <span className="text-[11px] text-faint">{open ? (worn === skin.id ? "Wearing" : skin.unlockAt === 0 ? "Unlocked" : `${skin.unlockAt} apps`) : `Unlocks after ${skin.unlockAt} applications`}</span>
               </button>
             </li>
           );

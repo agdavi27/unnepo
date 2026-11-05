@@ -149,7 +149,7 @@ export function SetupPage({ resume, completeness, resumeBusy, onReplaceResume, o
   const toggleLabel = "flex items-start gap-2.5 text-[13px] leading-normal text-[#9A9AA3]";
 
   return (
-    <div className="mx-auto flex w-full max-w-[1120px] flex-col gap-7 pt-4 sm:pt-8">
+    <div className="flex w-full flex-col gap-7 pt-4 sm:pt-8">
       <nav aria-label="Setup" className="flex flex-wrap gap-2 text-[13px]">
         {PARTS.map((item, index) => {
           const now = part === item.id;
@@ -212,7 +212,7 @@ export function SetupPage({ resume, completeness, resumeBusy, onReplaceResume, o
           <section className={card} aria-label="Follow-up contacts">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <p className="m-0 text-[28px] font-bold leading-tight tracking-[-1px] tabular-nums">{followed} <span className="text-[15px] font-medium tracking-normal text-[#8B8B94]">of {applied.length} followed up</span></p>
-              {applied.length > 0 && <FollowUpFacts applied={applied} school={data.school} onOpen={onOpenJob} />}
+              {applied.length > 0 && <FollowUpFacts applied={applied} onOpen={onOpenJob} />}
             </div>
             <label className={toggleLabel}>
               <input type="checkbox" className={check} checked={Boolean(autoPeople)} onChange={(event) => void toggle({ autoFindPeople: event.target.checked })} />

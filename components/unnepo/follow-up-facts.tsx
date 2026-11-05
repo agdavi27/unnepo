@@ -41,7 +41,7 @@ const HIDDEN_KEY = "unnepo-follow-up-hidden";
 const today = () => new Date().toISOString().slice(0, 10);
 
 /** A small card for the corner of the Applied page. The × folds it down to the spider for the rest of the day. */
-export function FollowUpFacts({ applied, school, onOpen }: { applied: FollowApp[]; school: string; onOpen: (appId: string) => void }) {
+export function FollowUpFacts({ applied, onOpen }: { applied: FollowApp[]; onOpen: (appId: string) => void }) {
   const [index, setIndex] = useState(0);
   const [talking, setTalking] = useState(false);
   const [still, setStill] = useState(false);
@@ -79,7 +79,7 @@ export function FollowUpFacts({ applied, school, onOpen }: { applied: FollowApp[
 
   const followed = applied.filter((app) => (app.contacts ?? []).some((contact) => contact.outreachStatus !== "not_contacted")).length;
   const next = applied.find((app) => !(app.contacts ?? []).some((contact) => contact.outreachStatus !== "not_contacted"));
-  const spider = useMemo(() => ({ open: spiderSvg({ skin: "school", school }, { open: true, size: 34 }), shut: spiderSvg({ skin: "school", school }, { size: 34 }) }), [school]);
+  const spider = useMemo(() => ({ open: spiderSvg({ skin: "classic" }, { open: true, size: 34 }), shut: spiderSvg({ skin: "classic" }, { size: 34 }) }), []);
   const fact = FOLLOW_UP_FACTS[index];
   const face = <span aria-hidden className={`flex-none ${still ? "" : "spider-hang"}`} dangerouslySetInnerHTML={{ __html: talking && !still && !folded ? spider.open : spider.shut }} />;
   const motion = (

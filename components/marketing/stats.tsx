@@ -14,7 +14,7 @@ const STATS: Array<{ value: string; label: string; source: string; href?: string
 
 export function Stats() {
   return (
-    <section aria-labelledby="stats-title" className="mx-auto w-full max-w-5xl px-6 py-20">
+    <section aria-labelledby="stats-title" className="mx-auto w-full max-w-[1600px] px-4 py-20 sm:px-5">
       <p className="m-0 font-mono text-xs uppercase tracking-[1.2px] text-[#8B8B94]">Why it works</p>
       <h2 id="stats-title" className="m-0 mt-3 max-w-3xl text-[clamp(30px,4.5vw,44px)] font-bold leading-[1.05] tracking-[-1.4px]">
         Finish applications in seconds. Then talk to the people who decide.

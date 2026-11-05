@@ -6,7 +6,7 @@ import { ART_H, ART_W, artRects, spiderArt, spiderPalette, type SpiderLook } fro
  */
 
 /** The spider as an SVG with both mouth frames; toggle the "talking" class to open his mouth. */
-export function heroSpiderSvg(look: SpiderLook = { skin: "school" }) {
+export function heroSpiderSvg(look: SpiderLook = { skin: "classic" }) {
   const palette = spiderPalette(look);
   return `<svg viewBox="0 0 ${ART_W} ${ART_H}" width="80" height="60" shape-rendering="crispEdges" aria-hidden="true"><g class="mouth-shut">${artRects(spiderArt(false, look), palette)}</g><g class="mouth-open">${artRects(spiderArt(true, look), palette)}</g></svg>`;
 }
