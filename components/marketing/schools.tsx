@@ -22,7 +22,7 @@ const SCHOOLS: Array<{ name: string; style: string }> = [
 
 export function Schools() {
   return (
-    <section aria-labelledby="schools-title" className="mx-auto w-full max-w-[1600px] px-4 pb-20 sm:px-5">
+    <section aria-labelledby="schools-title" className="w-full pb-20">
       <div className="relative border-4 border-[#F7F7F8] shadow-[12px_12px_0_#17171B]">
         <h2
           id="schools-title"
@@ -30,7 +30,7 @@ export function Schools() {
         >
           USED BY STUDENTS FROM
         </h2>
-        <ul className="grid grid-cols-2 gap-x-6 gap-y-8 px-6 pb-10 pt-14 sm:grid-cols-3 sm:px-10 lg:grid-cols-6 lg:gap-y-10 lg:px-14">
+        <ul className="grid grid-cols-2 gap-x-3 gap-y-8 px-3 pb-10 pt-14 sm:grid-cols-[repeat(auto-fit,minmax(140px,1fr))] sm:gap-x-6 sm:gap-y-10 sm:px-10 lg:px-14">
           {SCHOOLS.map((school) => (
             <li key={school.name} className={`flex items-center justify-center whitespace-nowrap text-center leading-none text-[#C9C9D0] ${school.style}`}>
               {school.name}

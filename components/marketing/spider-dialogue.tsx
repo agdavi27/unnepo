@@ -1,19 +1,20 @@
 "use client";
 
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 
 /**
  * The home page centerpiece: Unnepo's original pixel spider hanging on a thread, talking through a retro
  * dialogue box. Lines type out while his mouth moves; a click finishes the line or moves to the next one.
+ * Scrolling shrinks him and carries him to the web line on the right, where he stays while the page moves.
  * With reduced motion, lines appear whole and nothing bobs or blinks. Poke him and he gets mad.
  */
 
 const LINES = [
   "Applying to internships is brutal. Same resume, retyped into 200 forms.",
-  "Then Workday wants a new account. For every. Single. Company.",
-  "So I crawl them for you. Every field, every dropdown, every Next button.",
-  "I make the accounts, hit submit, and log it the second it lands.",
-  "Then I find the recruiters behind the role and write the email.",
+  "On a job board? Apply like normal. Your letter and answers are right here.",
+  "On the company's site? Press Fill. I crawl every field and every Next button.",
+  "Either way, it goes in your tracker. Every application, in one place.",
+  "I find the recruiters behind the role and write the email.",
   "Your job? Pick the jobs. I'll do the crawling.",
 ];
 
@@ -128,24 +129,65 @@ function Rects({ list }: { list: Run[] }) {
   return <>{list.map((run) => <rect key={`${run.x}-${run.y}`} x={run.x} y={run.y} width={run.w} height={1} fill={run.fill} />)}</>;
 }
 
-function Spider({ talking, mad, onPoke }: { talking: boolean; mad: number; onPoke: () => void }) {
+function SpiderArt({ talking, mad }: { talking: boolean; mad: number }) {
   return (
-    <div className="unnepo-bob relative w-[min(400px,82vw)]">
-      <div className="absolute bottom-[calc(100%-18px)] left-[calc(50%-3px)] h-[44px] w-[6px] bg-[#3A3A44]" />
-      <button type="button" onClick={onPoke} aria-label="Poke the spider" className="relative block w-full cursor-pointer focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-4 focus-visible:outline-[#3D8BFF]">
-        {/* A new key on each poke restarts the shake. */}
-        <svg key={mad} viewBox={`0 0 ${W} ${H}`} className={`block w-full ${mad ? "unnepo-shake" : ""}`} shapeRendering="crispEdges" aria-hidden>
-          {mad ? <Rects list={ANGRY} /> : (
-            <>
-              <Rects list={BASE} />
-              <g style={{ display: talking ? "inline" : "none" }}><Rects list={MOUTH_OPEN} /></g>
-              <g style={{ display: talking ? "none" : "inline" }}><Rects list={MOUTH_CLOSED} /></g>
-            </>
-          )}
-        </svg>
-      </button>
-    </div>
+    // A new key on each poke restarts the shake.
+    <svg key={mad} viewBox={`0 0 ${W} ${H}`} className={`block w-full ${mad ? "unnepo-shake" : ""}`} shapeRendering="crispEdges" aria-hidden>
+      {mad ? <Rects list={ANGRY} /> : (
+        <>
+          <Rects list={BASE} />
+          <g style={{ display: talking ? "inline" : "none" }}><Rects list={MOUTH_OPEN} /></g>
+          <g style={{ display: talking ? "none" : "inline" }}><Rects list={MOUTH_CLOSED} /></g>
+        </>
+      )}
+    </svg>
   );
+}
+
+/** How many pixels of scrolling take him from the hero to the web line. */
+const SCROLL_RANGE = 520;
+/** He rests this far below the top of the screen once he's on the line. */
+const LINE_TOP = 96;
+
+const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
+const smooth = (value: number) => { const x = clamp(value, 0, 1); return x * x * (3 - 2 * x); };
+const mix = (from: number, to: number, amount: number) => from + (to - from) * amount;
+
+/** Where his resting spot is on screen, and how far the page has scrolled. */
+type View = { progress: number; homeX: number; homeY: number; homeWidth: number; lineX: number; targetWidth: number };
+
+/** Follows the page's scroll. Matches the --gutter and --inset sizes on the landing page's root. */
+function useScrollView(home: React.RefObject<HTMLDivElement | null>) {
+  const [view, setView] = useState<View | null>(null);
+  useEffect(() => {
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const el = home.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const screen = window.innerWidth;
+      const columnRight = el.closest("[data-landing-column]")?.getBoundingClientRect().right ?? screen;
+      setView({
+        progress: clamp(window.scrollY / SCROLL_RANGE, 0, 1),
+        homeX: rect.left,
+        homeY: rect.top,
+        homeWidth: rect.width,
+        lineX: columnRight + clamp(screen * 0.13, 52, 176) - clamp(screen * 0.06, 24, 84),
+        targetWidth: clamp(screen * 0.055, 40, 80),
+      });
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(measure); };
+    measure();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
+    };
+  }, [home]);
+  return view;
 }
 
 const TYPE_MS = 42;
@@ -169,6 +211,8 @@ export function SpiderDialogue() {
   // Pokes so far; `mad` is non-zero (the poke number) while he's still cross.
   const [pokes, setPokes] = useState(0);
   const [mad, setMad] = useState(0);
+  const home = useRef<HTMLDivElement>(null);
+  const view = useScrollView(home);
 
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -203,13 +247,26 @@ export function SpiderDialogue() {
   // With reduced motion every line is shown whole, so a click always moves on.
   const advance = () => (reduced ? (dispatch("advance"), dispatch("advance")) : dispatch("advance"));
 
-  // The mouth opens on every other pair of letters, and stays shut on spaces and once the line is done.
-  const talking = typing && text.charAt(typed) !== " " && Math.floor(typed / 2) % 2 === 0;
+  const progress = view?.progress ?? 0;
+  // He shrinks first, then travels. Before anything has scrolled he simply sits in his spot in the page.
+  const shrink = smooth(progress / 0.5);
+  const travel = smooth((progress - 0.35) / 0.65);
+  const moved = view !== null && progress > 0;
+  const width = view ? mix(view.homeWidth, view.targetWidth, shrink) : 0;
+  // His spot scrolls away faster than he travels, so he's held on screen until he reaches the line.
+  const top = view ? Math.max(mix(view.homeY, LINE_TOP, travel), 24) : 0;
+  const left = view ? mix(view.homeX + (view.homeWidth - width) / 2, view.lineX + 1 - view.targetWidth / 2, travel) : 0;
+  const threadHeight = moved ? mix(width * 0.11, top + width * 0.1 + 24, travel) : 44;
+  const threadWidth = moved ? mix(6, 2, shrink) : 6;
+  const boxOpacity = 1 - smooth(progress / 0.6);
+
+  // The mouth opens on every other pair of letters, and stays shut on spaces, once the line is done, and once he's small.
+  const talking = typing && progress < 0.5 && text.charAt(typed) !== " " && Math.floor(typed / 2) % 2 === 0;
 
   return (
     <>
       <style>{`
-        @keyframes unnepo-bob { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(14px) } }
+        @keyframes unnepo-bob { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(3.5%) } }
         @keyframes unnepo-blink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
         .unnepo-bob { animation: unnepo-bob 3.2s steps(4) infinite; }
         .unnepo-blink { animation: unnepo-blink 0.9s steps(1) infinite; }
@@ -217,15 +274,26 @@ export function SpiderDialogue() {
         .unnepo-shake { animation: unnepo-shake .45s steps(5); }
         @media (prefers-reduced-motion: reduce) { .unnepo-bob, .unnepo-blink, .unnepo-shake { animation: none; } }
       `}</style>
-      <Spider talking={talking} mad={mad} onPoke={poke} />
+      {view && <div aria-hidden className="pointer-events-none fixed inset-y-0 z-[1] w-0.5 bg-[#3A3A42]" style={{ left: view.lineX, opacity: smooth((progress - 0.6) / 0.4) }} />}
+      {/* His spot in the hero. It keeps its size when he leaves, so the page doesn't jump. */}
+      <div ref={home} className="relative mt-11 aspect-[40/30] w-[min(340px,72vw)]">
+        <div className={moved ? "fixed z-[5]" : "absolute inset-0"} style={moved ? { left, top, width } : undefined}>
+          <div className="unnepo-bob relative w-full">
+            <div className="absolute left-1/2 -translate-x-1/2 bg-[#3A3A44]" style={{ width: threadWidth, height: threadHeight, bottom: moved ? `calc(100% - ${width * 0.1}px)` : "calc(100% - 18px)" }} />
+            <button type="button" onClick={poke} aria-label="Poke the spider" className="relative block w-full cursor-pointer focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-4 focus-visible:outline-[#3D8BFF]">
+              <SpiderArt talking={talking} mad={mad} />
+            </button>
+          </div>
+        </div>
+      </div>
       {/* Buttons take their font from the page (globals.css), so the box's font is set on this wrapper. */}
-      <div className="flex w-full max-w-[760px] flex-col font-[family-name:var(--font-pixel)] text-[clamp(13px,1.7vw,17px)] leading-[2]">
+      <div className={`flex w-full max-w-[600px] flex-col font-[family-name:var(--font-pixel)] text-[clamp(12px,1.2vw,15px)] leading-[2] ${boxOpacity === 0 ? "invisible" : ""}`} style={{ opacity: boxOpacity, pointerEvents: boxOpacity < 0.3 ? "none" : undefined }}>
         <div className={`relative z-[1] -mb-2 ml-6 self-start border-4 border-bg ${mad ? "bg-[#FF4D4D]" : "bg-[#3D8BFF]"} px-3.5 pb-2 pt-2.5 text-[13px] leading-normal text-white shadow-[0_0_0_4px_#F7F7F8]`}>UNNEPO</div>
         <button
           type="button"
           onClick={() => (mad ? setMad(0) : advance())}
           aria-label={typing ? "Show the whole line" : "Next line"}
-          className="relative min-h-[150px] cursor-pointer border-4 border-bg bg-[#F7F7F8] px-8 pb-[34px] pt-[30px] text-left text-bg shadow-[0_0_0_4px_#F7F7F8,12px_12px_0_4px_#1E1E26] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[10px] focus-visible:outline-[#3D8BFF]"
+          className="relative min-h-[140px] cursor-pointer border-4 border-bg bg-[#F7F7F8] px-8 pb-[34px] pt-[30px] text-left text-bg shadow-[0_0_0_4px_#F7F7F8,12px_12px_0_4px_#1E1E26] focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-[10px] focus-visible:outline-[#3D8BFF]"
         >
           <span aria-hidden className={mad ? "text-[#C81E2E]" : undefined}>{text.slice(0, typed)}</span>
           <span className="sr-only" aria-live="polite">{text}</span>

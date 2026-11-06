@@ -39,8 +39,8 @@ export function FounderLink() {
   const dialog = useRef<HTMLDialogElement>(null);
   return (
     <>
-      <button type="button" onClick={() => dialog.current?.showModal()} className="py-3 text-[#9A9AA3] hover:text-white">Founder</button>
-      <dialog ref={dialog} aria-label="About the founder" className="m-auto max-h-[calc(100vh-32px)] w-[min(1100px,calc(100vw-32px))] overflow-auto rounded-[20px] bg-transparent p-0 backdrop:bg-black/70" onClick={(event) => { if (event.target === dialog.current) dialog.current?.close(); }}>
+      <button type="button" onClick={() => dialog.current?.showModal()} className="py-3 text-[#9A9AA3] hover:text-white">About the founder</button>
+      <dialog ref={dialog} aria-label="About the founder" className="m-auto max-h-[calc(100vh-32px)] w-[min(1100px,calc(100vw-32px))] overflow-auto rounded-[20px] bg-transparent p-0 backdrop:bg-black/70 backdrop:backdrop-blur-[10px]" onClick={(event) => { if (event.target === dialog.current) dialog.current?.close(); }}>
         <FounderCard onClose={() => dialog.current?.close()} />
       </dialog>
     </>

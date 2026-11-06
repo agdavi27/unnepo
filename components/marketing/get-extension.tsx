@@ -10,7 +10,7 @@ import { useEffect, useRef, useState } from "react";
 
 type Check = { status: "covered" | "not_covered"; school: string } | { status: "not_school"; message: string };
 
-export function GetExtension({ href, external }: { href: string; external: boolean }) {
+export function GetExtension({ href, external, label = "Get the Chrome extension", className }: { href: string; external: boolean; label?: string; className?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const [email, setEmail] = useState("");
   const [result, setResult] = useState<Check | null>(null);
@@ -45,8 +45,8 @@ export function GetExtension({ href, external }: { href: string; external: boole
 
   return (
     <>
-      <button type="button" className={pixelButton} onClick={() => dialog.current?.showModal()}>
-        Get the Chrome extension
+      <button type="button" className={className ?? pixelButton} onClick={() => dialog.current?.showModal()}>
+        {label}
       </button>
       <dialog ref={dialog} aria-labelledby="school-check-title" className="m-auto w-[min(440px,calc(100vw-32px))] rounded-2xl border border-[#26262C] bg-[#0C0C0E] p-0 text-[#F7F7F8] backdrop:bg-black/70">
         <div className="flex flex-col gap-5 p-6">
