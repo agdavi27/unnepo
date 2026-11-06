@@ -67,6 +67,16 @@ export const applications = {
     return withLock((db) => (db.jobApplications ?? []).filter((app) => app.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
   },
 
+  /** Just each job's name and status: what the email page shows, without every job's long description. */
+  async names(userId: string): Promise<Array<Pick<JobApplication, "id" | "title" | "company" | "status">>> {
+    if (onTables()) {
+      const { data, error } = await supabaseTables().from("job_applications").select("id,title,company,status").eq("user_id", userId).order("created_at", { ascending: false }).limit(200);
+      if (error) throw tableError(error);
+      return data ?? [];
+    }
+    return withLock((db) => (db.jobApplications ?? []).filter((app) => app.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(({ id, title, company, status }) => ({ id, title, company, status })));
+  },
+
   /** Just each job's status and dates: what the panel's goal and spider need, without every job's long description. */
   async appliedTimes(userId: string): Promise<Array<Pick<JobApplication, "status" | "submittedAt" | "createdAt">>> {
     if (onTables()) {

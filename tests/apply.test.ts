@@ -1006,6 +1006,35 @@ describe("questions autofill used to miss", () => {
 });
 
 describe("jobs added by hand, and jobs missing the company", () => {
+  it("loads the list without waiting to read a posting, and fixes the company afterward", async () => {
+    const userId = await student();
+    const jobUrl = "https://acme.wd5.myworkdayjobs.com/en-US/careers/job/Boston/Analyst_R1";
+    const { app } = await applications.insert({
+      userId, jobKey: "workday:slow", jobUrl, ats: "workday", title: "Analyst", company: "Workday", companyDomain: null, department: null, location: null,
+      description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
+      confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0,
+    });
+    const later: Array<() => Promise<void>> = [];
+    setDeferForTests((task) => { later.push(task); });
+    let reads = 0;
+    let release = () => {};
+    const slowSite = new Promise<void>((resolve) => { release = resolve; });
+    setJobPageFetcherForTests(async () => { reads += 1; await slowSite; return new Response("not found", { status: 404 }); });
+    try {
+      const state = await applyState(userId);
+      expect(reads).toBe(0);
+      expect(state.applications.find((item) => item.id === app.id)?.company).toBe("Acme");
+      expect((await applications.get(userId, app.id))?.company).toBe("Workday");
+      release();
+      await Promise.all(later.map((task) => task()));
+      expect(reads).toBeGreaterThan(0);
+      expect((await applications.get(userId, app.id))?.company).toBe("Acme");
+    } finally {
+      release();
+      setJobPageFetcherForTests(null);
+    }
+  });
+
   it("adds a job with just a title and company, or with a link, date and stage", async () => {
     const userId = await student();
     const plain = (await addJobByHand(userId, { title: "Growth Intern", company: "MealPal" })).application;

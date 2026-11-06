@@ -416,27 +416,36 @@ export async function addJobByHand(userId: string, raw: unknown, how: "added_by_
 // Jobs whose company couldn't be found, so a page load doesn't read their posting again.
 const companyTries = new Set<string>();
 
+/** A job saved with the job site's name as the company ("Workday") gets the company's name: from the posting when Unnepo can read it, else from the link. */
+async function companyFromPosting(userId: string, app: JobApplication) {
+  let company = "";
+  try {
+    company = (await extractJob(app.jobUrl)).company;
+  } catch {
+    // A posting that closed or needs signing in: the link still names the company.
+  }
+  if (!company || isJobSiteName(company)) company = companyFromUrl(app.jobUrl) || companyFromUrl(app.applicationUrl ?? "");
+  if (company) await applications.update(userId, app.id, { company: company.slice(0, 200) });
+}
+
 /**
- * Jobs saved with the job site's name as the company ("Workday") get the company's name: from the posting
- * when Unnepo can read it, else from the link. Saved, so it's fixed once.
+ * Tidies the company names on a student's jobs. Reading a posting can take many seconds, so that happens after the
+ * response: the page never waits on another site.
  */
 export async function repairCompanies(userId: string, apps: JobApplication[]) {
-  return Promise.all(apps.map(async (app) => {
+  const tidied = await Promise.all(apps.map(async (app) => {
     // Saved with the words around the name ("See more jobs at Anderson Equipment Company"): just the name.
     const cleaned = cleanCompanyName(app.company);
     if (cleaned !== app.company && cleaned.length >= 2) return (await applications.update(userId, app.id, { company: cleaned.slice(0, 200) })) ?? app;
-    if (!isJobSiteName(app.company) || companyTries.has(app.id)) return app;
-    companyTries.add(app.id);
-    let company = "";
-    try {
-      company = (await extractJob(app.jobUrl)).company;
-    } catch {
-      // A posting that closed or needs signing in: the link still names the company.
-    }
-    if (!company || isJobSiteName(company)) company = companyFromUrl(app.jobUrl) || companyFromUrl(app.applicationUrl ?? "");
-    if (!company) return app;
-    return (await applications.update(userId, app.id, { company: company.slice(0, 200) })) ?? app;
+    return app;
   }));
+  const unread = tidied.filter((app) => isJobSiteName(app.company) && !companyTries.has(app.id));
+  if (unread.length) {
+    for (const app of unread) companyTries.add(app.id);
+    defer(async () => { await Promise.all(unread.map((app) => companyFromPosting(userId, app).catch(() => undefined))); });
+  }
+  // Until then, the link's name is shown when it has one. It isn't saved, so the posting's better name can replace it.
+  return tidied.map((app) => (isJobSiteName(app.company) ? { ...app, company: companyFromUrl(app.jobUrl) || companyFromUrl(app.applicationUrl ?? "") || app.company } : app));
 }
 
 export async function applyState(userId: string) {
@@ -447,15 +456,20 @@ export async function applyState(userId: string) {
     resumeReads.set(userId, Date.now());
     defer(() => ensureResumeProfile(userId).catch(() => undefined));
   }
-  const contacts = await applicationContacts.list(userId, apps.map((app) => app.id));
+  const [contacts, profileIsReady, usage, account] = await Promise.all([
+    applicationContacts.list(userId, apps.map((app) => app.id)),
+    profileReady(userId),
+    planUsage(userId),
+    repo.getAccount(userId),
+  ]);
   return {
     applications: apps.map((app) => ({ ...summary(app), contacts: contacts.filter((contact) => contact.applicationId === app.id) })),
     profile: publicProfile(info.profile),
     resume: info.resume ? { fileName: info.resume.fileName, stored: Boolean(info.resume.storagePath) } : null,
-    ready: { hunter: hunterReady(), profile: await profileReady(userId) },
-    usage: await planUsage(userId),
+    ready: { hunter: hunterReady(), profile: profileIsReady },
+    usage,
     school: info.context.school,
-    plan: (await repo.getAccount(userId))?.plan ?? "free",
+    plan: account?.plan ?? "free",
     maybe: liveMaybe(info.profile.maybeApplied).map(({ description, ...item }) => (void description, item)),
     session: sessionNow(info.profile.session),
   };

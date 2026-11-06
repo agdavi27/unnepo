@@ -121,6 +121,23 @@ function when(date: Date) {
 /** The Home tab: the day so far, the totals, and the list of jobs, from one data load. */
 export type AppPage = "home" | "applications";
 
+/** How long a list fetched ahead of time is still worth showing. */
+const EARLY_LOAD_MS = 15_000;
+let earlyLoad: { at: number; list: Promise<ApplyData> } | null = null;
+
+/** Starts fetching the applications as the dashboard opens, so they don't wait for the workspace to finish loading first. */
+export function loadApplicationsEarly() {
+  const list = call<ApplyData>("", "GET");
+  list.catch(() => undefined);
+  earlyLoad = { at: Date.now(), list };
+}
+
+function takeEarlyLoad() {
+  const early = earlyLoad;
+  earlyLoad = null;
+  return early && Date.now() - early.at < EARLY_LOAD_MS ? early.list : null;
+}
+
 /** The Home and Applications pages. They share their data, so moving between them is instant and nothing is lost. */
 export function ApplyArea({ page, onPage, refreshKey = 0, userName, onUsage, onSetup, onJobs, onSpiders }: { page: AppPage; onPage: (page: AppPage) => void; refreshKey?: number; userName: string; onUsage?: (usage: PlanUsage) => void; onSetup: () => void; onJobs: () => void; onSpiders: () => void }) {
   const [data, setData] = useState<ApplyData | null>(null);
@@ -130,7 +147,8 @@ export function ApplyArea({ page, onPage, refreshKey = 0, userName, onUsage, onS
 
   const load = useCallback(async () => {
     try {
-      setData(await call<ApplyData>("", "GET"));
+      const early = takeEarlyLoad();
+      setData(await (early ? early.catch(() => call<ApplyData>("", "GET")) : call<ApplyData>("", "GET")));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Couldn't load your applications.");

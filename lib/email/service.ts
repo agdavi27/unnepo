@@ -13,7 +13,7 @@ const VERIFICATION_DAYS = 3;
 const SKIPPED_SHOWN = 5;
 
 export async function emailState(userId: string) {
-  const [inbox, events, apps, count] = await Promise.all([emailInboxes.forUser(userId), emailEvents.list(userId, 200), applications.list(userId), emailEvents.byKey(userId, SKIPPED_KEY)]);
+  const [inbox, events, apps, count] = await Promise.all([emailInboxes.forUser(userId), emailEvents.list(userId, 200), applications.names(userId), emailEvents.byKey(userId, SKIPPED_KEY)]);
   const name = new Map(apps.map((app) => [app.id, { id: app.id, title: app.title, company: app.company }]));
   // The newest forwarding confirmation from the last few days: its code and link, to finish setting up.
   const verification = events.find((event) => event.outcome === "verification" && Date.now() - Date.parse(event.createdAt) < VERIFICATION_DAYS * 86_400_000);

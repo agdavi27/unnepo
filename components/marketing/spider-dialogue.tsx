@@ -31,8 +31,15 @@ const PALETTE: Record<string, string> = {
 const W = 40;
 const H = 30;
 
-/** The 40×30 spider, drawn from shapes so it's easy to tweak. `open` is the talking frame; `angry` is after a poke. */
-function buildSpider(open: boolean, angry = false): string[] {
+/** How far a leg's foot moves in a crawl step, in the sprite's pixels. */
+const REACH = -3;
+const PUSH = 2;
+
+/**
+ * The 40×30 spider, drawn from shapes so it's easy to tweak. `open` is the talking frame; `angry` is after a poke.
+ * `step` is the crawl: 0 and 2 stand still, while 1 and 3 reach with every other leg and push with the rest.
+ */
+function buildSpider(open: boolean, angry = false, step = 0): string[] {
   const g: string[][] = Array.from({ length: H }, () => Array<string>(W).fill(""));
   const set = (x: number, y: number, c: string) => { if (x >= 0 && x < W && y >= 0 && y < H) g[y][x] = c; };
   const brush = (x: number, y: number, c: string) => { set(x, y, c); set(x + 1, y, c); set(x, y + 1, c); set(x + 1, y + 1, c); };
@@ -53,13 +60,16 @@ function buildSpider(open: boolean, angry = false): string[] {
     [[12, 16], [5, 15], [2, 24]],
     [[14, 19], [9, 21], [6, 27]],
   ];
-  for (const leg of legs) for (const side of [0, 1]) {
+  legs.forEach((leg, index) => [0, 1].forEach((side) => {
     const mirror = (p: [number, number]): [number, number] => (side ? [W - 2 - p[0], p[1]] : p);
-    const [hip, knee, foot] = leg.map(mirror);
+    const [hip, bentKnee, restingFoot] = leg.map(mirror);
+    const shift = step % 2 === 0 ? 0 : (index + side) % 2 === (step === 1 ? 0 : 1) ? REACH : PUSH;
+    const knee: [number, number] = [bentKnee[0], bentKnee[1] + Math.round(shift / 2)];
+    const foot: [number, number] = [restingFoot[0], restingFoot[1] + shift];
     line(hip[0], hip[1], knee[0], knee[1], "l");
     line(knee[0], knee[1], foot[0], foot[1], "L");
     set(knee[0] + (side ? 1 : 0), knee[1], "h");
-  }
+  }));
   const blob = (cx: number, cy: number, rx: number, ry: number, base: string, hi: string, lo: string) => {
     for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
       const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
@@ -124,16 +134,22 @@ const BASE = runs(CLOSED, SAME);
 const MOUTH_OPEN = runs(OPEN, (i) => !SAME(i));
 const MOUTH_CLOSED = runs(CLOSED, (i) => !SAME(i));
 const ANGRY = runs(buildSpider(true, true), () => true);
+const CRAWL = [0, 1, 2, 3].map((step) => runs(buildSpider(false, false, step), () => true));
 
 function Rects({ list }: { list: Run[] }) {
   return <>{list.map((run) => <rect key={`${run.x}-${run.y}`} x={run.x} y={run.y} width={run.w} height={1} fill={run.fill} />)}</>;
 }
 
-function SpiderArt({ talking, mad }: { talking: boolean; mad: number }) {
+function SpiderArt({ talking, mad, crawl }: { talking: boolean; mad: number; crawl: number | null }) {
   return (
     // A new key on each poke restarts the shake.
     <svg key={mad} viewBox={`0 0 ${W} ${H}`} className={`block w-full ${mad ? "unnepo-shake" : ""}`} shapeRendering="crispEdges" aria-hidden>
-      {mad ? <Rects list={ANGRY} /> : (
+      {mad ? <Rects list={ANGRY} /> : crawl !== null ? (
+        <>
+          <Rects list={CRAWL[crawl]} />
+          {talking && <Rects list={MOUTH_OPEN} />}
+        </>
+      ) : (
         <>
           <Rects list={BASE} />
           <g style={{ display: talking ? "inline" : "none" }}><Rects list={MOUTH_OPEN} /></g>
@@ -148,13 +164,17 @@ function SpiderArt({ talking, mad }: { talking: boolean; mad: number }) {
 const SCROLL_RANGE = 520;
 /** He rests this far below the top of the screen once he's on the line. */
 const LINE_TOP = 96;
+/** He stops this far above the bottom of the screen when the page ends. */
+const LINE_BOTTOM = 32;
+/** Pixels of scrolling for each step of his legs. */
+const CRAWL_STEP = 24;
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 const smooth = (value: number) => { const x = clamp(value, 0, 1); return x * x * (3 - 2 * x); };
 const mix = (from: number, to: number, amount: number) => from + (to - from) * amount;
 
 /** Where his resting spot is on screen, and how far the page has scrolled. */
-type View = { progress: number; homeX: number; homeY: number; homeWidth: number; lineX: number; targetWidth: number };
+type View = { progress: number; descent: number; scroll: number; screenHeight: number; homeX: number; homeY: number; homeWidth: number; lineX: number; targetWidth: number };
 
 /** Follows the page's scroll. Matches the --gutter and --inset sizes on the landing page's root. */
 function useScrollView(home: React.RefObject<HTMLDivElement | null>) {
@@ -168,8 +188,13 @@ function useScrollView(home: React.RefObject<HTMLDivElement | null>) {
       const rect = el.getBoundingClientRect();
       const screen = window.innerWidth;
       const columnRight = el.closest("[data-landing-column]")?.getBoundingClientRect().right ?? screen;
+      const scroll = Math.max(0, window.scrollY);
+      const pageEnd = document.documentElement.scrollHeight - window.innerHeight;
       setView({
-        progress: clamp(window.scrollY / SCROLL_RANGE, 0, 1),
+        progress: clamp(scroll / SCROLL_RANGE, 0, 1),
+        descent: pageEnd > SCROLL_RANGE ? clamp((scroll - SCROLL_RANGE) / (pageEnd - SCROLL_RANGE), 0, 1) : 0,
+        scroll,
+        screenHeight: window.innerHeight,
         homeX: rect.left,
         homeY: rect.top,
         homeWidth: rect.width,
@@ -254,7 +279,10 @@ export function SpiderDialogue() {
   const moved = view !== null && progress > 0;
   const width = view ? mix(view.homeWidth, view.targetWidth, shrink) : 0;
   // His spot scrolls away faster than he travels, so he's held on screen until he reaches the line.
-  const top = view ? Math.max(mix(view.homeY, LINE_TOP, travel), 24) : 0;
+  // On the line he crawls down the strand as the page goes by, reaching the bottom when the page ends.
+  const lineY = view ? mix(LINE_TOP, view.screenHeight - view.targetWidth * (H / W) - LINE_BOTTOM, view.descent) : 0;
+  const top = view ? Math.max(mix(view.homeY, lineY, travel), 24) : 0;
+  const crawl = moved && !reduced && view ? Math.floor(view.scroll / CRAWL_STEP) % CRAWL.length : null;
   const left = view ? mix(view.homeX + (view.homeWidth - width) / 2, view.lineX + 1 - view.targetWidth / 2, travel) : 0;
   const threadHeight = moved ? mix(width * 0.11, top + width * 0.1 + 24, travel) : 44;
   const threadWidth = moved ? mix(6, 2, shrink) : 6;
@@ -281,7 +309,7 @@ export function SpiderDialogue() {
           <div className="unnepo-bob relative w-full">
             <div className="absolute left-1/2 -translate-x-1/2 bg-[#3A3A44]" style={{ width: threadWidth, height: threadHeight, bottom: moved ? `calc(100% - ${width * 0.1}px)` : "calc(100% - 18px)" }} />
             <button type="button" onClick={poke} aria-label="Poke the spider" className="relative block w-full cursor-pointer focus-visible:outline focus-visible:outline-[3px] focus-visible:outline-offset-4 focus-visible:outline-[#3D8BFF]">
-              <SpiderArt talking={talking} mad={mad} />
+              <SpiderArt talking={talking} mad={mad} crawl={crawl} />
             </button>
           </div>
         </div>

@@ -9,7 +9,7 @@ import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
 import { CREDIT_COST, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
 import type { PlanUsage } from "@/components/unnepo/apply";
 import { Logo } from "@/components/brand/logo";
-import { ApplyArea, SpiderSettings } from "@/components/unnepo/apply";
+import { ApplyArea, SpiderSettings, loadApplicationsEarly } from "@/components/unnepo/apply";
 import { SetupPage } from "@/components/unnepo/setup";
 import { extensionHere } from "@/lib/extension-bridge";
 
@@ -120,6 +120,9 @@ export function AppHome({ start = "home" }: { start?: View }) {
 
   useEffect(() => {
     let cancelled = false;
+    // Home and Applications both show the list, so it's fetched alongside the workspace instead of after it.
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if ((start === "home" || start === "applications") && tab !== "setup" && tab !== "jobs") loadApplicationsEarly();
     fetchState()
       .then((body) => {
         if (!cancelled && body) setData(body);
@@ -130,7 +133,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
     return () => {
       cancelled = true;
     };
-  }, [fetchState]);
+  }, [fetchState, start]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });

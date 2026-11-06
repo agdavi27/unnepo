@@ -761,8 +761,11 @@ describe("company names on job sites", () => {
     expect(made.application.company).toBe("Searchinfluence");
     // One saved before the fix, on a site Unnepo can't read: the link still names the company.
     await applications.update(userId, made.application.id, { company: "Workday" });
+    const later: Array<() => Promise<void>> = [];
+    setDeferForTests((task) => { later.push(task); });
     const listed = await (await call("GET", "jobs", token)).json();
     expect(listed.jobs.find((job: { id: string }) => job.id === made.application.id).company).toBe("Searchinfluence");
+    await Promise.all(later.map((task) => task()));
     expect((await applications.get(userId, made.application.id))?.company).toBe("Searchinfluence");
   });
 });
