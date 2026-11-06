@@ -24,13 +24,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
     fetch("/api/me")
       .then(async (response) => {
         if (response.status === 401) {
-          router.push("/login");
+          window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
           return null;
         }
         return response.json();
       })
       .then((data) => data && setMe(data));
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     function onCredits(event: Event) {

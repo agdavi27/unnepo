@@ -75,11 +75,21 @@ class CallError extends Error {
   }
 }
 
-async function call<T>(path: string, method: string, body?: unknown): Promise<T> {
-  const response = await fetch(`/api/apply${path}`, { method, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
+async function call<T>(path: string, method: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(`/api/apply${path}`, { method, signal, headers: body ? { "Content-Type": "application/json" } : undefined, body: body ? JSON.stringify(body) : undefined });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new CallError(payload.error || `Something went wrong (${response.status}).`, payload.code ?? "");
   return payload as T;
+}
+
+/** The list of applications, giving up after 30 seconds so the page never waits forever. */
+async function fetchApplications() {
+  try {
+    return await call<ApplyData>("", "GET", undefined, AbortSignal.timeout(30_000));
+  } catch (reason) {
+    if (reason instanceof DOMException && reason.name === "TimeoutError") throw new Error("Your applications are taking too long to load.");
+    throw reason;
+  }
 }
 
 /**
@@ -127,7 +137,7 @@ let earlyLoad: { at: number; list: Promise<ApplyData> } | null = null;
 
 /** Starts fetching the applications as the dashboard opens, so they don't wait for the workspace to finish loading first. */
 export function loadApplicationsEarly() {
-  const list = call<ApplyData>("", "GET");
+  const list = fetchApplications();
   list.catch(() => undefined);
   earlyLoad = { at: Date.now(), list };
 }
@@ -148,7 +158,7 @@ export function ApplyArea({ page, onPage, refreshKey = 0, userName, onUsage, onS
   const load = useCallback(async () => {
     try {
       const early = takeEarlyLoad();
-      setData(await (early ? early.catch(() => call<ApplyData>("", "GET")) : call<ApplyData>("", "GET")));
+      setData(await (early ? early.catch(() => fetchApplications()) : fetchApplications()));
       setError("");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Couldn't load your applications.");

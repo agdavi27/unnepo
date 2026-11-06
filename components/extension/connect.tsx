@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Logo } from "@/components/brand/logo";
 
 /**
@@ -10,7 +9,6 @@ import { Logo } from "@/components/brand/logo";
  * page for the token; if it isn't installed yet, the student can copy the code into the extension instead.
  */
 export function ConnectExtension() {
-  const router = useRouter();
   const [state, setState] = useState<"idle" | "busy" | "done">("idle");
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState("");
@@ -23,7 +21,7 @@ export function ConnectExtension() {
       const response = await fetch("/api/extension/token", { method: "POST" });
       const body = await response.json().catch(() => ({}));
       if (response.status === 401) {
-        router.push("/login?next=/extension/connect");
+        window.location.replace("/login?next=/extension/connect");
         return;
       }
       if (!response.ok) throw new Error(body.error || "Couldn't connect the extension.");

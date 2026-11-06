@@ -92,7 +92,8 @@ export function AppHome({ start = "home" }: { start?: View }) {
     try {
       const response = await fetch("/api/app/state", { signal: controller.signal });
       if (response.status === 401) {
-        router.push("/login");
+        // A full page load: the router may have remembered /login redirecting here while the old cookie was alive.
+        window.location.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
         return null;
       }
       const body = await response.json().catch(() => ({ error: `The server returned an error (${response.status}).` }));
@@ -104,7 +105,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
     } finally {
       clearTimeout(timer);
     }
-  }, [router]);
+  }, []);
 
   const load = useCallback(async () => {
     try {

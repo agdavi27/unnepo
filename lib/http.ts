@@ -8,8 +8,13 @@ export async function readSession() {
 }
 
 export async function requireUser() {
-  const session = await readSession();
-  if (!session) throw new ServiceError("Sign in to continue.", "auth", 401);
+  const token = (await cookies()).get("unnepo_session")?.value;
+  const session = await userFromSessionToken(token);
+  if (!session) {
+    // The proxy only checks that the cookie exists, so a dead one would keep sending /login back to /home.
+    if (token) await clearSessionCookie();
+    throw new ServiceError("Sign in to continue.", "auth", 401);
+  }
   return session.user;
 }
 

@@ -265,7 +265,12 @@ export const repo = {
     });
   },
   async getSessionByTokenHash(tokenHash: string) {
-    return withLock((db) => db.sessions.find((session) => session.tokenHash === tokenHash) ?? null);
+    const find = (db: Database) => db.sessions.find((session) => session.tokenHash === tokenHash) ?? null;
+    const session = await withLock(find);
+    if (session || !remoteActive()) return session;
+    // Another server may have just created it and this one's copy can be seconds old, so look again before saying it's gone.
+    state().remoteAt = 0;
+    return withLock(find);
   },
   async deleteSession(sessionId: string) {
     return withLock((db) => {
