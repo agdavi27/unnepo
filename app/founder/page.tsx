@@ -13,7 +13,7 @@ export default function FounderPage() {
       <header className="flex items-center justify-between px-6 py-6 sm:px-10">
         <Logo href="/" className="text-xl font-bold tracking-[-0.6px]" />
       </header>
-      <main className="mx-auto w-full max-w-[1100px] px-4 pb-16">
+      <main className="mx-auto w-full max-w-[672px] px-4 pb-16">
         <FounderCard />
       </main>
     </div>
