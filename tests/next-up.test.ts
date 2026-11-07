@@ -6,44 +6,40 @@ const app = (id: string, extra: Record<string, unknown> = {}) => ({
   id, company: id, title: `${id} role`, status: "applied_manual", contactsStatus: "done",
   createdAt: "2026-11-03T12:00:00.000Z", submittedAt: "2026-11-03T12:00:00.000Z", fillReport: null, contacts: [], ...extra,
 }) as unknown as Parameters<typeof nextUp>[0][number];
-const reply = { outcome: "interviewing", statusHistory: [{ at: "2026-11-04T12:00:00.000Z", status: "interviewing", source: "email" }] };
+const replied = { outcome: "follow_up", statusHistory: [{ at: "2026-11-04T12:00:00.000Z", status: "follow_up", source: "email", summary: "Acme wants to set up a call." }] };
 
-describe("Home's next up list", () => {
-  it("orders replies, follow-ups, emails to review, unfinished applications, then finding people", () => {
-    const items = nextUp([
-      app("people", { contactsStatus: "idle" }),
-      app("started", { status: "filling", submittedAt: null }),
+describe("Home's next up sections", () => {
+  it("says how many more to apply to, today first, then this week", () => {
+    expect(nextUp([], { now, goal: { today: 1, daily: 3, week: 4, weekly: 10 } }).goals.items[0]).toMatchObject({ title: "Apply to 2 more jobs today", detail: "1 of 3 today · 4 of 10 this week", action: "See suggested jobs" });
+    expect(nextUp([], { now, goal: { today: 3, daily: 3, week: 4, weekly: 30 } }).goals.items[0].title).toBe("Apply to 26 more jobs this week");
+    expect(nextUp([], { now, goal: { today: 3, daily: 3, week: 10, weekly: 10 } }).goals.items).toEqual([]);
+  });
+
+  it("lists companies that replied, then people to follow up with", () => {
+    const next = nextUp([
       app("follow", { fillReport: { emailedAt: { c1: "2026-10-20T12:00:00.000Z" } }, contacts: [{ id: "c1", name: "Maya", outreachStatus: "emailed" }] }),
-      app("replied", { fillReport: reply }),
-    ], { toReview: 2, now });
-    expect(items.map((item) => item.kind)).toEqual(["reply", "follow_up", "review", "finish", "find_people"]);
-    expect(items[0]).toMatchObject({ title: "replied replied to your application", detail: "replied role · arrived today", when: "Today", action: "Read email" });
-    expect(items[1].title).toBe("Follow up with Maya");
-    expect(items[2].title).toBe("2 emails need a look");
-    expect(items[3].title).toBe("Finish started role at started");
+      app("acme", { fillReport: replied }),
+      app("rejected", { fillReport: { outcome: "rejected" } }),
+    ], { now });
+    expect(next.follow_ups.replied).toBe(1);
+    expect(next.follow_ups.items.map((item) => item.kind)).toEqual(["reply", "follow_up"]);
+    expect(next.follow_ups.items[0]).toMatchObject({ title: "acme replied to your application", detail: "acme role · Acme wants to set up a call.", when: "Today" });
+    expect(next.follow_ups.items[1].title).toBe("Follow up with Maya");
   });
 
-  it("says how many more applications today's goal needs, before finding people", () => {
-    const items = nextUp([app("people", { contactsStatus: "idle" })], { now, goal: { today: 1, daily: 3 } });
-    expect(items.map((item) => item.kind)).toEqual(["goal", "find_people"]);
-    expect(items[0]).toMatchObject({ title: "Apply to 2 more jobs to hit today's goal", detail: "1 of 3 today", action: "Find jobs" });
-    expect(nextUp([], { now, goal: { today: 3, daily: 3 } })).toEqual([]);
+  it("lists unfinished applications, then applied ones quiet for two weeks", () => {
+    const next = nextUp([
+      app("quiet", { submittedAt: "2026-10-10T12:00:00.000Z", createdAt: "2026-10-10T12:00:00.000Z" }),
+      app("recent"),
+      app("started", { status: "filling", submittedAt: null }),
+      app("blank", { status: "filling", submittedAt: null, companyMissing: true }),
+    ], { now });
+    expect(next.applications.items.map((item) => item.key)).toEqual(["finish:started", "update:quiet"]);
+    expect(next.applications.items[1].title).toBe("Heard back from quiet?");
   });
 
-  it("drops a reply once it's read, once it's old, or when it was bad news", () => {
-    const [item] = nextUp([app("a", { fillReport: reply })], { now });
-    expect(nextUp([app("a", { fillReport: reply })], { read: new Set([item.key]), now })).toEqual([]);
-    expect(nextUp([app("a", { fillReport: reply })], { now: new Date("2026-12-04T15:00:00.000Z") }).filter((next) => next.kind === "reply")).toEqual([]);
-    expect(nextUp([app("a", { fillReport: { outcome: "rejected", statusHistory: [{ at: "2026-11-04T12:00:00.000Z", status: "rejected", source: "email" }] } })], { now })).toEqual([]);
-  });
-
-  it("leaves out old jobs and jobs missing a company", () => {
-    expect(nextUp([app("old", { contactsStatus: "idle", submittedAt: "2026-09-01T12:00:00.000Z" })], { now })).toEqual([]);
-    expect(nextUp([app("blank", { contactsStatus: "idle", companyMissing: true })], { now })).toEqual([]);
-    expect(nextUp([app("old", { status: "filling", submittedAt: null, createdAt: "2026-08-01T12:00:00.000Z" })], { now })).toEqual([]);
-  });
-
-  it("shows at most three jobs to find people at", () => {
-    expect(nextUp(["a", "b", "c", "d"].map((id) => app(id, { contactsStatus: "idle" })), { now })).toHaveLength(3);
+  it("counts emails to review", () => {
+    expect(nextUp([], { now, toReview: 2 }).review).toMatchObject({ count: 2, items: [{ title: "2 emails need a look", action: "Review emails" }] });
+    expect(nextUp([], { now }).review.items).toEqual([]);
   });
 });

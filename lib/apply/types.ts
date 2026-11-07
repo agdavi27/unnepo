@@ -142,7 +142,11 @@ export type SavedFeedJob = { id: string; title: string; company: string; locatio
 
 export type MaybeApplied = { id: string; url: string; title: string; company: string; site: string; description?: string; applicationId?: string; at: string };
 
-export type ApplicationOutcome = "assessment" | "interviewing" | "offer" | "rejected";
+/**
+ * "follow_up": the company wrote back (an interview, assessment or offer email) and the student has a next step.
+ * Emails set that; "interviewing", "assessment" and "offer" are only set by the student.
+ */
+export type ApplicationOutcome = "follow_up" | "assessment" | "interviewing" | "offer" | "rejected";
 
 /** One change in an application's status, and where it came from: a forwarded email, or the student. */
 export type StatusChange = { at: string; status: ApplicationOutcome | "applied" | "incomplete"; source: "email" | "you"; summary: string };

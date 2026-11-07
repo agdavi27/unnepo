@@ -27,7 +27,8 @@ import { forwardingVerification } from "@/lib/email/verification";
 export const MIN_CONFIDENCE = 0.7;
 const EMPTY_REPORT: FillReport = { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
 const OUTCOME_FOR: Record<Exclude<Classification["type"], "applied" | "incomplete" | "not_job_related">, ApplicationOutcome> = {
-  interview: "interviewing", assessment: "assessment", offer: "offer", rejected: "rejected",
+  // Good news from an email is a Follow up: Interviewing and the rest are only set by the student.
+  interview: "follow_up", assessment: "follow_up", offer: "follow_up", rejected: "rejected",
 };
 
 // One row per student, however many emails are dropped, so it can't push real emails out of the list.

@@ -463,7 +463,7 @@ describe("tracking outcomes and goals", () => {
     const { app } = await applications.insert(job(userId, 1));
     await expect(setOutcome(userId, { applicationId: app.id, outcome: "interviewing" })).rejects.toThrow(/applied first/);
     await markApplied(userId, { applicationId: app.id });
-    await expect(setOutcome(userId, { applicationId: app.id, outcome: "hired" })).rejects.toThrow(/interviewing, offer, or rejected/);
+    await expect(setOutcome(userId, { applicationId: app.id, outcome: "hired" })).rejects.toThrow(/follow up, interviewing, or rejected/);
     const set = await setOutcome(userId, { applicationId: app.id, outcome: "offer" });
     expect(stageOf(set.application)).toBe("offer");
     const cleared = await setOutcome(userId, { applicationId: app.id, outcome: null });

@@ -173,7 +173,7 @@ describe("processing forwarded emails", () => {
     expect(await applications.list(userId)).toHaveLength(1);
   });
 
-  it("confirms a saved job by its title, and moves a job to interviewing", async () => {
+  it("confirms a saved job by its title, and moves a job to follow up", async () => {
     const userId = await student();
     const base = { userId, jobUrl: "https://acme.example/jobs/1", ats: "other" as const, companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, contactsStatus: "idle" as const, contactsMessage: "", charged: false, attempts: 0 };
     const acme = await applications.insert({ ...base, jobKey: "k1", title: "Data Analyst Intern", company: "Acme, Inc.", status: "extracted", submittedAt: null });
@@ -182,8 +182,9 @@ describe("processing forwarded emails", () => {
     expect((await applications.get(userId, acme.app.id))?.status).toBe("applied_manual");
     expect((await processEmail(userId, fixture("interview-invite"), "forward"))).toMatchObject({ outcome: "updated", applicationId: globex.app.id });
     const moved = await applications.get(userId, globex.app.id);
-    expect(moved?.fillReport).toMatchObject({ outcome: "interviewing", fromEmail: "updated" });
-    expect(stageOf(moved!)).toBe("interviewing");
+    // An interview email makes it a Follow up: only the student sets Interviewing.
+    expect(moved?.fillReport).toMatchObject({ outcome: "follow_up", fromEmail: "updated" });
+    expect(stageOf(moved!)).toBe("follow_up");
   });
 
   it("saves a status email about a job that isn't saved as its own job, left out of goals", async () => {
@@ -229,7 +230,7 @@ describe("processing forwarded emails", () => {
     expect(several.event?.candidates).toHaveLength(2);
     expect((await reviewEmail(userId, { eventId: several.event!.id, action: "approve" })).ok).toBe(false);
     expect((await reviewEmail(userId, { eventId: several.event!.id, action: "pick", applicationId: sales.app.id })).ok).toBe(true);
-    expect(stageOf((await applications.get(userId, sales.app.id))!)).toBe("interviewing");
+    expect(stageOf((await applications.get(userId, sales.app.id))!)).toBe("follow_up");
     expect((await reviewEmail(userId, { eventId: unsure.event!.id, action: "dismiss" })).event?.outcome).toBe("dismissed");
   });
 

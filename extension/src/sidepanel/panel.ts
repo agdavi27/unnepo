@@ -1167,7 +1167,7 @@ function manualJobForm() {
       <label class="question"><span class="q-label">Company</span><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="MealPal"></label>
       <label class="question"><span class="q-label">Job link</span><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="https://…"></label>
       <div class="links"><button type="button" class="link" id="mj-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading the link…" : "Fill in the job information"}</button></div>
-      <label class="question"><span class="q-label">Status</span><select class="field" id="mj-stage">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("assessment", "Assessment")}${stage("interviewing", "Interviewing")}${stage("offer", "Offer")}${stage("rejected", "Rejected")}</select></label>
+      <label class="question"><span class="q-label">Status</span><select class="field" id="mj-stage">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("follow_up", "Follow up")}${stage("interviewing", "Interviewing")}${stage("rejected", "Rejected")}</select></label>
       <div class="links">
         <button type="button" class="solid" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add to tracker"}</button>
         <button type="button" class="link" id="mj-cancel">Cancel</button>

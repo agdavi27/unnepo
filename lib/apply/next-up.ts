@@ -3,13 +3,16 @@ import { isApplied, stageOf } from "@/lib/apply/stats";
 import type { ApplicationContact, JobApplication } from "@/lib/apply/types";
 
 /**
- * Home's list of what to do next, most urgent first: replies from companies (an interview waits on the student),
- * follow-ups that are due (they go stale), emails Unnepo wasn't sure about (the tracker is wrong until they're
- * placed), applications left unfinished, how many more to apply to for today's goal, and recent jobs with nobody
- * looked up yet. No server imports, so the web app runs it.
+ * Home's "Next up", in four sections:
+ * - goals: how many more to apply to for today's (and this week's) goal;
+ * - follow_ups: companies that wrote back (Follow up), and people whose follow-up email is due;
+ * - applications: applications left unfinished, and applied ones quiet long enough to ask how they went;
+ * - review: emails Unnepo couldn't place on a job.
+ * No server imports, so the web app runs it.
  */
 
-export type NextKind = "reply" | "review" | "follow_up" | "finish" | "goal" | "find_people";
+export type NextKind = "goal" | "reply" | "follow_up" | "finish" | "update" | "review";
+export type NextSection = "goals" | "follow_ups" | "applications" | "review";
 
 export type NextItem = {
   key: string;
@@ -18,7 +21,7 @@ export type NextItem = {
   contactId?: string;
   title: string;
   detail: string;
-  /** The short note on the right of the "Then" list. */
+  /** The short note on the right of the row. */
   when: string;
   action: string;
 };
@@ -30,11 +33,10 @@ type NextApp = Pick<JobApplication, "id" | "company" | "title" | "status" | "cre
 };
 
 const DAY = 86_400_000;
-const REPLY_DAYS = 14;
-const FIND_PEOPLE_DAYS = 14;
-const FIND_PEOPLE_MOST = 3;
 const FINISH_DAYS = 30;
-const GOOD_NEWS = new Set(["assessment", "interviewing", "offer"]);
+/** Applied this long ago with nothing heard: time to say how it went. */
+const UPDATE_DAYS = 14;
+const SHOWN = 5;
 
 function daysAgo(at: number, now: Date) {
   const start = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
@@ -48,81 +50,84 @@ function dayWords(at: number, now: Date) {
   return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-/** Unfinished applications shown at most: past that, the goal and people come before the rest of them. */
-const FINISH_MOST = 3;
+export type NextUp = {
+  goals: { today: number; daily: number; week: number; weekly: number; items: NextItem[] };
+  follow_ups: { replied: number; count: number; items: NextItem[] };
+  applications: { count: number; items: NextItem[] };
+  review: { count: number; items: NextItem[] };
+};
 
-export function nextUp(apps: NextApp[], options: { toReview?: number; read?: ReadonlySet<string>; now?: Date; goal?: { today: number; daily: number } } = {}): NextItem[] {
+export function nextUp(apps: NextApp[], options: { toReview?: number; now?: Date; goal?: { today: number; daily: number; week?: number; weekly?: number } } = {}): NextUp {
   const now = options.now ?? new Date();
-  const read = options.read ?? new Set<string>();
-  const items: NextItem[] = [];
   const role = (app: NextApp) => (app.titleMissing ? "" : app.title);
+  const named = apps.filter((app) => !app.companyMissing);
 
-  const replies = apps.flatMap((app) => {
-    const change = [...(app.fillReport?.statusHistory ?? [])].reverse().find((item) => item.source === "email" && GOOD_NEWS.has(item.status));
-    if (!change || app.companyMissing || stageOf(app) !== change.status) return [];
-    const at = Date.parse(change.at);
-    const key = `reply:${app.id}:${change.at}`;
-    return now.getTime() - at <= REPLY_DAYS * DAY && !read.has(key) ? [{ app, at, key }] : [];
-  }).sort((a, b) => b.at - a.at);
-  for (const { app, at, key } of replies) {
-    const when = dayWords(at, now);
-    items.push({
-      key, kind: "reply", applicationId: app.id, title: `${app.company} replied to your application`,
-      detail: [role(app), `arrived ${/^[TY]/.test(when) ? when.toLowerCase() : when}`].filter(Boolean).join(" · "), when, action: "Read email",
+  // Reach your goals.
+  const goal = { today: options.goal?.today ?? 0, daily: options.goal?.daily ?? 0, week: options.goal?.week ?? 0, weekly: options.goal?.weekly ?? 0 };
+  const goalItems: NextItem[] = [];
+  const leftToday = Math.max(0, goal.daily - goal.today);
+  const leftWeek = Math.max(0, goal.weekly - goal.week);
+  if (leftToday > 0 || leftWeek > 0) {
+    const left = leftToday || leftWeek;
+    goalItems.push({
+      key: `goal:${goal.today}:${goal.week}`, kind: "goal",
+      title: `Apply to ${left} more ${left === 1 ? "job" : "jobs"}${leftToday ? " today" : " this week"}`,
+      detail: [goal.daily ? `${goal.today} of ${goal.daily} today` : "", goal.weekly ? `${goal.week} of ${goal.weekly} this week` : ""].filter(Boolean).join(" · "),
+      when: `${left} to go`, action: "See suggested jobs",
     });
   }
 
-  for (const due of followUpsDue(apps, now)) {
-    items.push({
+  // Follow ups: companies that wrote back, newest first, then people to nudge.
+  const replied = named
+    .filter((app) => stageOf(app) === "follow_up")
+    .map((app) => {
+      const change = [...(app.fillReport?.statusHistory ?? [])].reverse().find((item) => item.status !== "applied" && item.status !== "incomplete");
+      return { app, at: Date.parse(change?.at ?? app.fillReport?.lastEmailAt ?? app.submittedAt ?? app.createdAt), summary: change?.summary ?? "" };
+    })
+    .sort((a, b) => b.at - a.at);
+  const followItems: NextItem[] = replied.map(({ app, at, summary }) => ({
+    key: `reply:${app.id}`, kind: "reply", applicationId: app.id,
+    title: `${app.company} replied to your application`,
+    detail: [role(app), summary].filter(Boolean).join(" · "), when: dayWords(at, now), action: "Read email",
+  }));
+  for (const due of followUpsDue(named, now)) {
+    followItems.push({
       key: `follow:${due.contactId}`, kind: "follow_up", applicationId: due.applicationId, contactId: due.contactId,
       title: `Follow up with ${due.name}`, detail: `${due.company} · emailed ${due.days} business days ago`, when: `${due.days} business days`, action: "Write email",
     });
   }
 
-  const toReview = options.toReview ?? 0;
-  if (toReview > 0) {
-    items.push({
-      key: "review", kind: "review", title: toReview === 1 ? "1 email needs a look" : `${toReview} emails need a look`,
-      detail: "Unnepo wasn't sure which job they belong to. Your tracker is off until you place them", when: "To review", action: "Review emails",
-    });
-  }
-
-
-  const unfinished = apps
-    .filter((app) => !isApplied(app.status) && !app.companyMissing && now.getTime() - Date.parse(app.createdAt) <= FINISH_DAYS * DAY)
+  // Applications: unfinished ones first, then applied ones quiet for two weeks.
+  const appItems: NextItem[] = named
+    .filter((app) => !isApplied(app.status) && now.getTime() - Date.parse(app.createdAt) <= FINISH_DAYS * DAY)
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-    .slice(0, FINISH_MOST);
-  for (const app of unfinished) {
-    items.push({
-      key: `finish:${app.id}`, kind: "finish", applicationId: app.id,
+    .map((app) => ({
+      key: `finish:${app.id}`, kind: "finish" as const, applicationId: app.id,
       title: role(app) ? `Finish ${role(app)} at ${app.company}` : `Finish your application at ${app.company}`,
-      detail: "In progress", when: "In progress", action: "Finish application",
+      detail: "Started, not submitted", when: "In progress", action: "Finish application",
+    }));
+  const dueIds = new Set(followItems.map((item) => item.applicationId));
+  for (const app of named
+    .filter((app) => ["submitted", "no_response"].includes(stageOf(app, now.getTime())) && !dueIds.has(app.id))
+    .filter((app) => now.getTime() - Date.parse(app.fillReport?.lastEmailAt ?? app.submittedAt ?? app.createdAt) >= UPDATE_DAYS * DAY)
+    .sort((a, b) => Date.parse(a.submittedAt ?? a.createdAt) - Date.parse(b.submittedAt ?? b.createdAt))) {
+    appItems.push({
+      key: `update:${app.id}`, kind: "update", applicationId: app.id,
+      title: `Heard back from ${app.company}?`, detail: [role(app), `applied ${daysAgo(Date.parse(app.submittedAt ?? app.createdAt), now)} days ago`].filter(Boolean).join(" · "),
+      when: "Update status", action: "Update status",
     });
   }
 
-  // Behind on today's goal: how many more, with a nudge to the ones already started.
-  const goal = options.goal;
-  if (goal && goal.daily > 0 && goal.today < goal.daily) {
-    const left = goal.daily - goal.today;
-    const started = unfinished.length;
-    items.push({
-      key: `goal:${goal.today}`, kind: "goal",
-      title: `Apply to ${left} more ${left === 1 ? "job" : "jobs"} to hit today's goal`,
-      detail: [`${goal.today} of ${goal.daily} today`, started ? `${started} already started` : ""].filter(Boolean).join(" · "),
-      when: `${left} to go`, action: "Find jobs",
-    });
-  }
+  const toReview = options.toReview ?? 0;
+  const reviewItems: NextItem[] = toReview > 0 ? [{
+    key: "review", kind: "review", title: toReview === 1 ? "1 email needs a look" : `${toReview} emails need a look`,
+    detail: "Unnepo wasn't sure which job they belong to. Your tracker is off until you place them", when: "To review", action: "Review emails",
+  }] : [];
 
-  const noPeople = apps
-    .filter((app) => stageOf(app) === "submitted" && !app.companyMissing && app.contactsStatus === "idle" && !app.contacts?.length)
-    .filter((app) => now.getTime() - Date.parse(app.submittedAt ?? app.createdAt) <= FIND_PEOPLE_DAYS * DAY)
-    .sort((a, b) => Date.parse(b.submittedAt ?? b.createdAt) - Date.parse(a.submittedAt ?? a.createdAt))
-    .slice(0, FIND_PEOPLE_MOST);
-  for (const app of noPeople) {
-    items.push({
-      key: `people:${app.id}`, kind: "find_people", applicationId: app.id, title: `Find people at ${app.company}`,
-      detail: role(app) || "Someone to reach out to", when: "No one yet", action: "Find people",
-    });
-  }
-  return items;
+  return {
+    goals: { ...goal, items: goalItems },
+    follow_ups: { replied: replied.length, count: followItems.length, items: followItems.slice(0, SHOWN) },
+    applications: { count: appItems.length, items: appItems.slice(0, SHOWN) },
+    review: { count: toReview, items: reviewItems },
+  };
 }

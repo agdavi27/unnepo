@@ -40,7 +40,7 @@ export function repeatGroups<T extends Job & Pick<JobApplication, "status" | "cr
   return groups.filter((group) => group.length > 1 && group.some((app) => isApplied(app.status)));
 }
 
-const OUTCOME_ORDER: ApplicationOutcome[] = ["assessment", "interviewing", "rejected", "offer"];
+const OUTCOME_ORDER: ApplicationOutcome[] = ["follow_up", "assessment", "interviewing", "rejected", "offer"];
 const unique = <T,>(list: T[]) => [...new Set(list)];
 const longer = (a: string, b: string) => (b.trim().length > a.trim().length ? b : a);
 const manualLink = (url: string | null | undefined) => !url || url.startsWith("https://unnepo.local/");

@@ -374,7 +374,7 @@ export async function minimalApplication(userId: string, input: { url: string; t
   return (await applications.get(userId, app.id))!;
 }
 
-const MANUAL_STAGES = ["applied", "in_progress", "assessment", "interviewing", "offer", "rejected"] as const;
+const MANUAL_STAGES = ["applied", "in_progress", "follow_up", "assessment", "interviewing", "offer", "rejected"] as const;
 
 /**
  * A job the student adds to the tracker by hand: applied somewhere Unnepo didn't see, or one to keep track of.
@@ -407,7 +407,7 @@ export async function addJobByHand(userId: string, raw: unknown, how: "added_by_
     submittedAt: applied ? when : null,
     statusMessage: applied ? "Added by you." : "Added by you. Not applied yet.",
     ...(typeof body.location === "string" && body.location.trim() && !app.location ? { location: body.location.trim().slice(0, 200) } : {}),
-    ...(stage === "assessment" || stage === "interviewing" || stage === "offer" || stage === "rejected" ? { fillReport: { ...report, outcome: stage } } : {}),
+    ...(stage === "follow_up" || stage === "assessment" || stage === "interviewing" || stage === "offer" || stage === "rejected" ? { fillReport: { ...report, outcome: stage } } : {}),
   });
   if (applied) await addActivity(userId, app.id, { kind: "applied", how, site: link ? undefined : "Added by you" });
   if (applied) await findPeopleOnApply(userId, app.id);
@@ -951,7 +951,7 @@ export async function updateOutreach(userId: string, raw: unknown) {
   return { contact: row };
 }
 
-const OUTCOMES = ["assessment", "interviewing", "offer", "rejected"] as const;
+const OUTCOMES = ["follow_up", "assessment", "interviewing", "offer", "rejected"] as const;
 
 /** The student's own note of what happened after applying: an assessment, interviewing, an offer, or a rejection. */
 export async function setOutcome(userId: string, raw: unknown) {
@@ -959,7 +959,7 @@ export async function setOutcome(userId: string, raw: unknown) {
   const app = await requireApp(userId, body.applicationId);
   if (app.status !== "submitted" && app.status !== "applied_manual") throw new ServiceError("Mark the job as applied first.", "state", 409);
   const outcome = OUTCOMES.find((item) => item === body.outcome) ?? null;
-  if (body.outcome && !outcome) throw new ServiceError("Choose assessment, interviewing, offer, or rejected.", "outcome", 400);
+  if (body.outcome && !outcome) throw new ServiceError("Choose applied, follow up, interviewing, or rejected.", "outcome", 400);
   const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
   const history = outcome && outcome !== report.outcome ? [...(report.statusHistory ?? []), { at: nowIso(), status: outcome, source: "you" as const, summary: "You changed the status." }].slice(-50) : report.statusHistory;
   const updated = await applications.update(userId, app.id, { fillReport: { ...report, outcome, statusHistory: history } });

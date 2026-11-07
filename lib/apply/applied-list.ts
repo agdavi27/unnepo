@@ -65,8 +65,7 @@ export function arrange<T extends ListApp>(apps: T[], options: { sort: SortBy; s
 export type Column = "company" | "role" | "applied" | "stage";
 
 /** Stage order: good news first, then what needs doing, then what's waiting, then what's over. */
-const STAGE_ORDER: Record<ReturnType<typeof stageOf>, number> = { offer: 0, interviewing: 1, assessment: 2, in_progress: 3, submitted: 4, no_response: 5, rejected: 6 };
-const FOLLOW_UP_DUE = STAGE_ORDER.in_progress;
+const STAGE_ORDER: Record<ReturnType<typeof stageOf>, number> = { offer: 0, interviewing: 1, assessment: 2, follow_up: 2, in_progress: 3, submitted: 4, no_response: 5, rejected: 6 };
 
 type SortApp = Pick<JobApplication, "id" | "company" | "title" | "status" | "createdAt" | "submittedAt" | "fillReport"> & { companyMissing?: boolean; titleMissing?: boolean };
 
@@ -80,7 +79,7 @@ export function sortByColumn<T extends SortApp>(apps: T[], column: Column, ascen
   const blankLast = (a: string, b: string) => (!a !== !b ? (a ? -1 : 1) : direction * words(a, b));
   const rank = (app: T) => {
     const stage = stageOf(app, now);
-    return (stage === "submitted" || stage === "no_response") && followUps.has(app.id) ? FOLLOW_UP_DUE : STAGE_ORDER[stage];
+    return (stage === "submitted" || stage === "no_response") && followUps.has(app.id) ? STAGE_ORDER.follow_up : STAGE_ORDER[stage];
   };
   const compare: Record<Column, (a: T, b: T) => number> = {
     company: (a, b) => blankLast(a.companyMissing ? "" : a.company, b.companyMissing ? "" : b.company),

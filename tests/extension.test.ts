@@ -916,9 +916,9 @@ describe("the Applications list's columns", () => {
     job("interview", "submitted", outcome("interviewing")),
   ];
 
-  it("puts interviews first, then in progress and follow-ups, submitted, then rejected", () => {
+  it("puts interviews first, then follow-ups, in progress, applied, then rejected", () => {
     expect(ids(sortByColumn(list, "stage", true, new Set(["due"]), now))).toEqual(["interview", "due", "started", "submitted", "rejected"]);
-    expect(ids(sortByColumn(list, "stage", false, new Set(["due"]), now))).toEqual(["rejected", "submitted", "due", "started", "interview"]);
+    expect(ids(sortByColumn(list, "stage", false, new Set(["due"]), now))).toEqual(["rejected", "submitted", "started", "due", "interview"]);
   });
 
   it("keeps blank companies and titles last in either direction", () => {

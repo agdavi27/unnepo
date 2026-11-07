@@ -62,8 +62,10 @@ const OUTREACH: Array<[OutreachState, string]> = [["not_contacted", "Not contact
 
 export const STAGE: Record<Stage, { label: string; color: string }> = {
   in_progress: { label: "In progress", color: "#F5A524" },
-  submitted: { label: "Submitted", color: "#9A9AA3" },
-  no_response: { label: "No response", color: "#6B6B74" },
+  submitted: { label: "Applied", color: "#9A9AA3" },
+  // Worked out after 28 quiet days; shown as plain Applied, which is all the student needs to know.
+  no_response: { label: "Applied", color: "#9A9AA3" },
+  follow_up: { label: "Follow up", color: "#F5C518" },
   assessment: { label: "Assessment", color: "#A78BFA" },
   interviewing: { label: "Interviewing", color: "#3D8BFF" },
   offer: { label: "Offer", color: "#4ADE80" },
@@ -243,9 +245,13 @@ function StageDot({ stage }: { stage: Stage }) {
   return <span aria-hidden className="h-2 w-2 shrink-0 rounded-full" style={stage === "rejected" ? { boxShadow: `inset 0 0 0 1.5px ${color}` } : { background: color }} />;
 }
 
-/** The status of an applied job, changeable by the student. Jobs not submitted yet just say so. */
-function StageControl({ app, onChange }: { app: App; onChange: (outcome: Stage) => void }) {
-  const stage = stageOf(app);
+/**
+ * The status of an applied job, changeable by the student: Applied, Follow up or Rejected, and Interviewing when
+ * they set it. A job with a follow-up email due shows Follow up. Jobs not submitted yet just say so.
+ */
+function StageControl({ app, due, onChange }: { app: App; due: boolean; onChange: (outcome: Stage) => void }) {
+  const worked = stageOf(app);
+  const stage: Stage = worked === "no_response" ? "submitted" : (worked === "submitted" && due) ? "follow_up" : worked;
   if (stage === "in_progress") {
     return <span className="inline-flex shrink-0 items-center gap-2 text-sm" style={{ color: STAGE.in_progress.color }}><StageDot stage={stage} />In progress</span>;
   }
@@ -258,8 +264,8 @@ function StageControl({ app, onChange }: { app: App; onChange: (outcome: Stage) 
         value={stage}
         onChange={(event) => onChange(event.target.value as Stage)}
       >
-        {/* "No response" is worked out (28 days with no email), so it shows only while it's true. */}
-        {([...(stage === "no_response" ? ["no_response" as const] : []), "submitted", "assessment", "interviewing", "offer", "rejected"] as const).map((value) => <option key={value} value={value} className="bg-card text-ink">{STAGE[value].label}</option>)}
+        {/* Assessment and Offer stay listed only on jobs already set to them. */}
+        {(["submitted", "follow_up", ...(stage === "assessment" ? ["assessment" as const] : []), "interviewing", ...(stage === "offer" ? ["offer" as const] : []), "rejected"] as const).map((value) => <option key={value} value={value} className="bg-card text-ink">{STAGE[value].label}</option>)}
       </select>
       <span aria-hidden className="pointer-events-none absolute right-2 text-[10px] text-faint">▾</span>
     </span>
@@ -419,7 +425,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
     }
   }
 
-  const stageCell = (app: App) => <StageControl app={app} onChange={(next) => void setStage(app, next)} />;
+  const stageCell = (app: App) => <StageControl app={app} due={followUpIds.has(app.id)} onChange={(next) => void setStage(app, next)} />;
   const row = (app: App) => {
     const expanded = open === app.id;
     const stage = stageOf(app);
@@ -701,7 +707,7 @@ function AddJobForm({ onDone }: { onDone: (added: boolean) => void | Promise<voi
         <div>
           <label className={label} htmlFor="add-stage">Status</label>
           <select id="add-stage" className={input} value={job.stage} onChange={(event) => set({ stage: event.target.value })}>
-            <option value="applied">Applied</option><option value="in_progress">Not applied yet</option><option value="assessment">Assessment</option><option value="interviewing">Interviewing</option><option value="offer">Offer</option><option value="rejected">Rejected</option>
+            <option value="applied">Applied</option><option value="in_progress">Not applied yet</option><option value="follow_up">Follow up</option><option value="interviewing">Interviewing</option><option value="rejected">Rejected</option>
           </select>
         </div>
         <div><label className={label} htmlFor="add-date">Applied on</label><input id="add-date" type="date" className={input} value={job.appliedOn} max={new Date().toISOString().slice(0, 10)} onChange={(event) => set({ appliedOn: event.target.value })} disabled={job.stage === "in_progress"} /></div>
@@ -831,7 +837,7 @@ const foundOn = (app: App) => (siteFor(app) === "Added by you" && app.fillReport
 
 const historyColor = (status: string) => (status === "applied" ? STAGE.submitted.color : status === "incomplete" ? STAGE.in_progress.color : STAGE[status as Stage]?.color ?? STAGE.submitted.color);
 
-const HISTORY_LABEL: Record<string, string> = { applied: "Applied", incomplete: "Not finished", assessment: "Assessment", interviewing: "Interviewing", offer: "Offer", rejected: "Rejected" };
+const HISTORY_LABEL: Record<string, string> = { follow_up: "Follow up", applied: "Applied", incomplete: "Not finished", assessment: "Assessment", interviewing: "Interviewing", offer: "Offer", rejected: "Rejected" };
 
 /**
  * A job's info: what Unnepo knows about it, from the page it was saved from or its link, with the posting and

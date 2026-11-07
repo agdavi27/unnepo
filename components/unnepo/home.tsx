@@ -6,7 +6,7 @@ import type { App } from "@/components/unnepo/apply";
 import { Funnel, PerDay, Systems, Tile, duration } from "@/components/unnepo/stats";
 import { H as SPRITE_H, ON_DARK, W as SPRITE_W, spiderRects } from "@/extension/src/shared/sprite";
 import { applicationStats } from "@/lib/apply/stats";
-import { nextUp, type NextItem } from "@/lib/apply/next-up";
+import { nextUp, type NextItem, type NextSection } from "@/lib/apply/next-up";
 import { crawlerColors, nextSkin, wornSkin, type SpiderLook } from "@/lib/spiders";
 
 /** The Home tab: what to do next, how it's going, and the next spider to unlock. */
@@ -16,7 +16,6 @@ export const DEFAULT_WEEKLY_GOAL = 10;
 
 const partOfDay = (hour: number) => (hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening");
 const eyebrow = "m-0 font-mono text-[11px] font-medium uppercase tracking-[0.1em]";
-const READ_KEY = "unnepo-home-read";
 
 /** The spider from job sites: it drops in on its thread and sways, with the same timing and colors. */
 function DroppingSpider({ look }: { look: SpiderLook }) {
@@ -57,19 +56,18 @@ type HomeProps = {
   onSpiders: () => void;
 };
 
+const SECTIONS: Array<{ id: NextSection; label: string }> = [
+  { id: "goals", label: "Reach your goals" },
+  { id: "follow_ups", label: "Follow ups" },
+  { id: "applications", label: "Applications" },
+  { id: "review", label: "Review emails" },
+];
+
 export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpenJob, onWrite, onSent, onReview, onJobs, onSpiders }: HomeProps) {
   const stats = useMemo(() => applicationStats(apps), [apps]);
   const [toReview, setToReview] = useState(0);
-  // Replies already opened on this device, so they leave the list.
-  const [read, setRead] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(window.localStorage.getItem(READ_KEY) ?? "[]") as string[]);
-    } catch {
-      return new Set();
-    }
-  });
-  const [skipped, setSkipped] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [picked, setPicked] = useState<NextSection | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/email/state")
@@ -78,34 +76,51 @@ export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpe
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
-  const items = useMemo(() => {
+  const next = useMemo(() => {
     const today = stats.perDay[stats.perDay.length - 1]?.count ?? 0;
-    const all = nextUp(apps, { toReview, read, goal: { today, daily: goals.dailyGoal ?? DEFAULT_DAILY_GOAL } });
-    return [...all.filter((item) => !skipped.includes(item.key)), ...skipped.flatMap((key) => all.filter((item) => item.key === key))];
-  }, [apps, toReview, read, skipped, stats, goals.dailyGoal]);
+    return nextUp(apps, { toReview, goal: { today, daily: goals.dailyGoal ?? DEFAULT_DAILY_GOAL, week: stats.thisWeek, weekly: goals.weeklyGoal ?? DEFAULT_WEEKLY_GOAL } });
+  }, [apps, toReview, stats, goals.dailyGoal, goals.weeklyGoal]);
+  const counts: Record<NextSection, number> = { goals: next.goals.items.length, follow_ups: next.follow_ups.count, applications: next.applications.count, review: next.review.count };
+  // Opens on the first section with something to do, in the order shown.
+  const section = picked ?? SECTIONS.find((item) => counts[item.id] > 0)?.id ?? "goals";
   const open = (item: NextItem) => {
     if (item.kind === "review") return onReview();
     if (item.kind === "goal") return onJobs();
-    if (item.kind === "reply") {
-      const next = new Set(read).add(item.key);
-      setRead(next);
-      try { window.localStorage.setItem(READ_KEY, JSON.stringify([...next])); } catch { /* storage off: it stays on the list */ }
-      return onOpenJob(item.applicationId!, "emails");
-    }
-    onOpenJob(item.applicationId!);
+    onOpenJob(item.applicationId!, item.kind === "reply" ? "emails" : undefined);
   };
-  const press = async (item: NextItem) => {
-    if (item.kind !== "follow_up") return open(item);
-    setBusy(true);
+  const write = async (item: NextItem) => {
+    setBusy(item.key);
     await onWrite(item.applicationId!, item.contactId!);
-    setBusy(false);
+    setBusy("");
     open(item);
   };
   const now = new Date();
   const first = name.trim().split(/\s+/)[0];
   const look: SpiderLook = { skin: wornSkin(spiderSkin, stats.applied), school };
-  const current = items[0];
-  const then = items.slice(1, 4);
+
+  const heading = (() => {
+    if (section === "goals") {
+      const item = next.goals.items[0];
+      return item ? { title: item.title, detail: item.detail } : { title: "Goals hit. Nice work.", detail: `${next.goals.today} today · ${next.goals.week} this week` };
+    }
+    if (section === "follow_ups") {
+      const { replied, count } = next.follow_ups;
+      const people = count - replied;
+      if (replied) return { title: `${replied} ${replied === 1 ? "company" : "companies"} replied to your application`, detail: people ? `And ${people} ${people === 1 ? "person" : "people"} to follow up with` : "Read what they said and reply" };
+      if (people) return { title: `Follow up with ${people} ${people === 1 ? "person" : "people"}`, detail: "You emailed them a week ago and haven't heard back" };
+      return { title: "No follow ups right now", detail: "When a company writes back, it shows up here" };
+    }
+    if (section === "applications") {
+      const finish = next.applications.items.filter((item) => item.kind === "finish").length;
+      if (next.applications.count) return { title: finish ? `Finish ${finish} ${finish === 1 ? "application" : "applications"}` : "Update your applications", detail: "Finish what you started, and say how the older ones went" };
+      return { title: "Your applications are up to date", detail: "Nothing started and left, and nothing waiting on an update" };
+    }
+    return next.review.count
+      ? { title: next.review.items[0].title, detail: next.review.items[0].detail }
+      : { title: "No emails to review", detail: "Emails Unnepo can't place on a job wait here" };
+  })();
+  const rows = section === "follow_ups" ? next.follow_ups.items : section === "applications" ? next.applications.items : [];
+
   return (
     <div className="mx-auto -mt-6 flex w-full max-w-[720px] flex-col overflow-y-clip pt-8 sm:pt-14">
       <p className="m-0 mb-2 font-mono text-xs uppercase tracking-[0.12em] text-[#9A9AA3]">{now.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</p>
@@ -113,58 +128,59 @@ export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpe
 
       <section aria-labelledby="next-up" className="relative rounded-[20px] border border-[#222] bg-[#0F0F0F] p-7">
         <DroppingSpider look={look} />
-        <div className="pr-16">
-          {current ? (
-            <>
-              <p className={`${eyebrow} text-[#3D8BFF]`}>Next up · 1 of {items.length}</p>
-              <h2 id="next-up" className="m-0 mb-1.5 mt-3 text-[22px] font-semibold tracking-[-0.02em]">{current.title}</h2>
-              <p className="m-0 text-sm text-[#9A9AA3]">{current.detail}</p>
-            </>
-          ) : apps.length === 0 ? (
-            <>
-              <p className={`${eyebrow} text-[#3D8BFF]`}>Next up</p>
-              <h2 id="next-up" className="m-0 mb-1.5 mt-3 text-[22px] font-semibold tracking-[-0.02em]">Start your first application</h2>
-              <p className="m-0 text-sm text-[#9A9AA3]">Open a job in Chrome and press Fill in the Unnepo extension. Every job you submit shows up here.</p>
-            </>
-          ) : (
-            <>
-              <p className={`${eyebrow} text-[#3D8BFF]`}>Next up</p>
-              <h2 id="next-up" className="m-0 mb-1.5 mt-3 text-[22px] font-semibold tracking-[-0.02em]">You&apos;re all caught up</h2>
-              <p className="m-0 text-sm text-[#9A9AA3]">Nothing needs you right now. Find your next job?</p>
-            </>
-          )}
+        <p id="next-up" className={`${eyebrow} pr-16 text-[#3D8BFF]`}>Next up</p>
+        <div role="tablist" aria-label="Next up" className="mt-4 flex flex-wrap gap-1.5 pr-16">
+          {SECTIONS.map((item) => {
+            const on = item.id === section;
+            return (
+              <button key={item.id} type="button" role="tab" id={`tab-${item.id}`} aria-selected={on} aria-controls="next-panel" onClick={() => setPicked(item.id)}
+                className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium ${on ? "border-[#F5F5F5] bg-[#F5F5F5] text-[#0A0A0A]" : "border-[#2A2A2A] text-[#9A9AA3] hover:text-white"}`}>
+                {item.label}
+                {counts[item.id] > 0 && <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? "bg-[#0A0A0A]/10" : item.id === "follow_ups" ? "bg-[#F5C518]/15 text-[#F5C518]" : "bg-white/5"}`}>{counts[item.id]}</span>}
+              </button>
+            );
+          })}
         </div>
-        <div className="mt-6 flex flex-wrap gap-2">
-          {current ? (
-            <>
-              <button type="button" disabled={busy} onClick={() => void press(current)} className={pill}>{busy ? "Writing…" : current.action}</button>
-              {current.kind === "follow_up" && <button type="button" onClick={() => void onSent(current.contactId!)} className={ghost}>I sent it</button>}
-              {items.length > 1 && <button type="button" onClick={() => setSkipped((list) => [...list.filter((key) => key !== current.key), current.key])} className={ghost}>Skip for now</button>}
-            </>
-          ) : apps.length === 0 ? (
-            <a href="/extension/connect" className={`${pill} inline-flex items-center`}>Connect the extension</a>
-          ) : (
-            <button type="button" onClick={onJobs} className={pill}>See jobs for you</button>
+
+        <div id="next-panel" role="tabpanel" aria-labelledby={`tab-${section}`} className="mt-6">
+          <h2 className="m-0 mb-1.5 pr-16 text-[22px] font-semibold tracking-[-0.02em]">{heading.title}</h2>
+          <p className="m-0 pr-16 text-sm text-[#9A9AA3]">{heading.detail}</p>
+
+          {section === "goals" && (
+            <div className="mt-6 flex flex-wrap gap-2">
+              <button type="button" onClick={onJobs} className={pill}>See suggested jobs</button>
+            </div>
+          )}
+          {section === "review" && next.review.count > 0 && (
+            <div className="mt-6 flex flex-wrap gap-2">
+              <button type="button" onClick={onReview} className={pill}>Review emails</button>
+            </div>
+          )}
+          {rows.length > 0 && (
+            <ul className="m-0 mt-5 list-none border-t border-[#1A1A1A] p-0">
+              {rows.map((item) => (
+                <li key={item.key} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[#1A1A1A] py-3">
+                  <span aria-hidden className={`h-2 w-2 flex-none rounded-full ${item.kind === "reply" || item.kind === "follow_up" ? "bg-[#F5C518]" : "border-[1.5px] border-[#8B8B94]"}`} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm">{item.title}</span>
+                    {item.detail && <span className="block truncate text-[13px] text-[#8B8B94]">{item.detail}</span>}
+                  </span>
+                  <span className="flex flex-none items-center gap-2">
+                    {item.kind === "follow_up" ? (
+                      <>
+                        <button type="button" disabled={busy === item.key} onClick={() => void write(item)} className={small}>{busy === item.key ? "Writing…" : item.action}</button>
+                        <button type="button" onClick={() => void onSent(item.contactId!)} className={smallGhost}>I sent it</button>
+                      </>
+                    ) : (
+                      <button type="button" onClick={() => open(item)} className={small}>{item.action}</button>
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
       </section>
-
-      {then.length > 0 && (
-        <section aria-labelledby="then" className="mt-8">
-          <h2 id="then" className={`${eyebrow} mb-2 text-[#9A9AA3]`}>Then</h2>
-          <ul className="m-0 list-none p-0">
-            {then.map((item) => (
-              <li key={item.key}>
-                <button type="button" onClick={() => open(item)} className="flex w-full items-center gap-3 border-b border-[#1A1A1A] px-1 py-3.5 text-left hover:bg-white/[0.02]">
-                  <span aria-hidden className={`h-2 w-2 flex-none rounded-full ${item.kind === "reply" || item.kind === "review" ? "bg-[#3D8BFF]" : "border-[1.5px] border-[#8B8B94]"}`} />
-                  <span className="min-w-0 flex-1 text-sm">{item.title}</span>
-                  <span className="flex-none text-[13px] text-[#8B8B94]">{item.when}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
 
       <Progress stats={stats} goals={goals} onGoals={onGoals} />
       <UnlockStrip applied={stats.applied} school={school} onSpiders={onSpiders} />
@@ -172,8 +188,9 @@ export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpe
   );
 }
 
+const small = "h-8 rounded-full bg-[#F5F5F5] px-3.5 text-[13px] font-medium text-[#0A0A0A] hover:bg-white disabled:opacity-50";
+const smallGhost = "h-8 rounded-full border border-[#2A2A2A] px-3 text-[13px] font-medium text-[#9A9AA3] hover:text-white";
 const pill = "h-11 rounded-full bg-[#F5F5F5] px-[22px] text-sm font-medium text-[#0A0A0A] hover:bg-white disabled:opacity-50";
-const ghost = "h-11 rounded-full border border-[#2A2A2A] px-[18px] text-sm font-medium text-[#9A9AA3] hover:text-white";
 
 function Meter({ value, goal, label }: { value: number; goal: number; label: string }) {
   return (
