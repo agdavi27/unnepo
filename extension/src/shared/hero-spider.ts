@@ -2,13 +2,13 @@ import { ART_H, ART_W, artRects, spiderArt, spiderPalette, type SpiderLook } fro
 
 /**
  * The talking spider at the top of the side panel: the student's spider from the Stats page (lib/spiders.ts),
- * with an open-mouth frame for when he talks.
+ * with an open-mouth frame for when he talks and an angry one for when he's poked.
  */
 
 /** The spider as an SVG with both mouth frames; toggle the "talking" class to open his mouth. */
 export function heroSpiderSvg(look: SpiderLook = { skin: "classic" }) {
   const palette = spiderPalette(look);
-  return `<svg viewBox="0 0 ${ART_W} ${ART_H}" width="80" height="60" shape-rendering="crispEdges" aria-hidden="true"><g class="mouth-shut">${artRects(spiderArt(false, look), palette)}</g><g class="mouth-open">${artRects(spiderArt(true, look), palette)}</g></svg>`;
+  return `<svg viewBox="0 0 ${ART_W} ${ART_H}" width="80" height="60" shape-rendering="crispEdges" aria-hidden="true"><g class="mouth-shut">${artRects(spiderArt(false, look), palette)}</g><g class="mouth-open">${artRects(spiderArt(true, look), palette)}</g><g class="mouth-angry">${artRects(spiderArt(true, look, true), { ...palette, R: "#FF4D4D" })}</g></svg>`;
 }
 
 const TYPING_W = 60;

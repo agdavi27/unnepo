@@ -6,13 +6,15 @@ import { NEVER_READ, type Issue, type PanelState } from "../shared/types";
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
  * while it fills, just the spider typing on his laptop; when it's applied, went wrong, or there's no job, two big
- * buttons that open a popup asking one question at a time, with the resume, password and feedback small under them. The dashboard and Settings are along the bottom of every page.
+ * buttons that open a popup asking one question at a time, with the resume, password and feedback small under them. The dashboard, Settings and credits left are along the bottom of every page.
  */
 
 const app = document.getElementById("app")!;
 const dashboard = document.getElementById("dashboard") as HTMLAnchorElement;
 const passwordSection = document.getElementById("password")!;
 const dock = document.getElementById("dock")!;
+const creditsLeft = document.getElementById("credits-left")!;
+const upgrade = document.getElementById("upgrade") as HTMLAnchorElement;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
 type View = "home" | "more" | "feedback" | "settings";
@@ -26,7 +28,11 @@ const extensionVersion = () => chrome.runtime.getManifest().version_name ?? chro
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
 const short = (text: string, max = 60) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
-/** The spider's line: types out while his mouth moves, then moves on to the next. */
+/** What he says when he's poked, worse each time, and how long he stays mad: the same as on the front page. */
+const OUCH = ["Ouch!", "Hey! Quit poking me.", "I have eight legs and I'm not afraid to use them.", "OK, that's it. I'm telling the recruiters."];
+const MAD_MS = 2200;
+
+/** The spider's line: types out while his mouth moves, then moves on to the next. Poking him interrupts it. */
 const speech = (() => {
   const spider = document.getElementById("spider")!;
   const line_ = document.getElementById("ticker-line")!;
@@ -39,8 +45,12 @@ const speech = (() => {
   let line = 0;
   let shown = 0;
   let hold = 0;
+  let alerting = false;
+  let pokes = 0;
+  let calm = 0;
 
   const draw = () => {
+    if (calm) return;
     const text = lines[line] ?? "";
     const typing = shown < text.length;
     typed.textContent = text.slice(0, shown);
@@ -54,10 +64,32 @@ const speech = (() => {
     draw();
   };
   setInterval(() => {
+    if (calm) return;
     const text = lines[line] ?? "";
     if (shown < text.length) { shown += 1; draw(); }
     else if (lines.length > 1 && ++hold > 70) next();
   }, 45);
+
+  spider.addEventListener("click", () => {
+    pokes += 1;
+    const ouch = OUCH[Math.min(pokes, OUCH.length) - 1];
+    clearTimeout(calm);
+    calm = 0;
+    typed.textContent = ouch;
+    said.textContent = ouch;
+    line_.classList.add("alert");
+    spider.classList.remove("talking", "mad");
+    // Taking the class off and on starts the shake again, for every poke.
+    void spider.offsetWidth;
+    spider.classList.add("mad");
+    calm = window.setTimeout(() => {
+      calm = 0;
+      spider.classList.remove("mad");
+      line_.classList.toggle("alert", alerting);
+      shown = reduce ? (lines[line] ?? "").length : 0;
+      draw();
+    }, MAD_MS);
+  });
 
   return (next: string[], alert = false) => {
     const nextKey = `${alert}|${next.join("\n")}`;
@@ -67,7 +99,8 @@ const speech = (() => {
     line = 0;
     shown = reduce ? lines[0].length : 0;
     hold = 0;
-    line_.classList.toggle("alert", alert);
+    alerting = alert;
+    if (!calm) line_.classList.toggle("alert", alert);
     draw();
   };
 })();
@@ -94,7 +127,7 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
   if (job?.step && (job.running || job.submission || job.report)) return { lines: [job.step] };
   if (!me!.profileReady) return { lines: ["Finish your profile on Unnepo first, so I have something to fill with."] };
   if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Applied with Easy Apply? Add it below.", goalLine(state)] };
-  if (!jobFound(state) || !page) return { lines: [goalLine(state), "Open an application, I'll wait.", "Need a cover letter? Tap Cover letter."] };
+  if (!jobFound(state) || !page) return { lines: [goalLine(state), "Open an application, I'll wait.", "Need a cover letter? Tap Write a cover letter."] };
   const found = `${page.company || page.site} job found.${page.title ? ` ${short(page.title)}.` : ""}`;
   if (page.posting) return { lines: [found, "Press Autofill. I'll press Apply and crawl it for you.", goalLine(state)] };
   const extra = page.account === "new" ? ", and one new account to make" : page.account === "sign_in" ? ", and I'll sign you in" : "";
@@ -215,13 +248,20 @@ function fillingView() {
 
 const SPARK_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>`;
 
-const toolIcon = (shape: string) => `<svg class="big-tool-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`;
+/** The blue AI spark on the two big buttons. */
+const SPARK = SPARK_SMALL.replace('width="13" height="13"', 'class="big-tool-icon" width="20" height="20"');
+/** "Write cover letter (2 credits)". Only Free spends credits on these; paid plans and unlimited accounts just say what it does. */
+const withCost = (label: string, kind: "letters" | "answers") => {
+  const cost = lastState?.me?.creditCost?.[kind];
+  if (!cost || !usesNow?.free || usesNow.unlimited) return label;
+  return `${label} (${cost} ${cost === 1 ? "credit" : "credits"})`;
+};
 /** The tools: the whole page once a job is applied, went wrong, or there's no job. `extra` goes above Feedback. */
 function toolsPage(state: PanelState, extra = "") {
   return `
     <div class="tools">
-      <button type="button" class="big-tool" data-popup="cover">${toolIcon(`<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7"/>`)}Write a cover letter</button>
-      <button type="button" class="big-tool" data-popup="answer">${toolIcon(`<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7"/><path d="M12 17h.01"/>`)}Answer a question</button>
+      <button type="button" class="big-tool" data-popup="cover">${SPARK}Write a cover letter</button>
+      <button type="button" class="big-tool" data-popup="answer">${SPARK}Answer a question</button>
       <div class="tool-lines">${resumeLine(state)}<div id="password-slot"></div></div>
       ${extra}
       <button type="button" class="feedback-link" data-go="feedback">Feedback</button>
@@ -567,7 +607,7 @@ function popupShell(title: string, body: string, step = 0, steps = 0) {
       ${step > 0 ? `<button type="button" class="back" id="popup-back"><span aria-hidden="true">‹</span> Back</button>` : ""}
     </section>`;
 }
-/** One big choice. Tapping it answers the question and moves on. */
+/** One big choice. */
 const option = (attr: string, value: string, label: string, hint: string, on: boolean) =>
   `<button type="button" class="opt${on ? " on" : ""}" data-${attr}="${value}" aria-pressed="${on}">${label}<small>${hint}</small></button>`;
 
@@ -578,6 +618,7 @@ function coverPopup(state: PanelState) {
   if (busy || (letter && letterStep === "written" && letterSource === (forJob ? "job" : "paste"))) {
     return popupShell("Your cover letter", `${writingSpider()}${letter ? writtenLetter(busy, forJob) : ""}${note}`);
   }
+  const highlights = state.me?.highlights ?? [];
   const steps = [...(forJob ? [] : ["paste"]), "length", "tone", "mention"];
   const step = Math.min(popup!.step, steps.length - 1);
   popup!.step = step;
@@ -586,17 +627,23 @@ function coverPopup(state: PanelState) {
   const forLine = forJob && title ? `<div class="sub">For ${escape(title)}${company ? ` at ${escape(company)}` : ""}</div>` : "";
   const pick = (name: "length" | "tone", value: string, label: string, hint: string) => option("letter", `${name}:${value}`, label, hint, letterChoices[name] === value);
   const bodies: Record<string, [string, () => string]> = {
-    paste: ["Paste the job description", () => `<div class="letter-form flat"><textarea class="field letter-input paste" id="paste-desc" rows="8" maxlength="8000" aria-label="Job description" placeholder="Paste the whole job description">${escape(pasteText)}</textarea><button type="button" class="btn primary big" id="popup-next" ${pasteText.trim().length < 80 ? "disabled" : ""}>Next</button></div>`],
+    paste: ["Paste the job description", () => `<div class="letter-form flat"><textarea class="field letter-input paste" id="paste-desc" rows="8" maxlength="8000" aria-label="Job description" placeholder="Paste the whole job description">${escape(pasteText)}</textarea><button type="button" class="btn primary big" id="popup-next" ${pasteButton().disabled ? "disabled" : ""}>${pasteButton().label}</button></div>`],
     length: ["How long should it be?", () => `<div class="stack tight">${pick("length", "short", "Short", "A few lines")}${pick("length", "standard", "Standard", "The usual cover letter")}${pick("length", "detailed", "Detailed", "More on your experience")}</div>`],
     tone: ["What tone?", () => `<div class="stack tight">${pick("tone", "professional", "Professional", "Polished and direct")}${pick("tone", "warm", "Warm", "Friendly and personal")}${pick("tone", "confident", "Confident", "Leads with what you've done")}${pick("tone", "enthusiastic", "Enthusiastic", "Shows you're excited")}</div>`],
-    mention: ["Anything to mention?", () => `<div class="letter-form flat"><textarea class="field letter-input" id="letter-mention" rows="3" maxlength="400" aria-label="Anything to mention (optional)" placeholder="Optional: a project, why this company, a skill to lead with…">${escape(letterChoices.mention)}</textarea><button type="button" class="btn primary big" id="letter-write">${SPARK_SMALL}Generate cover letter</button>${usesLine(usesNow?.letters.note)}</div>`],
+    mention: [highlights.length ? "Mention specific things from your resume" : "Anything to mention?", () => `<div class="letter-form flat">${highlights.length ? `<div class="choices" role="group" aria-label="Things from your resume">${highlights.map((item) => `<button type="button" class="choice${letterChoices.picked.includes(item) ? " on" : ""}" data-highlight="${escape(item)}" aria-pressed="${letterChoices.picked.includes(item)}">${escape(item)}</button>`).join("")}</div>` : ""}<textarea class="field letter-input" id="letter-mention" rows="2" maxlength="400" aria-label="Anything else to mention (optional)" placeholder="${highlights.length ? "Anything else? Optional" : "Optional: a project, why this company, a skill to lead with…"}">${escape(letterChoices.mention)}</textarea><button type="button" class="btn primary big" id="letter-write">${SPARK_SMALL}${withCost("Write cover letter", "letters")}</button>${usesLine(usesNow?.letters.note)}</div>`],
   };
   const [question, body] = bodies[steps[step]];
   return popupShell(question, `${forLine}${body()}${note}`, step, steps.length);
 }
 
+/** An empty box offers a generic letter; once something's typed, it needs the whole description to go on. */
+const pasteButton = () => {
+  const typed = pasteText.trim().length;
+  return { label: typed ? "Next" : "Write generic one", disabled: typed > 0 && typed < 80 };
+};
+
 /** "Answer a question": an answer to a pasted question, for the job on this tab when Unnepo knows it. */
-const answering = { question: "", length: "", answer: "", busy: false, note: "" };
+const answering = { question: "", length: "paragraph", answer: "", busy: false, note: "" };
 function answerPopup() {
   const note = answering.note ? `<p class="small" role="status">${escape(answering.note)}</p>` : "";
   if (answering.busy) return popupShell("Writing your answer", `<div class="letter-writing" role="status">${typingSpiderSvg(120, spiderLook)}<span class="small">Writing your answer…</span></div>`);
@@ -611,7 +658,7 @@ function answerPopup() {
   const step = Math.min(popup!.step, 1);
   const pick = (value: string, label: string, hint: string) => option("answer-length", value, label, hint, answering.length === value);
   if (step === 0) return popupShell("Paste the question", `<div class="letter-form flat"><textarea class="field letter-input" id="answer-q" rows="5" maxlength="600" aria-label="The question from the form" placeholder="e.g. Describe a time you led a team">${escape(answering.question)}</textarea><button type="button" class="btn primary big" id="popup-next" ${answering.question.trim() ? "" : "disabled"}>Next</button></div>${note}`, 0, 2);
-  return popupShell("How long should it be?", `<div class="stack tight">${pick("short", "A few sentences", "For short boxes on a form")}${pick("paragraph", "A paragraph", "The usual length")}${pick("long", "Longer", "For essay questions")}</div>${usesLine(usesNow?.answers.note)}${note}`, 1, 2);
+  return popupShell("How long should it be?", `<div class="stack tight">${pick("short", "A few sentences", "For short boxes on a form")}${pick("paragraph", "A paragraph", "The usual length")}${pick("long", "Longer", "For essay questions")}</div><button type="button" class="btn primary big" id="answer-write">${SPARK_SMALL}${withCost("Answer question", "answers")}</button>${usesLine(usesNow?.answers.note)}${note}`, 1, 2);
 }
 
 function popupView(state: PanelState) {
@@ -662,9 +709,11 @@ function wireAnswer(tabId: number) {
     const next = document.getElementById("popup-next") as HTMLButtonElement | null;
     if (next) next.disabled = !box.value.trim();
   });
-  // Choosing how long is the last question, so it writes.
-  app.querySelectorAll<HTMLButtonElement>("[data-answer-length]").forEach((button) => button.addEventListener("click", async () => {
-    answering.length = button.dataset.answerLength ?? "";
+  app.querySelectorAll<HTMLButtonElement>("[data-answer-length]").forEach((button) => button.addEventListener("click", () => {
+    answering.length = button.dataset.answerLength ?? "paragraph";
+    void render();
+  }));
+  document.getElementById("answer-write")?.addEventListener("click", async () => {
     answering.busy = true;
     answering.note = "";
     void render();
@@ -674,7 +723,7 @@ function wireAnswer(tabId: number) {
     if (result.ok && result.answer) answering.answer = result.answer;
     else answering.note = result.error ?? "Couldn't write this one.";
     void render();
-  }));
+  });
   const written = document.getElementById("answer-text") as HTMLTextAreaElement | null;
   written?.addEventListener("input", () => { answering.answer = written.value; });
   document.getElementById("answer-copy")?.addEventListener("click", () => {
@@ -699,7 +748,7 @@ let letterNote = "";
 let letterEdited = false;
 /** The tab and job the letter is for. */
 let letterFor = "";
-const letterChoices = { length: "standard", tone: "professional", mention: "", edit: "" };
+const letterChoices = { length: "standard", tone: "professional", picked: [] as string[], mention: "", edit: "" };
 
 /** While the AI writes: the spider typing on his laptop. */
 const writingSpider = () => (letterStep === "writing" || letterStep === "revising"
@@ -751,15 +800,17 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
   // Let go of the box, or the panel keeps it as it is and the spider never shows.
   if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
   void render();
+  // No description pasted: a generic letter, and so are its edits.
+  const source = fromPaste && !pasteText.trim() ? { generic: true } : {};
   const options = part
     ? { previous: letter?.text ?? "", part: part.part, ask: part.ask }
     : save
     ? { text: letter?.text ?? "" }
     : revise
       ? { previous: letter?.text ?? "", edit: letterChoices.edit }
-      : { length: letterChoices.length, tone: letterChoices.tone, mention: letterChoices.mention, track: true };
+      : { length: letterChoices.length, tone: letterChoices.tone, mention: [...letterChoices.picked, letterChoices.mention.trim()].filter(Boolean).join("; "), track: true };
   type Result = { ok: boolean; doc?: Letter; error?: string };
-  const result = await ask<Result>({ type: "generate-letter", tabId, options, ...(fromPaste ? { description: pasteText } : {}) }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  const result = await ask<Result>({ type: "generate-letter", tabId, options: { ...options, ...source }, ...(fromPaste ? { description: pasteText } : {}) }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
   if (result.ok && result.doc) {
     letter = result.doc;
     letterStep = "written";
@@ -790,6 +841,13 @@ function wireLetter(tabId: number, fromPaste: boolean) {
     if (popup) popup.step += 1;
     void render();
   }));
+  // Bubbles can be picked in any number, so they stay on this question.
+  app.querySelectorAll<HTMLButtonElement>("[data-highlight]").forEach((button) => button.addEventListener("click", () => {
+    const item = button.dataset.highlight ?? "";
+    letterChoices.picked = letterChoices.picked.includes(item) ? letterChoices.picked.filter((other) => other !== item) : [...letterChoices.picked, item];
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    void render();
+  }));
   const mention = document.getElementById("letter-mention") as HTMLTextAreaElement | null;
   mention?.addEventListener("input", () => { letterChoices.mention = mention.value; });
   const edits = document.getElementById("letter-edit") as HTMLTextAreaElement | null;
@@ -804,7 +862,10 @@ function wireLetter(tabId: number, fromPaste: boolean) {
   paste?.addEventListener("input", () => {
     pasteText = paste.value;
     const next = document.getElementById("popup-next") as HTMLButtonElement | null;
-    if (next) next.disabled = pasteText.trim().length < 80;
+    if (next) {
+      next.disabled = pasteButton().disabled;
+      next.textContent = pasteButton().label;
+    }
   });
   const typed = document.getElementById("letter-text") as HTMLTextAreaElement | null;
   // Selecting part of the letter offers to rewrite just that part. Shown without redrawing, so the selection stays.
@@ -1329,6 +1390,16 @@ async function render() {
   await refresh();
 }
 
+/** Bottom right: what's left, and the way to more. */
+function drawPlan(state: PanelState) {
+  const me = state.me;
+  const left = me?.usage?.credits ?? (me ? me.credits * 5 : 0);
+  creditsLeft.textContent = me?.unlimitedCredits ? "Unlimited credits" : `${left} ${left === 1 ? "credit" : "credits"} left`;
+  upgrade.href = `${state.apiBase}/#pricing`;
+  // Nothing to upgrade to from the top plan or an unlimited account.
+  upgrade.hidden = Boolean(me?.unlimitedCredits) || me?.plan === "premium";
+}
+
 /** Draws the panel. False when it left the page as it was, because the student is typing in it. */
 function draw(state: PanelState): boolean {
   usesNow = state.me?.usage ?? null;
@@ -1337,10 +1408,11 @@ function draw(state: PanelState): boolean {
   const jobName = (state.job?.title || state.page?.title || "").toLowerCase();
   const letterJob = state.tab && jobName ? `${state.tab.id}|${jobName}` : letterFor;
   if (letterJob !== letterFor) {
-    if (letterFor && letterSource === "job" && letterStep !== "writing" && letterStep !== "revising") { letter = null; letterStep = "closed"; letterNote = ""; letterChoices.mention = ""; letterChoices.edit = ""; }
+    if (letterFor && letterSource === "job" && letterStep !== "writing" && letterStep !== "revising") { letter = null; letterStep = "closed"; letterNote = ""; letterChoices.picked = []; letterChoices.mention = ""; letterChoices.edit = ""; }
     letterFor = letterJob;
   }
   dashboard.href = `${state.apiBase}/home`;
+  drawPlan(state);
   dressSpider(state.me?.spider);
   const said = lines(state);
   speech(said.lines, said.alert);

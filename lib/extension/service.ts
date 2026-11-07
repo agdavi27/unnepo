@@ -1,5 +1,6 @@
 import { APPLIED_HOW, addActivity, addMaybe, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { nameCompanyFromDescription } from "@/lib/apply/job-link";
+import { CREDIT_COST } from "@/lib/config";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, planUsage } from "@/lib/apply/limits";
@@ -84,6 +85,9 @@ export async function extensionMe(userId: string) {
     credits: credits?.balance ?? 0,
     unlimitedCredits: usage.unlimited,
     setup: setupState(state.profile),
+    // What the cover letter popup offers to mention, as bubbles.
+    highlights: resumeHighlights(state.profile),
+    creditCost: { letters: CREDIT_COST.letters, answers: CREDIT_COST.answers },
     maybe: liveMaybe(stored?.maybeApplied).map(({ id, title, company, site, at }) => ({ id, title, company, site, at })),
     session: sessionNow(stored?.session),
     plan: credits?.plan ?? "free",
@@ -99,6 +103,16 @@ export async function extensionMe(userId: string) {
     // The spider the student wears from the Stats page, for the panel and the crawling spiders.
     spider: { skin: wornSkin(stored?.spiderSkin, applied.length), school: state.profile.education?.[0]?.school ?? "" },
   };
+}
+
+/** The student's jobs, projects and top skills from their resume, each short enough for a bubble. */
+function resumeHighlights(profile: Pick<StudentProfile, "experience" | "projects" | "skills">) {
+  const jobs = (profile.experience ?? []).map((job) => {
+    const both = [job.title, job.company].filter(Boolean).join(" at ");
+    return both.length <= 44 ? both : job.company || job.title || "";
+  });
+  const pick = (items: Array<string | undefined>, count: number) => items.map((item) => item?.trim() ?? "").filter((item) => item && item.length <= 44).slice(0, count);
+  return [...new Set([...pick(jobs, 4), ...pick((profile.projects ?? []).map((project) => project.name), 3), ...pick(profile.skills?.technical ?? [], 3)])];
 }
 
 /** Everything the extension fills forms from. Passwords for job sites stay in the extension. */
@@ -448,18 +462,20 @@ export async function extensionLearn(userId: string, raw: unknown) {
 
 /** A cover letter for this job, as text and as a PDF to upload. Written once per job. */
 export async function extensionCoverLetter(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; track?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown; part?: unknown; ask?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; generic?: unknown; track?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown; part?: unknown; ask?: unknown };
   // No job on the page: the student pasted the job description instead. Nothing is opened in the tracker.
   const pasted = !body.applicationId && typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
-  if (!body.applicationId && pasted.length < 80) throw new ServiceError("Paste the whole job description (at least a few sentences).", "description", 400);
-  const app = pasted ? null : await requireApp(userId, body.applicationId);
+  // Or asked for a generic letter, for no job in particular.
+  const generic = !body.applicationId && !pasted && body.generic === true;
+  if (!body.applicationId && !generic && pasted.length < 80) throw new ServiceError("Paste the whole job description (at least a few sentences).", "description", 400);
+  const app = pasted || generic ? null : await requireApp(userId, body.applicationId);
   const info = await student(userId);
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
   const pick = <T extends string>(value: unknown, allowed: readonly T[]) => (allowed.includes(value as T) ? (value as T) : undefined);
   const style: CoverLetterStyle = {
     length: pick(body.length, ["short", "standard", "detailed"] as const),
     tone: pick(body.tone, ["professional", "warm", "confident", "enthusiastic"] as const),
-    mention: typeof body.mention === "string" ? body.mention.slice(0, 400) : undefined,
+    mention: typeof body.mention === "string" ? body.mention.slice(0, 800) : undefined,
     edit: typeof body.edit === "string" ? body.edit.slice(0, 600) : undefined,
     previous: typeof body.previous === "string" ? body.previous.slice(0, 6000) : undefined,
   };
@@ -486,7 +502,7 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText }, style));
   if (fresh && text) await countCoverLetter(userId);
   // The student asked for this letter (autofill writing one for a form doesn't count), so the job goes on Applied.
-  const addedToApplied = fresh && Boolean(text) && body.track === true && await (app ? markAppliedFromLetter(userId, app.id) : addPastedJob(userId, pasted)).catch(() => false);
+  const addedToApplied = fresh && Boolean(text) && body.track === true && !generic && await (app ? markAppliedFromLetter(userId, app.id) : addPastedJob(userId, pasted)).catch(() => false);
   if (!text) throw new ServiceError("Couldn't write a cover letter. Add your resume and profile first.", "cover_letter", 409);
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
   if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });

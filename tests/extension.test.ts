@@ -581,6 +581,34 @@ describe("cover letters from the panel", () => {
     expect((await applications.list(userId)).length).toBe(count);
   });
 
+  it("writes a generic letter for no job in particular, and adds nothing to the tracker", async () => {
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    expect((await call("POST", "cover-letter", token, { description: "" })).status).toBe(400);
+
+    model.replies.push(`Dear Hiring Team,\n\nI am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students. I bring careful work and steady follow-through to any team.\n\nI would welcome the chance to talk.\n\nSincerely,\nAva Chen`);
+    const letter = await (await call("POST", "cover-letter", token, { generic: true, description: "", mention: "Colby Data Club; Python", track: true })).json();
+    expect(letter.addedToApplied).toBe(false);
+    expect(model.lastPrompt).toContain("general letter");
+    expect(model.lastPrompt).not.toContain("Job description:");
+    expect(model.lastPrompt).toContain("Colby Data Club; Python");
+    expect((await (await call("GET", "jobs", token)).json()).total).toBe(0);
+  });
+
+  it("offers the student's jobs, projects and skills as things to mention", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    await saveStudentProfile(userId, { profile: {
+      experience: [{ company: "Colby", title: "Data Analyst Intern", current: false, bullets: [] }, { company: "A Very Long Company Name Incorporated", title: "Senior Assistant Associate Marketing Coordinator", current: false, bullets: [] }],
+      projects: [{ name: "Campus Dashboard", bullets: [], tech: [] }],
+      skills: { technical: ["SQL", "Python", "Excel", "Tableau"] },
+    } });
+    const { highlights, creditCost } = await (await call("GET", "me", token)).json();
+    expect(creditCost).toEqual({ letters: 2, answers: 1 });
+    expect(highlights).toEqual(["Data Analyst Intern at Colby", "A Very Long Company Name Incorporated", "Campus Dashboard", "SQL", "Python", "Excel"]);
+  });
+
   it("writes from a pasted job description when there's no job on the page, and lists the student's jobs", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";

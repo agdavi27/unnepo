@@ -12,7 +12,7 @@
       <div class="logo">unnepo<span class="dot">.</span></div>
       <p class="ticker mono" id="ticker-line"><span id="typed" aria-hidden="true"></span><span id="said" class="sr-only" aria-live="polite"></span></p>
     </div>
-    <div class="spider" id="spider" aria-hidden="true"><div class="thread"></div></div>
+    <button type="button" class="spider" id="spider" aria-label="Poke the spider"><span class="thread"></span></button>
   </header>
 
   <main id="app" class="body"></main>
@@ -20,9 +20,15 @@
 
   <section id="password" class="password" aria-label="Job-site password" hidden></section>
 
-  <nav id="dock" class="dock" aria-label="Dashboard and settings" hidden>
-    <a id="dashboard" target="_blank" rel="noreferrer">See my job dashboard <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
-    <button type="button" id="open-settings">Settings</button>
+  <nav id="dock" class="dock" aria-label="Dashboard, settings and plan" hidden>
+    <div class="dock-side">
+      <a id="dashboard" target="_blank" rel="noreferrer">See my job dashboard <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+      <button type="button" id="open-settings">Settings</button>
+    </div>
+    <div class="dock-side right">
+      <span id="credits-left"></span>
+      <a id="upgrade" target="_blank" rel="noreferrer">Upgrade plan</a>
+    </div>
   </nav>
 
   <script type="module" src="panel.js"></script>

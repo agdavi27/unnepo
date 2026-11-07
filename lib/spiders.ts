@@ -150,7 +150,7 @@ export function spiderPalette(look: SpiderLook) {
  * a round back with a mark (a sweater with letters for the school spider), a face with glowing eyes and fangs,
  * and four legs a side. `open` opens the mouth.
  */
-export function spiderArt(open: boolean, look: SpiderLook): string[][] {
+export function spiderArt(open: boolean, look: SpiderLook, angry = false): string[][] {
   const W = ART_W, H = ART_H;
   const g: string[][] = Array.from({ length: H }, () => Array<string>(W).fill(""));
   const set = (x: number, y: number, c: string) => { if (x >= 0 && x < W && y >= 0 && y < H) g[y][x] = c; };
@@ -198,6 +198,12 @@ export function spiderArt(open: boolean, look: SpiderLook): string[][] {
   blob(20, 17.8, 6.8, 5.2, "k", "h", "K");
   for (const [x, y] of [[16, 15], [17, 15], [16, 16], [17, 16], [22, 15], [23, 15], [22, 16], [23, 16]]) set(x, y, "e");
   set(16, 15, "w"); set(22, 15, "w"); set(14, 14, "e"); set(25, 14, "e");
+  // Poked: red eyes that meet under slanted brows, the same as on the front page.
+  if (angry) {
+    for (const [x, y] of [[16, 15], [17, 15], [16, 16], [17, 16], [22, 15], [23, 15], [22, 16], [23, 16], [14, 14], [25, 14]]) set(x, y, "R");
+    set(17, 16, "w"); set(22, 16, "w");
+    for (const [x, y] of [[15, 13], [16, 13], [17, 14], [18, 14], [24, 13], [23, 13], [22, 14], [21, 14]]) set(x, y, "m");
+  }
   if (open) {
     for (let x = 17; x <= 22; x++) { set(x, 19, "m"); set(x, 20, "m"); }
     for (let x = 18; x <= 21; x++) set(x, 21, "m");
