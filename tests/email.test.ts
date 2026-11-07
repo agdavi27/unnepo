@@ -11,7 +11,7 @@ import { processEmail, reviewEmail } from "@/lib/email/process";
 import { setClassifierForTests } from "@/lib/email/classify";
 import { applications } from "@/lib/apply/store";
 import { repo } from "@/lib/db/file-store";
-import { stageOf } from "@/lib/apply/stats";
+import { applicationStats, stageOf } from "@/lib/apply/stats";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { POST } from "@/app/api/[...slug]/route";
 import { unwrapForward } from "@/lib/email/inbound";
@@ -186,17 +186,33 @@ describe("processing forwarded emails", () => {
     expect(stageOf(moved!)).toBe("interviewing");
   });
 
-  it("sends a status email about a job that isn't saved to review, and approving saves it", async () => {
+  it("saves a status email about a job that isn't saved as its own job, left out of goals", async () => {
     const userId = await student();
     const result = await processEmail(userId, fixture("rejection"), "forward");
-    expect(result.outcome).toBe("review");
-    expect(result.event?.reason).toBe("no_match");
-    expect(await applications.list(userId)).toHaveLength(0);
+    expect(result.outcome).toBe("created");
+    const [app] = await applications.list(userId);
+    expect(app).toMatchObject({ company: "Initech", title: "Growth Intern", status: "applied_manual" });
+    expect(app.fillReport?.notCounted).toBe(true);
+    expect(stageOf(app)).toBe("rejected");
+    // Counted as an application and a response, but not toward today, the week or the streak.
+    const stats = applicationStats([app]);
+    expect(stats.applied).toBe(1);
+    expect(stats.rejected).toBe(1);
+    expect(stats.thisWeek).toBe(0);
+    expect(stats.perDay.every((day) => day.count === 0)).toBe(true);
+  });
+
+  it("still asks which job when the company has other saved jobs", async () => {
+    const userId = await student();
+    const base = { userId, jobUrl: "https://initech.example/jobs/1", ats: "other" as const, companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "submitted" as const, statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: "2026-10-20T12:00:00.000Z", contactsStatus: "idle" as const, contactsMessage: "", charged: false, attempts: 0 };
+    await applications.insert({ ...base, jobKey: "i1", title: "Finance Analyst", company: "Initech" });
+    const result = await processEmail(userId, fixture("rejection"), "forward");
+    expect(result.event).toMatchObject({ outcome: "review", reason: "no_match" });
     const approved = await reviewEmail(userId, { eventId: result.event!.id, action: "approve" });
     expect(approved.ok).toBe(true);
-    const [app] = await applications.list(userId);
-    expect(app).toMatchObject({ company: "Initech", title: "Growth Intern" });
-    expect(stageOf(app)).toBe("rejected");
+    const saved = (await applications.list(userId)).find((app) => app.title === "Growth Intern");
+    expect(saved?.fillReport?.notCounted).toBe(true);
+    expect(stageOf(saved!)).toBe("rejected");
   });
 
   it("changes nothing when it isn't sure, and lets the student pick when two jobs fit", async () => {

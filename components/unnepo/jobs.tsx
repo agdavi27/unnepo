@@ -462,13 +462,15 @@ function EditCareers({ onClose, onSaved }: { onClose: () => void; onSaved: (role
   );
 }
 
-export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoading, onClose, onGenerate, usesNote = "" }: {
+export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoading, onClose, onGenerate, onSpent, usesNote = "" }: {
   jobs: Job[];
   initialJob: Job | null;
   highlights: Highlight[];
   highlightsLoading: boolean;
   onClose: () => void;
   onGenerate: (input: LetterInput) => Promise<string>;
+  /** After a rewrite, which uses credits, so the credits left are read again. */
+  onSpent?: () => void;
   usesNote?: string;
 }) {
   const [step, setStep] = useState(initialJob ? 1 : 0);
@@ -503,6 +505,7 @@ export function CoverLetterModal({ jobs, initialJob, highlights, highlightsLoadi
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Couldn't rewrite that part.");
       setLetter(payload.letter);
+      onSpent?.();
       setPart("");
       setPartAsk("");
     } catch (reason) {

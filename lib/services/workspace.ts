@@ -13,7 +13,8 @@ import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/l
 import { highlightProfileWithModel, organizeQuizWithModel, quizSourceText } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
 import { applicationProfiles, applications } from "@/lib/apply/store";
-import { rewriteLetterPart } from "@/lib/apply/cover-letter";
+import { LETTER_VOICE, letterModel, rewriteLetterPart } from "@/lib/apply/cover-letter";
+import { assertUseAllowed, countUse } from "@/lib/apply/limits";
 import { student } from "@/lib/apply/service";
 import { addAppliedFromLetter } from "@/lib/apply/service";
 import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
@@ -297,8 +298,13 @@ const LETTER_TONES: Record<string, string> = {
 };
 const LETTER_LENGTHS: Record<string, string> = { short: "about 200 words", standard: "about 300 words", detailed: "about 400 words" };
 
-const COVER_LETTER_PROMPT =
-  "You write cover letters for college students applying to jobs and internships. Use only facts from the student's highlights and resume; never invent jobs, schools, skills, numbers, or achievements. Connect two or three of the student's real experiences to specific requirements in the job description. Do not copy sentences from the job description. Do not mention anything the student asked to avoid. Write plain text: a greeting, three or four short paragraphs, and a sign-off with the student's name. No placeholders in brackets. Return only JSON with the key body.";
+const COVER_LETTER_PROMPT = `You write cover letters for college students applying to jobs and internships.
+${LETTER_VOICE}
+- Lead with the highlights the student picked. Use the resume to fill in their details, not to add new topics.
+- Never mention anything the student asked to avoid.
+
+Shape: a greeting ("Dear Hiring Team," unless the posting names the person), three or four short paragraphs, and a sign-off with the student's full name. Follow the tone and length asked for. No placeholders in brackets.
+Return only JSON with the key body.`;
 
 /** Writes a cover letter for one job from the student's selected highlights and resume text. */
 export async function generateWorkspaceCoverLetter(userId: string, raw: unknown) {
@@ -344,11 +350,12 @@ export async function generateWorkspaceCoverLetter(userId: string, raw: unknown)
     resumeText ? `Resume:\n${resumeText}` : document?.organizedProfile ? `Profile:\n${JSON.stringify(document.organizedProfile).slice(0, 5000)}` : "",
     document?.form.excludedTopics.trim() ? `Topics not to mention: ${document.form.excludedTopics.trim()}` : "",
     notes ? `Extra notes from the student: ${notes}` : "",
+    `Today is ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}, for telling past roles from current ones.`,
   ]
     .filter(Boolean)
     .join("\n\n");
 
-  const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+  const model = letterModel();
   const started = Date.now();
   let letter = "";
   let inputTokens = 0;
@@ -391,10 +398,13 @@ export async function rewriteWorkspaceLetterPart(userId: string, raw: unknown) {
   const ask = String(body.ask ?? "").trim().slice(0, 300);
   if (part.trim().length < 3 || !letter.includes(part)) throw new ServiceError("Select part of the letter first.", "part", 400);
   if (!ask) throw new ServiceError("Say how to change it.", "ask", 400);
+  // A rewrite is an AI call like a chat answer, and costs the same.
+  await assertUseAllowed(userId, "answers");
   const info = await student(userId);
   const job = `${String(body.job?.title ?? "")} at ${String(body.job?.company ?? "")}\n${String(body.job?.description ?? "").slice(0, 3000)}`;
   const rewritten = await rewriteLetterPart(userId, letter, part, ask, { job, student: { name: info.user.name, resumeText: info.resumeText, profile: info.profileText } });
   if (!rewritten) throw new ServiceError("Couldn't rewrite that part. Try again.", "part", 502);
+  await countUse(userId, "answers");
   return { letter: rewritten };
 }
 

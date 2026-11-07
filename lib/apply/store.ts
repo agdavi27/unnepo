@@ -78,13 +78,13 @@ export const applications = {
   },
 
   /** Just each job's status and dates: what the panel's goal and spider need, without every job's long description. */
-  async appliedTimes(userId: string): Promise<Array<Pick<JobApplication, "status" | "submittedAt" | "createdAt">>> {
+  async appliedTimes(userId: string): Promise<Array<Pick<JobApplication, "status" | "submittedAt" | "createdAt"> & { notCounted: boolean }>> {
     if (onTables()) {
-      const { data, error } = await supabaseTables().from("job_applications").select("status,submitted_at,created_at").eq("user_id", userId);
+      const { data, error } = await supabaseTables().from("job_applications").select("status,submitted_at,created_at,not_counted:fill_report->notCounted").eq("user_id", userId);
       if (error) throw tableError(error);
-      return (data ?? []).map((row) => ({ status: row.status, submittedAt: row.submitted_at, createdAt: row.created_at }));
+      return (data ?? []).map((row) => ({ status: row.status, submittedAt: row.submitted_at, createdAt: row.created_at, notCounted: row.not_counted === true }));
     }
-    return withLock((db) => (db.jobApplications ?? []).filter((app) => app.userId === userId).map(({ status, submittedAt, createdAt }) => ({ status, submittedAt, createdAt })));
+    return withLock((db) => (db.jobApplications ?? []).filter((app) => app.userId === userId).map(({ status, submittedAt, createdAt, fillReport }) => ({ status, submittedAt, createdAt, notCounted: fillReport?.notCounted === true })));
   },
 
   /** Every student's fill records from their most recently updated applications, for the admin's failure report. */

@@ -18,6 +18,9 @@ export function stageOf(app: Pick<JobApplication, "status" | "fillReport"> & Par
   return last && now - last > NO_RESPONSE_DAYS * 86_400_000 ? "no_response" : "submitted";
 }
 
+/** False for a job saved from a status email with no sign of applying: it stays out of goals and today's count. */
+export const countsTowardGoals = (app: Pick<JobApplication, "fillReport">) => !app.fillReport?.notCounted;
+
 /** The day an application counts for: when it was submitted, else when it was added. */
 export const appliedOn = (app: Pick<JobApplication, "createdAt" | "submittedAt">) => new Date(app.submittedAt ?? app.createdAt);
 
@@ -41,8 +44,11 @@ export function applicationStats(items: Item[], now = new Date(), days = 14) {
   const rejected = stages.filter((stage) => stage === "rejected").length;
   const responses = interviewing + offers + rejected;
 
+  // Jobs only known from a later email (a rejection, an interview) were applied to on a day nobody knows: they
+  // count as applications, but not toward goals, the per-day chart or the streak.
+  const counted = applied.filter(countsTowardGoals);
   const perDayCount = new Map<string, number>();
-  for (const app of applied) perDayCount.set(dayKey(appliedOn(app)), (perDayCount.get(dayKey(appliedOn(app))) ?? 0) + 1);
+  for (const app of counted) perDayCount.set(dayKey(appliedOn(app)), (perDayCount.get(dayKey(appliedOn(app))) ?? 0) + 1);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const perDay = Array.from({ length: days }, (_, index) => {
     const date = new Date(today);
@@ -75,8 +81,8 @@ export function applicationStats(items: Item[], now = new Date(), days = 14) {
   return {
     applied: applied.length,
     inProgress: items.length - applied.length,
-    thisWeek: applied.filter((app) => appliedOn(app) >= weekStart(now)).length,
-    thisMonth: applied.filter((app) => appliedOn(app) >= monthStart).length,
+    thisWeek: counted.filter((app) => appliedOn(app) >= weekStart(now)).length,
+    thisMonth: counted.filter((app) => appliedOn(app) >= monthStart).length,
     /** People first emailed or followed up with this week. */
     emailedThisWeek: items.reduce((sum, app) => sum + Object.values(app.fillReport?.emailedAt ?? {}).filter((at) => new Date(at) >= weekStart(now)).length, 0),
     /** Jobs that moved to interviewing this month. */

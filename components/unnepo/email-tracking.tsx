@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Inbox, X } from "lucide-react";
 import { AddressRow, CopyButton, EmailWizard, guessProvider, type Progress, type Provider } from "@/components/unnepo/email-wizard";
 
 /**
@@ -131,17 +133,83 @@ function PasteBox({ focus, onDone }: { focus?: boolean; onDone: () => Promise<vo
   );
 }
 
-function ReviewInbox({ state, onDone }: { state: State; onDone: () => Promise<void> }) {
+/**
+ * The Review Inbox, as a small button on the Applications page with how many emails wait in it. It opens a popup
+ * over the blurred page. `open` lets Home's "emails need a look" open it straight away.
+ */
+export function ReviewInboxButton({ open, onOpenChange, onChanged }: { open: boolean; onOpenChange: (open: boolean) => void; onChanged: () => Promise<void> }) {
+  const [state, setState] = useState<Pick<State, "review" | "applications"> | null>(null);
+  const [problem, setProblem] = useState("");
+  const close = useRef<HTMLButtonElement>(null);
+  const load = useCallback(async () => {
+    try {
+      const next = await call<State>("/state");
+      setState({ review: next.review, applications: next.applications });
+      setProblem("");
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't load the Review Inbox.");
+    }
+  }, []);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the count is read once the page is in the browser
+    void load();
+    const again = () => { if (document.visibilityState === "visible") void load(); };
+    window.addEventListener("focus", again);
+    return () => window.removeEventListener("focus", again);
+  }, [load]);
+  const shut = useCallback(() => onOpenChange(false), [onOpenChange]);
+  useEffect(() => {
+    if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fresh when it opens
+    void load();
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") shut(); };
+    const before = document.body.style.overflow;
+    const opener = document.activeElement as HTMLElement | null;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    close.current?.focus();
+    return () => {
+      document.body.style.overflow = before;
+      document.removeEventListener("keydown", onKey);
+      opener?.focus();
+    };
+  }, [open, load, shut]);
+  const count = state?.review.length ?? 0;
+  const done = async () => {
+    await load();
+    await onChanged();
+  };
   return (
-    <section className={part} aria-labelledby="review">
-      <h3 id="review" className={partTitle}>Review Inbox <span className="font-normal text-[#8B8B94] tabular-nums">{state.review.length}</span></h3>
-      <p className="m-0 text-[13px] text-[#9A9AA3]">Emails Unnepo wasn&apos;t sure about. Nothing changes until you say.</p>
-      {state.review.length ? (
-        <ul className="m-0 flex list-none flex-col p-0">
-          {state.review.map((item) => <ReviewItem key={item.id} item={item} applications={state.applications} onDone={onDone} />)}
-        </ul>
-      ) : <p className="m-0 text-[13px] text-[#8B8B94]">Nothing to review.</p>}
-    </section>
+    <>
+      <button type="button" onClick={() => onOpenChange(true)} aria-haspopup="dialog" className={`${secondary} ${count ? "" : "text-muted"}`} title="Emails Unnepo wasn't sure about">
+        <Inbox aria-hidden size={14} strokeWidth={1.7} />
+        Review inbox
+        {count > 0 && <span className="rounded-full bg-[#3D8BFF] px-1.5 text-[11px] font-semibold text-white tabular-nums"><span className="sr-only">, waiting: </span>{count}</span>}
+      </button>
+      {open && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3 backdrop-blur-md sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) shut(); }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="review-title" className="flex max-h-full w-full max-w-2xl flex-col rounded-[20px] border border-[#222] bg-[#0F0F0F]">
+            <div className="flex items-start justify-between gap-3 border-b border-[#1A1A1A] p-5">
+              <div className="min-w-0">
+                <h2 id="review-title" className="m-0 text-lg font-semibold tracking-[-0.02em]">Review inbox <span className="text-sm font-normal text-[#8B8B94] tabular-nums">{count}</span></h2>
+                <p className="m-0 mt-0.5 text-sm text-muted">Emails Unnepo wasn&apos;t sure about. Nothing changes until you say.</p>
+              </div>
+              <button ref={close} type="button" aria-label="Close" onClick={shut} className="flex h-8 w-8 flex-none items-center justify-center rounded-full text-[#9A9AA3] hover:bg-white/5 hover:text-white"><X aria-hidden size={16} /></button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5 pt-2">
+              {problem && <p role="alert" className="m-0 mt-3 text-xs text-red-300">{problem}</p>}
+              {!state && !problem && <p className="m-0 mt-3 text-sm text-muted">Loading…</p>}
+              {state && (state.review.length ? (
+                <ul className="m-0 flex list-none flex-col p-0">
+                  {state.review.map((item) => <ReviewItem key={item.id} item={item} applications={state.applications} onDone={done} />)}
+                </ul>
+              ) : <p className="m-0 mt-3 text-sm text-[#8B8B94]">Nothing to review. Emails Unnepo can&apos;t place on a job wait here.</p>)}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -247,7 +315,6 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
         </div>
         {offWarning}
         <EmailWizard state={state} progress={progress} guess={guess} spider={spider} onProgress={moveTo} onFinish={finish} onCheck={load} onPaste={() => setPasting(true)} />
-        {state.review.length > 0 && <ReviewInbox state={state} onDone={load} />}
         {pasting && <PasteBox focus onDone={load} />}
         {problemLine}
       </div>
@@ -260,7 +327,7 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <h1 className={headingClass}>{working ? "Your tracker updates itself." : "Almost there."}</h1>
-        <p className={introClass}>{working ? "New job emails update your applications on their own. Anything Unnepo isn't sure about waits in your Review Inbox." : "Forward one job email to your Unnepo address to check that it works."}</p>
+        <p className={introClass}>{working ? "New job emails update your applications on their own. Anything Unnepo isn't sure about waits in the Review Inbox on your Applications page." : "Forward one job email to your Unnepo address to check that it works."}</p>
       </div>
       {offWarning}
 
@@ -290,7 +357,6 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
         </div>
       </section>
 
-      <ReviewInbox state={state} onDone={load} />
       <PasteBox onDone={load} />
 
       <details className={part}>

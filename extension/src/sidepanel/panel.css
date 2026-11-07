@@ -123,7 +123,8 @@ details.part .view { padding: 12px 0 0; }
 .rappel-spider .mouth-open { display: none; }
 
 /* The tools: two big buttons, and the rest small */
-.tools { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+/* Room above the buttons, so they sit as far from the spider's line as from the panel's sides. */
+.tools { flex: 1; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-top: 16px; }
 .big-tool { min-height: 84px; flex: none; padding: 0 18px; border: 1px solid #33333B; border-radius: 14px; background: #111114; display: flex; align-items: center; gap: 12px; font: 600 16px Geist, sans-serif; text-align: left; cursor: pointer; }
 .big-tool:hover { border-color: #4A4A55; background: #16161A; }
 .big-tool-icon { flex: none; color: var(--accent); }

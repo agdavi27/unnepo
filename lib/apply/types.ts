@@ -106,6 +106,13 @@ export type FillReport = {
   lastEmailAt?: string;
   /** Saved from a forwarded email ("added"), or its status changed by one ("updated"): the badge on the Applied list. */
   fromEmail?: "added" | "updated";
+  /**
+   * Saved from a rejection, interview or other status email with no confirmation of applying before it: it's on
+   * the list, but it doesn't count toward goals, today's count or the streak, since the day it was applied isn't known.
+   */
+  notCounted?: boolean;
+  /** Starred by the student on the Applications page, to keep an eye on. */
+  starred?: boolean;
   /** The student's own notes on this job, typed on the Applied page. */
   notes?: string;
   /** When the job's details were last read from its link (to fill in a missing company). */

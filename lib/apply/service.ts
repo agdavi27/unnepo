@@ -294,7 +294,7 @@ export async function setCompany(userId: string, raw: unknown) {
 
 /**
  * The student edits a job's details on the Applied page: its title, company, place, posting link and
- * description, and their own notes. Only what's sent changes; an empty notes box clears the notes.
+ * description, their own notes, and whether it's starred. Only what's sent changes; an empty notes box clears the notes.
  */
 export async function updateJobDetails(userId: string, raw: unknown) {
   const body = (raw ?? {}) as Record<string, unknown>;
@@ -305,7 +305,8 @@ export async function updateJobDetails(userId: string, raw: unknown) {
   if (company !== undefined && company.length < 2) throw new ServiceError("Type the company's name.", "company", 400);
   if (link !== undefined && link && !/^https:\/\/\S+\.\S+/i.test(link)) throw new ServiceError("The link should start with https://.", "url", 400);
   const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
-  const nextReport = { ...report, ...(link !== undefined ? { postingUrl: link || undefined } : {}), ...(notes !== undefined ? { notes: notes.trim() ? notes : undefined } : {}) };
+  const starred = typeof body.starred === "boolean" ? body.starred : undefined;
+  const nextReport = { ...report, ...(link !== undefined ? { postingUrl: link || undefined } : {}), ...(notes !== undefined ? { notes: notes.trim() ? notes : undefined } : {}), ...(starred !== undefined ? { starred: starred || undefined } : {}) };
   const updated = await applications.update(userId, app.id, {
     ...(title !== undefined ? { title } : {}),
     // A new company means a new search for its website and people.

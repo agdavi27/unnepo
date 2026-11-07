@@ -9,18 +9,25 @@ const app = (id: string, extra: Record<string, unknown> = {}) => ({
 const reply = { outcome: "interviewing", statusHistory: [{ at: "2026-11-04T12:00:00.000Z", status: "interviewing", source: "email" }] };
 
 describe("Home's next up list", () => {
-  it("orders replies, emails to review, follow-ups, unfinished applications, then finding people", () => {
+  it("orders replies, follow-ups, emails to review, unfinished applications, then finding people", () => {
     const items = nextUp([
       app("people", { contactsStatus: "idle" }),
       app("started", { status: "filling", submittedAt: null }),
       app("follow", { fillReport: { emailedAt: { c1: "2026-10-20T12:00:00.000Z" } }, contacts: [{ id: "c1", name: "Maya", outreachStatus: "emailed" }] }),
       app("replied", { fillReport: reply }),
     ], { toReview: 2, now });
-    expect(items.map((item) => item.kind)).toEqual(["reply", "review", "follow_up", "finish", "find_people"]);
+    expect(items.map((item) => item.kind)).toEqual(["reply", "follow_up", "review", "finish", "find_people"]);
     expect(items[0]).toMatchObject({ title: "replied replied to your application", detail: "replied role · arrived today", when: "Today", action: "Read email" });
-    expect(items[1].title).toBe("2 emails need a look");
-    expect(items[2].title).toBe("Follow up with Maya");
+    expect(items[1].title).toBe("Follow up with Maya");
+    expect(items[2].title).toBe("2 emails need a look");
     expect(items[3].title).toBe("Finish started role at started");
+  });
+
+  it("says how many more applications today's goal needs, before finding people", () => {
+    const items = nextUp([app("people", { contactsStatus: "idle" })], { now, goal: { today: 1, daily: 3 } });
+    expect(items.map((item) => item.kind)).toEqual(["goal", "find_people"]);
+    expect(items[0]).toMatchObject({ title: "Apply to 2 more jobs to hit today's goal", detail: "1 of 3 today", action: "Find jobs" });
+    expect(nextUp([], { now, goal: { today: 3, daily: 3 } })).toEqual([]);
   });
 
   it("drops a reply once it's read, once it's old, or when it was bad news", () => {

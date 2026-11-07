@@ -60,7 +60,7 @@ export function Landing() {
         <main className="contents">
           <section className="mr-[calc(var(--pad)-var(--gutter))] flex flex-wrap items-center gap-x-12 gap-y-10 pb-24 pt-6">
             <div className="flex min-w-0 flex-[1_1_460px] flex-col items-start gap-5">
-              <h1 className="m-0 text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Less applying.<br />More interviewing.</h1>
+              <h1 className="m-0 text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Apply faster.<br />Follow up smarter.<br />Get hired.</h1>
               <p className="m-0 max-w-[500px] text-[clamp(16px,2vw,19px)] leading-normal text-[#B4B4BC]">Apply on any job board or company site. Every application lands in one place, with the people to follow up with.</p>
               <GetExtension
                 href={cta}

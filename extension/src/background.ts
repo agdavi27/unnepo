@@ -118,7 +118,10 @@ async function api<T>(method: "GET" | "POST" | "DELETE", path: string, body?: un
     void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
   }
   if (!response.ok) throw new ApiError((payload as { error?: string }).error || `Unnepo answered ${response.status}.`, response.status, (payload as { code?: string }).code ?? "");
-  if (method !== "GET") await meChanged(path);
+  // A quiet call that used something up (an autofill's first success) changes the credits left like any other.
+  const spent = (payload as { counted?: unknown } | null)?.counted === true;
+  if (method !== "GET") await meChanged(path, spent);
+  if (spent) void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
   return payload as T;
 }
 
@@ -136,10 +139,10 @@ let reading: { call: number; result: Promise<Me> } | null = null;
 
 const meCopy = async () => ((await chrome.storage.session.get("meCopy")).meCopy as MeCopy | undefined) ?? null;
 
-async function meChanged(path: string) {
+async function meChanged(path: string, spent = false) {
   meCalls += 1;
   const copy = await meCopy();
-  if (copy) await chrome.storage.session.set({ meCopy: { ...copy, at: 0, waitForNew: copy.waitForNew || !QUIET.has(path) } });
+  if (copy) await chrome.storage.session.set({ meCopy: { ...copy, at: 0, waitForNew: copy.waitForNew || spent || !QUIET.has(path) } });
 }
 
 function readMe(token: string) {

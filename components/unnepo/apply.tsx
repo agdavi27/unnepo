@@ -3,7 +3,9 @@
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FileText, GraduationCap, Mail, Plus, StickyNote, User, X } from "lucide-react";
+import { FileText, GraduationCap, Mail, Plus, Star, StickyNote, User, X } from "lucide-react";
+import { ReviewInboxButton } from "@/components/unnepo/email-tracking";
+import { guessProvider } from "@/components/unnepo/email-wizard";
 import { HomePage, HomeTiles, MoreStats, PerDayCard, type Goals } from "@/components/unnepo/home";
 import type { Maybe, Session } from "@/components/unnepo/activity";
 import { extensionHere, readLinksInBrowser } from "@/lib/extension-bridge";
@@ -294,6 +296,10 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
   const [site, setSite] = useState("");
   const [period, setPeriod] = useState<When>("all");
   const [notFollowed, setNotFollowed] = useState(false);
+  const [starredOnly, setStarredOnly] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  // Jobs with a follow-up email due: their rows are yellow, so it's obvious one needs sending.
+  const followUpIds = useMemo(() => new Set(followUpsDue(apps).map((item) => item.applicationId)), [apps]);
   const sites = useMemo(() => sitesIn(apps), [apps]);
   const [problem, setProblem] = useState("");
   const [adding, setAdding] = useState(false);
@@ -324,14 +330,16 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
   const shown = useMemo(() => {
     const words = query.trim().toLowerCase();
     const matching = apps.filter((app) => !words || `${app.company} ${app.title} ${app.location ?? ""}`.toLowerCase().includes(words));
-    const due = new Set(followUpsDue(apps).map((item) => item.applicationId));
-    return sortByColumn(arrange(matching, { sort: "recent", site, when: period, notFollowed }), sort.column, sort.ascending, due);
-  }, [apps, query, sort, site, period, notFollowed]);
+    const sorted = sortByColumn(arrange(matching.filter((app) => !starredOnly || app.fillReport?.starred), { sort: "recent", site, when: period, notFollowed }), sort.column, sort.ascending, followUpIds);
+    // Starred jobs stay at the top, in the order the column gives them.
+    return [...sorted.filter((app) => app.fillReport?.starred), ...sorted.filter((app) => !app.fillReport?.starred)];
+  }, [apps, query, sort, site, period, notFollowed, starredOnly, followUpIds]);
   const clearFilters = () => {
     setQuery("");
     setSite("");
     setPeriod("all");
     setNotFollowed(false);
+    setStarredOnly(false);
   };
   const pressColumn = (column: Column) => setSort((now) => (now.column === column ? { column, ascending: !now.ascending } : { column, ascending: column !== "applied" }));
 
@@ -397,6 +405,20 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
     }
   }
 
+  async function toggleStar(app: App) {
+    setProblem("");
+    const starred = !app.fillReport?.starred;
+    const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+    onReplace({ ...app, fillReport: { ...report, starred } });
+    try {
+      const result = await call<{ application: App }>("/details", "PATCH", { applicationId: app.id, starred });
+      onReplace({ ...app, ...result.application, contacts: app.contacts });
+    } catch (reason) {
+      onReplace(app);
+      setProblem(reason instanceof Error ? reason.message : "Couldn't star it.");
+    }
+  }
+
   const stageCell = (app: App) => <StageControl app={app} onChange={(next) => void setStage(app, next)} />;
   const row = (app: App) => {
     const expanded = open === app.id;
@@ -405,14 +427,22 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
     const toggle = () => setOpen(expanded ? null : app.id);
     const role = app.titleMissing ? "" : app.title;
     const fromEmail = app.fillReport?.fromEmail ? <EmailMark mark={app.fillReport.fromEmail} /> : null;
+    const starred = Boolean(app.fillReport?.starred);
+    const followUp = followUpIds.has(app.id);
     return (
       <Fragment key={app.id}>
-        <tr id={`job-${app.id}`} className="border-t border-[#17171B]">
+        <tr id={`job-${app.id}`} className={`border-t border-[#17171B] ${followUp ? "bg-[#F5C518]/[0.08] shadow-[inset_3px_0_0_#F5C518]" : ""}`}>
           <td className="py-3.5 pr-2 align-middle font-medium">
+            <span className="flex items-start gap-1">
+            <button type="button" onClick={() => void toggleStar(app)} aria-pressed={starred} aria-label={starred ? `Unstar ${app.company}` : `Star ${app.company}`} title={starred ? "Starred" : "Star this job"} className={`-ml-1 mt-[1px] flex h-5 w-5 flex-none items-center justify-center rounded hover:text-[#F5C518] ${starred ? "text-[#F5C518]" : "text-[#4A4A52]"}`}>
+              <Star aria-hidden size={14} strokeWidth={1.8} fill={starred ? "currentColor" : "none"} />
+            </button>
             <button type="button" onClick={toggle} aria-expanded={expanded} aria-label={app.companyMissing ? "Open this job's details" : undefined} className="flex max-w-full items-start gap-1.5 text-left hover:text-white">
               <span aria-hidden className={`mt-[3px] text-[10px] text-[#8B8B94] transition-transform ${expanded ? "rotate-90" : ""}`}>▶</span>
               <span className="min-w-0 break-words">{app.companyMissing ? "" : app.company}</span>
             </button>
+            </span>
+            {followUp && <span className="mt-1 ml-5 inline-flex items-center rounded-full bg-[#F5C518]/15 px-2 py-0.5 text-[11px] font-semibold text-[#F5C518]">Follow up due</span>}
             {(role || fromEmail) && <span className="mt-0.5 flex items-center gap-1.5 pl-4 text-[13px] font-normal text-[#B4B4BC] sm:hidden"><span className="min-w-0">{role}</span>{fromEmail}</span>}
             <span className="mt-0.5 block pl-4 font-mono text-xs font-normal text-[#8B8B94] sm:hidden">{when(appliedOn(app))}</span>
           </td>
@@ -429,7 +459,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
             <td colSpan={4} className="pb-4">
               <div className="space-y-4 rounded-xl border border-line bg-panel p-4">
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
-                  <JobInfo app={app} startOn={openOn === app.id ? "emails" : ""} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={(next) => void readLinks([next ?? app], app.id)} onSaved={onReplace} />
+                  <JobInfo app={app} studentEmail={data.profile.email} startOn={openOn === app.id ? "emails" : ""} reading={reading === app.id} disabled={reading !== null} note={readNote.key === app.id && reading === null ? readNote.text : ""} onRead={(next) => void readLinks([next ?? app], app.id)} onSaved={onReplace} />
                   {/* The people box stays this size whatever is in it, and scrolls inside. */}
                   <div className="relative min-w-0 lg:min-h-[24rem]">
                     <div className="h-full lg:absolute lg:inset-0">
@@ -515,6 +545,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
             onWrite={(appId, contactId) => act("/contact-email", "POST", { applicationId: appId, contactId, followUp: true })}
             onSent={(contactId) => act("/contact", "PATCH", { contactId, status: "emailed", followedUp: true })}
             onSetup={onSetup}
+            onReview={() => { onPage("applications"); setReviewOpen(true); }}
             onJobs={onJobs}
             onSpiders={onSpiders}
           />
@@ -525,7 +556,8 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h1 id="applied-title" className="m-0 text-3xl font-bold tracking-[-1px]">Applications <span className="text-sm font-medium tracking-normal text-[#8B8B94] tabular-nums">{apps.length}</span></h1>
             <div className="flex items-center gap-2">
-              {apps.length > 0 && <FiltersMenu query={query} onQuery={setQuery} period={period} onPeriod={setPeriod} site={site} onSite={setSite} sites={sites} notFollowed={notFollowed} onNotFollowed={setNotFollowed} shown={shown.length} onClear={clearFilters} />}
+              <ReviewInboxButton open={reviewOpen} onOpenChange={setReviewOpen} onChanged={onReload} />
+              {apps.length > 0 && <FiltersMenu query={query} onQuery={setQuery} period={period} onPeriod={setPeriod} site={site} onSite={setSite} sites={sites} notFollowed={notFollowed} onNotFollowed={setNotFollowed} starredOnly={starredOnly} onStarredOnly={setStarredOnly} shown={shown.length} onClear={clearFilters} />}
               <button type="button" className={secondary} onClick={() => setAdding((on) => !on)} aria-expanded={adding}>+ Add job</button>
             </div>
           </div>
@@ -702,11 +734,12 @@ function EmailMark({ mark }: { mark: "added" | "updated" }) {
 }
 
 /** The search and every filter for the Applications list, folded into one button. */
-function FiltersMenu({ query, onQuery, period, onPeriod, site, onSite, sites, notFollowed, onNotFollowed, shown, onClear }: {
+function FiltersMenu({ query, onQuery, period, onPeriod, site, onSite, sites, notFollowed, onNotFollowed, starredOnly, onStarredOnly, shown, onClear }: {
   query: string; onQuery: (value: string) => void;
   period: When; onPeriod: (value: When) => void;
   site: string; onSite: (value: string) => void; sites: Array<{ site: string; count: number }>;
   notFollowed: boolean; onNotFollowed: (value: boolean) => void;
+  starredOnly: boolean; onStarredOnly: (value: boolean) => void;
   shown: number; onClear: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -722,7 +755,7 @@ function FiltersMenu({ query, onQuery, period, onPeriod, site, onSite, sites, no
       document.removeEventListener("mousedown", onClick);
     };
   }, [open]);
-  const active = [query.trim(), site, period !== "all", notFollowed].filter(Boolean).length;
+  const active = [query.trim(), site, period !== "all", notFollowed, starredOnly].filter(Boolean).length;
   const select = "w-full rounded-lg border border-line bg-card px-2 py-1.5 text-sm text-ink";
   return (
     <div ref={box} className="sm:relative">
@@ -753,6 +786,10 @@ function FiltersMenu({ query, onQuery, period, onPeriod, site, onSite, sites, no
             <input type="checkbox" checked={notFollowed} onChange={(event) => onNotFollowed(event.target.checked)} className="h-4 w-4 accent-white" />
             Not followed up yet
           </label>
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input type="checkbox" checked={starredOnly} onChange={(event) => onStarredOnly(event.target.checked)} className="h-4 w-4 accent-white" />
+            Starred only
+          </label>
           <div className="flex items-center justify-between border-t border-line pt-2.5 text-xs text-faint">
             <span className="tabular-nums" role="status">{shown} shown</span>
             {active > 0 && <button type="button" onClick={onClear} className="text-ink underline-offset-4 hover:underline">Clear filters</button>}
@@ -760,6 +797,32 @@ function FiltersMenu({ query, onQuery, period, onPeriod, site, onSite, sites, no
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * "See all emails from Acme": the student's own inbox (Gmail or Outlook, from their email address, Gmail when it
+ * can't tell), searched for mail from the company's domain or, without one, its name.
+ */
+function companyEmailSearch(company: string, domain: string | null, provider: "gmail" | "outlook") {
+  const name = company.replace(/["()]/g, "").trim();
+  const query = domain ? `from:(${domain} OR "${name}")` : `from:("${name}")`;
+  if (provider === "outlook") return `https://outlook.live.com/mail/0/search?q=${encodeURIComponent(domain ? `from:${domain}` : `from:"${name}"`)}`;
+  return `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(query)}`;
+}
+
+function CompanyEmailsLink({ company, domain, studentEmail }: { company: string; domain: string | null; studentEmail?: string | null }) {
+  const guessed = guessProvider(studentEmail);
+  const main = guessed === "outlook" ? "outlook" : "gmail";
+  const other = main === "gmail" ? "outlook" : "gmail";
+  const label = { gmail: "Gmail", outlook: "Outlook" };
+  return (
+    <p className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]">
+      <a href={companyEmailSearch(company, domain, main)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-ink underline-offset-4 hover:text-white hover:underline">
+        <Mail aria-hidden size={13} strokeWidth={1.7} />See all emails from {company} in {label[main]} ↗
+      </a>
+      <a href={companyEmailSearch(company, domain, other)} target="_blank" rel="noreferrer" className="text-xs text-faint underline-offset-4 hover:text-white hover:underline">or {label[other]} ↗</a>
+    </p>
   );
 }
 
@@ -775,7 +838,7 @@ const HISTORY_LABEL: Record<string, string> = { applied: "Applied", incomplete: 
  * application as links. "Edit" changes any of it; "Fill in from the link" reads the link again for whatever is
  * missing. Below, the student's own quick notes, saved when they press Save.
  */
-function JobInfo({ app, startOn, reading, disabled, note, onRead, onSaved }: { app: App; startOn: "" | "emails"; reading: boolean; disabled: boolean; note: string; onRead: (next?: App) => void; onSaved: (app: App) => void }) {
+function JobInfo({ app, studentEmail, startOn, reading, disabled, note, onRead, onSaved }: { app: App; studentEmail?: string | null; startOn: "" | "emails"; reading: boolean; disabled: boolean; note: string; onRead: (next?: App) => void; onSaved: (app: App) => void }) {
   const posting = postingLink(app);
   const applied = app.fillReport?.activity?.find((event) => event.kind === "applied");
   const link = posting || app.applicationUrl || "";
@@ -1013,6 +1076,7 @@ function JobInfo({ app, startOn, reading, disabled, note, onRead, onSaved }: { a
               </span>
             </form>
           ))}
+          {!app.companyMissing && <CompanyEmailsLink company={app.company} domain={app.companyDomain} studentEmail={studentEmail} />}
           {panel === "emails" && <JobEmailsDialog app={app} onClose={closeEmails} />}
           {panel === "notes" && (
             <form

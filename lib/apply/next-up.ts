@@ -3,12 +3,13 @@ import { isApplied, stageOf } from "@/lib/apply/stats";
 import type { ApplicationContact, JobApplication } from "@/lib/apply/types";
 
 /**
- * Home's list of what to do next, most urgent first: replies from companies, emails Unnepo wasn't sure about,
- * follow-ups that are due, applications left unfinished, and recent jobs with nobody looked up yet.
- * No server imports, so the web app runs it.
+ * Home's list of what to do next, most urgent first: replies from companies (an interview waits on the student),
+ * follow-ups that are due (they go stale), emails Unnepo wasn't sure about (the tracker is wrong until they're
+ * placed), applications left unfinished, how many more to apply to for today's goal, and recent jobs with nobody
+ * looked up yet. No server imports, so the web app runs it.
  */
 
-export type NextKind = "reply" | "review" | "follow_up" | "finish" | "find_people";
+export type NextKind = "reply" | "review" | "follow_up" | "finish" | "goal" | "find_people";
 
 export type NextItem = {
   key: string;
@@ -47,7 +48,10 @@ function dayWords(at: number, now: Date) {
   return new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export function nextUp(apps: NextApp[], options: { toReview?: number; read?: ReadonlySet<string>; now?: Date } = {}): NextItem[] {
+/** Unfinished applications shown at most: past that, the goal and people come before the rest of them. */
+const FINISH_MOST = 3;
+
+export function nextUp(apps: NextApp[], options: { toReview?: number; read?: ReadonlySet<string>; now?: Date; goal?: { today: number; daily: number } } = {}): NextItem[] {
   const now = options.now ?? new Date();
   const read = options.read ?? new Set<string>();
   const items: NextItem[] = [];
@@ -68,14 +72,6 @@ export function nextUp(apps: NextApp[], options: { toReview?: number; read?: Rea
     });
   }
 
-  const toReview = options.toReview ?? 0;
-  if (toReview > 0) {
-    items.push({
-      key: "review", kind: "review", title: toReview === 1 ? "1 email needs a look" : `${toReview} emails need a look`,
-      detail: "Unnepo wasn't sure which job these belong to", when: "To review", action: "Review emails",
-    });
-  }
-
   for (const due of followUpsDue(apps, now)) {
     items.push({
       key: `follow:${due.contactId}`, kind: "follow_up", applicationId: due.applicationId, contactId: due.contactId,
@@ -83,14 +79,37 @@ export function nextUp(apps: NextApp[], options: { toReview?: number; read?: Rea
     });
   }
 
+  const toReview = options.toReview ?? 0;
+  if (toReview > 0) {
+    items.push({
+      key: "review", kind: "review", title: toReview === 1 ? "1 email needs a look" : `${toReview} emails need a look`,
+      detail: "Unnepo wasn't sure which job they belong to. Your tracker is off until you place them", when: "To review", action: "Review emails",
+    });
+  }
+
+
   const unfinished = apps
     .filter((app) => !isApplied(app.status) && !app.companyMissing && now.getTime() - Date.parse(app.createdAt) <= FINISH_DAYS * DAY)
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    .slice(0, FINISH_MOST);
   for (const app of unfinished) {
     items.push({
       key: `finish:${app.id}`, kind: "finish", applicationId: app.id,
       title: role(app) ? `Finish ${role(app)} at ${app.company}` : `Finish your application at ${app.company}`,
       detail: "In progress", when: "In progress", action: "Finish application",
+    });
+  }
+
+  // Behind on today's goal: how many more, with a nudge to the ones already started.
+  const goal = options.goal;
+  if (goal && goal.daily > 0 && goal.today < goal.daily) {
+    const left = goal.daily - goal.today;
+    const started = unfinished.length;
+    items.push({
+      key: `goal:${goal.today}`, kind: "goal",
+      title: `Apply to ${left} more ${left === 1 ? "job" : "jobs"} to hit today's goal`,
+      detail: [`${goal.today} of ${goal.daily} today`, started ? `${started} already started` : ""].filter(Boolean).join(" · "),
+      when: `${left} to go`, action: "Find jobs",
     });
   }
 

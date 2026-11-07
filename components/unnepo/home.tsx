@@ -51,11 +51,13 @@ type HomeProps = {
   onWrite: (appId: string, contactId: string) => Promise<void>;
   onSent: (contactId: string) => Promise<void>;
   onSetup: () => void;
+  /** Opens the Review Inbox on the Applications page. */
+  onReview: () => void;
   onJobs: () => void;
   onSpiders: () => void;
 };
 
-export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpenJob, onWrite, onSent, onSetup, onJobs, onSpiders }: HomeProps) {
+export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpenJob, onWrite, onSent, onReview, onJobs, onSpiders }: HomeProps) {
   const stats = useMemo(() => applicationStats(apps), [apps]);
   const [toReview, setToReview] = useState(0);
   // Replies already opened on this device, so they leave the list.
@@ -77,11 +79,13 @@ export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpe
     return () => { cancelled = true; };
   }, []);
   const items = useMemo(() => {
-    const all = nextUp(apps, { toReview, read });
+    const today = stats.perDay[stats.perDay.length - 1]?.count ?? 0;
+    const all = nextUp(apps, { toReview, read, goal: { today, daily: goals.dailyGoal ?? DEFAULT_DAILY_GOAL } });
     return [...all.filter((item) => !skipped.includes(item.key)), ...skipped.flatMap((key) => all.filter((item) => item.key === key))];
-  }, [apps, toReview, read, skipped]);
+  }, [apps, toReview, read, skipped, stats, goals.dailyGoal]);
   const open = (item: NextItem) => {
-    if (item.kind === "review") return onSetup();
+    if (item.kind === "review") return onReview();
+    if (item.kind === "goal") return onJobs();
     if (item.kind === "reply") {
       const next = new Set(read).add(item.key);
       setRead(next);

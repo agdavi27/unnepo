@@ -80,7 +80,7 @@ export async function extensionMe(userId: string) {
   const weekAgo = Date.now() - 8 * 86_400_000;
   return {
     // The panel's Day / Week goal. The panel counts them, so "today" is the student's own day.
-    goal: { weekly: stored?.weeklyGoal ?? null, appliedAt: applied.map((app) => app.submittedAt ?? app.createdAt).filter((at) => Date.parse(at) >= weekAgo) },
+    goal: { weekly: stored?.weeklyGoal ?? null, appliedAt: applied.filter((app) => !app.notCounted).map((app) => app.submittedAt ?? app.createdAt).filter((at) => Date.parse(at) >= weekAgo) },
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: credits?.balance ?? 0,
     unlimitedCredits: usage.unlimited,
@@ -438,13 +438,14 @@ export async function extensionAttempts(userId: string, raw: unknown) {
       ...(entry.ok === true ? {} : { problem: problem ?? "error", reason: text(entry.reason, 200) }), at,
     }];
   });
-  if (!attempts.length) return { saved: 0 };
+  if (!attempts.length) return { saved: 0, counted: false };
   const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
   // A successful autofill: at least one answer stuck on the form. Each job counts once.
   const counts = !report.autofillCounted && attempts.some((attempt) => attempt.ok);
   await applications.update(userId, app.id, { fillReport: { ...report, ...(counts ? { autofillCounted: true } : {}), attempts: [...(report.attempts ?? []), ...attempts].slice(-ATTEMPTS_PER_APP) } });
   if (counts) await countUse(userId, "autofills");
-  return { saved: attempts.length };
+  // `counted`: this autofill used one up, so the extension reads the credits left again.
+  return { saved: attempts.length, counted: counts };
 }
 
 /** Answers the student typed into a form themselves, saved so the same question fills itself next time. */
@@ -487,9 +488,12 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   if (typeof body.part === "string" && typeof body.previous === "string") {
     const how = typeof body.ask === "string" ? body.ask.trim().slice(0, 300) : "";
     if (!how) throw new ServiceError("Say how to change it.", "ask", 400);
+    // A rewrite is an AI call like a chat answer, and costs the same.
+    await assertUseAllowed(userId, "answers");
     const jobText = app ? `${app.title} at ${app.company}\n${app.requirements.join("\n")}\n${app.description}` : pasted;
     const rewritten = await rewriteLetterPart(userId, body.previous.slice(0, 6000), body.part.slice(0, 2000), how, { job: jobText, student: { name, resumeText: info.resumeText, profile: info.profileText } });
     if (!rewritten) throw new ServiceError("Couldn't rewrite that part. Select it again and try once more.", "part", 502);
+    await countUse(userId, "answers");
     body.text = rewritten;
   }
   // The student edited the letter themselves: their text, as typed, with no AI.
@@ -499,7 +503,7 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   // A new letter from AI counts toward Free's monthly number; the student's own edits and a reused letter don't.
   const fresh = !own && !reused;
   if (fresh) await assertCoverLetterAllowed(userId);
-  const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText }, style));
+  const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, style));
   if (fresh && text) await countCoverLetter(userId);
   // The student asked for this letter (autofill writing one for a form doesn't count), so the job goes on Applied.
   const addedToApplied = fresh && Boolean(text) && body.track === true && !generic && await (app ? markAppliedFromLetter(userId, app.id) : addPastedJob(userId, pasted)).catch(() => false);

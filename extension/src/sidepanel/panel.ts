@@ -250,8 +250,15 @@ const SPARK_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="curre
 
 /** The blue AI spark on the two big buttons. */
 const SPARK = SPARK_SMALL.replace('width="13" height="13"', 'class="big-tool-icon" width="20" height="20"');
-/** "Write cover letter (2 credits)", on every plan. The server's number wins; the fallback covers a server that doesn't send one. */
+/**
+ * "Write cover letter (2 credits)" on Free, where it uses credits up. Pro and Premium include writing, so their
+ * credits don't move and the button says so; unlimited accounts see no cost. The server's number wins; the
+ * fallback covers a server that doesn't send one.
+ */
 const withCost = (label: string, kind: "letters" | "answers") => {
+  const me = lastState?.me;
+  if (me?.unlimitedCredits) return label;
+  if (me?.usage && !me.usage.free) return `${label} (included in your plan)`;
   const cost = lastState?.me?.creditCost?.[kind] ?? CREDIT_COST_FALLBACK[kind];
   return `${label} (${cost} ${cost === 1 ? "credit" : "credits"})`;
 };

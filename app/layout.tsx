@@ -9,7 +9,7 @@ const caveat = Caveat({ variable: "--font-caveat", subsets: ["latin"] });
 const pixel = Press_Start_2P({ variable: "--font-pixel", weight: "400", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Unnepo — Less applying. More interviewing.",
+  title: "Unnepo — Apply faster. Follow up smarter. Get hired.",
   description: "A Chrome extension that fills job and internship applications for you, then finds the recruiters behind the role. Free to start.",
 };
 

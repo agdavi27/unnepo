@@ -2,13 +2,33 @@ import { serverConfig } from "@/lib/config";
 import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import type { JobApplication } from "@/lib/apply/types";
 
-export const COVER_LETTER_PROMPT = `You write a short cover letter for a college student applying to a job.
-Use only facts from the student's resume and profile and the job posting. Never invent experience, employers, dates, numbers, skills, awards, or reasons the student likes the company beyond what the posting says.
-Shape: "Dear Hiring Team," then three short paragraphs: the role and who the student is (school, year, major when known); one or two real experiences that match the job's requirements, with what the student did; a brief, confident close. Then "Sincerely," and the student's full name on the next line.
+/**
+ * How a letter should read, shared by the web app and the extension. Accurate first (only what the student's own
+ * resume and profile say, matched to what the posting asks for), then human: specific, plain and polite, like a
+ * thoughtful student writing to a professional they respect, never stiff and never casual.
+ */
+export const LETTER_VOICE = `Accuracy comes first:
+- Use only facts from the student's resume, profile, chosen highlights and notes, and the job posting. Never invent or round up experience, employers, titles, dates, numbers, tools, coursework, awards, or reasons for liking the company.
+- Before writing, pick the two or three requirements the posting stresses most, and for each find the student's strongest real evidence. Build the letter on those matches. If the student has no evidence for a requirement, leave it out rather than claim it.
+- Get the facts right: a role that has ended is past tense, one still going (no end date, or "Present") is present tense. Use the student's real school, class year and major only as given.
+- Name the company and role exactly as the posting does. Say something specific about the team or work only when the posting says it.
+
+How it should sound:
+- Like a capable student wrote it themselves: clear, specific and warm, but professional. No slang, no exclamation marks, contractions only now and then.
+- Show, don't claim: describe what the student actually did and what came of it ("built the intake form 40 volunteers now use") instead of adjectives about themselves ("hardworking", "detail-oriented", "passionate").
+- Vary sentence length. Short paragraphs. Each paragraph makes one point.
+- Never use these: "I am writing to express my interest", "I am excited to apply", "I believe I would be a great fit", "passion"/"passionate", "leverage", "synergy", "dynamic", "fast-paced environment", "hit the ground running", "unique opportunity", "honed", "delve", "testament", "tapestry", "I am confident that", "thrilled", em dashes.
+- Don't restate the resume line by line or list every skill. Depth on two experiences beats a tour of five.
+- Don't copy sentences from the job posting.`;
+
+export const COVER_LETTER_PROMPT = `You write a cover letter for a college student applying to a job.
+${LETTER_VOICE}
+
+Shape: "Dear Hiring Team," then three short paragraphs. First: the role, who the student is (school, year, major when known) and, in one sentence, the clearest reason they fit, drawn from their real experience. Second: one or two real experiences that answer the posting's main requirements, with what the student did and what came of it. Third: a brief, confident close that says what they'd bring and that they'd welcome a conversation. Then "Sincerely," and the student's full name on the next line.
 Under 250 words. Plain text, paragraphs separated by a blank line. No addresses, no date, no placeholders in brackets, no markdown.
 Return only the letter.`;
 
-export type CoverLetterStudent = { name: string; resumeText: string; profile: string };
+export type CoverLetterStudent = { name: string; resumeText: string; profile: string; /** Topics the student asked never to bring up. */ excluded?: string };
 
 /** What the student asked for in the extension's quick questions, or the changes they asked for after reading it. */
 export type CoverLetterStyle = {
@@ -39,6 +59,9 @@ function styleNotes(style: CoverLetterStyle) {
   return notes.join("\n");
 }
 
+/** The model letters are written with: ANTHROPIC_LETTER_MODEL when set (a stronger model writes better letters), else the fast one. */
+export const letterModel = () => process.env.ANTHROPIC_LETTER_MODEL || process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+
 /** One model call writes the letter from the student's resume and the posting. Null when AI isn't set up or there's no resume. */
 export async function writeCoverLetter(userId: string, app: Pick<JobApplication, "title" | "company" | "department" | "description" | "requirements">, student: CoverLetterStudent, style: CoverLetterStyle = {}) {
   if (!student.resumeText.trim() && !student.profile.trim()) return null;
@@ -54,9 +77,11 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
     generic ? "" : `Job description:\n${app.description.slice(0, 3500)}`,
     student.resumeText ? `Resume:\n${student.resumeText.slice(0, 6000)}` : "",
     student.profile ? `Profile:\n${student.profile.slice(0, 3000)}` : "",
+    student.excluded?.trim() ? `Topics the student asked you never to mention: ${student.excluded.trim().slice(0, 500)}` : "",
+    `Today is ${new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" })}, for telling past roles from current ones.`,
     styleNotes(style),
   ].filter(Boolean).join("\n\n");
-  const model = process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
+  const model = letterModel();
   const started = Date.now();
   try {
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
@@ -82,7 +107,7 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
 }
 
 export const PART_PROMPT = `You rewrite one part of a college student's cover letter, as they ask, and nothing else.
-Use only facts from the student's resume and profile, the job posting, and the rest of the letter. Never invent experience, numbers, or skills.
+${LETTER_VOICE}
 Keep it fitting the sentences around it: same tone, same person, plain text. If it was one sentence, return one or two.
 Return only the new text for that part: no quotes, no explanation.`;
 

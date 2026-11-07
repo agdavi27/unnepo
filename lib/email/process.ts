@@ -72,7 +72,7 @@ export function withEmailChange(report: FillReport | null, change: StatusChange,
  * Saves the job an email is about, as a job of its own, added from email: applied, or not yet when the student
  * still has to finish it. Noting an email doesn't use up the free plan's applications.
  */
-async function createFromEmail(userId: string, job: Classification, at: string) {
+async function createFromEmail(userId: string, job: Classification, at: string, notCounted = false) {
   const unfinished = job.type === "incomplete";
   const company = cleanCompanyName(job.company) || job.company;
   const title = job.job_title || "Unknown role";
@@ -80,8 +80,8 @@ async function createFromEmail(userId: string, job: Classification, at: string) 
   const app = await minimalApplication(userId, { url: `https://unnepo.local/email/${id()}`, title, company, charge: false });
   const updated = await applications.update(userId, app.id, {
     jobUrl: "", applicationUrl: null, location: job.location ?? null,
-    ...(unfinished ? { statusMessage: "Added from a forwarded email. Not applied yet." } : { status: "applied_manual" as const, submittedAt: at, statusMessage: "Added from a forwarded email." }),
-    fillReport: withEmailChange(app.fillReport, { at, status: unfinished ? "incomplete" : "applied", source: "email", summary: job.summary }, "added"),
+    ...(unfinished ? { statusMessage: "Added from a forwarded email. Not applied yet." } : { status: "applied_manual" as const, submittedAt: at, statusMessage: notCounted ? "Added from an email about this job. Not counted toward your goals, since Unnepo never saw you apply." : "Added from a forwarded email." }),
+    fillReport: { ...withEmailChange(app.fillReport, { at, status: unfinished ? "incomplete" : "applied", source: "email", summary: job.summary }, "added"), ...(notCounted ? { notCounted: true } : {}) },
   });
   return updated ?? app;
 }
@@ -97,8 +97,9 @@ export async function applyEmail(userId: string, job: Classification, at: string
     const match = matchApplication(apps, { company: job.company, jobTitle: job.job_title });
     if (match.kind === "several") return { outcome: "review", applicationId: null, reason: "several_matches", candidates: match.candidates.map((app) => app.id) };
     if (match.kind === "one") target = match.app;
-    // A status email about a job that isn't saved: the student says which one, or saves it.
-    if (match.kind === "none" && job.type !== "applied" && job.type !== "incomplete") return { outcome: "review", applicationId: null, reason: "no_match", candidates: match.atCompany.map((app) => app.id) };
+    // A status email about a job at a company with other saved jobs: the student says which one, or saves it.
+    // With nothing saved at that company it's saved on its own below: some companies never confirm an application.
+    if (match.kind === "none" && match.atCompany.length && job.type !== "applied" && job.type !== "incomplete") return { outcome: "review", applicationId: null, reason: "no_match", candidates: match.atCompany.map((app) => app.id) };
   }
   if (job.type === "applied") {
     if (!target) return { outcome: "created", applicationId: (await createFromEmail(userId, job, at)).id };
@@ -120,8 +121,9 @@ export async function applyEmail(userId: string, job: Classification, at: string
   if (job.type === "not_job_related") return { outcome: "review", applicationId: null, reason: "low_confidence" };
   const outcome = OUTCOME_FOR[job.type];
   if (!target) {
-    // Approved from the Review Inbox with no job to put it on: saved as a new one, already at this status.
-    const created = await createFromEmail(userId, { ...job, type: "applied" }, at);
+    // No job to put it on (none saved at that company, or approved from the Review Inbox as a new one): saved as a
+    // new one, already at this status. The application itself was never confirmed, so it doesn't count toward goals.
+    const created = await createFromEmail(userId, { ...job, type: "applied" }, at, true);
     await applications.update(userId, created.id, { fillReport: withEmailChange(created.fillReport, { at, status: outcome, source: "email", summary: job.summary }, "added", outcome) });
     return { outcome: "created", applicationId: created.id };
   }

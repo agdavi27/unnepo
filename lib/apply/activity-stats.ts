@@ -5,7 +5,7 @@ import type { ActivityEvent, AppliedHow } from "@/lib/apply/types";
  * each site's confirmation rate, and a session's pace. No server imports, so the web app runs it too.
  */
 
-type WithActivity = { id: string; title: string; company: string; status: string; submittedAt: string | null; fillReport?: { activity?: ActivityEvent[] } | null };
+type WithActivity = { id: string; title: string; company: string; status: string; submittedAt: string | null; fillReport?: { activity?: ActivityEvent[]; notCounted?: boolean } | null };
 
 export const HOW_LABEL: Record<AppliedHow, string> = {
   site_confirmed: "Site confirmed",
@@ -48,6 +48,7 @@ const average = (values: number[]) => (values.length ? Math.round(values.reduce(
 /** Applied since `from`: how many, average time each, and on how many sites. */
 export function appliedSince(apps: WithActivity[], from: number) {
   const done = apps.filter((app) => {
+    if (app.fillReport?.notCounted) return false;
     const at = appliedAt(app);
     return at && Date.parse(at) >= from;
   });
