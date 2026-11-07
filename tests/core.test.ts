@@ -61,6 +61,19 @@ describe("password reset", () => {
     expect(session.user.email).toBe("resetme@colby.edu");
     await expect(resetPassword(token!, "anotherpass")).rejects.toThrow(/invalid or expired/);
   });
+
+  it("never shows the reset link in production, even with no email set up", async () => {
+    await verifiedStudent("victim@colby.edu", "Victim");
+    const env = process.env as Record<string, string | undefined>;
+    const saved = env.NODE_ENV;
+    env.NODE_ENV = "production";
+    delete env.RESEND_API_KEY;
+    try {
+      expect(await requestPasswordReset("victim@colby.edu", "https://www.unnepo.com")).toEqual({ sent: false, resetUrl: null });
+    } finally {
+      env.NODE_ENV = saved;
+    }
+  });
 });
 
 describe("stripe webhooks", () => {

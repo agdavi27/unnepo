@@ -5,7 +5,7 @@ import { FounderLink } from "@/components/marketing/founder-note";
 import { GetExtension } from "@/components/marketing/get-extension";
 import { Schools } from "@/components/marketing/schools";
 import { SpiderDialogue } from "@/components/marketing/spider-dialogue";
-import { ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
+import { CONTACT_EMAIL, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
 
 /** The Chrome Web Store listing, once the extension is published. Until then the button starts sign-up. */
 const EXTENSION_URL = process.env.NEXT_PUBLIC_CHROME_EXTENSION_URL || "";
@@ -189,7 +189,7 @@ export function Landing() {
         </main>
 
         <footer className="border-t border-[#17171B] py-7 text-[13px] text-[#9A9AA3]">
-          Unnepo · Built for students · <Link href="/privacy" className="underline-offset-4 hover:text-white hover:underline">Privacy Policy</Link>
+          Unnepo · Built for students · <Link href="/privacy" className="underline-offset-4 hover:text-white hover:underline">Privacy Policy</Link> · Contact <a href={`mailto:${CONTACT_EMAIL}`} className="underline-offset-4 hover:text-white hover:underline">{CONTACT_EMAIL}</a>
         </footer>
       </div>
     </div>

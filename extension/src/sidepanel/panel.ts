@@ -277,7 +277,7 @@ const SPARK_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="curre
 /** The blue AI spark on the two big buttons. */
 const SPARK = SPARK_SMALL.replace('width="13" height="13"', 'class="big-tool-icon" width="20" height="20"');
 /**
- * "Write cover letter (2 credits)" on Free, where it uses credits up. Pro and Premium include writing, so their
+ * "Write cover letter (2 credits)" on Free, where it uses credits up. Pro includes writing, so its
  * credits don't move and the button says so; unlimited accounts see no cost. The server's number wins; the
  * fallback covers a server that doesn't send one.
  */
@@ -1431,7 +1431,10 @@ function drawPlan(state: PanelState) {
   creditsLeft.textContent = me?.unlimitedCredits ? "Unlimited credits" : `${left} ${left === 1 ? "credit" : "credits"} left`;
   upgrade.href = upgradeUrl(state);
   // Nothing to upgrade to from the top plan or an unlimited account.
-  upgrade.hidden = Boolean(me?.unlimitedCredits) || me?.plan === "premium";
+  // Pro (and the old Premium) has nothing above it: the way to more is 50 more companies for $15.
+  const paid = me?.plan === "pro" || me?.plan === "premium";
+  upgrade.textContent = paid ? "Get 50 more companies" : "Upgrade plan";
+  upgrade.hidden = Boolean(me?.unlimitedCredits);
 }
 
 /** Draws the panel. False when it left the page as it was, because the student is typing in it. */

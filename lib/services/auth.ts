@@ -167,7 +167,11 @@ export async function requestPasswordReset(email: string, origin?: string) {
   const token = await issueToken(user.id, "reset_password");
   const resetUrl = `${appOrigin(origin)}/reset?token=${encodeURIComponent(token)}`;
   const sent = await sendPasswordResetEmail(user.email, resetUrl);
-  return { sent, resetUrl: exposeDevToken(token) ? resetUrl : null };
+  if (!sent) console.error("password_reset_email_not_sent", { userId: user.id, resend: Boolean(process.env.RESEND_API_KEY) });
+  // The link is only ever shown in the browser in local runs. In production it goes by email alone: showing it
+  // would let anyone who knows a student's email reset their password.
+  const local = process.env.NODE_ENV !== "production" || process.env.UNNEPO_DEV_VERIFY === "true";
+  return { sent, resetUrl: local ? resetUrl : null };
 }
 
 export async function resetPassword(rawToken: string, password: string) {

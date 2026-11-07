@@ -5,6 +5,9 @@ function intEnv(name: string, fallback: number) {
   return Number.isFinite(value) ? value : fallback;
 }
 
+/** Where students, schools and anyone else can reach Unnepo. */
+export const CONTACT_EMAIL = "contact@unnepo.com";
+
 /** Pricing, credit rules, and spend caps. All of these are environment-configurable. */
 export function serverConfig() {
   return {
@@ -14,11 +17,11 @@ export function serverConfig() {
     referralDailyCap: intEnv("REFERRAL_DAILY_CAP", 10),
     grindPriceCents: intEnv("GRIND_PRICE_CENTS", 2900),
     grindMonthlyCredits: intEnv("GRIND_MONTHLY_CREDITS", 30),
-    packPriceCents: intEnv("PACK_PRICE_CENTS", 1000),
-    packCredits: intEnv("PACK_CREDITS", 20),
-    proPriceCents: intEnv("PRO_PRICE_CENTS", 1500),
+    packPriceCents: intEnv("PACK_PRICE_CENTS", 1500),
+    packCredits: intEnv("PACK_CREDITS", 50),
+    proPriceCents: intEnv("PRO_PRICE_CENTS", 2500),
     proMonthlyCredits: intEnv("PRO_MONTHLY_CREDITS", 25),
-    proSemesterPriceCents: intEnv("PRO_SEMESTER_PRICE_CENTS", 4500),
+    proSemesterPriceCents: intEnv("PRO_SEMESTER_PRICE_CENTS", 7500),
     premiumPriceCents: intEnv("PREMIUM_PRICE_CENTS", 3900),
     premiumMonthlyCredits: intEnv("PREMIUM_MONTHLY_CREDITS", 75),
     premiumSemesterPriceCents: intEnv("PREMIUM_SEMESTER_PRICE_CENTS", 11700),
@@ -43,7 +46,7 @@ export function serverConfig() {
 
 /**
  * Pricing: Free is a one-time allowance, kept in separate buckets so its cost stays capped: FREE_LIMITS, plus
- * people at FREE_PEOPLE companies. Pro and Premium have no limit on writing or autofill beyond a monthly fair-use
+ * people at FREE_PEOPLE companies. Pro (and the old Premium) has no limit on writing or autofill beyond a monthly fair-use
  * cap. What costs real money is finding people, so that's what separates the plans. `balance` on an account counts
  * people searches (1 = the list of people at the company for one job, charged only when someone is found); students
  * see it in credits, at CREDIT_COST.people each.
@@ -81,8 +84,8 @@ export const PUBLIC_PLANS = [
   {
     id: "pro" as const,
     name: "Pro",
-    priceLabel: "$15",
-    semesterLabel: "or $45 a semester",
+    priceLabel: "$25",
+    semesterLabel: "or $75 a semester",
     cadence: "Billed monthly or each semester",
     blurb: "About 6 companies a week",
     cta: "Choose Pro",
@@ -91,22 +94,7 @@ export const PUBLIC_PLANS = [
     credits: 25,
     semesterCredits: 100,
     applicationsLabel: "Unlimited autofill and writing",
-    features: ["Autofill that answers the questions too", "Cover letters tailored to each job", "Follow-up emails written for you", "Email updates the moment they arrive", "People at 25 companies a month, or 100 a semester", "Tracker and job matches", "20 more companies for $10"],
-  },
-  {
-    id: "premium" as const,
-    name: "Premium",
-    priceLabel: "$39",
-    semesterLabel: "or $117 a semester",
-    cadence: "Billed monthly or each semester",
-    blurb: "About 20 companies a week",
-    cta: "Choose Premium",
-    popular: false,
-    monthly: true,
-    credits: 75,
-    semesterCredits: 300,
-    applicationsLabel: "Unlimited autofill and writing",
-    features: ["Everything in Pro", "People at 75 companies a month, or 300 a semester", "20 more companies for $10"],
+    features: ["Autofill that answers the questions too", "Cover letters tailored to each job", "Follow-up emails written for you", "Email updates the moment they arrive", "People at 25 companies a month, or 100 a semester", "Tracker and job matches", "50 more companies for $15 when you need them"],
   },
 ];
 
@@ -116,5 +104,5 @@ export const ENTERPRISE_PLAN = {
   blurb: "Buy for your school",
   priceLabel: "Custom",
   features: ["Unnepo for students across your school", "Credits sized to your number of students", "Pricing set with you"],
-  contactEmail: process.env.NEXT_PUBLIC_SALES_EMAIL || "contactus@unnepo.io",
+  contactEmail: CONTACT_EMAIL,
 };

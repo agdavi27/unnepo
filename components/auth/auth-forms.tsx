@@ -8,6 +8,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Check } from "lucide-react";
 import { isSchoolEmail } from "@/lib/schools";
+import { CONTACT_EMAIL } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 
 const signupSchema = z.object({
@@ -187,16 +188,14 @@ export function ResetForm() {
       setError(data.error || "Could not send a reset link.");
       return;
     }
-    if (data.sent) {
-      setMessage("Check that school inbox for the reset link. It can land in spam.");
-      return;
-    }
-    if (data.resetUrl) {
+    // Local runs only: no email is sent, so the link is shown here.
+    if (data.resetUrl && !data.sent) {
       setResetUrl(data.resetUrl);
-      setMessage("Email sending is not connected yet, so use this link to choose a new password.");
+      setMessage("Email isn't set up on this computer, so use this link to choose a new password.");
       return;
     }
-    setError("No account exists for that school email.");
+    // The same answer whether or not there's an account, so nobody can use this to check who's signed up.
+    setMessage(`If there's an Unnepo account for ${email.trim()}, a reset link is on its way. Check spam too. Nothing after a few minutes? Email ${CONTACT_EMAIL}.`);
   }
 
   async function reset(event: React.FormEvent) {

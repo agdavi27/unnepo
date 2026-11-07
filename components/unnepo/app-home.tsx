@@ -36,7 +36,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: "jobs", label: "Jobs for you" },
   { id: "setup", label: "Setup" },
 ];
-const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)" };
+const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 
 export function AppHome({ start = "home" }: { start?: View }) {
   const router = useRouter();
@@ -350,6 +350,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
                 <p className="mt-3 font-medium">{data.user.name || "Student"}</p>
                 <p className="text-sm text-muted">{data.user.email}</p>
                 <button type="button" onClick={logout} className="mt-4 rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Log out</button>
+                <p className="mt-4 text-xs text-faint">Questions or problems? <a href={`mailto:${ENTERPRISE_PLAN.contactEmail}`} className="text-muted underline underline-offset-4 hover:text-white">{ENTERPRISE_PLAN.contactEmail}</a></p>
               </div>
               <div className="rounded-2xl border border-line bg-panel p-5">
                 <h2 className={sectionTitle}>Profile</h2>
@@ -374,7 +375,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
                 </div>
                 <p className="text-xs text-faint">{CREDIT_COST.people} credits = up to 5 people at one company</p>
               </div>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {PUBLIC_PLANS.map((plan) => {
                   const current = plan.id === currentPlan;
                   return (
@@ -425,8 +426,8 @@ export function AppHome({ start = "home" }: { start?: View }) {
               </div>
               {currentPlan !== "free" && (
                 <div className="flex flex-wrap gap-3">
-                  <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: "pack" })} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Buy 20 more companies for $10</button>
-                  {currentPlan === "grind" && <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Manage subscription</button>}
+                  <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: "pack" })} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Add 50 more companies for $15</button>
+                  {(currentPlan === "grind" || currentPlan === "premium") && <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Manage subscription</button>}
                 </div>
               )}
             </section>

@@ -291,11 +291,14 @@ function checkoutOffer(kind: CheckoutKind, config: ReturnType<typeof serverConfi
   return { credits: config.packCredits, amount: config.packPriceCents, bucket: "purchased" as const, plan: "pack" as const, name: `Unnepo ${config.packCredits} credits`, priceId: process.env.STRIPE_PRICE_PACK, recurring: false };
 }
 
-/** What a student can buy today, from what the upgrade buttons send. Legacy Grind can't be bought. */
+/**
+ * What a student can buy today, from what the upgrade buttons send: Pro, or more companies. Premium and the
+ * legacy Grind can't be bought any more; students already on them keep them.
+ */
 export function checkoutKind(plan: unknown, billing: unknown): CheckoutKind {
   if (plan === "pack") return "pack";
-  if (plan !== "pro" && plan !== "premium") throw new ServiceError("Choose Pro or Premium.", "plan", 400);
-  return billing === "semester" ? `${plan}_semester` : plan;
+  if (plan !== "pro") throw new ServiceError("Choose Pro.", "plan", 400);
+  return billing === "semester" ? "pro_semester" : "pro";
 }
 
 /** The price the plan cards show, in cents. Null for what they don't list. */
@@ -324,7 +327,7 @@ export async function createStripeCheckout(user: { id: string; email: string }, 
   const userId = user.id;
   const config = serverConfig();
   const offer = checkoutOffer(kind, config);
-  if (kind === "pack" && (await repo.getAccount(userId))?.plan === "free") throw new ServiceError("Extra people are for Pro and Premium.", "plan", 409);
+  if (kind === "pack" && (await repo.getAccount(userId))?.plan === "free") throw new ServiceError("Extra companies are for Pro.", "plan", 409);
   const stripe = await stripeClient();
   if (!stripe) throw new ServiceError("Checkout isn't set up.", "stripe", 409);
   // Nobody pays a different price from the one on the page, whatever a price id or setting says.

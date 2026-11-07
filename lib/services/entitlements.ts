@@ -19,7 +19,7 @@ export async function assertAiAllowed(userId: string, purpose: string) {
   const plan = effectivePlan(account?.plan, user?.createdAt);
   const limit = aiMonthlyLimit(plan);
   if (limit <= 0) {
-    throw new ServiceError("AI writing is included with Pro and Premium. You can still write and send the email yourself.", "plan", 402);
+    throw new ServiceError("AI writing is included with Pro. You can still write and send the email yourself.", "plan", 402);
   }
   const start = new Date();
   start.setUTCDate(1);

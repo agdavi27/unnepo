@@ -83,9 +83,10 @@ describe("checkout", () => {
   it("only sells what's on the plan cards", () => {
     expect(checkoutKind("pro", "monthly")).toBe("pro");
     expect(checkoutKind("pro", undefined)).toBe("pro");
-    expect(checkoutKind("premium", "semester")).toBe("premium_semester");
+    expect(checkoutKind("pro", "semester")).toBe("pro_semester");
     expect(checkoutKind("pack", undefined)).toBe("pack");
-    for (const plan of ["grind", "free", "", undefined, { plan: "pro" }]) expect(() => checkoutKind(plan, "monthly")).toThrow("Choose Pro or Premium.");
+    // Premium isn't sold any more; students already on it keep it.
+    for (const plan of ["premium", "grind", "free", "", undefined, { plan: "pro" }]) expect(() => checkoutKind(plan, "monthly")).toThrow("Choose Pro.");
   });
 
   it("charges Pro at the monthly price and returns to the app it came from", async () => {
@@ -96,19 +97,16 @@ describe("checkout", () => {
     expect(session.customer_email).toBe(user.email);
     expect(session.success_url).toBe(`${ORIGIN}/home?billing=success`);
     expect(session.cancel_url).toBe(`${ORIGIN}/home?billing=cancelled`);
-    expect(session.line_items[0].price_data).toMatchObject({ unit_amount: 1500, recurring: { interval: "month", interval_count: 1 } });
+    expect(session.line_items[0].price_data).toMatchObject({ unit_amount: 2500, recurring: { interval: "month", interval_count: 1 } });
     expect(session.subscription_data.metadata).toMatchObject({ userId: user.id, kind: "pro", plan: "pro", credits: "25" });
   });
 
   it("bills a semester every four months with four months of credits", async () => {
     const user = await student();
     await createStripeCheckout(user, "pro_semester", ORIGIN);
-    await createStripeCheckout(user, "premium_semester", ORIGIN);
-    const [pro, premium] = api.checkout.mock.calls.map((call) => call[0]);
-    expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 4500, recurring: { interval: "month", interval_count: 4 } });
+    const [pro] = api.checkout.mock.calls.map((call) => call[0]);
+    expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 7500, recurring: { interval: "month", interval_count: 4 } });
     expect(pro.metadata.credits).toBe("100");
-    expect(premium.line_items[0].price_data).toMatchObject({ unit_amount: 11700, recurring: { interval: "month", interval_count: 4 } });
-    expect(premium.metadata.credits).toBe("300");
   });
 
   it("won't charge a price that differs from the page", async () => {
@@ -120,7 +118,7 @@ describe("checkout", () => {
     api.price.mockResolvedValueOnce({ unit_amount: 2400 });
     await expect(createStripeCheckout(user, "pro", ORIGIN)).rejects.toThrow("price is being updated");
     expect(api.checkout).not.toHaveBeenCalled();
-    api.price.mockResolvedValueOnce({ unit_amount: 1500 });
+    api.price.mockResolvedValueOnce({ unit_amount: 2500 });
     await createStripeCheckout(user, "pro", ORIGIN);
     expect(api.checkout.mock.calls[0][0].line_items).toEqual([{ price: "price_old", quantity: 1 }]);
   });
@@ -129,7 +127,7 @@ describe("checkout", () => {
     const user = await student();
     await applyVerifiedStripeEvent(paidInvoice(user.id));
     await expect(createStripeCheckout(user, "pro", ORIGIN)).rejects.toThrow("already on this plan");
-    await createStripeCheckout(user, "premium", ORIGIN);
+    await createStripeCheckout(user, "pro_semester", ORIGIN);
     const session = api.checkout.mock.calls[0][0];
     expect(session.customer).toBe("cus_1");
     expect(session.customer_email).toBeUndefined();
@@ -146,7 +144,7 @@ describe("checkout", () => {
 
   it("keeps extra companies for paid plans, without touching the subscription", async () => {
     const user = await student();
-    await expect(createStripeCheckout(user, "pack", ORIGIN)).rejects.toThrow("Extra people are for Pro and Premium");
+    await expect(createStripeCheckout(user, "pack", ORIGIN)).rejects.toThrow("Extra companies are for Pro.");
     await applyVerifiedStripeEvent(paidInvoice(user.id));
     await createStripeCheckout(user, "pack", ORIGIN);
     const session = api.checkout.mock.calls[0][0];
