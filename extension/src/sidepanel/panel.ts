@@ -5,8 +5,8 @@ import { NEVER_READ, type Issue, type PanelState } from "../shared/types";
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
- * while it fills, just the spider typing on his laptop; when it's applied, went wrong, or there's no job, five
- * tools. The dashboard and Settings are along the bottom of every page.
+ * while it fills, just the spider typing on his laptop; when it's applied, went wrong, or there's no job, two big
+ * buttons that open a popup asking one question at a time, with the resume, password and feedback small under them. The dashboard and Settings are along the bottom of every page.
  */
 
 const app = document.getElementById("app")!;
@@ -15,8 +15,10 @@ const passwordSection = document.getElementById("password")!;
 const dock = document.getElementById("dock")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-type View = "home" | "more" | "cover" | "answer" | "resume" | "password" | "feedback" | "settings";
+type View = "home" | "more" | "feedback" | "settings";
 let view: View = "home";
+/** The cover letter or answer popup, and which of its questions is showing. */
+let popup: { kind: "cover" | "answer"; step: number } | null = null;
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 /** "1.001": the version name, which keeps the zeros Chrome's own version number can't have. */
@@ -213,16 +215,18 @@ function fillingView() {
 
 const SPARK_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>`;
 
-const pillIcon = (shape: string) => `<svg class="pill-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`;
-const TOOLS: Array<[View, string, string]> = [
-  ["cover", "Write a cover letter", `<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7"/>`],
-  ["answer", "Answer a question", `<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7"/><path d="M12 17h.01"/>`],
-  ["resume", "Resume", `<path d="M6 3h12v18H6z"/><circle cx="12" cy="9" r="2.5"/><path d="M8.5 17c.5-2 2-3 3.5-3s3 1 3.5 3"/>`],
-  ["password", "Job-site password", `<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l3 3"/>`],
-  ["feedback", "Feedback", `<path d="M4 5h16v11H9l-5 4z"/>`],
-];
-/** The five tools: the whole page once a job is applied, went wrong, or there's no job. */
-const toolButtons = () => `<div class="pills" role="group" aria-label="Tools">${TOOLS.map(([id, label, shape]) => `<button type="button" class="pill" data-go="${id}">${pillIcon(shape)}${escape(label)}</button>`).join("")}</div>`;
+const toolIcon = (shape: string) => `<svg class="big-tool-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`;
+/** The tools: the whole page once a job is applied, went wrong, or there's no job. `extra` goes above Feedback. */
+function toolsPage(state: PanelState, extra = "") {
+  return `
+    <div class="tools">
+      <button type="button" class="big-tool" data-popup="cover">${toolIcon(`<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7"/>`)}Write a cover letter</button>
+      <button type="button" class="big-tool" data-popup="answer">${toolIcon(`<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7"/><path d="M12 17h.01"/>`)}Answer a question</button>
+      <div class="tool-lines">${resumeLine(state)}<div id="password-slot"></div></div>
+      ${extra}
+      <button type="button" class="feedback-link" data-go="feedback">Feedback</button>
+    </div>`;
+}
 
 /** "I already applied" and "Save for later": read the job on the tab and save it. */
 const hereLinks = () => {
@@ -233,30 +237,24 @@ const hereLinks = () => {
 /** The page for the tab: what's happening decides it. */
 function homeView(state: PanelState) {
   if (isRunning(state)) return fillingView();
-  if (onLinkedIn(state)) return linkedInCard(state) + toolButtons();
+  if (onLinkedIn(state)) return linkedInCard(state) + toolsPage(state);
   const card = openedCard(state);
-  if (state.job?.submission || state.job?.error) return card + toolButtons();
-  if (card) return here.step === "check" ? card : card + toolButtons();
+  if (state.job?.submission || state.job?.error) return card + toolsPage(state);
+  if (card) return here.step === "check" ? card : card + toolsPage(state);
   if (jobFound(state)) return jobPage(state);
   const how = dismissal(state);
   const onWeb = Boolean(state.tab && /^https:\/\//.test(state.tab.url)) && !onUnnepo(state);
   return `${how ? `<div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>` : ""}
-    ${toolButtons()}
-    ${onWeb && !how ? hereLinks() : ""}
-    ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`;
+    ${toolsPage(state, `${onWeb && !how ? hereLinks() : ""}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`)}`;
 }
 
 const back = () => `<button type="button" class="back" data-go="home"><span aria-hidden="true">‹</span> Back</button>`;
 
 /** A page that was asked for. */
 function pageView(state: PanelState) {
-  const heading = (text: string, side = "") => `<div class="row-between"><span class="heading">${text}</span>${side ? `<span class="small">${side}</span>` : ""}</div>`;
+  const heading = (text: string) => `<div class="row-between"><span class="heading">${text}</span></div>`;
   const pages: Record<Exclude<View, "home">, () => string> = {
-    more: () => `${jobFound(state) ? hereLinks() : ""}${toolButtons()}`,
-    cover: () => (jobFound(state) ? heading("Cover letter") + letterBlock() : pasteForm(true)),
-    answer: () => answerForm(true),
-    resume: () => `<section class="stack tight" aria-label="Resume">${heading("Resume")}${resumeTool(state)}</section>`,
-    password: () => `<section class="stack tight" aria-label="Job-site password">${heading("Job-site password", "Only on this computer")}<div id="password-slot"></div></section>`,
+    more: () => toolsPage(state, jobFound(state) ? hereLinks() : ""),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     settings: () => `${profileCard(state)}
       <div class="rule"></div>
@@ -552,114 +550,156 @@ function activityCard() {
     </section>`;
 }
 
-/** A cover letter from a pasted job description: the Cover letter tool with no job on the tab. */
+/** A cover letter from a pasted job description, when there's no job on the tab. */
 let pasteText = "";
 /** Which letter is showing: for the job on the tab, or for a pasted description. */
 let letterSource: "job" | "paste" = "job";
 
-function pasteForm(big: boolean) {
-  const busy = letterStep === "writing" || letterStep === "revising" || letterStep === "saving";
-  const label = big ? `<label class="big" for="paste-desc">Cover letter ${SPARK_SMALL.replace('fill="currentColor"', 'fill="var(--accent)"')}</label>` : `<label class="q-label" for="paste-desc">Job description</label>`;
+/** The popup's frame: its question, how far along it is, and a way back. */
+function popupShell(title: string, body: string, step = 0, steps = 0) {
+  const bars = steps > 1 ? `<div class="steps" role="img" aria-label="Question ${step + 1} of ${steps}">${Array.from({ length: steps }, (_, at) => `<div class="${at <= step ? "on" : ""}"></div>`).join("")}</div>` : "";
   return `
-    <section class="letter-form flat" aria-label="Cover letter from a job description">
-      ${label}
-      <textarea class="field letter-input paste" id="paste-desc" rows="${big ? 5 : 4}" maxlength="8000" placeholder="Paste the job description">${escape(pasteText)}</textarea>
-      ${big ? `<div class="question"><span class="q-label">How long?</span><div class="choices">${choice("length", "short", "Short")}${choice("length", "standard", "Standard")}${choice("length", "detailed", "Detailed")}</div></div>
-      <div class="question"><span class="q-label">What tone?</span><div class="choices">${choice("tone", "professional", "Professional")}${choice("tone", "warm", "Warm")}${choice("tone", "confident", "Confident")}${choice("tone", "enthusiastic", "Enthusiastic")}</div></div>` : ""}
-      <button type="button" class="btn primary" id="paste-write" ${busy || pasteText.trim().length < 80 ? "disabled" : ""}>${SPARK_SMALL}${letterStep === "writing" ? "Writing…" : "Generate cover letter"}</button>
-      ${writingSpider()}
-      ${letter && letterSource === "paste" ? writtenLetter(busy, false) : ""}
-      ${letterNote && letterSource === "paste" ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}
+    <div class="dim" id="popup-dim"></div>
+    <section class="sheet" id="popup" role="dialog" aria-modal="true" aria-label="${escape(title)}" tabindex="-1">
+      <div class="popup-head"><span class="popup-title">${escape(title)}</span><button type="button" class="popup-x" id="popup-close" aria-label="Close">×</button></div>
+      ${bars}
+      ${body}
+      ${step > 0 ? `<button type="button" class="back" id="popup-back"><span aria-hidden="true">‹</span> Back</button>` : ""}
     </section>`;
+}
+/** One big choice. Tapping it answers the question and moves on. */
+const option = (attr: string, value: string, label: string, hint: string, on: boolean) =>
+  `<button type="button" class="opt${on ? " on" : ""}" data-${attr}="${value}" aria-pressed="${on}">${label}<small>${hint}</small></button>`;
+
+function coverPopup(state: PanelState) {
+  const forJob = jobFound(state);
+  const busy = letterStep === "writing" || letterStep === "revising" || letterStep === "saving";
+  const note = letterNote ? `<p class="small" role="status">${escape(letterNote)}</p>` : "";
+  if (busy || (letter && letterStep === "written" && letterSource === (forJob ? "job" : "paste"))) {
+    return popupShell("Your cover letter", `${writingSpider()}${letter ? writtenLetter(busy, forJob) : ""}${note}`);
+  }
+  const steps = [...(forJob ? [] : ["paste"]), "length", "tone", "mention"];
+  const step = Math.min(popup!.step, steps.length - 1);
+  popup!.step = step;
+  const title = state.job?.title || state.page?.title;
+  const company = state.job?.company || state.page?.company;
+  const forLine = forJob && title ? `<div class="sub">For ${escape(title)}${company ? ` at ${escape(company)}` : ""}</div>` : "";
+  const pick = (name: "length" | "tone", value: string, label: string, hint: string) => option("letter", `${name}:${value}`, label, hint, letterChoices[name] === value);
+  const bodies: Record<string, [string, () => string]> = {
+    paste: ["Paste the job description", () => `<div class="letter-form flat"><textarea class="field letter-input paste" id="paste-desc" rows="8" maxlength="8000" aria-label="Job description" placeholder="Paste the whole job description">${escape(pasteText)}</textarea><button type="button" class="btn primary big" id="popup-next" ${pasteText.trim().length < 80 ? "disabled" : ""}>Next</button></div>`],
+    length: ["How long should it be?", () => `<div class="stack tight">${pick("length", "short", "Short", "A few lines")}${pick("length", "standard", "Standard", "The usual cover letter")}${pick("length", "detailed", "Detailed", "More on your experience")}</div>`],
+    tone: ["What tone?", () => `<div class="stack tight">${pick("tone", "professional", "Professional", "Polished and direct")}${pick("tone", "warm", "Warm", "Friendly and personal")}${pick("tone", "confident", "Confident", "Leads with what you've done")}${pick("tone", "enthusiastic", "Enthusiastic", "Shows you're excited")}</div>`],
+    mention: ["Anything to mention?", () => `<div class="letter-form flat"><textarea class="field letter-input" id="letter-mention" rows="3" maxlength="400" aria-label="Anything to mention (optional)" placeholder="Optional: a project, why this company, a skill to lead with…">${escape(letterChoices.mention)}</textarea><button type="button" class="btn primary big" id="letter-write">${SPARK_SMALL}Generate cover letter</button>${usesLine(usesNow?.letters.note)}</div>`],
+  };
+  const [question, body] = bodies[steps[step]];
+  return popupShell(question, `${forLine}${body()}${note}`, step, steps.length);
 }
 
 /** "Answer a question": an answer to a pasted question, for the job on this tab when Unnepo knows it. */
-const answering = { question: "", answer: "", busy: false, note: "" };
-function answerForm(big: boolean) {
-  const label = big ? `<label class="big" for="answer-q">Answer a question ${SPARK_SMALL.replace('fill="currentColor"', 'fill="var(--accent)"')}</label>` : `<label class="q-label" for="answer-q">Question from the form</label>`;
-  return `
-    <section class="letter-form flat" aria-label="Answer a question">
-      ${label}
-      <textarea class="field letter-input" id="answer-q" rows="3" maxlength="600" placeholder="e.g. Describe a time you led a team">${escape(answering.question)}</textarea>
-      <button type="button" class="btn${big ? "" : " primary"}" id="answer-go" ${answering.busy || !answering.question.trim() ? "disabled" : ""}>${SPARK_SMALL}${answering.busy ? "Writing…" : "Answer with AI"}</button>
-      ${usesLine(usesNow?.answers.note)}
-      ${answering.answer ? `
-        <label class="q-label" for="answer-text">Your answer. Check it, change it, then copy it.</label>
+const answering = { question: "", length: "", answer: "", busy: false, note: "" };
+function answerPopup() {
+  const note = answering.note ? `<p class="small" role="status">${escape(answering.note)}</p>` : "";
+  if (answering.busy) return popupShell("Writing your answer", `<div class="letter-writing" role="status">${typingSpiderSvg(120, spiderLook)}<span class="small">Writing your answer…</span></div>`);
+  if (answering.answer) {
+    return popupShell("Your answer", `
+      <section class="letter-form flat">
+        <label class="q-label" for="answer-text">Check it, change it, then copy it.</label>
         <textarea class="cv-text" id="answer-text">${escape(answering.answer)}</textarea>
-        <div class="links"><button type="button" class="link" id="answer-copy">Copy</button></div>` : ""}
-      ${answering.note ? `<p class="small" role="status">${escape(answering.note)}</p>` : ""}
-    </section>`;
+        <div class="links"><button type="button" class="solid" id="answer-copy">Copy</button><button type="button" class="link" id="answer-again">Answer another</button></div>
+      </section>${note}`);
+  }
+  const step = Math.min(popup!.step, 1);
+  const pick = (value: string, label: string, hint: string) => option("answer-length", value, label, hint, answering.length === value);
+  if (step === 0) return popupShell("Paste the question", `<div class="letter-form flat"><textarea class="field letter-input" id="answer-q" rows="5" maxlength="600" aria-label="The question from the form" placeholder="e.g. Describe a time you led a team">${escape(answering.question)}</textarea><button type="button" class="btn primary big" id="popup-next" ${answering.question.trim() ? "" : "disabled"}>Next</button></div>${note}`, 0, 2);
+  return popupShell("How long should it be?", `<div class="stack tight">${pick("short", "A few sentences", "For short boxes on a form")}${pick("paragraph", "A paragraph", "The usual length")}${pick("long", "Longer", "For essay questions")}</div>${usesLine(usesNow?.answers.note)}${note}`, 1, 2);
+}
+
+function popupView(state: PanelState) {
+  if (!popup || !state.connected || isRunning(state)) return "";
+  return popup.kind === "cover" ? coverPopup(state) : answerPopup();
+}
+/** Closes the popup, letting go of a box so what's behind it can be drawn. */
+function closePopup() {
+  popup = null;
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  void render();
+}
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && popup) closePopup(); });
+/** Puts the cursor in the question's box, or on the popup, each time the question changes. */
+let popupFocused = "";
+function focusPopup() {
+  const box = document.getElementById("popup");
+  const key = box ? box.getAttribute("aria-label") ?? "" : "";
+  if (key === popupFocused) return;
+  // It slides up only on opening: a redraw while it's open mustn't make it flash.
+  if (box && !popupFocused) box.classList.add("entering");
+  popupFocused = key;
+  if (box) (box.querySelector<HTMLElement>("textarea:not(.cv-text)") ?? box).focus({ preventScroll: true });
+}
+
+function wirePopup() {
+  app.querySelectorAll<HTMLButtonElement>("[data-popup]").forEach((button) => button.addEventListener("click", () => {
+    popup = { kind: button.dataset.popup as "cover" | "answer", step: 0 };
+    void render();
+  }));
+  document.getElementById("popup-close")?.addEventListener("click", closePopup);
+  document.getElementById("popup-dim")?.addEventListener("click", closePopup);
+  // The panel doesn't redraw while a box has the cursor, so moving on lets go of it.
+  const move = (by: number) => () => {
+    if (!popup) return;
+    popup.step = Math.max(0, popup.step + by);
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    void render();
+  };
+  document.getElementById("popup-next")?.addEventListener("click", move(1));
+  document.getElementById("popup-back")?.addEventListener("click", move(-1));
 }
 
 function wireAnswer(tabId: number) {
   const box = document.getElementById("answer-q") as HTMLTextAreaElement | null;
-  const go = document.getElementById("answer-go") as HTMLButtonElement | null;
   box?.addEventListener("input", () => {
     answering.question = box.value;
-    if (go) go.disabled = answering.busy || !box.value.trim();
+    const next = document.getElementById("popup-next") as HTMLButtonElement | null;
+    if (next) next.disabled = !box.value.trim();
   });
-  go?.addEventListener("click", async () => {
+  // Choosing how long is the last question, so it writes.
+  app.querySelectorAll<HTMLButtonElement>("[data-answer-length]").forEach((button) => button.addEventListener("click", async () => {
+    answering.length = button.dataset.answerLength ?? "";
     answering.busy = true;
     answering.note = "";
-    if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
     void render();
     type Written = { ok: boolean; answer?: string; error?: string };
-    const result = await ask<Written>({ type: "answer-question", tabId, question: answering.question }).catch((): Written => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    const result = await ask<Written>({ type: "answer-question", tabId, question: answering.question, length: answering.length }).catch((): Written => ({ ok: false, error: "Couldn't reach Unnepo." }));
     answering.busy = false;
     if (result.ok && result.answer) answering.answer = result.answer;
     else answering.note = result.error ?? "Couldn't write this one.";
     void render();
-  });
+  }));
   const written = document.getElementById("answer-text") as HTMLTextAreaElement | null;
   written?.addEventListener("input", () => { answering.answer = written.value; });
   document.getElementById("answer-copy")?.addEventListener("click", () => {
     void navigator.clipboard.writeText(answering.answer).then(() => { answering.note = "Copied."; void render(); }, () => { answering.note = "Couldn't copy. Select the text and copy it."; void render(); });
   });
+  document.getElementById("answer-again")?.addEventListener("click", () => {
+    Object.assign(answering, { question: "", answer: "", note: "" });
+    if (popup) popup.step = 0;
+    void render();
+  });
 }
 
 /**
- * The cover letter writer: "Write cover letter" asks a few quick questions (length, tone, anything to
- * mention), writes it, then offers a box for edits. Kept across re-renders of the panel.
+ * The cover letter writer: the popup asks one question at a time (the job description when there's no job on
+ * the tab, then length, tone, anything to mention), writes it, then offers a box for edits. Kept across redraws.
  */
 type Letter = { text: string; fileName: string; pdfBase64: string; addedToApplied?: boolean };
 let letter: Letter | null = null;
-let letterStep: "closed" | "asking" | "writing" | "written" | "revising" | "saving" = "closed";
+let letterStep: "closed" | "writing" | "written" | "revising" | "saving" = "closed";
 let letterNote = "";
 /** The student typed into the letter since the PDF was made, so the PDF is remade from their text first. */
 let letterEdited = false;
 /** The tab and job the letter is for. */
 let letterFor = "";
 const letterChoices = { length: "standard", tone: "professional", mention: "", edit: "" };
-
-const choice = (name: "length" | "tone", value: string, label: string) =>
-  `<button type="button" class="choice${letterChoices[name] === value ? " on" : ""}" data-choice="${name}" data-value="${value}" aria-pressed="${letterChoices[name] === value}">${label}</button>`;
-
-function letterBlock() {
-  const busy = letterStep === "writing" || letterStep === "revising" || letterStep === "saving";
-  // A letter from a pasted description belongs on Write, not on this job.
-  if (letterStep === "closed" || (letterSource === "paste" && letterStep !== "asking" && !busy)) {
-    return `<div class="cv"><span class="sub">For the job on this page, written from your profile and resume.</span><button type="button" class="btn primary" id="letter-start">${SPARK_SMALL}Generate cover letter</button>${usesLine(usesNow?.letters.note)}</div>`;
-  }
-  const questions = letterStep === "asking" ? `
-    <div class="letter-form" id="letter-form">
-      <span class="eyebrow">Your cover letter</span>
-      <div class="question"><span class="q-label">How long?</span>
-        <div class="choices">${choice("length", "short", "Short")}${choice("length", "standard", "Standard")}${choice("length", "detailed", "Detailed")}</div>
-      </div>
-      <div class="question"><span class="q-label">What tone?</span>
-        <div class="choices">${choice("tone", "professional", "Professional")}${choice("tone", "warm", "Warm")}${choice("tone", "confident", "Confident")}${choice("tone", "enthusiastic", "Enthusiastic")}</div>
-      </div>
-      <label class="question"><span class="q-label">Anything to mention? <span class="small">Optional</span></span>
-        <textarea class="field letter-input" id="letter-mention" rows="2" maxlength="400" placeholder="A project, why this company, a skill to lead with…">${escape(letterChoices.mention)}</textarea>
-      </label>
-      <div class="links">
-        <button type="button" class="solid" id="letter-write" ${busy ? "disabled" : ""}>${busy ? "Writing…" : "Write it"}</button>
-        <button type="button" class="link" id="letter-cancel">Cancel</button>
-      </div>
-    </div>` : "";
-  const written = letter && letterStep !== "asking" && letterSource === "job" ? writtenLetter(busy, true) : "";
-  return `<div class="cv">${writingSpider()}${questions}${written}${letterNote ? `<p class="small" role="status">${escape(letterNote)}</p>` : ""}</div>`;
-}
 
 /** While the AI writes: the spider typing on his laptop. */
 const writingSpider = () => (letterStep === "writing" || letterStep === "revising"
@@ -670,7 +710,6 @@ const writingSpider = () => (letterStep === "writing" || letterStep === "revisin
 function writtenLetter(busy: boolean, forJob: boolean) {
   return `
     <div class="letter-form" id="letter-form">
-      <span class="eyebrow">Your cover letter</span>
       <textarea class="cv-text" id="letter-text" aria-label="Your cover letter. Edit it right here, or select part of it to have it rewritten." ${busy ? "readonly" : ""}>${escape(letter!.text)}</textarea>
       <div class="part-bar" id="part-bar" hidden role="group" aria-label="Change the selected part">
         <span class="small">Selected part:</span>
@@ -693,7 +732,7 @@ function writtenLetter(busy: boolean, forJob: boolean) {
       </label>
       <div class="links">
         <button type="button" class="solid" id="letter-revise" ${busy || !letterChoices.edit.trim() ? "disabled" : ""}>${letterStep === "revising" ? "Rewriting…" : "Make these edits"}</button>
-        ${forJob ? `<button type="button" class="link" id="letter-restart" ${busy ? "disabled" : ""}>Start over</button>` : ""}
+        <button type="button" class="link" id="letter-restart" ${busy ? "disabled" : ""}>Start over</button>
       </div>
       <p class="small">Written from your profile and resume. Click into it to change anything.${forJob ? " Your saved version is what Unnepo attaches when this application asks for a cover letter." : ""}</p>
     </div>`;
@@ -718,7 +757,7 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
     ? { text: letter?.text ?? "" }
     : revise
       ? { previous: letter?.text ?? "", edit: letterChoices.edit }
-      : { length: letterChoices.length, tone: letterChoices.tone, mention: fromPaste ? "" : letterChoices.mention, track: true };
+      : { length: letterChoices.length, tone: letterChoices.tone, mention: letterChoices.mention, track: true };
   type Result = { ok: boolean; doc?: Letter; error?: string };
   const result = await ask<Result>({ type: "generate-letter", tabId, options, ...(fromPaste ? { description: pasteText } : {}) }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
   if (result.ok && result.doc) {
@@ -729,7 +768,7 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
     if (save) letterNote = "Saved. The PDF has your edits.";
     if (result.doc.addedToApplied) letterNote = "Added to your applied jobs.";
   } else {
-    letterStep = letter ? "written" : fromPaste ? "closed" : "asking";
+    letterStep = letter ? "written" : "closed";
     letterNote = result.error ?? "Couldn't write the cover letter.";
   }
   // The panel doesn't redraw while a box has the cursor, so let go of it to show the letter.
@@ -737,13 +776,18 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
   void render();
 }
 
-function wireLetter(tabId: number) {
-  const go = (step: typeof letterStep) => { letterStep = step; letterNote = ""; void render(); };
-  document.getElementById("letter-start")?.addEventListener("click", () => go("asking"));
-  document.getElementById("letter-cancel")?.addEventListener("click", () => go(letter ? "written" : "closed"));
-  document.getElementById("letter-restart")?.addEventListener("click", () => go("asking"));
-  app.querySelectorAll<HTMLButtonElement>(".choice[data-choice]").forEach((button) => button.addEventListener("click", () => {
-    letterChoices[button.dataset.choice as "length" | "tone"] = button.dataset.value ?? "";
+function wireLetter(tabId: number, fromPaste: boolean) {
+  document.getElementById("letter-restart")?.addEventListener("click", () => {
+    letterStep = "closed";
+    letterNote = "";
+    if (popup) popup.step = 0;
+    void render();
+  });
+  // A choice answers the question and moves on to the next.
+  app.querySelectorAll<HTMLButtonElement>("[data-letter]").forEach((button) => button.addEventListener("click", () => {
+    const [name, value] = (button.dataset.letter ?? "").split(":");
+    letterChoices[name as "length" | "tone"] = value;
+    if (popup) popup.step += 1;
     void render();
   }));
   const mention = document.getElementById("letter-mention") as HTMLTextAreaElement | null;
@@ -754,16 +798,14 @@ function wireLetter(tabId: number) {
     letterChoices.edit = edits.value;
     if (revise && letterStep === "written") revise.disabled = !edits.value.trim();
   });
-  document.getElementById("letter-write")?.addEventListener("click", () => void writeLetter(tabId, false));
-  const fromPaste = Boolean(document.getElementById("paste-desc"));
+  document.getElementById("letter-write")?.addEventListener("click", () => void writeLetter(tabId, false, fromPaste));
   revise?.addEventListener("click", () => void writeLetter(tabId, true, fromPaste));
   const paste = document.getElementById("paste-desc") as HTMLTextAreaElement | null;
-  const pasteWrite = document.getElementById("paste-write") as HTMLButtonElement | null;
   paste?.addEventListener("input", () => {
     pasteText = paste.value;
-    if (pasteWrite) pasteWrite.disabled = pasteText.trim().length < 80 || letterStep === "writing" || letterStep === "revising";
+    const next = document.getElementById("popup-next") as HTMLButtonElement | null;
+    if (next) next.disabled = pasteText.trim().length < 80;
   });
-  pasteWrite?.addEventListener("click", () => void writeLetter(tabId, false, true));
   const typed = document.getElementById("letter-text") as HTMLTextAreaElement | null;
   // Selecting part of the letter offers to rewrite just that part. Shown without redrawing, so the selection stays.
   const partBar = document.getElementById("part-bar");
@@ -816,40 +858,32 @@ function wireLetter(tabId: number) {
 let resumeNote = "";
 let resumeBusy = false;
 
-function resumeTool(state: PanelState) {
+/** The resume, small: its name opens it, Change picks a new one. */
+function resumeLine(state: PanelState) {
   const resume = state.me!.resume;
-  const when = resume ? new Date(resume.uploadedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
-  const name = resume ? escape(resume.fileName) : "No resume yet";
+  const name = resume ? escape(resume.fileName) : "None yet";
+  const note = resumeNote || (resume && !resume.file ? "Unnepo only has this resume's text, not the file. Change it so it can be attached." : "");
   return `
-    <div class="file">
-      ${resume?.file ? `<button type="button" class="resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="file-name" title="${name}">${name}</span>`}
-      ${resume ? `<span class="sub">Updated ${when}</span>` : ""}
+    <div class="tool-line">
+      <span class="tool-what">Resume</span>
+      ${resume?.file ? `<button type="button" class="resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
+      <button type="button" class="tool-change" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Change" : "Upload"}</button>
     </div>
-    <div class="grid2">
-      <button type="button" class="btn" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Replace" : "Upload"}</button>
-      <button type="button" class="btn primary" id="download-resume" ${resumeBusy || !resume?.file ? "disabled" : ""}>Download</button>
-    </div>
-    <span class="small" role="status">${resumeNote ? escape(resumeNote) : resume && !resume.file ? "Unnepo only has this resume's text, not the file. Upload it again so it can be attached." : resume ? "Attached to every application." : "Upload a PDF or DOCX. It's attached to every application."}</span>`;
+    ${note ? `<p class="small tool-note" role="status">${escape(note)}</p>` : ""}`;
 }
 
-async function seeResume(download = false) {
+async function seeResume() {
   resumeBusy = true;
-  resumeNote = download ? "Downloading…" : "Opening…";
+  resumeNote = "Opening…";
   void render();
   const result = await ask<{ ok: boolean; file?: { name: string; mime: string; base64: string }; error?: string }>({ type: "get-resume" });
   resumeBusy = false;
   if (result.ok && result.file) {
     const bytes = Uint8Array.from(atob(result.file.base64), (char) => char.charCodeAt(0));
-    const url = URL.createObjectURL(new Blob([bytes], { type: result.file.mime }));
-    if (download) {
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = result.file.name;
-      link.click();
-    } else void chrome.tabs.create({ url });
+    void chrome.tabs.create({ url: URL.createObjectURL(new Blob([bytes], { type: result.file.mime })) });
     resumeNote = "";
   } else {
-    resumeNote = `${result.error ?? "Couldn't open your resume."} Replace it to fix this.`;
+    resumeNote = `${result.error ?? "Couldn't open your resume."} Change it to fix this.`;
   }
   void render();
 }
@@ -971,41 +1005,44 @@ function wireIssues() {
  * The job-site password. Drawn on its own, not with the rest of the panel, so a password being typed
  * isn't wiped when the panel refreshes.
  */
-let passwordMode: "hidden" | "shown" | "editing" = "hidden";
+let passwordMode: "hidden" | "editing" = "hidden";
 let passwordNote = "";
+let passwordCopied = false;
+
+const COPY_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></svg>`;
 
 async function renderPassword() {
   const { password } = await ask<{ password?: string }>({ type: "get-password" });
   if (!password) return;
   const rules = (value: string) => PASSWORD_RULES.map((rule) => `<li class="${rule.test(value) ? "met" : ""}">${escape(rule.label)}</li>`).join("");
+  const editing = passwordMode === "editing";
   passwordSection.innerHTML = `
-    ${passwordMode === "editing" ? `
+    <div class="tool-line">
+      <span class="tool-what">Job-site password</span>
+      ${passwordCopied ? `<span class="tool-value copied" role="status">✓ Copied</span>` : editing ? `<span class="tool-value"></span>` : `<button type="button" class="stars" id="copy-password" aria-label="Copy job-site password" title="Copy">************${COPY_ICON}</button>`}
+      <button type="button" class="tool-change" id="${editing ? "cancel-password" : "change-password"}">${editing ? "Cancel" : "Change"}</button>
+    </div>
+    ${editing ? `
       <input class="field" type="text" id="new-password" autocomplete="off" spellcheck="false" placeholder="Your new password" aria-label="New password">
       <ul class="rules" id="rules">${rules("")}</ul>
       <p class="small">Accounts Unnepo already made keep working with the password they were made with.</p>
-      <div class="links"><button type="button" class="solid" id="save-password" disabled>Save password</button><button type="button" class="link" id="cancel-password">Cancel</button></div>
-    ` : `
-      <div class="pw-field mono">${passwordMode === "shown" ? escape(password) : "•".repeat(Math.min(password.length, 16))}</div>
-      <div class="grid3">
-        <button type="button" class="btn" id="toggle-password">${passwordMode === "shown" ? "Hide" : "Show"}</button>
-        <button type="button" class="btn" id="copy-password">Copy</button>
-        <button type="button" class="btn" id="change-password">Change</button>
-      </div>
-      <span class="small">Used for job-site accounts. Stays on this computer, never goes to Unnepo.</span>
-      <div class="links"><button type="button" class="link" id="regenerate-password">Make a new one</button></div>
-    `}
-    ${passwordNote ? `<p class="small" role="status">${escape(passwordNote)}</p>` : ""}`;
+      <div class="links"><button type="button" class="solid" id="save-password" disabled>Save password</button><button type="button" class="link" id="regenerate-password">Make a new one for me</button></div>
+    ` : ""}
+    ${passwordNote ? `<p class="small tool-note" role="status">${escape(passwordNote)}</p>` : ""}`;
   const redraw = (mode: typeof passwordMode, note = "") => { passwordMode = mode; passwordNote = note; void renderPassword(); };
-  document.getElementById("toggle-password")?.addEventListener("click", () => redraw(passwordMode === "shown" ? "hidden" : "shown"));
   document.getElementById("copy-password")?.addEventListener("click", async () => {
-    await navigator.clipboard.writeText(password).then(() => redraw(passwordMode, "Copied."), () => redraw(passwordMode, "Couldn't copy. Press Show and copy it yourself."));
+    await navigator.clipboard.writeText(password).then(() => {
+      passwordCopied = true;
+      setTimeout(() => { passwordCopied = false; void renderPassword(); }, 1500);
+      redraw(passwordMode);
+    }, () => redraw(passwordMode, "Couldn't copy. Try again."));
   });
   document.getElementById("change-password")?.addEventListener("click", () => redraw("editing"));
   document.getElementById("cancel-password")?.addEventListener("click", () => redraw("hidden"));
   document.getElementById("regenerate-password")?.addEventListener("click", async () => {
     if (!confirm("Make a new password? Accounts Unnepo already made keep working: it remembers the password each one was made with. Accounts you made yourself aren't changed.")) return;
     await ask({ type: "new-password" });
-    redraw("shown", "New password made.");
+    redraw("hidden", "New password made. Press the stars to copy it.");
   });
   const input = document.getElementById("new-password") as HTMLInputElement | null;
   const save = document.getElementById("save-password") as HTMLButtonElement | null;
@@ -1323,12 +1360,14 @@ function draw(state: PanelState): boolean {
   document.body.append(passwordSection);
   const shown = state.connected && view === "home" && isRunning(state);
   const wasAt = shown ? null : laptopRect();
-  app.innerHTML = !state.connected ? connectView(state) : view === "home" ? homeView(state) : pageView(state);
+  if (shown) popup = null;
+  app.innerHTML = !state.connected ? connectView(state) : `${view === "home" ? homeView(state) : pageView(state)}${popupView(state)}`;
+  focusPopup();
   moveSpider(state, shown, wasAt);
   const slot = document.getElementById("password-slot");
   passwordSection.hidden = !slot;
-  // A password left showing is covered again once its panel closes, and forgotten on signing out.
-  if (!state.connected || (!slot && passwordMode === "shown")) {
+  // Forgotten on signing out.
+  if (!state.connected) {
     passwordMode = "hidden";
     passwordSection.innerHTML = "";
   }
@@ -1373,12 +1412,12 @@ function draw(state: PanelState): boolean {
     await ask({ type: "disconnect" });
     void render();
   });
-  wireLetter(state.tab?.id ?? 0);
+  wirePopup();
+  wireLetter(state.tab?.id ?? 0, !jobFound(state));
   wireAnswer(state.tab?.id ?? 0);
   if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
   wireSetup(state);
   wireOpened(state);
-  document.getElementById("download-resume")?.addEventListener("click", () => void seeResume(true));
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
   wireIssues();

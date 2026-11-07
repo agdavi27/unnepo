@@ -1258,7 +1258,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         try {
           const job = (await jobs())[Number(message.tabId)];
-          const written = await api<{ answer: string }>("POST", "write", { question: String(message.question ?? ""), ...(job?.applicationId ? { applicationId: job.applicationId } : {}) });
+          const written = await api<{ answer: string }>("POST", "write", { question: String(message.question ?? ""), length: message.length, ...(job?.applicationId ? { applicationId: job.applicationId } : {}) });
           return reply({ ok: true, answer: written.answer });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't write this one." });

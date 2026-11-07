@@ -296,8 +296,10 @@ Reply with only the answer text, no quotes and no preamble.`;
 
 /** The orange questions Unnepo couldn't fill: a short draft for one, on the student's request, for them to check. */
 export async function extensionWrite(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; question?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; question?: unknown; length?: unknown };
   const question = String(body.question ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
+  // The student's choice in the panel. Without one (the orange questions on a form), a short draft.
+  const length = body.length === "paragraph" || body.length === "long" ? body.length : null;
   if (!question) throw new ServiceError("Which question should Unnepo write?", "question", 400);
   if (classifyQuestion(question).sensitive) throw new ServiceError("Unnepo doesn't answer questions about you like this one. Answer it yourself.", "sensitive", 400);
   // No job: a question pasted in the panel, answered from the student's details alone.
@@ -308,13 +310,15 @@ export async function extensionWrite(userId: string, raw: unknown) {
   const context = runContext(userId, info, app ?? { title: "", company: "" });
   const text = await claudeAsk(userId, "question_draft")(DRAFT_PROMPT, [
     `Question: ${question}`,
+    ...(length ? [`Length: ${length === "paragraph" ? "one full paragraph, about 4 to 6 sentences" : "a longer answer of 2 or 3 paragraphs"}.`] : []),
     ...(app ? [`Job: ${app.title} at ${app.company}\n${app.description.slice(0, 3500)}`] : []),
     `Student's details:\n${context.facts}`,
     `Resume and profile:\n${context.sources.slice(0, 12000)}`,
   ].join("\n\n")).catch(() => {
     throw new ServiceError("Couldn't write that right now. Try again.", "ai_failed", 502);
   });
-  const answer = shortAnswer(question, plainWriting(text.trim().replace(/^["“]|["”]$/g, ""))).slice(0, 4000);
+  const written = plainWriting(text.trim().replace(/^["“]|["”]$/g, ""));
+  const answer = (length ? written : shortAnswer(question, written)).slice(0, 4000);
   if (!answer || /^none\.?$/i.test(answer)) throw new ServiceError("Your resume doesn't say enough to answer this one. Answer it yourself.", "no_facts", 422);
   await countUse(userId, "answers");
   return { answer };

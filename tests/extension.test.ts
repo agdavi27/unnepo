@@ -480,6 +480,22 @@ describe("plan limits", () => {
     expect(low.people.note).toBe("Only 1 people search left");
   });
 
+  it("keeps a short answer to two sentences unless the student asks for a longer one", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    const long = "I led the Colby Data Club. We met weekly. We built a dashboard. It helped the dean.";
+    const answer = async (length?: string) => {
+      model.replies.push(long);
+      const reply = await call("POST", "write", token, { question: "Describe a time you led a team", ...(length ? { length } : {}) });
+      return (await reply.json()).answer as string;
+    };
+    expect(await answer()).toBe("I led the Colby Data Club. We met weekly.");
+    expect(await answer("short")).toBe("I led the Colby Data Club. We met weekly.");
+    expect(await answer("paragraph")).toBe(long);
+    expect(await answer("long")).toBe(long);
+  });
+
   it("stops Free at 10 chat answers", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";

@@ -24,8 +24,12 @@ bottom:
   resume, more** has the tools, **I already applied** and **Save for later**.
 - **Filling:** the spider rappels down from the top onto his laptop and types, with **Stop, I'll do it myself**.
   The line at the top says what's happening, including what's waiting on the student. Stopping goes back to the job.
-- **Applied, an error, or no job:** five buttons: cover letter, answer a question, resume, job-site password and
-  feedback. The line at the top says how it went. Reloading the page after an error brings Autofill back.
+- **Applied, an error, or no job:** two big buttons, **Write a cover letter** and **Answer a question**. Each opens
+  a popup asking one question at a time. A cover letter asks for the job description when there's no job on the
+  tab, then length, tone and anything to mention. An answer asks for the question, then how long. Under the big
+  buttons, smaller: the resume (its name opens it, **Change** picks a new one), the job-site password as stars
+  (click to copy, **Change** to type or make a new one), and **Feedback**. The line at the top says how it went.
+  Reloading the page after an error brings Autofill back.
 
 Settings has the profile, whether to press Submit, My jobs, activity, sign out and the version.
 
