@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { FREE_LIMITS, FREE_PEOPLE } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 
 export default function ForStudentsPage() {
@@ -45,7 +44,7 @@ export default function ForStudentsPage() {
         </p>
 
         <Link href="/signup" className="mt-8 inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black">
-          Start free: {FREE_LIMITS.autofills} autofills and people at {FREE_PEOPLE} companies
+          Start with 7 days of Pro free, no card
         </Link>
       </main>
     </div>

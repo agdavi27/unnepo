@@ -739,7 +739,7 @@ async function run(tabId: number) {
         const answered = new Set(known.answers.filter((answer) => answer.values.length).map((answer) => answer.id));
         const left = scan.useServerSchema ? null : scan.fields.filter((field) => field.type !== "file" && !answered.has(field.id));
         const askRest = applicationId && formFields && (scan.useServerSchema || left!.length)
-          ? api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : left }).catch(() => null)
+          ? api<{ answers: Answer[]; llmCalls: number; locked?: Array<{ id: string; label: string }> }>("POST", "map", { applicationId, fields: scan.useServerSchema ? [] : left }).catch(() => null)
           : Promise.resolve(null);
         noteCheck(known.answers);
         let report = await fillWith(known.answers, { resume: wantsResume ? resume ?? null : null });
@@ -754,6 +754,8 @@ async function run(tabId: number) {
           await step("Answering the rest…");
           const more = await askRest;
           llmCalls += more?.llmCalls ?? 0;
+          // Free: the questions Pro would have answered, for the panel to say so.
+          await saveJob(tabId, { locked: more?.locked?.length ?? 0 });
           const fresh = (more?.answers ?? []).filter((answer) => answer.values.length && !answered.has(answer.id) && answer.type !== "file");
           noteCheck(fresh);
           if (fresh.length) report = merge(report, await fillWith(fresh));

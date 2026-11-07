@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Lock, Pencil, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Lock, Mail, Pencil, RotateCcw, X } from "lucide-react";
+import { CompanyLogo } from "@/components/unnepo/company";
 import type { App } from "@/components/unnepo/apply";
 import { Funnel, PerDay, Systems, Tile, duration } from "@/components/unnepo/stats";
 import { H as SPRITE_H, ON_DARK, W as SPRITE_W, spiderRects } from "@/extension/src/shared/sprite";
 import { applicationStats } from "@/lib/apply/stats";
-import { nextUp, type NextItem, type NextSection } from "@/lib/apply/next-up";
+import { UPGRADE_URL } from "@/lib/plan";
+import { nextUp, type NextItem, type NextSection, type ReviewEmail } from "@/lib/apply/next-up";
 import { crawlerColors, nextSkin, wornSkin, type SpiderLook } from "@/lib/spiders";
 
 /** The Home tab: what to do next, how it's going, and the next spider to unlock. */
@@ -54,35 +56,66 @@ type HomeProps = {
   onReview: () => void;
   onJobs: () => void;
   onSpiders: () => void;
+  /** Free: follow-up drafts are blurred, with Pro to write them. */
+  free?: boolean;
+  /** Free: emails read and waiting a day before they update the jobs. */
+  heldEmails?: { waiting: number; nextAt: string | null };
 };
 
-const SECTIONS: Array<{ id: NextSection; label: string }> = [
-  { id: "goals", label: "Reach your goals" },
-  { id: "follow_ups", label: "Follow ups" },
-  { id: "applications", label: "Applications" },
-  { id: "review", label: "Review emails" },
+const SECTIONS: Array<{ id: NextSection; label: string; color: string }> = [
+  { id: "goals", label: "Reach your goals", color: "#3D8BFF" },
+  { id: "follow_ups", label: "Follow ups", color: "#F5C518" },
+  { id: "applications", label: "Applications", color: "#9A9AA3" },
+  { id: "review", label: "Review emails", color: "#9A9AA3" },
 ];
 
-export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpenJob, onWrite, onSent, onReview, onJobs, onSpiders }: HomeProps) {
+/** Today's goal as the outer ring, this week's as the inner one, with how many are left today in the middle. */
+function GoalRings({ today, daily, week, weekly, left }: { today: number; daily: number; week: number; weekly: number; left: number }) {
+  const arc = (r: number, value: number, goal: number, color: string, width: number) => {
+    const length = 2 * Math.PI * r;
+    const done = goal ? Math.min(1, value / goal) : 1;
+    return (
+      <>
+        <circle cx="55" cy="55" r={r} fill="none" stroke="#1F1F1F" strokeWidth={width} />
+        {done > 0 && <circle cx="55" cy="55" r={r} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeDasharray={length} strokeDashoffset={length * (1 - done)} transform="rotate(-90 55 55)" />}
+      </>
+    );
+  };
+  return (
+    <svg viewBox="0 0 110 110" className="h-[104px] w-[104px] flex-none sm:h-[120px] sm:w-[120px]" role="img" aria-label={`${today} of ${daily} today, ${week} of ${weekly} this week`}>
+      {arc(46, today, daily, "#3D8BFF", 10)}
+      {arc(32, week, weekly, "#85B7EB", 6)}
+      {left > 0
+        ? <text x="55" y="62" textAnchor="middle" fill="#F5F5F5" fontSize="22" fontWeight="600">{left}</text>
+        : <path d="M45 56 l7 7 l14 -15" fill="none" stroke="#F5F5F5" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />}
+    </svg>
+  );
+}
+
+export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpenJob, onWrite, onSent, onReview, onJobs, onSpiders, free = false, heldEmails }: HomeProps) {
   const stats = useMemo(() => applicationStats(apps), [apps]);
-  const [toReview, setToReview] = useState(0);
+  const [reviewEmails, setReviewEmails] = useState<ReviewEmail[] | undefined>(undefined);
   const [busy, setBusy] = useState("");
-  const [picked, setPicked] = useState<NextSection | null>(null);
+  const [picked, setPicked] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch("/api/email/state")
       .then((response) => (response.ok ? response.json() : null))
-      .then((state: { review?: unknown[] } | null) => { if (!cancelled && state) setToReview(state.review?.length ?? 0); })
+      .then((state: { review?: ReviewEmail[] } | null) => { if (!cancelled && state) setReviewEmails(state.review ?? []); })
       .catch(() => undefined);
     return () => { cancelled = true; };
   }, []);
   const next = useMemo(() => {
     const today = stats.perDay[stats.perDay.length - 1]?.count ?? 0;
-    return nextUp(apps, { toReview, goal: { today, daily: goals.dailyGoal ?? DEFAULT_DAILY_GOAL, week: stats.thisWeek, weekly: goals.weeklyGoal ?? DEFAULT_WEEKLY_GOAL } });
-  }, [apps, toReview, stats, goals.dailyGoal, goals.weeklyGoal]);
+    return nextUp(apps, { reviewEmails, goal: { today, daily: goals.dailyGoal ?? DEFAULT_DAILY_GOAL, week: stats.thisWeek, weekly: goals.weeklyGoal ?? DEFAULT_WEEKLY_GOAL } });
+  }, [apps, reviewEmails, stats, goals.dailyGoal, goals.weeklyGoal]);
+  const byId = useMemo(() => new Map(apps.map((app) => [app.id, app])), [apps]);
   const counts: Record<NextSection, number> = { goals: next.goals.items.length, follow_ups: next.follow_ups.count, applications: next.applications.count, review: next.review.count };
-  // Opens on the first section with something to do, in the order shown.
-  const section = picked ?? SECTIONS.find((item) => counts[item.id] > 0)?.id ?? "goals";
+  // Opens on the first section with something to do; Next and Back step through the rest.
+  const step = picked ?? Math.max(0, SECTIONS.findIndex((item) => counts[item.id] > 0));
+  const current = SECTIONS[step];
+  const section = current.id;
+  const upcoming = SECTIONS[(step + 1) % SECTIONS.length];
   const open = (item: NextItem) => {
     if (item.kind === "review") return onReview();
     if (item.kind === "goal") return onJobs();
@@ -99,92 +132,148 @@ export function HomePage({ name, apps, goals, onGoals, school, spiderSkin, onOpe
   const look: SpiderLook = { skin: wornSkin(spiderSkin, stats.applied), school };
 
   const heading = (() => {
-    if (section === "goals") {
-      const item = next.goals.items[0];
-      return item ? { title: item.title, detail: item.detail } : { title: "Goals hit. Nice work.", detail: `${next.goals.today} today · ${next.goals.week} this week` };
-    }
     if (section === "follow_ups") {
       const { replied, count } = next.follow_ups;
       const people = count - replied;
-      if (replied) return { title: `${replied} ${replied === 1 ? "company" : "companies"} replied to your application`, detail: people ? `And ${people} ${people === 1 ? "person" : "people"} to follow up with` : "Read what they said and reply" };
-      if (people) return { title: `Follow up with ${people} ${people === 1 ? "person" : "people"}`, detail: "You emailed them a week ago and haven't heard back" };
-      return { title: "No follow ups right now", detail: "When a company writes back, it shows up here" };
+      if (!count) return { title: "No follow ups right now", detail: "When a company writes back, it shows up here" };
+      return {
+        title: `${count} ${count === 1 ? "follow up" : "follow ups"}`,
+        detail: [replied ? `${replied} ${replied === 1 ? "company" : "companies"} replied` : "", people ? `${people} ${people === 1 ? "person" : "people"} to nudge` : ""].filter(Boolean).join(" · "),
+      };
     }
     if (section === "applications") {
-      const finish = next.applications.items.filter((item) => item.kind === "finish").length;
-      if (next.applications.count) return { title: finish ? `Finish ${finish} ${finish === 1 ? "application" : "applications"}` : "Update your applications", detail: "Finish what you started, and say how the older ones went" };
+      const count = next.applications.count;
+      if (count) return { title: `${count} ${count === 1 ? "application" : "applications"}`, detail: "Finish what you started, and say how the older ones went" };
       return { title: "Your applications are up to date", detail: "Nothing started and left, and nothing waiting on an update" };
     }
-    return next.review.count
-      ? { title: next.review.items[0].title, detail: next.review.items[0].detail }
+    const count = next.review.count;
+    return count
+      ? { title: `${count} ${count === 1 ? "email" : "emails"} to review`, detail: "Unnepo wasn't sure which job these belong to" }
       : { title: "No emails to review", detail: "Emails Unnepo can't place on a job wait here" };
   })();
-  const rows = section === "follow_ups" ? next.follow_ups.items : section === "applications" ? next.applications.items : [];
+  const rows = section === "follow_ups" ? next.follow_ups.items : section === "applications" ? next.applications.items : section === "review" ? next.review.items : [];
+  const more = section === "follow_ups" ? next.follow_ups.count - rows.length : section === "applications" ? next.applications.count - rows.length : section === "review" ? next.review.count - rows.length : 0;
+  const goal = next.goals;
+  // The middle of the rings: what's left today, or this week once today's goal is met.
+  const leftToday = Math.max(0, goal.daily - goal.today) || Math.max(0, goal.weekly - goal.week);
 
   return (
     <div className="mx-auto -mt-6 flex w-full max-w-[720px] flex-col overflow-y-clip pt-8 sm:pt-14">
       <p className="m-0 mb-2 font-mono text-xs uppercase tracking-[0.12em] text-[#9A9AA3]">{now.toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}</p>
       <h1 className="m-0 mb-8 pr-16 text-[30px] font-bold tracking-[-0.03em] sm:pr-0">Good {partOfDay(now.getHours())}{first ? `, ${first}` : ""}.</h1>
 
-      <section aria-labelledby="next-up" className="relative rounded-[20px] border border-[#222] bg-[#0F0F0F] p-7">
+      <section aria-labelledby="next-up" aria-roledescription="carousel" className="relative flex min-h-[300px] flex-col rounded-[20px] border border-[#222] bg-[#0F0F0F] p-6 sm:p-7"
+        onKeyDown={(event) => {
+          if (event.target instanceof HTMLElement && event.target.closest("input, textarea")) return;
+          if (event.key === "ArrowRight") setPicked((step + 1) % SECTIONS.length);
+          if (event.key === "ArrowLeft" && step > 0) setPicked(step - 1);
+        }}>
         <DroppingSpider look={look} />
-        <p id="next-up" className={`${eyebrow} pr-16 text-[#3D8BFF]`}>Next up</p>
-        <div role="tablist" aria-label="Next up" className="mt-4 flex flex-wrap gap-1.5 pr-16">
-          {SECTIONS.map((item) => {
-            const on = item.id === section;
-            return (
-              <button key={item.id} type="button" role="tab" id={`tab-${item.id}`} aria-selected={on} aria-controls="next-panel" onClick={() => setPicked(item.id)}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium ${on ? "border-[#F5F5F5] bg-[#F5F5F5] text-[#0A0A0A]" : "border-[#2A2A2A] text-[#9A9AA3] hover:text-white"}`}>
-                {item.label}
-                {counts[item.id] > 0 && <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? "bg-[#0A0A0A]/10" : item.id === "follow_ups" ? "bg-[#F5C518]/15 text-[#F5C518]" : "bg-white/5"}`}>{counts[item.id]}</span>}
-              </button>
-            );
-          })}
+        <h2 id="next-up" className="sr-only">Next up</h2>
+        <p className="m-0 flex items-baseline gap-2 pr-16" aria-live="polite">
+          <span className={eyebrow} style={{ color: current.color }}>{current.label}</span>
+          <span className="text-xs tabular-nums text-[#8B8B94]">{step + 1} of {SECTIONS.length}</span>
+        </p>
+        <div className="mt-3 flex gap-1 pr-16" aria-hidden>
+          {SECTIONS.map((item, index) => (
+            <span key={item.id} className="h-1 flex-1 rounded-sm" style={{ background: index === step ? item.color : index < step ? "#3A3A3A" : "#1F1F1F" }} />
+          ))}
         </div>
 
-        <div id="next-panel" role="tabpanel" aria-labelledby={`tab-${section}`} className="mt-6">
-          <h2 className="m-0 mb-1.5 pr-16 text-[22px] font-semibold tracking-[-0.02em]">{heading.title}</h2>
-          <p className="m-0 pr-16 text-sm text-[#9A9AA3]">{heading.detail}</p>
+        <div className="mt-6 flex-1">
+          {section === "goals" ? (
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-4">
+              <GoalRings today={goal.today} daily={goal.daily} week={goal.week} weekly={goal.weekly} left={leftToday} />
+              <div className="min-w-0 flex-1">
+                <h3 className="m-0 mb-1.5 text-[22px] font-semibold tracking-[-0.02em] sm:text-[24px]">{goal.items[0]?.title ?? "Goals hit. Nice work."}</h3>
+                <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[#9A9AA3]">
+                  <span><span aria-hidden className="mr-1.5 inline-block h-[7px] w-[7px] rounded-full bg-[#3D8BFF]" />Today {goal.today}/{goal.daily}</span>
+                  <span><span aria-hidden className="mr-1.5 inline-block h-[7px] w-[7px] rounded-full bg-[#85B7EB]" />This week {goal.week}/{goal.weekly}</span>
+                </p>
+                <button type="button" onClick={onJobs} className={`${pill} mt-5 whitespace-nowrap`}>See suggested jobs</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <h3 className="m-0 mb-1.5 pr-16 text-[22px] font-semibold tracking-[-0.02em]">{heading.title}</h3>
+              <p className="m-0 pr-16 text-sm text-[#9A9AA3]">{heading.detail}</p>
+              {rows.length > 0 && (
+                <ul className="m-0 mt-5 list-none p-0">
+                  {rows.map((item) => {
+                    const app = item.applicationId ? byId.get(item.applicationId) : undefined;
+                    return (
+                      <li key={item.key} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-[#1A1A1A] py-3">
+                        <span className="relative flex-none">
+                          {app ? <CompanyLogo app={app} size={32} /> : (
+                            <span aria-hidden className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#2A2A2A] bg-[#1A1A1A] text-[#9A9AA3]"><Mail size={15} /></span>
+                          )}
+                          {item.kind === "reply" && <span aria-hidden className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#0F0F0F] bg-[#F5C518]" />}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm">{item.title}</span>
+                          {(item.detail || item.when) && <span className="block truncate text-[13px] text-[#8B8B94]">{[item.detail, item.kind === "reply" || item.kind === "review" ? item.when : ""].filter(Boolean).join(" · ")}</span>}
+                        </span>
+                        <span className="flex flex-none items-center gap-2">
+                          {item.kind === "follow_up" && free ? (
+                            <>
+                              <a href={UPGRADE_URL} className={`${small} inline-flex items-center`}>Unlock draft</a>
+                              <button type="button" onClick={() => void onSent(item.contactId!)} className={smallGhost}>I sent it</button>
+                            </>
+                          ) : item.kind === "follow_up" ? (
+                            <>
+                              <button type="button" disabled={busy === item.key} onClick={() => void write(item)} className={small}>{busy === item.key ? "Writing…" : item.action}</button>
+                              <button type="button" onClick={() => void onSent(item.contactId!)} className={smallGhost}>I sent it</button>
+                            </>
+                          ) : (
+                            <button type="button" onClick={() => open(item)} className={item.kind === "update" || item.kind === "review" ? smallGhost : small}>{item.action}</button>
+                          )}
+                        </span>
+                        {item.kind === "follow_up" && free && <LockedDraft />}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+              {section === "review" && next.review.count > 0 && (
+                <button type="button" onClick={onReview} className={`${smallGhost} mt-3`}>{more > 0 ? `See all ${next.review.count} in Review Inbox` : "Open Review Inbox"}</button>
+              )}
+              {section !== "review" && more > 0 && <p className="m-0 mt-2 text-[13px] text-[#8B8B94]">And {more} more</p>}
+              {section === "follow_ups" && heldEmails && heldEmails.waiting > 0 && (
+                <p className="m-0 mt-3 rounded-xl border border-[#F5C518]/30 bg-[#F5C518]/[0.06] px-3 py-2 text-[13px] text-[#D4D4D4]">
+                  {heldEmails.waiting} {heldEmails.waiting === 1 ? "email about your jobs is" : "emails about your jobs are"} waiting{heldEmails.nextAt ? ` until ${new Date(heldEmails.nextAt).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit" })}` : ""}. Free updates your jobs a day after each email. <a href={UPGRADE_URL} className="font-medium text-white underline underline-offset-4">Pro updates them right away</a>
+                </p>
+              )}
+            </>
+          )}
+        </div>
 
-          {section === "goals" && (
-            <div className="mt-6 flex flex-wrap gap-2">
-              <button type="button" onClick={onJobs} className={pill}>See suggested jobs</button>
-            </div>
+        <div className="mt-6 flex justify-end gap-2">
+          {step > 0 && (
+            <button type="button" aria-label={`Back to ${SECTIONS[step - 1].label}`} onClick={() => setPicked(step - 1)} className="flex h-9 w-9 items-center justify-center rounded-full border border-[#2A2A2A] text-[#D4D4D4] hover:text-white">
+              <ArrowLeft aria-hidden size={15} />
+            </button>
           )}
-          {section === "review" && next.review.count > 0 && (
-            <div className="mt-6 flex flex-wrap gap-2">
-              <button type="button" onClick={onReview} className={pill}>Review emails</button>
-            </div>
-          )}
-          {rows.length > 0 && (
-            <ul className="m-0 mt-5 list-none border-t border-[#1A1A1A] p-0">
-              {rows.map((item) => (
-                <li key={item.key} className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-[#1A1A1A] py-3">
-                  <span aria-hidden className={`h-2 w-2 flex-none rounded-full ${item.kind === "reply" || item.kind === "follow_up" ? "bg-[#F5C518]" : "border-[1.5px] border-[#8B8B94]"}`} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm">{item.title}</span>
-                    {item.detail && <span className="block truncate text-[13px] text-[#8B8B94]">{item.detail}</span>}
-                  </span>
-                  <span className="flex flex-none items-center gap-2">
-                    {item.kind === "follow_up" ? (
-                      <>
-                        <button type="button" disabled={busy === item.key} onClick={() => void write(item)} className={small}>{busy === item.key ? "Writing…" : item.action}</button>
-                        <button type="button" onClick={() => void onSent(item.contactId!)} className={smallGhost}>I sent it</button>
-                      </>
-                    ) : (
-                      <button type="button" onClick={() => open(item)} className={small}>{item.action}</button>
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <button type="button" onClick={() => setPicked((step + 1) % SECTIONS.length)} className="flex h-9 items-center gap-1.5 rounded-full border border-[#2A2A2A] px-4 text-[13px] font-medium text-[#D4D4D4] hover:text-white">
+            {step === SECTIONS.length - 1 ? <>Start over <RotateCcw aria-hidden size={14} /></> : <>{upcoming.label}{counts[upcoming.id] > 0 && <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${upcoming.id === "follow_ups" ? "bg-[#F5C518]/15 text-[#F5C518]" : "bg-white/5"}`}>{counts[upcoming.id]}</span>} <ArrowRight aria-hidden size={15} /></>}
+          </button>
         </div>
       </section>
 
       <Progress stats={stats} goals={goals} onGoals={onGoals} />
       <UnlockStrip applied={stats.applied} school={school} onSpiders={onSpiders} />
     </div>
+  );
+}
+
+/** Free: the follow-up Pro would write, as blurred lines. The draft isn't written, so there's nothing to read. */
+function LockedDraft() {
+  return (
+    <span className="flex basis-full items-center gap-3 rounded-xl border border-[#1F1F1F] bg-[#0A0A0A] px-3 py-2.5">
+      <span aria-hidden className="flex min-w-0 flex-1 flex-col gap-1.5">
+        {["w-11/12", "w-4/5", "w-2/3"].map((width) => <span key={width} className={`block h-2 rounded bg-[#8B8B94]/45 blur-[2.5px] ${width}`} />)}
+      </span>
+      <span className="flex-none text-[12px] text-[#9A9AA3]">Pro writes this follow-up for you</span>
+    </span>
   );
 }
 

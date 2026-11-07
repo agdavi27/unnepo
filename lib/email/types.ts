@@ -9,6 +9,7 @@ export type EmailOutcome =
   | "created" // a new application, saved as applied
   | "updated" // an application's status changed
   | "review" // waiting in the Review Inbox: not sure enough, or more than one matching job
+  | "held" // Free: read, and put on the job 24 hours after it arrived (Pro puts it on right away)
   | "approved" // the student approved it from the Review Inbox
   | "dismissed" // the student dismissed it
   | "ignored" // not about a job application

@@ -16,6 +16,8 @@ export function useTempDb() {
   process.env.DAILY_GLOBAL_SPEND_CENTS = "2500";
   process.env.DAILY_USER_SPEND_CENTS = "200";
   process.env.SIGNUP_CREDITS = "3";
+  // New accounts start on the 7-day Pro trial; tests are on Free unless a test turns the trial on.
+  process.env.TRIAL_DAYS = "0";
   process.env.PACK_CREDITS = "75";
   process.env.GRIND_MONTHLY_CREDITS = "30";
   return dir;

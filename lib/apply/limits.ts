@@ -2,6 +2,7 @@ import { CREDIT_COST, FREE_LIMITS, FREE_PEOPLE, PUBLIC_PLANS, serverConfig } fro
 import { repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { applicationProfiles } from "@/lib/apply/store";
+import { effectivePlan, trialEndedAt, trialFor } from "@/lib/plan";
 
 /**
  * Plan limits beyond people searches. Free has a one-time allowance of each; paid plans have a monthly fair-use cap.
@@ -18,6 +19,23 @@ export async function hasUnlimitedCredits(userId: string) {
   return Boolean(user && list.includes(user.email.trim().toLowerCase()));
 }
 
+/**
+ * The plan an account works as right now. `stored` is what it's on (billing reads that); `plan` is Pro during
+ * the trial; `free` is true only on Free with the trial over. `trial` while it runs, `trialEnded` for a month after.
+ */
+export async function planState(userId: string) {
+  const [account, user] = await Promise.all([repo.getAccount(userId), repo.getUserById(userId)]);
+  const stored = account?.plan ?? "free";
+  const plan = effectivePlan(stored, user?.createdAt);
+  // "Your Pro trial ended" is said for a month after it ends, then dropped.
+  const ended = trialEndedAt(stored, user?.createdAt);
+  const trialEnded = ended && Date.now() - Date.parse(ended) < 30 * 86_400_000 ? ended : null;
+  return { stored, plan, free: plan === "free", trial: trialFor(stored, user?.createdAt), trialEnded, account };
+}
+
+/** True when the account works as Free (the trial over, no paid plan). */
+export const isFree = async (userId: string) => (await planState(userId)).free;
+
 const thisMonth = () => new Date().toISOString().slice(0, 7);
 
 const NAMES: Record<UsageKind | "people", [string, string]> = {
@@ -31,7 +49,7 @@ const NAMES: Record<UsageKind | "people", [string, string]> = {
 function usesNote(kind: UsageKind | "people", left: number, free: boolean, cap: number) {
   const [one, many] = NAMES[kind];
   if (left <= 0) {
-    if (kind === "people") return free ? `No ${many} left. Pro includes ${PUBLIC_PLANS[1].credits} a month.` : `No ${many} left until your plan renews.`;
+    if (kind === "people") return free ? `Free shows who works there. Pro shows their names and emails, ${PUBLIC_PLANS[1].credits} companies a month.` : `No ${many} left until your plan renews.`;
     return free ? `No ${many} left. Pro has no limit.` : `You've used this month's ${cap} ${many}. More next month.`;
   }
   const low = kind === "people" ? (free ? 2 : 5) : free ? (kind === "letters" ? 2 : 3) : 20;
@@ -40,10 +58,10 @@ function usesNote(kind: UsageKind | "people", left: number, free: boolean, cap: 
 
 /** What the student has left on their plan, in uses and in credits, and the line to show for anything running low. */
 export async function planUsage(userId: string) {
-  const [account, stored, unlimited] = await Promise.all([repo.getAccount(userId), applicationProfiles.get(userId), hasUnlimitedCredits(userId)]);
-  const free = !account || account.plan === "free";
+  const [state, stored, unlimited] = await Promise.all([planState(userId), applicationProfiles.get(userId), hasUnlimitedCredits(userId)]);
+  const { account, free } = state;
   const config = serverConfig();
-  const fairUse = account?.plan === "premium" ? config.premiumAiLimit : config.proAiLimit;
+  const fairUse = state.plan === "premium" ? config.premiumAiLimit : config.proAiLimit;
   const uses = stored?.uses;
   const count = (kind: UsageKind) => (free ? uses?.total?.[kind] : uses?.month === thisMonth() ? uses.monthly?.[kind] : 0) ?? 0;
   const one = (kind: UsageKind) => {
@@ -51,16 +69,20 @@ export async function planUsage(userId: string) {
     const left = Math.max(0, limit - count(kind));
     return { used: count(kind), limit, left, note: usesNote(kind, left, free, limit) };
   };
-  const [letters, answers, autofills] = [one("letters"), one("answers"), one("autofills")];
+  const [letters, answers] = [one("letters"), one("answers")];
+  // Free fills the basic fields (no AI), with no limit; the AI answers to a form's questions are for Pro.
+  const autofills = free ? { used: count("autofills"), limit: 0, left: 0, note: "", basic: true } : { ...one("autofills"), basic: false };
   const peopleLeft = account?.balance ?? (free ? FREE_PEOPLE : 0);
   const people = { left: peopleLeft, note: unlimited ? "" : usesNote("people", peopleLeft, free, 0) };
-  const writing = free ? letters.left * CREDIT_COST.letters + answers.left * CREDIT_COST.answers + autofills.left * CREDIT_COST.autofills : 0;
-  return { free, unlimited, credits: unlimited ? null : writing + peopleLeft * CREDIT_COST.people, letters, answers, autofills, people };
+  const writing = free ? letters.left * CREDIT_COST.letters + answers.left * CREDIT_COST.answers : 0;
+  return { free, plan: state.plan, trial: state.trial, trialEnded: state.trialEnded, unlimited, credits: unlimited ? null : writing + peopleLeft * CREDIT_COST.people, letters, answers, autofills, people };
 }
 
 /** Before an AI use: stops at the plan's number. */
 export async function assertUseAllowed(userId: string, kind: UsageKind) {
   const usage = await planUsage(userId);
+  // Free's autofill is the basic fields, which has no limit.
+  if (kind === "autofills" && usage.autofills.basic) return;
   if (usage[kind].left === 0) throw new ServiceError(usage[kind].note, kind, usage.free ? 402 : 429);
 }
 

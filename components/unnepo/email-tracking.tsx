@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Inbox, X } from "lucide-react";
+import { UPGRADE_URL } from "@/lib/plan";
 import { AddressRow, CopyButton, EmailWizard, guessProvider, type Progress, type Provider } from "@/components/unnepo/email-wizard";
 
 /**
@@ -23,6 +24,8 @@ export type State = {
   gmailQuery: string; atsDomains: string[]; phrases: string[];
   verification: { provider: "gmail" | "outlook"; code: string | null; link: string | null; at: string } | null;
   review: Item[]; recent: Item[]; applications: Named[];
+  /** Free: emails read and waiting a day before they update the jobs. */
+  held?: { waiting: number; nextAt: string | null };
   skipped: { read: Array<{ id: string; at: string; summary: string }>; dropped: number; droppedAt: string | null };
 };
 
@@ -357,6 +360,12 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
         </div>
       </section>
 
+      {state.held && state.held.waiting > 0 && (
+        <p role="status" className="m-0 rounded-xl border border-[#F5C518]/30 bg-[#F5C518]/[0.06] px-4 py-3 text-[13px] text-[#D4D4D4]">
+          {state.held.waiting} {state.held.waiting === 1 ? "email is" : "emails are"} read and waiting. On Free, emails update your jobs a day after they arrive. <a href={UPGRADE_URL} className="font-medium text-white underline underline-offset-4">Pro updates them the moment they come in</a>
+        </p>
+      )}
+
       <PasteBox onDone={load} />
 
       <details className={part}>
@@ -365,7 +374,7 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
           <ul className="m-0 mt-3 flex list-none flex-col divide-y divide-[#17171B] p-0">
             {state.recent.map((item) => (
               <li key={item.id} className="flex flex-wrap items-baseline justify-between gap-2 py-2.5 text-[13px]">
-                <span className="min-w-0"><span className="mr-2 rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{item.outcome === "created" ? "Auto-added" : "Updated"}</span>{item.summary}{item.application && <a href={`/home?job=${encodeURIComponent(item.application.id)}`} className="ml-2 text-ink underline-offset-4 hover:underline">{item.application.company} — {item.application.title} →</a>}</span>
+                <span className="min-w-0"><span className="mr-2 rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">{item.outcome === "created" ? "Auto-added" : item.outcome === "held" ? "Waiting a day" : "Updated"}</span>{item.summary}{item.application && <a href={`/home?job=${encodeURIComponent(item.application.id)}`} className="ml-2 text-ink underline-offset-4 hover:underline">{item.application.company} — {item.application.title} →</a>}</span>
                 <span className="text-xs text-faint tabular-nums">{when(item.at)}</span>
               </li>
             ))}

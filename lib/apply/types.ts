@@ -91,6 +91,11 @@ export type FillReport = {
   peopleLinks?: Record<string, Array<{ label: string; url: string }>>;
   /** People on the list not revealed yet, by the name shown, and how many reveals this job has used. */
   peopleHidden?: Record<string, HiddenPerson>;
+  /**
+   * Free with no people searches left: who the search found (role and title, never a name or email), shown blurred
+   * with an upgrade. Cleared when a real search runs.
+   */
+  peoplePreview?: { at: string; company: string; rows: Array<{ role: ContactRole; title: string }> };
   peopleReveals?: number;
   /** When the student marked each person (by contact id) as emailed, for follow-up reminders. */
   emailedAt?: Record<string, string>;

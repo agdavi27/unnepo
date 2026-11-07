@@ -5,7 +5,7 @@ import { FounderLink } from "@/components/marketing/founder-note";
 import { GetExtension } from "@/components/marketing/get-extension";
 import { Schools } from "@/components/marketing/schools";
 import { SpiderDialogue } from "@/components/marketing/spider-dialogue";
-import { ENTERPRISE_PLAN, FREE_CREDITS, PUBLIC_PLANS } from "@/lib/config";
+import { ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
 
 /** The Chrome Web Store listing, once the extension is published. Until then the button starts sign-up. */
 const EXTENSION_URL = process.env.NEXT_PUBLIC_CHROME_EXTENSION_URL || "";
@@ -65,10 +65,10 @@ export function Landing() {
               <GetExtension
                 href={cta}
                 external={Boolean(EXTENSION_URL)}
-                label="Start free as a student"
+                label="Start 7 days of Pro free"
                 className="mt-1 inline-flex min-h-[54px] items-center justify-center rounded-[10px] bg-[#3D8BFF] px-[26px] py-3.5 text-base font-semibold text-bg transition-colors hover:bg-[#5A9DFF]"
               />
-              <p className="m-0 text-[13px] text-[#9A9AA3]">{FREE_CREDITS} free credits. The tracker is free and unlimited. Some schools cover Pro.</p>
+              <p className="m-0 text-[13px] text-[#9A9AA3]">7 days of Pro free, no card. The tracker is free and unlimited. Some schools cover Pro.</p>
             </div>
             <div className="flex min-w-0 flex-[1_1_480px] flex-col items-center gap-[22px]">
               <SpiderDialogue />

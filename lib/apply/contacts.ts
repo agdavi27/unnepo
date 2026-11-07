@@ -360,7 +360,7 @@ const roleForTitle = (title: string): ContactRole => (RECRUITING.test(title) ? "
  * soon as one person has a usable email: the rest of the list is revealed when the student asks.
  * Every person comes from one of these sources. Nobody is invented. Each search is recorded, so a result can be traced.
  */
-export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; facts?: StudentFacts; known?: KnownEmail[]; progress?: Progress } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch; hidden: Record<string, HiddenPerson>; reveals: number }> {
+export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; facts?: StudentFacts; known?: KnownEmail[]; progress?: Progress; /** Free's preview: the free searches only, no emails, nothing paid. */ preview?: boolean } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch; hidden: Record<string, HiddenPerson>; reveals: number }> {
   const started = Date.now();
   const spentBefore = await spentTodayCents(userId).catch(() => 0);
   const over = () => Date.now() - started > TIME_BUDGET_MS;
@@ -457,6 +457,13 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
       relevance: named.linkedinUrl ? "Shown under \"Meet the hiring team\" on this job." : "Named on the job posting.",
       linkedinUrl: named.linkedinUrl ?? null, photoUrl: null, links: named.linkedinUrl ? [{ label: "LinkedIn", url: named.linkedinUrl }] : [], guess: null, maybe: [], base: "", history: null, checked: Boolean(named.email),
     });
+  }
+
+  // Free's preview stops here: who's there, from the free searches, with no emails and nothing paid for.
+  if (options.preview) {
+    search.listed = listed.length;
+    const people = listed.map((row, index): ListedPerson => ({ rank: index + 1, role: row.role, name: row.name, title: row.title, email: null, emailSource: null, relevance: row.relevance, linkedinUrl: null, photoUrl: null, links: [] }));
+    return { people, domain: winner ?? domains[0] ?? null, notes: [], search, hidden: {}, reveals: 0 };
   }
 
   // Free again: addresses published on the company's own pages, when Apollo has no one.

@@ -12,6 +12,7 @@ import { Logo } from "@/components/brand/logo";
 import { ApplyArea, SpiderSettings, loadApplicationsEarly } from "@/components/unnepo/apply";
 import { SetupPage } from "@/components/unnepo/setup";
 import { extensionHere } from "@/lib/extension-bridge";
+import { trialLeftLabel } from "@/lib/plan";
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
@@ -58,9 +59,9 @@ export function AppHome({ start = "home" }: { start?: View }) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
       setEditing(true);
       window.history.replaceState(null, "", window.location.pathname);
-    } else if (tab === "setup" || tab === "jobs") {
+    } else if (tab === "setup" || tab === "jobs" || tab === "settings") {
       setView(tab);
-      window.history.replaceState(null, "", "/home");
+      window.history.replaceState(null, "", "/home" + window.location.hash);
     } else if (params.get("job")) {
       setView("applications");
     } else if (params.get("billing")) {
@@ -71,6 +72,11 @@ export function AppHome({ start = "home" }: { start?: View }) {
     }
     void extensionHere().then(setExtension);
   }, []);
+  // /settings#plans (the upgrade links): the plans, once the page has them.
+  const loaded = Boolean(data);
+  useEffect(() => {
+    if (loaded && view === "settings" && window.location.hash === "#plans") requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" }));
+  }, [loaded, view]);
   // Applications has its own address, so a refresh or a saved link stays on it.
   useEffect(() => {
     const path = view === "applications" ? "/applications" : "/home";
@@ -240,7 +246,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
   const creditsLeft = usage?.credits ?? (data?.credits.balance ?? 0) * CREDIT_COST.people;
   const creditsLabel = data?.credits.unlimited ? "Unlimited credits" : `${creditsLeft} ${creditsLeft === 1 ? "credit" : "credits"} left`;
   const usesLeft = usage ? [
-    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"}`, `${usage.answers.left} ${usage.answers.left === 1 ? "chat answer" : "chat answers"}`, `${usage.autofills.left} ${usage.autofills.left === 1 ? "autofill" : "autofills"}`] : []),
+    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"}`, `${usage.answers.left} ${usage.answers.left === 1 ? "chat answer" : "chat answers"}`] : []),
     ...(usage.unlimited ? [] : [`${usage.people.left} ${usage.people.left === 1 ? "people search" : "people searches"}`]),
   ] : [];
   const hadResume = Boolean(data?.resume);
@@ -308,6 +314,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
           </div>
         )}
         {!data && !error && <SpiderLoader label="Loading your workspace…" />}
+        {data && !showOnboarding && usage && !usage.unlimited && view !== "settings" && <TrialBanner usage={usage} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />}
         {notice && (
           <div className="flex items-start justify-between gap-3 rounded-xl border border-line bg-card px-4 py-3 text-sm text-zinc-300">
             <p>{notice}</p>
@@ -356,11 +363,12 @@ export function AppHome({ start = "home" }: { start?: View }) {
               </div>
             </section>
             <SpiderSettings />
-            <section className="space-y-4">
+            <section id="plans" className="scroll-mt-24 space-y-4">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <h2 className="text-xl font-semibold tracking-tight">Plans</h2>
                   <p className="mt-1 text-sm text-muted">
+                    {usage?.trial ? <>You&apos;re on your free Pro trial, {trialLeftLabel(usage.trial)}. Then you&apos;ll be on Free unless you choose a plan. </> : null}
                     You&apos;re on {LEGACY_PLANS[currentPlan] ?? PUBLIC_PLANS.find((plan) => plan.id === currentPlan)?.name ?? "Free"} with {creditsLabel.toLowerCase()}{usesLeft.length ? `: ${usesLeft.join(", ")}` : ""}.
                   </p>
                 </div>
@@ -373,8 +381,10 @@ export function AppHome({ start = "home" }: { start?: View }) {
                     <div key={plan.id} className={`flex flex-col rounded-2xl border p-5 ${current ? "border-white bg-card" : "border-line bg-panel"}`}>
                       <div className="flex items-center justify-between gap-2">
                         <h3 className="text-lg font-semibold">{plan.name}</h3>
-                        {current ? (
-                          <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-black">Current plan</span>
+                        {usage?.trial && plan.id === "pro" ? (
+                          <span className="rounded-full bg-[#3D8BFF] px-2.5 py-0.5 text-xs font-semibold text-black">On trial</span>
+                        ) : current ? (
+                          <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-semibold text-black">{usage?.trial ? "After your trial" : "Current plan"}</span>
                         ) : plan.popular ? (
                           <span className="rounded-full border border-line px-2.5 py-0.5 text-xs text-muted">Popular</span>
                         ) : null}
@@ -436,6 +446,27 @@ export function AppHome({ start = "home" }: { start?: View }) {
           usesNote={usage?.letters.note ?? ""}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The Pro trial, while it runs (how long is left, and what goes when it ends), and once it's over (what Free
+ * doesn't do). Shown above every page but Settings, where the plans are.
+ */
+function TrialBanner({ usage, onPlans }: { usage: PlanUsage; onPlans: () => void }) {
+  if (!usage.trial && !(usage.trialEnded && usage.free)) return null;
+  const urgent = usage.trial ? usage.trial.hoursLeft <= 48 : true;
+  return (
+    <div role="status" className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${urgent ? "border-[#F5A524]/60 bg-[#F5A524]/[0.07]" : "border-[#3D8BFF]/50 bg-[#3D8BFF]/[0.07]"}`}>
+      <p className="m-0 min-w-0 flex-1 basis-72">
+        {usage.trial ? (
+          <><strong className="font-semibold">Pro trial: {trialLeftLabel(usage.trial)}.</strong> <span className="text-muted">After that, autofill skips the questions, cover letters aren&apos;t tailored, people stay hidden, and follow-ups aren&apos;t written for you.</span></>
+        ) : (
+          <><strong className="font-semibold">Your Pro trial ended.</strong> <span className="text-muted">You&apos;re on Free: autofill fills your basic details, and people and follow-up drafts are hidden. Pro brings them back.</span></>
+        )}
+      </p>
+      <button type="button" onClick={onPlans} className="shrink-0 rounded-xl bg-white px-3.5 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">{usage.trial ? "Keep Pro" : "Get Pro back"}</button>
     </div>
   );
 }

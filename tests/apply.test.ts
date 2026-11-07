@@ -657,18 +657,31 @@ describe("people after applying", () => {
     await runContactDiscovery(userId, application.id);
     expect(await debits()).toBe(1);
 
-    // Another job with no credits left: nobody is looked up.
-    await repo.setAccountForTests(userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
-    const { app } = await applications.insert({
-      userId, jobKey: "url:acme.com/job/2", jobUrl: "https://acme.com/job/2", ats: "other", title: "Analyst", company: "Acme Corp", companyDomain: "acme.com", department: null, location: null,
+    const another = async (n: number) => (await applications.insert({
+      userId, jobKey: `url:acme.com/job/${n}`, jobUrl: `https://acme.com/job/${n}`, ats: "other", title: "Analyst", company: "Acme Corp", companyDomain: "acme.com", department: null, location: null,
       description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
       confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: true, attempts: 0,
-    });
-    const searchesBefore = searches.length;
+    })).app;
+
+    // Another job with no credits left, on Free: who's there, from the free searches, kept as roles and titles
+    // only (no names, no emails), and nothing spent.
+    await repo.setAccountForTests(userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
+    const app = await another(2);
     await runContactDiscovery(userId, app.id);
-    expect(searches.length).toBe(searchesBefore);
     expect(await applicationContacts.list(userId, [app.id])).toEqual([]);
-    expect((await applications.get(userId, app.id))?.contactsMessage).toMatch(/out of credits/);
+    const preview = (await applications.get(userId, app.id))?.fillReport?.peoplePreview;
+    expect(preview?.rows).toEqual([{ role: "alumni", title: "Product Manager" }]);
+    expect(JSON.stringify(preview)).not.toContain("Casey");
+    expect(await debits()).toBe(1);
+
+    // On a paid plan with no credits left: nobody is looked up.
+    await repo.setAccountForTests(userId, { plan: "pro" });
+    const paid = await another(3);
+    const searchesBefore = searches.length;
+    await runContactDiscovery(userId, paid.id);
+    expect(searches.length).toBe(searchesBefore);
+    expect(await applicationContacts.list(userId, [paid.id])).toEqual([]);
+    expect((await applications.get(userId, paid.id))?.contactsMessage).toMatch(/out of credits/);
   });
 
   it("charges nothing for a list with no emails, and never charges an unlimited account", async () => {
@@ -700,6 +713,8 @@ describe("people after applying", () => {
     const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
     const { userId, application, contacts } = await appliedWith(found, { verified: ["a1"] });
     const casey = contacts.find((item) => item.name === "Casey Park")!;
+    // Follow-ups written for you are Pro.
+    await repo.setAccountForTests(userId, { plan: "pro" });
     await writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, subject: "Hello", body: "Hi Casey, I applied to the Product Analyst Intern role." });
     await updateOutreach(userId, { contactId: casey.id, status: "emailed" });
     const emailedAt = (await applications.get(userId, application.id))!.fillReport!.emailedAt![casey.id];
@@ -720,6 +735,16 @@ describe("people after applying", () => {
     expect(Date.parse((await applications.get(userId, application.id))!.fillReport!.emailedAt![casey.id])).toBeGreaterThanOrEqual(Date.parse(emailedAt));
     await updateOutreach(userId, { contactId: casey.id, status: "replied" });
     expect((await applications.get(userId, application.id))!.fillReport!.emailedAt![casey.id]).toBeUndefined();
+  });
+
+  it("doesn't write follow-ups on Free", async () => {
+    const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
+    const { userId, application, contacts } = await appliedWith(found, { verified: ["a1"] });
+    const casey = contacts.find((item) => item.name === "Casey Park")!;
+    await writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, subject: "Hello", body: "Hi Casey." });
+    const calls = model.calls.length;
+    await expect(writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, followUp: true })).rejects.toMatchObject({ code: "plan", status: 402 });
+    expect(model.calls.length).toBe(calls);
   });
 
   it("looks for people as soon as a job is applied to, on a paid plan or when Free turns it on", async () => {

@@ -107,6 +107,8 @@ describe("extension tokens", () => {
 describe("extension API", () => {
   it("serves the profile and resume, maps forms with at most one AI call, and caches answers", async () => {
     const userId = await readyStudent();
+    // The AI's answers to a form's questions are Pro.
+    await repo.setAccountForTests(userId, { plan: "pro" });
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
 
@@ -472,12 +474,13 @@ describe("plan limits", () => {
     await repo.setAccountForTests(userId, { balance: 5 });
     const { token } = await issueExtensionToken(userId);
     const { usage } = await (await call("GET", "me", token)).json();
-    expect(usage.credits).toBe(55);
-    expect(usage.autofills).toMatchObject({ left: 10, note: "" });
+    expect(usage.credits).toBe(45);
+    // Free's autofill is the basic fields, with no limit to count down.
+    expect(usage.autofills).toMatchObject({ basic: true, note: "" });
     expect(usage.people).toMatchObject({ left: 5, note: "" });
     await repo.setAccountForTests(userId, { balance: 1 });
     const low = (await (await call("GET", "me", token)).json()).usage;
-    expect(low.credits).toBe(35);
+    expect(low.credits).toBe(25);
     expect(low.people.note).toBe("Only 1 people search left");
   });
 
@@ -510,7 +513,7 @@ describe("plan limits", () => {
     expect((await blocked.json()).error).toBe("No chat answers left. Pro has no limit.");
   });
 
-  it("counts a job's autofill once it worked, and lets Free refill that job after the limit", async () => {
+  it("counts a job's autofill once it worked, and has no limit on Free's basic fill", async () => {
     const userId = await readyStudent();
     const { token } = await issueExtensionToken(userId);
     const fields = [{ id: "first", label: "First name", type: "text", required: true, options: [] }];
@@ -529,12 +532,70 @@ describe("plan limits", () => {
     expect((await (await call("GET", "me", token)).json()).usage.autofills.used).toBe(1);
     for (const applicationId of jobs.slice(1, 10)) await call("POST", "attempts", token, { applicationId, attempts: ok });
 
-    const blocked = await call("POST", "map", token, { applicationId: jobs[10], fields, ai: false });
-    expect(blocked.status).toBe(402);
-    expect((await blocked.json()).error).toBe("No autofills left. Pro has no limit.");
-    expect((await call("POST", "map", token, { applicationId: jobs[0], fields, ai: false })).status).toBe(200);
-    await repo.setAccountForTests(userId, { plan: "pro" });
+    // Past ten, Free still fills the basic fields.
     expect((await call("POST", "map", token, { applicationId: jobs[10], fields, ai: false })).status).toBe(200);
+    expect((await call("POST", "map", token, { applicationId: jobs[0], fields, ai: false })).status).toBe(200);
+  });
+});
+
+describe("Free and the Pro trial", () => {
+  const fields = [
+    { id: "f1", label: "Legal first name", type: "text", required: true },
+    { id: "f2", label: "Why do you want to work here?", type: "textarea", required: true },
+    { id: "f3", label: "Tell us about a project you're proud of", type: "textarea", required: false },
+    { id: "f4", label: "Resume", type: "file", required: true },
+  ];
+
+  it("fills only the basic fields on Free, says which questions Pro would answer, and answers them on the trial", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/5", title: "Data Intern", company: "Globex" })).json();
+
+    const free = await (await call("POST", "map", token, { applicationId: job.application.id, fields })).json();
+    expect(model.calls).toBe(0);
+    expect(free.answers.find((item: { id: string }) => item.id === "f1").values).toEqual(["Pat"]);
+    expect(free.locked.map((item: { id: string }) => item.id)).toEqual(["f2", "f3"]);
+    expect(free.aiAvailable).toBe(false);
+    const me = await (await call("GET", "me", token)).json();
+    expect(me).toMatchObject({ trial: null, effectivePlan: "free", usage: { free: true } });
+
+    // Signed up today, with the trial on: Pro, so the questions are answered.
+    process.env.TRIAL_DAYS = "7";
+    model.replies.push(JSON.stringify({ answers: [{ id: "f2", value: "I led the Colby Data Club and built dashboards for 40 students.", source: "resume", evidence: "I led the Colby Data Club and built dashboards for 40 students." }] }));
+    const trial = await (await call("POST", "map", token, { applicationId: job.application.id, fields })).json();
+    expect(model.calls).toBe(1);
+    expect(trial.locked).toEqual([]);
+    expect(trial.answers.find((item: { id: string }) => item.id === "f2").source).toBe("ai");
+    const onTrial = await (await call("GET", "me", token)).json();
+    expect(onTrial).toMatchObject({ plan: "free", effectivePlan: "pro", trial: { daysLeft: 7 }, usage: { free: false } });
+
+    // Its answer stays cached, but Free doesn't get it back after the trial.
+    process.env.TRIAL_DAYS = "0";
+    const after = await (await call("POST", "map", token, { applicationId: job.application.id, fields })).json();
+    expect(after.answers.find((item: { id: string }) => item.id === "f2").values).toEqual([]);
+  });
+
+  const letterText = "Dear Hiring Team,\n\nI am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students. I would bring the same care and steady habits to the team at Northwind.\n\nSincerely,\nPat Doe";
+
+  it("writes Free a general letter for the job, and Pro one from the job description", async () => {
+    const userId = await readyStudent();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    const { token } = await issueExtensionToken(userId);
+    const description = "Retail Manager at Northwind. You will lead a team of 12, plan weekly schedules, and run inventory counts.";
+    const job = await (await call("POST", "jobs", token, { url: "https://careers.northwind.example/apply/1", title: "Retail Manager", company: "Northwind", description })).json();
+    model.replies.push(letterText);
+    const general = await (await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" })).json();
+    expect(model.lastPrompt).toContain("Role: Retail Manager at Northwind");
+    expect(model.lastPrompt).not.toContain("plan weekly schedules");
+    expect(model.lastPrompt).toContain("No job description");
+    expect(general).toMatchObject({ tailored: false, upgrade: "Pro tailors every letter to the job description." });
+
+    await repo.setAccountForTests(userId, { plan: "pro" });
+    model.replies.push(letterText);
+    const tailored = await (await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "confident" })).json();
+    expect(model.lastPrompt).toContain("plan weekly schedules");
+    expect(tailored).toMatchObject({ tailored: true, upgrade: null });
   });
 });
 
@@ -614,6 +675,8 @@ describe("cover letters from the panel", () => {
 
   it("writes from a pasted job description when there's no job on the page, and lists the student's jobs", async () => {
     const userId = await readyStudent();
+    // Letters tailored to the description are Pro.
+    await repo.setAccountForTests(userId, { plan: "pro" });
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
     expect((await call("POST", "cover-letter", token, { description: "Too short." })).status).toBe(400);
@@ -634,6 +697,7 @@ describe("cover letters from the panel", () => {
 
   it("writes about the Handshake job the student clicked, from the text the page shows", async () => {
     const userId = await readyStudent();
+    await repo.setAccountForTests(userId, { plan: "pro" });
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
     const description = "Retail Manager at Northwind. You will lead a team of 12, plan weekly schedules, and run inventory counts.";

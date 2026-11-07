@@ -17,6 +17,7 @@ import { HOW_LABEL } from "@/lib/apply/activity-stats";
 import { WHENS, arrange, postingLink, siteFor, sitesIn, sortByColumn, type Column, type When } from "@/lib/apply/applied-list";
 import type { ApplicationContact, ApplicationProfile, JobApplication, OutreachState } from "@/lib/apply/types";
 import type { planUsage } from "@/lib/apply/limits";
+import { UPGRADE_URL } from "@/lib/plan";
 
 const btn = "inline-flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed";
 const primary = `${btn} bg-white text-black hover:bg-zinc-200`;
@@ -34,6 +35,8 @@ export type ApplyData = {
   usage?: PlanUsage;
   school: string;
   plan?: string;
+  /** Free: emails waiting a day before they update the jobs. */
+  heldEmails?: { waiting: number; nextAt: string | null };
   maybe?: Maybe[];
   session?: Session;
 };
@@ -478,7 +481,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
                         <div className="w-full text-left empty:hidden"><PostedBy app={app} /></div>
                       </div>
                     ) : (
-                      <ContactsPanel app={app} school={data.school} peopleNote={data.usage?.people.note ?? ""} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} onReveal={(contactId) => act("/reveal-person", "POST", { applicationId: app.id, contactId })} onBounced={(contactId) => void act("/contact-bounced", "POST", { applicationId: app.id, contactId })} />
+                      <ContactsPanel app={app} school={data.school} free={Boolean(data.usage?.free)} peopleNote={data.usage?.people.note ?? ""} onStatus={(contactId, status) => void act("/contact", "PATCH", { contactId, status })} onRetry={(website) => void act("/retry-contacts", "POST", { applicationId: app.id, ...(website ? { website } : {}) })} onEmail={(contactId, edit) => act("/contact-email", "POST", { applicationId: app.id, contactId, ...edit })} onReveal={(contactId) => act("/reveal-person", "POST", { applicationId: app.id, contactId })} onBounced={(contactId) => void act("/contact-bounced", "POST", { applicationId: app.id, contactId })} />
                     )}
                     </div>
                   </div>
@@ -554,6 +557,8 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
             onReview={() => { onPage("applications"); setReviewOpen(true); }}
             onJobs={onJobs}
             onSpiders={onSpiders}
+            free={Boolean(data.usage?.free)}
+            heldEmails={data.heldEmails}
           />
         </>
       )}
@@ -618,6 +623,52 @@ function PeopleCircles() {
 }
 
 const peopleCard = "flex h-full max-h-[32rem] min-h-56 flex-col items-center justify-center gap-3 overflow-y-auto rounded-xl border border-line bg-card p-5 text-center lg:max-h-none";
+
+/** "3 recruiters and 2 alumni": the roles the preview found, counted. */
+export function peopleCount(rows: Array<{ role: ApplicationContact["role"] }>) {
+  const names: Record<ApplicationContact["role"], [string, string]> = {
+    recruiter: ["recruiter", "recruiters"], alumni: ["alum", "alumni"], job_poster: ["hiring contact", "hiring contacts"],
+    hiring_manager: ["hiring manager", "hiring managers"], team_member: ["person on the team", "people on the team"],
+  };
+  const order: Array<ApplicationContact["role"]> = ["recruiter", "alumni", "job_poster", "hiring_manager", "team_member"];
+  const parts = order.flatMap((role) => {
+    const count = rows.filter((row) => row.role === role).length;
+    return count ? [`${count} ${names[role][count === 1 ? 0 : 1]}`] : [];
+  });
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts[0] ?? "";
+}
+
+/** Blurred bars where a name and an email go: the page never has them on Free, not even hidden. */
+const BAR_WIDTHS = ["w-28", "w-24", "w-32", "w-20", "w-[7.5rem]", "w-[6.5rem]"];
+
+/** Free: the people the search found at the company, names and emails blurred, with Pro to see them. */
+function LockedPeople({ company, rows }: { company: string; rows: Array<{ role: ApplicationContact["role"]; title: string }> }) {
+  return (
+    <div className="flex h-full max-h-[32rem] flex-col gap-3 overflow-y-auto rounded-xl border border-line bg-card p-4 lg:max-h-none">
+      <div>
+        <p className="m-0 text-sm font-semibold">{peopleCount(rows)} found at {company}</p>
+        <p className="m-0 mt-0.5 text-[13px] text-muted">Pro shows who they are, their checked emails, and writes your first email.</p>
+      </div>
+      <ul className="m-0 flex list-none flex-col gap-2 p-0" aria-label="People found, hidden on Free">
+        {rows.map((row, index) => (
+          <li key={index} className="flex items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2.5">
+            <span aria-hidden className="h-9 w-9 shrink-0 rounded-full border border-[#3A3A44] bg-[#1A1A1F] blur-[2px]" />
+            <div className="min-w-0 flex-1">
+              <p className="m-0 flex items-center gap-2 text-sm font-medium">
+                <span aria-hidden className={`inline-block h-3.5 rounded bg-[#C9C9D1]/60 blur-[3px] ${BAR_WIDTHS[index % BAR_WIDTHS.length]}`} />
+                <span className="sr-only">Hidden name</span>
+                <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted">{ROLE_LABEL[row.role]}</span>
+              </p>
+              <p className="m-0 truncate text-xs text-muted">{row.title || "Works here"}</p>
+              <span aria-hidden className="mt-1.5 block h-2.5 w-40 rounded bg-[#8B8B94]/50 blur-[3px]" />
+            </div>
+          </li>
+        ))}
+      </ul>
+      <a href={UPGRADE_URL} className="inline-flex justify-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">See who they are with Pro</a>
+    </div>
+  );
+}
 
 /** The person the posting names, shown as soon as the job is saved, with the posting's own label for them. */
 function PostedBy({ app }: { app: App }) {
@@ -1258,7 +1309,7 @@ function EmailBox({ contact, onEmail }: { contact: NonNullable<App["contacts"]>[
   );
 }
 
-function ContactsPanel({ app, school, peopleNote, onStatus, onRetry, onEmail, onReveal, onBounced }: { app: App; school: string; peopleNote: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void; onEmail: (contactId: string, edit?: EmailEdit) => Promise<void>; onReveal: (contactId: string) => Promise<void>; onBounced: (contactId: string) => void }) {
+function ContactsPanel({ app, school, free, peopleNote, onStatus, onRetry, onEmail, onReveal, onBounced }: { app: App; school: string; free: boolean; peopleNote: string; onStatus: (contactId: string, status: OutreachState) => void; onRetry: (website?: string) => void; onEmail: (contactId: string, edit?: EmailEdit) => Promise<void>; onReveal: (contactId: string) => Promise<void>; onBounced: (contactId: string) => void }) {
   const contacts = app.contacts ?? [];
   const [copied, setCopied] = useState("");
   const [website, setWebsite] = useState("");
@@ -1283,8 +1334,11 @@ function ContactsPanel({ app, school, peopleNote, onStatus, onRetry, onEmail, on
       setCopied("");
     }
   }
-  // Nobody is looked up until the student asks.
-  if (app.contactsStatus === "idle") {
+  const preview = contacts.length === 0 && app.contactsStatus === "done" ? app.fillReport?.peoplePreview : undefined;
+  // Free: who the search found, blurred, with Pro to see them.
+  if (preview?.rows.length && free) return <LockedPeople company={app.company} rows={preview.rows} />;
+  // Nobody is looked up until the student asks (or, after upgrading, again for real).
+  if (app.contactsStatus === "idle" || (preview && !free)) {
     return (
       <div className={peopleCard}>
         <PeopleCircles />

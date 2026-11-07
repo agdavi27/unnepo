@@ -2,7 +2,7 @@ import { ServiceError } from "@/lib/errors";
 import { applications } from "@/lib/apply/store";
 import { addressFor, inboundReady } from "@/lib/email/address";
 import { ATS_DOMAINS, JOB_PHRASES, gmailFilterQuery, type InboundEmail } from "@/lib/email/filter";
-import { SKIPPED_KEY, processEmail, reviewEmail } from "@/lib/email/process";
+import { SKIPPED_KEY, processEmail, releaseHeldEmails, reviewEmail } from "@/lib/email/process";
 import { applications as jobs } from "@/lib/apply/store";
 import { emailEvents, emailInboxes, emailTexts } from "@/lib/email/store";
 import { unwrapForward } from "@/lib/email/inbound";
@@ -13,6 +13,8 @@ const VERIFICATION_DAYS = 3;
 const SKIPPED_SHOWN = 5;
 
 export async function emailState(userId: string) {
+  // Free's held emails that are due go on their jobs first, so the page shows them.
+  const held = await releaseHeldEmails(userId).catch(() => ({ waiting: 0, nextAt: null }));
   const [inbox, events, apps, count] = await Promise.all([emailInboxes.forUser(userId), emailEvents.list(userId, 200), applications.names(userId), emailEvents.byKey(userId, SKIPPED_KEY)]);
   const name = new Map(apps.map((app) => [app.id, { id: app.id, title: app.title, company: app.company }]));
   // The newest forwarding confirmation from the last few days: its code and link, to finish setting up.
@@ -30,12 +32,14 @@ export async function emailState(userId: string) {
     forwarded: events.some((event) => event.source === "forward") || Boolean(count),
     // The newest real email forwarded in (not the forwarding code): the setup's test looks for a new one.
     lastEmail: lastEmail ? { id: lastEmail.id, at: lastEmail.createdAt, outcome: lastEmail.outcome, company: lastEmail.company, jobTitle: lastEmail.jobTitle, summary: lastEmail.summary } : null,
+    // Free: emails read and waiting to go on their jobs (a day after each arrived). Pro updates right away.
+    held,
     gmailQuery: gmailFilterQuery(),
     atsDomains: ATS_DOMAINS,
     phrases: JOB_PHRASES,
     verification: verification?.verification ? { ...verification.verification, at: verification.createdAt } : null,
     review: events.filter((event) => event.outcome === "review").map(show),
-    recent: events.filter((event) => ["created", "updated", "approved"].includes(event.outcome)).slice(0, 20).map(show),
+    recent: events.filter((event) => ["created", "updated", "approved", "held"].includes(event.outcome)).slice(0, 20).map(show),
     // Emails that arrived but weren't about a job, so the student knows they got here. The AI's one line for those
     // it read; only a count and a time for those dropped before it.
     skipped: {

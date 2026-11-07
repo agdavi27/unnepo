@@ -219,6 +219,8 @@ function jobPage(state: PanelState) {
       <div><div class="job-name">${escape(title)}</div><div class="sub job-detail">${escape(detail)}</div></div>
       <button type="button" class="btn primary big" id="fill" ${me!.profileReady ? "" : "disabled"}>${job?.report ? "Fill again" : "Autofill application"}</button>
       ${usesLine(me?.usage?.autofills.note)}
+      ${lockedLine(state)}
+      ${trialLine(state)}
       <div class="row-between"><button type="button" class="quiet-link" id="skip-job">Skip this job</button><button type="button" class="quiet-link" id="not-job">This isn't a job</button></div>
       <span class="sub">Beta: check every field before you submit.</span>
       ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
@@ -227,6 +229,30 @@ function jobPage(state: PanelState) {
       <button type="button" class="more-row" data-go="more">Cover letter, resume, more <span aria-hidden="true">›</span></button>
       ${goalBar(state)}
     </div>`;
+}
+
+/** Where "Get Pro" goes: the plans in the web app. */
+const upgradeUrl = (state: PanelState) => `${state.apiBase}/home?tab=settings#plans`;
+
+/** Free, after a fill: "Pro would answer these 4 questions for you." */
+function lockedLine(state: PanelState) {
+  const count = state.job?.locked ?? 0;
+  if (!count || !state.me?.usage?.free || state.job?.running) return "";
+  return `<p class="small locked-line" role="status">${SPARK_SMALL} Pro would answer ${count === 1 ? "this question" : `these ${count} questions`} for you. <a href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Get Pro</a></p>`;
+}
+
+/** The Pro trial: how long is left, and, once it's over, that this is Free. */
+function trialLine(state: PanelState) {
+  const me = state.me;
+  if (!me || me.unlimitedCredits) return "";
+  if (me.trial) {
+    const left = me.trial.hoursLeft < 24 ? `${me.trial.hoursLeft} ${me.trial.hoursLeft === 1 ? "hour" : "hours"}` : `${me.trial.daysLeft} ${me.trial.daysLeft === 1 ? "day" : "days"}`;
+    return `<span class="small"${me.trial.hoursLeft <= 48 ? ' style="color: var(--warn)"' : ""}>Pro trial: ${left} left. <a href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Keep Pro</a></span>`;
+  }
+  if (me.trialEnded && me.usage?.free) {
+    return `<span class="small">Your Pro trial ended. Free fills your basic details. <a href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Get Pro back</a></span>`;
+  }
+  return "";
 }
 
 /** Today's goal, as one quiet line. */
@@ -746,7 +772,7 @@ function wireAnswer(tabId: number) {
  * The cover letter writer: the popup asks one question at a time (the job description when there's no job on
  * the tab, then length, tone, anything to mention), writes it, then offers a box for edits. Kept across redraws.
  */
-type Letter = { text: string; fileName: string; pdfBase64: string; addedToApplied?: boolean };
+type Letter = { text: string; fileName: string; pdfBase64: string; addedToApplied?: boolean; tailored?: boolean; upgrade?: string | null };
 let letter: Letter | null = null;
 let letterStep: "closed" | "writing" | "written" | "revising" | "saving" = "closed";
 let letterNote = "";
@@ -824,6 +850,8 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
     if (revise) letterChoices.edit = "";
     if (save) letterNote = "Saved. The PDF has your edits.";
     if (result.doc.addedToApplied) letterNote = "Added to your applied jobs.";
+    // Free: a general letter. Says what Pro does instead.
+    else if (result.doc.upgrade && !save) letterNote = `A general letter. ${result.doc.upgrade}`;
   } else {
     letterStep = letter ? "written" : "closed";
     letterNote = result.error ?? "Couldn't write the cover letter.";
@@ -978,7 +1006,7 @@ function profileCard(state: PanelState) {
       <div class="row-between"><span class="heading">Your profile</span><span class="mono">${me.completeness}% READY</span></div>
       <div class="bar" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}"><div style="width:${me.completeness}%"></div></div>
       <span class="small">${escape(me.user.email)} · ${me.unlimitedCredits ? "unlimited credits" : `${me.usage?.credits ?? me.credits * 5} credits left`}</span>
-      ${me.usage?.free ? `<span class="small">${me.usage.letters.left} cover letters · ${me.usage.answers.left} chat answers · ${me.usage.autofills.left} autofills${me.usage.unlimited ? "" : ` · ${me.usage.people.left} people searches`} left</span>` : ""}
+      ${me.usage?.free ? `<span class="small">${me.usage.letters.left} cover letters · ${me.usage.answers.left} chat answers${me.usage.unlimited ? "" : ` · ${me.usage.people.left} people searches`} left</span>` : ""}
       <a class="btn" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">Edit my info</a>
       ${me.profileReady ? "" : `<span class="small" style="color: var(--warn)">Finish your profile so there's something to fill with.</span>`}
       ${missing.length ? `<span class="small">Missing: ${missing.map(escape).join(", ")}</span>` : ""}
@@ -1401,7 +1429,7 @@ function drawPlan(state: PanelState) {
   const me = state.me;
   const left = me?.usage?.credits ?? (me ? me.credits * 5 : 0);
   creditsLeft.textContent = me?.unlimitedCredits ? "Unlimited credits" : `${left} ${left === 1 ? "credit" : "credits"} left`;
-  upgrade.href = `${state.apiBase}/#pricing`;
+  upgrade.href = upgradeUrl(state);
   // Nothing to upgrade to from the top plan or an unlimited account.
   upgrade.hidden = Boolean(me?.unlimitedCredits) || me?.plan === "premium";
 }

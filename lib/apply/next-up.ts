@@ -7,7 +7,7 @@ import type { ApplicationContact, JobApplication } from "@/lib/apply/types";
  * - goals: how many more to apply to for today's (and this week's) goal;
  * - follow_ups: companies that wrote back (Follow up), and people whose follow-up email is due;
  * - applications: applications left unfinished, and applied ones quiet long enough to ask how they went;
- * - review: emails Unnepo couldn't place on a job.
+ * - review: emails Unnepo couldn't place on a job, one row each when they're passed in.
  * No server imports, so the web app runs it.
  */
 
@@ -57,7 +57,10 @@ export type NextUp = {
   review: { count: number; items: NextItem[] };
 };
 
-export function nextUp(apps: NextApp[], options: { toReview?: number; now?: Date; goal?: { today: number; daily: number; week?: number; weekly?: number } } = {}): NextUp {
+/** An email in the Review Inbox, as /api/email/state lists it. */
+export type ReviewEmail = { id: string; at?: string | null; company?: string | null; jobTitle?: string | null; summary?: string | null };
+
+export function nextUp(apps: NextApp[], options: { toReview?: number; reviewEmails?: ReviewEmail[]; now?: Date; goal?: { today: number; daily: number; week?: number; weekly?: number } } = {}): NextUp {
   const now = options.now ?? new Date();
   const role = (app: NextApp) => (app.titleMissing ? "" : app.title);
   const named = apps.filter((app) => !app.companyMissing);
@@ -118,8 +121,14 @@ export function nextUp(apps: NextApp[], options: { toReview?: number; now?: Date
     });
   }
 
-  const toReview = options.toReview ?? 0;
-  const reviewItems: NextItem[] = toReview > 0 ? [{
+  const emails = options.reviewEmails;
+  const toReview = emails ? emails.length : options.toReview ?? 0;
+  const reviewItems: NextItem[] = emails ? emails.slice(0, SHOWN).map((email) => ({
+    key: `review:${email.id}`, kind: "review" as const,
+    title: email.company ? `Email from ${email.company}` : "Email about a job",
+    detail: [email.jobTitle, email.summary].filter(Boolean).join(" · ") || "Unnepo wasn't sure which job it belongs to",
+    when: email.at ? dayWords(Date.parse(email.at), now) : "", action: "Review",
+  })) : toReview > 0 ? [{
     key: "review", kind: "review", title: toReview === 1 ? "1 email needs a look" : `${toReview} emails need a look`,
     detail: "Unnepo wasn't sure which job they belong to. Your tracker is off until you place them", when: "To review", action: "Review emails",
   }] : [];

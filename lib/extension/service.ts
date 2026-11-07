@@ -3,7 +3,7 @@ import { nameCompanyFromDescription } from "@/lib/apply/job-link";
 import { CREDIT_COST } from "@/lib/config";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
-import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, planUsage } from "@/lib/apply/limits";
+import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, isFree, planUsage } from "@/lib/apply/limits";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
@@ -90,7 +90,11 @@ export async function extensionMe(userId: string) {
     creditCost: { letters: CREDIT_COST.letters, answers: CREDIT_COST.answers },
     maybe: liveMaybe(stored?.maybeApplied).map(({ id, title, company, site, at }) => ({ id, title, company, site, at })),
     session: sessionNow(stored?.session),
+    // What the account is on (billing), and what it works as: Pro during the trial.
     plan: credits?.plan ?? "free",
+    effectivePlan: usage.plan,
+    trial: usage.trial,
+    trialEnded: usage.trialEnded,
     coverLetters: { used: usage.letters.used, left: usage.free ? usage.letters.left : null },
     profileReady: state.ready,
     completeness: state.profile.completeness,
@@ -241,8 +245,8 @@ async function withContacts(userId: string, apps: JobApplication[]) {
  * student presses Write. Free writes one only when asked, since it has a monthly number.
  */
 async function preWriteLetter(userId: string, applicationId: string) {
-  const [account, app] = await Promise.all([repo.getAccount(userId), applications.get(userId, applicationId)]);
-  if (!account || account.plan === "free" || !app || app.fillReport?.coverLetter || !app.description.trim()) return;
+  const [free, app] = await Promise.all([isFree(userId), applications.get(userId, applicationId)]);
+  if (free || !app || app.fillReport?.coverLetter || !app.description.trim()) return;
   const info = await student(userId);
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
   const text = await writeCoverLetter(userId, app, { name, resumeText: info.resumeText, profile: info.profileText });
@@ -348,6 +352,8 @@ export async function extensionMap(userId: string, raw: unknown) {
   const app = await requireApp(userId, body.applicationId);
   // Filling a job again is free once it has counted; a new one needs a use left.
   if (!app.fillReport?.autofillCounted) await assertUseAllowed(userId, "autofills");
+  // Free fills the basic fields from the student's own details; the AI answers to the questions are for Pro.
+  const free = await isFree(userId);
   const fields = Array.isArray(body.fields) ? (body.fields as PageField[]) : [];
   // ai: false answers only from the student's data and saved answers, with no model call, so the extension can
   // start filling at once; it asks again for what's left.
@@ -373,12 +379,12 @@ export async function extensionMap(userId: string, raw: unknown) {
   const knownOrCached = (field: SchemaField) => {
     const answer = known(field);
     if (answer) return answer;
-    const hit = cache[cacheKey(field)];
+    const hit = free ? null : cache[cacheKey(field)];
     if (!hit) return null;
     fromCache.add(field.id);
     return { value: hit.values.join("\n"), source: "ai" };
   };
-  const ai = !skipAi && (await aiCallsToday(userId)) < DAILY_AI_CALLS;
+  const ai = !free && !skipAi && (await aiCallsToday(userId)) < DAILY_AI_CALLS;
   const mapped = await buildMapping({
     userId, ai, schema, known: knownOrCached, facts: context.facts, sources: context.sources,
     consent: Boolean(info.profile.accountConsentAt), resumeFileName: info.context.resumeFileName,
@@ -411,8 +417,17 @@ export async function extensionMap(userId: string, raw: unknown) {
     }),
     llmCalls: mapped.llmCalls,
     aiAvailable: ai,
+    // Free: the questions left that Pro would answer ("Pro would answer these 4 questions for you").
+    locked: free ? lockedQuestions(schema.fields, mapped.answers) : [],
     ms: Date.now() - started,
   };
+}
+
+/** The questions on a form that are left unanswered and that AI would write: not files, not about who the student is. */
+export function lockedQuestions(fields: SchemaField[], answers: Map<string, unknown>) {
+  return fields
+    .filter((field) => !answers.has(field.id) && field.type !== "file" && field.section === "question" && !field.sensitive)
+    .map((field) => ({ id: field.id, label: field.label }));
 }
 
 /** Fill records kept per application, newest last. */
@@ -483,7 +498,13 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   if (style.edit !== undefined && !style.edit.trim()) throw new ServiceError("Say what you'd like changed.", "edit", 400);
   // The student's choices (or edits) always mean a new letter; otherwise the one already written is reused.
   const asked = Boolean(style.length || style.tone || style.mention?.trim() || style.edit?.trim());
-  const job = app ?? { title: "", company: "", department: null, description: pasted, requirements: [] };
+  // Free writes a general letter (the job's title and company, not its description); Pro tailors it to the posting.
+  const free = await isFree(userId);
+  const tailored = !free && !generic;
+  const job = !tailored && app
+    ? { title: app.title, company: app.company, department: app.department, description: "", requirements: [] }
+    : !tailored && pasted ? { title: "", company: "", department: null, description: "", requirements: [] }
+    : app ?? { title: "", company: "", department: null, description: pasted, requirements: [] };
   // The student selected part of the letter and asked for it changed: only that part is rewritten.
   if (typeof body.part === "string" && typeof body.previous === "string") {
     const how = typeof body.ask === "string" ? body.ask.trim().slice(0, 300) : "";
@@ -499,6 +520,7 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   // The student edited the letter themselves: their text, as typed, with no AI.
   const own = typeof body.text === "string" ? body.text.replace(/\r\n/g, "\n").trim().slice(0, 6000) : "";
   if (typeof body.text === "string" && !own) throw new ServiceError("The cover letter is empty.", "text", 400);
+  // A letter written during the trial (tailored) is still the job's letter after it.
   const reused = !own && !asked ? app?.fillReport?.coverLetter ?? "" : "";
   // A new letter from AI counts toward Free's monthly number; the student's own edits and a reused letter don't.
   const fresh = !own && !reused;
@@ -511,7 +533,7 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
   if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
-  return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64"), addedToApplied };
+  return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64"), addedToApplied, tailored: tailored || Boolean(reused && app?.fillReport?.coverLetter), upgrade: free && !generic ? "Pro tailors every letter to the job description." : null };
 }
 
 /** A letter from a pasted job description: the description says which job it was. Nothing is added if it doesn't. */

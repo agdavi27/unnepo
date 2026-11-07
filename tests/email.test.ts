@@ -7,7 +7,7 @@ import { gmailFilterQuery, passesPrefilter, senderDomain, type InboundEmail } fr
 import { forwardingVerification } from "@/lib/email/verification";
 import { parseClassification } from "@/lib/email/classify";
 import { matchApplication, normalizeCompany, sameCompany, sameTitle } from "@/lib/email/match";
-import { processEmail, reviewEmail } from "@/lib/email/process";
+import { processEmail, releaseHeldEmails, reviewEmail } from "@/lib/email/process";
 import { setClassifierForTests } from "@/lib/email/classify";
 import { applications } from "@/lib/apply/store";
 import { repo } from "@/lib/db/file-store";
@@ -22,6 +22,8 @@ const fixture = (name: string) => JSON.parse(readFileSync(path.join(__dirname, "
 
 beforeEach(() => {
   useTempDb();
+  // New students are on the Pro trial, where emails update jobs right away. Free's day's wait has its own test.
+  process.env.TRIAL_DAYS = "7";
   delete process.env.INBOUND_EMAIL_DOMAIN;
   delete process.env.INBOUND_EMAIL_BASE;
 });
@@ -319,6 +321,30 @@ describe("processing forwarded emails", () => {
       expect(result.outcome).toBe("created");
     }
     expect((await applications.list(userId)).filter((app) => app.charged)).toEqual([]);
+  });
+
+  it("on Free, reads a forwarded email now and puts it on the job a day later, or right away after upgrading", async () => {
+    process.env.TRIAL_DAYS = "0";
+    const userId = await student();
+    const held = await processEmail(userId, fixture("pg-thank-you"), "forward");
+    expect(held.outcome).toBe("held");
+    expect(await applications.list(userId)).toHaveLength(0);
+    expect((await emailState(userId)).held).toMatchObject({ waiting: 1 });
+    expect((await releaseHeldEmails(userId, Date.now() + 23 * 3_600_000)).waiting).toBe(1);
+    expect(await applications.list(userId)).toHaveLength(0);
+    expect((await releaseHeldEmails(userId, Date.now() + 25 * 3_600_000)).waiting).toBe(0);
+    expect(await applications.list(userId)).toMatchObject([{ company: "P&G", status: "applied_manual" }]);
+    expect((await emailEvents.list(userId)).find((event) => event.id === held.event!.id)?.outcome).toBe("created");
+
+    // A pasted email is the student's own doing: it goes on at once.
+    expect((await processEmail(userId, fixture("workday-confirmation"), "paste")).outcome).not.toBe("held");
+
+    // On Pro, anything still waiting goes on the next time they open Unnepo.
+    setClassifierForTests(async () => answers["Your application to Initech"]);
+    expect((await processEmail(userId, { messageId: "<initech@x>", from: "Initech <jobs@initech.com>", subject: "Your application to Initech", text: "Thank you for applying. We won't be moving forward." }, "forward")).outcome).toBe("held");
+    await repo.setAccountForTests(userId, { plan: "pro" });
+    expect((await releaseHeldEmails(userId)).waiting).toBe(0);
+    expect((await applications.list(userId)).some((app) => app.company === "Initech")).toBe(true);
   });
 
   it("learns a company's email format from a recruiter's own address, but keeps nothing else from it", async () => {

@@ -42,4 +42,11 @@ describe("Home's next up sections", () => {
     expect(nextUp([], { now, toReview: 2 }).review).toMatchObject({ count: 2, items: [{ title: "2 emails need a look", action: "Review emails" }] });
     expect(nextUp([], { now }).review.items).toEqual([]);
   });
+
+  it("lists each email to review when they're passed in", () => {
+    const review = nextUp([], { now, reviewEmails: [{ id: "e1", company: "Stripe", jobTitle: "Intern", summary: "Next steps" }, { id: "e2" }] }).review;
+    expect(review.count).toBe(2);
+    expect(review.items.map((item) => item.title)).toEqual(["Email from Stripe", "Email about a job"]);
+    expect(review.items[0].detail).toBe("Intern · Next steps");
+  });
 });

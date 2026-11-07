@@ -14,6 +14,7 @@ import { jobLinksIn } from "@/lib/email/links";
 import { emailEvents, emailTexts, messageKey } from "@/lib/email/store";
 import type { EmailEvent } from "@/lib/email/types";
 import { forwardingVerification } from "@/lib/email/verification";
+import { isFree } from "@/lib/apply/limits";
 
 /**
  * One email, start to finish: skipped if it was processed before (same Message-ID); a forwarding confirmation
@@ -25,6 +26,8 @@ import { forwardingVerification } from "@/lib/email/verification";
  */
 
 export const MIN_CONFIDENCE = 0.7;
+/** Free: how long a forwarded email waits before it updates the student's jobs. Pro: right away. */
+export const FREE_EMAIL_DELAY_MS = 24 * 3_600_000;
 const EMPTY_REPORT: FillReport = { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
 const OUTCOME_FOR: Record<Exclude<Classification["type"], "applied" | "incomplete" | "not_job_related">, ApplicationOutcome> = {
   // Good news from an email is a Follow up: Interviewing and the rest are only set by the student.
@@ -188,10 +191,38 @@ export async function processEmail(userId: string, email: InboundEmail, source: 
   const event = await emailEvents.add({ ...base, ...fields, outcome: "review", applicationId: null });
   if (!event) return { outcome: "duplicate" };
   await keepText(event.id);
+  // Free: a forwarded email is read now and put on the job a day later. A pasted one is the student's own doing.
+  if (source === "forward" && (await isFree(userId))) {
+    const held = await emailEvents.update(userId, event.id, { outcome: "held" });
+    return { outcome: "held", event: held ?? event, applicationId: null };
+  }
   const result = await applyEmail(userId, job, at);
   const saved = await emailEvents.update(userId, event.id, { outcome: result.outcome, applicationId: result.applicationId, reason: result.reason, candidates: result.candidates });
   if (result.applicationId) findPostingLater(userId, result.applicationId, { title: job.job_title, location: job.location, jobNumber: job.job_number, links: jobLinks });
   return { outcome: result.outcome, event: saved ?? event, applicationId: result.applicationId };
+}
+
+/**
+ * Emails held for Free, put on the student's jobs once a day has passed since each arrived (all of them at once
+ * when the account is on Pro now). Runs when the student opens Unnepo. Returns how many are still waiting, and
+ * when the next one is due.
+ */
+export async function releaseHeldEmails(userId: string, now = Date.now()) {
+  const held = (await emailEvents.list(userId, 200)).filter((event) => event.outcome === "held");
+  if (!held.length) return { waiting: 0, nextAt: null as string | null };
+  const free = await isFree(userId);
+  const due = (event: EmailEvent) => !free || now - Date.parse(event.createdAt) >= FREE_EMAIL_DELAY_MS;
+  // Oldest first, so a job's emails land in the order they came.
+  for (const event of held.filter(due).sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    if (event.kind === "verification" || event.kind === "not_job_related") continue;
+    const job: Classification = { type: event.kind, company: event.company, job_title: event.jobTitle, location: event.location, job_number: event.jobNumber, confidence: event.confidence, summary: event.summary };
+    const result = await applyEmail(userId, job, event.receivedAt);
+    await emailEvents.update(userId, event.id, { outcome: result.outcome, applicationId: result.applicationId, reason: result.reason, candidates: result.candidates });
+    if (result.applicationId) findPostingLater(userId, result.applicationId, { title: event.jobTitle, location: event.location, jobNumber: event.jobNumber, links: event.jobLinks });
+  }
+  const waiting = held.filter((event) => !due(event));
+  const next = waiting.map((event) => Date.parse(event.createdAt) + FREE_EMAIL_DELAY_MS).sort((a, b) => a - b)[0];
+  return { waiting: waiting.length, nextAt: next ? new Date(next).toISOString() : null };
 }
 
 /** The Review Inbox: Approve (as Unnepo read it), Pick application (the student's choice), or Dismiss. */

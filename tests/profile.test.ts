@@ -129,7 +129,7 @@ describe("structured profile", () => {
     const saved = process.env.SIGNUP_CREDITS;
     delete process.env.SIGNUP_CREDITS;
     expect(serverConfig().signupCredits).toBe(5);
-    expect(FREE_CREDITS).toBe(55);
+    expect(FREE_CREDITS).toBe(45);
     expect(serverConfig().proMonthlyCredits).toBe(25);
     expect(serverConfig().premiumMonthlyCredits).toBe(75);
     expect(serverConfig().packPriceCents).toBe(1000);

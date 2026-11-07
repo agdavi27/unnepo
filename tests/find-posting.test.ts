@@ -198,6 +198,8 @@ describe("finding a posting", () => {
 });
 
 describe("emails saved on a job", () => {
+  // On the Pro trial, so emails go on their jobs right away.
+  beforeEach(() => { process.env.TRIAL_DAYS = "7"; });
   const confirmation = { messageId: "<one@x>", from: "AlphaSights <no-reply@greenhouse.io>", subject: "Thank you for applying", text: "Thank you for applying to the Data Intern role at AlphaSights. Secret detail in the body.", html: '<a href="https://acme.com/unsubscribe">Unsubscribe</a>' };
   const reply = '{"type":"applied","company":"AlphaSights","job_title":"Data Intern","location":"London","job_number":"R-77","confidence":0.95,"summary":"AlphaSights confirmed your application."}';
 

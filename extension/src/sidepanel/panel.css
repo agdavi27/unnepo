@@ -238,3 +238,8 @@ details.part .view { padding: 12px 0 0; }
 @media (prefers-reduced-motion: reduce) {
   .letter-writing .spider, .letter-writing .foot, .letter-writing .logo, .letter-writing .glow { animation: none; }
 }
+
+/* Free, after a fill: the questions Pro would have answered. */
+.locked-line { margin: 0; padding: 8px 10px; border: 1px solid rgba(61, 139, 255, 0.4); border-radius: 10px; background: rgba(61, 139, 255, 0.08); color: var(--fg); }
+.locked-line svg { color: var(--accent); vertical-align: -2px; margin-right: 2px; }
+.locked-line a { font-weight: 600; }

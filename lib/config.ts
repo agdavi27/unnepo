@@ -51,8 +51,8 @@ export function serverConfig() {
 export const FREE_LIMITS = { letters: 5, answers: 10, autofills: 10 };
 export const FREE_PEOPLE = 5;
 export const CREDIT_COST = { letters: 2, answers: 1, autofills: 1, people: 5 };
-/** What Free starts with, in credits: 10 for cover letters, 10 for chat answers, 10 for autofills, 25 for people. */
-export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers + FREE_LIMITS.autofills * CREDIT_COST.autofills + FREE_PEOPLE * CREDIT_COST.people;
+/** What Free starts with, in credits: 10 for cover letters, 10 for chat answers, 25 for people. Free's autofill (the basic fields) has no limit. */
+export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers + FREE_PEOPLE * CREDIT_COST.people;
 
 /** A semester plan: four months paid up front, with four months of credits at once. */
 export const SEMESTER_MONTHS = 4;
@@ -68,15 +68,15 @@ export const PUBLIC_PLANS = [
     name: "Free",
     priceLabel: "$0",
     semesterLabel: null,
-    cadence: "When you join",
-    blurb: "Try it out",
-    cta: "Get started free",
+    cadence: "After 7 days of Pro free",
+    blurb: "Start with Pro, free for 7 days",
+    cta: "Start 7 days of Pro free",
     popular: false,
     monthly: false,
     credits: FREE_PEOPLE,
     semesterCredits: null,
     applicationsLabel: `${FREE_CREDITS} credits to start`,
-    features: [`${FREE_LIMITS.letters} cover letters`, `${FREE_LIMITS.answers} chat answers`, `${FREE_LIMITS.autofills} successful autofills`, `People at ${FREE_PEOPLE} companies`, "Tracker and job matches"],
+    features: ["7 days of Pro free, no card", "Autofill for your basic details", `${FREE_LIMITS.letters} general cover letters`, `${FREE_LIMITS.answers} chat answers`, `People at ${FREE_PEOPLE} companies`, "Tracker and job matches"],
   },
   {
     id: "pro" as const,
@@ -91,7 +91,7 @@ export const PUBLIC_PLANS = [
     credits: 25,
     semesterCredits: 100,
     applicationsLabel: "Unlimited autofill and writing",
-    features: ["Unlimited cover letters, chat answers and autofills", "People at 25 companies a month, or 100 a semester", "Tracker and job matches", "20 more companies for $10"],
+    features: ["Autofill that answers the questions too", "Cover letters tailored to each job", "Follow-up emails written for you", "Email updates the moment they arrive", "People at 25 companies a month, or 100 a semester", "Tracker and job matches", "20 more companies for $10"],
   },
   {
     id: "premium" as const,

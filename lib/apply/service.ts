@@ -13,7 +13,7 @@ import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
-import { hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
+import { hasUnlimitedCredits, isFree, planState, planUsage } from "@/lib/apply/limits";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { removeEmailTextsFor } from "@/lib/email/store";
@@ -450,6 +450,8 @@ export async function repairCompanies(userId: string, apps: JobApplication[]) {
 }
 
 export async function applyState(userId: string) {
+  // Free's held emails that are due go on their jobs first. Imported here, since the email code imports this file.
+  const held = await import("@/lib/email/process").then((email) => email.releaseHeldEmails(userId)).catch(() => ({ waiting: 0, nextAt: null }));
   const [saved, info] = await Promise.all([applications.list(userId).then((apps) => mergeRepeats(userId, apps)), student(userId)]);
   const apps = await repairCompanies(userId, saved);
   // A new resume is read in the background, so blank details fill from it without waiting for an application.
@@ -457,11 +459,10 @@ export async function applyState(userId: string) {
     resumeReads.set(userId, Date.now());
     defer(() => ensureResumeProfile(userId).catch(() => undefined));
   }
-  const [contacts, profileIsReady, usage, account] = await Promise.all([
+  const [contacts, profileIsReady, usage] = await Promise.all([
     applicationContacts.list(userId, apps.map((app) => app.id)),
     profileReady(userId),
     planUsage(userId),
-    repo.getAccount(userId),
   ]);
   return {
     applications: apps.map((app) => ({ ...summary(app), contacts: contacts.filter((contact) => contact.applicationId === app.id) })),
@@ -470,7 +471,9 @@ export async function applyState(userId: string) {
     ready: { hunter: hunterReady(), profile: profileIsReady },
     usage,
     school: info.context.school,
-    plan: account?.plan ?? "free",
+    // The plan it works as: Pro during the trial.
+    plan: usage.plan,
+    heldEmails: held,
     maybe: liveMaybe(info.profile.maybeApplied).map(({ description, ...item }) => (void description, item)),
     session: sessionNow(info.profile.session),
   };
@@ -706,9 +709,11 @@ async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof stu
  * list with an email).
  */
 export async function findPeopleOnApply(userId: string, applicationId: string) {
-  const [app, account, stored] = await Promise.all([applications.get(userId, applicationId), repo.getAccount(userId), applicationProfiles.get(userId)]);
+  const [app, plan, stored] = await Promise.all([applications.get(userId, applicationId), planState(userId), applicationProfiles.get(userId)]);
   if (!app || app.contactsStatus !== "idle" || (app.status !== "submitted" && app.status !== "applied_manual")) return false;
-  const on = account && account.plan !== "free" ? stored?.autoFindPeople !== false : stored?.autoFindPeople === true;
+  // Free with no searches left still gets the preview (who's there, blurred), which costs nothing.
+  const previewOnly = plan.free && (plan.account?.balance ?? 0) < 1 && !(await hasUnlimitedCredits(userId));
+  const on = !plan.free ? stored?.autoFindPeople !== false : stored?.autoFindPeople === true || previewOnly;
   if (!on || companyMissing(app)) return false;
   await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: `Searching for relevant people at ${app.company}…` });
   startContacts(userId, app.id, true);
@@ -782,6 +787,8 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const alreadyPaid = Boolean(app.fillReport?.personCharged);
   const unlimited = await hasUnlimitedCredits(userId);
   if (!alreadyPaid && !unlimited && ((await repo.getAccount(userId))?.balance ?? 0) < 1) {
+    // Free: who's there, blurred, from the free searches. Pro shows them.
+    if (await isFree(userId)) return previewPeople(userId, app);
     await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 5 credits find the people at a company for one job." });
     return;
   }
@@ -821,7 +828,28 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const latest = (await applications.get(userId, app.id)) ?? app;
   const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
   // Emails are written only when the student asks, one person at a time.
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, ...(charged ? { personCharged: true } : {}) } });
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, peoplePreview: undefined, ...(charged ? { personCharged: true } : {}) } });
+}
+
+/**
+ * Free with no people searches left: the free part of the search runs, and the job keeps only who it found by role
+ * and title ("3 recruiters and 2 alumni"), never a name or an email. The page shows them blurred, with Pro to see them.
+ */
+async function previewPeople(userId: string, app: JobApplication) {
+  try {
+    const info = await student(userId);
+    const found = await findPeopleForApplication(userId, app, { school: info.context.school, preview: true, progress: async (text) => { await applications.update(userId, app.id, { contactsMessage: text }); } });
+    const latest = (await applications.get(userId, app.id)) ?? app;
+    const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+    const rows = found.people.map((person) => ({ role: person.role, title: person.title.slice(0, 120) }));
+    await applications.update(userId, app.id, {
+      contactsStatus: "done",
+      contactsMessage: rows.length ? "" : `Couldn't find anyone at ${app.company} right now.`,
+      fillReport: { ...report, peopleSearch: found.search, peoplePreview: { at: nowIso(), company: app.company, rows } },
+    });
+  } catch {
+    await applications.update(userId, app.id, { contactsStatus: "failed", contactsMessage: "Couldn't look up people right now. Try again." });
+  }
 }
 
 /**
@@ -846,6 +874,7 @@ export async function writeContactEmail(userId: string, raw: unknown) {
     const checked = await checkBeforeWriting(userId, contact.name, domain, contact.email).catch(() => null);
     if (checked && (checked.email !== contact.email || checked.emailSource !== contact.emailSource)) writeTo = (await applicationContacts.update(userId, contact.id, checked)) ?? contact;
   }
+  if (body.followUp === true && (await isFree(userId))) throw new ServiceError("Follow-up emails written for you are part of Pro.", "plan", 402);
   const info = await student(userId);
   // "Write follow-up": a short nudge on the email already sent, which stays in the thread.
   const followUp = body.followUp === true && contact.emailBody ? { subject: contact.emailSubject ?? "", body: contact.emailBody, sentAt: app.fillReport?.emailedAt?.[contact.id] ?? null } : undefined;
