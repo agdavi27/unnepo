@@ -1,8 +1,21 @@
-import { SEMESTER_MONTHS, serverConfig } from "@/lib/config";
+import { PUBLIC_PLANS, SEMESTER_MONTHS, serverConfig } from "@/lib/config";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 
 type StripeObject = Record<string, unknown>;
+
+async function stripeClient() {
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!secret) return null;
+  const Stripe = (await import("stripe")).default;
+  return new Stripe(secret);
+}
+
+/** Stripe sends a linked record as its id or, when expanded, as the whole object. */
+function idOf(value: unknown) {
+  if (typeof value === "string") return value;
+  return value && typeof value === "object" ? String((value as StripeObject).id ?? "") : "";
+}
 
 export type StripeEvent = {
   id: string;
@@ -23,32 +36,42 @@ export async function applyVerifiedStripeEvent(event: StripeEvent) {
     }
     if (event.type === "customer.subscription.deleted") {
       const subscriptionId = String(event.data.object.id ?? "");
-      const userId = String((event.data.object.metadata as StripeObject | undefined)?.userId ?? "");
       if (subscriptionId) {
+        const stored = (await repo.listSubscriptions()).find((item) => item.stripeSubscriptionId === subscriptionId);
+        const userId = String((event.data.object.metadata as StripeObject | undefined)?.userId ?? stored?.userId ?? "");
         await repo.upsertSubscription({
           id: id(),
-          userId,
-          stripeSubscriptionId: subscriptionId,
-          status: "canceled",
           priceCents: serverConfig().grindPriceCents,
           currentPeriodEnd: null,
           createdAt: nowIso(),
+          ...stored,
+          userId,
+          stripeSubscriptionId: subscriptionId,
+          status: "canceled",
         });
-        if (userId) {
-          const account = await repo.getAccount(userId);
-          if (account?.plan === "grind") await repo.setAccountForTests(userId, { plan: "free", includedAllowance: serverConfig().signupCredits });
-        }
+        if (userId) await endPaidPlan(userId);
       }
       return { duplicate: false, granted: 0 };
     }
+    if (event.type === "customer.subscription.updated") {
+      const subscriptionId = String(event.data.object.id ?? "");
+      const stored = (await repo.listSubscriptions()).find((item) => item.stripeSubscriptionId === subscriptionId);
+      const status = String(event.data.object.status ?? "");
+      const next = status === "active" || status === "trialing" ? "active" : status === "past_due" || status === "unpaid" ? "past_due" : null;
+      if (stored && next) await repo.upsertSubscription({ ...stored, status: next });
+      return { duplicate: false, granted: 0 };
+    }
     if (event.type === "charge.refunded") {
+      // A partial refund leaves what was bought in place.
+      if (event.data.object.refunded === false) return { duplicate: false, granted: 0 };
       const paymentIntent = String(event.data.object.payment_intent ?? "");
       const payments = await repo.listPayments();
-      const payment = payments.find((item) => item.stripePaymentIntent === paymentIntent || item.stripeCheckoutId === String(event.data.object.id ?? ""));
+      const payment = payments.find((item) => item.status === "paid" && ((paymentIntent && item.stripePaymentIntent === paymentIntent) || item.stripeCheckoutId === String(event.data.object.id ?? "")));
       if (payment && !payment.demo) {
-        await repo.clawbackPurchased({
+        await repo.clawbackCredits({
           userId: payment.userId,
           amount: payment.creditsGranted,
+          bucket: payment.kind === "subscription" ? "allowance" : "purchased",
           idempotencyKey: `refund:${event.id}`,
           note: "Stripe refund",
         });
@@ -66,8 +89,37 @@ export async function applyVerifiedStripeEvent(event: StripeEvent) {
     }
     return { duplicate: false, granted: 0 };
   } catch (error) {
-    await repo.releaseIdempotency(`webhook-hold:${event.id}`);
+    // Stripe retries a failed delivery, and the retry has to run rather than look like a duplicate.
+    await repo.forgetWebhook("stripe", event.id);
     throw error;
+  }
+}
+
+/** A subscription ended. Its monthly credits end with it; credits the student bought stay. Another active subscription keeps the plan. */
+async function endPaidPlan(userId: string) {
+  const others = (await repo.listSubscriptions()).filter((item) => item.userId === userId && item.status === "active");
+  if (others.length) return;
+  const account = await repo.getAccount(userId);
+  if (!account || !["grind", "pro", "premium"].includes(account.plan)) return;
+  await repo.replaceAllowance(userId, 0);
+  await repo.setAccountForTests(userId, { plan: account.purchasedBalance > 0 ? "pack" : "free", includedAllowance: serverConfig().signupCredits });
+}
+
+/** The payment behind an invoice. Newer Stripe API versions list it under the invoice's payments instead of on the invoice. */
+async function invoicePaymentIntent(object: StripeObject) {
+  const direct = idOf(object.payment_intent);
+  if (direct) return direct;
+  const listed = ((object.payments as StripeObject | undefined)?.data ?? []) as Array<{ payment?: { payment_intent?: unknown } }>;
+  const fromList = idOf(listed[0]?.payment?.payment_intent);
+  if (fromList) return fromList;
+  try {
+    const stripe = await stripeClient();
+    const payments = await stripe?.invoicePayments.list({ invoice: String(object.id), limit: 1 });
+    return idOf(payments?.data[0]?.payment?.payment_intent) || null;
+  } catch (error) {
+    // The student still gets what they paid for. Only matching a later refund is affected.
+    console.error("stripe_invoice_payment_lookup_failed", String(object.id), error instanceof Error ? error.message : error);
+    return null;
   }
 }
 
@@ -113,9 +165,11 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
   }
   const metadata = (object.metadata ?? {}) as StripeObject;
   const parent = (object.parent ?? object.subscription_details ?? {}) as StripeObject;
-  const nested = (parent.metadata ?? (parent.subscription_details as StripeObject | undefined)?.metadata ?? {}) as StripeObject;
+  const details = (parent.subscription_details ?? {}) as StripeObject;
+  const nested = (parent.metadata ?? details.metadata ?? {}) as StripeObject;
   const userId = String(metadata.userId ?? nested.userId ?? object.client_reference_id ?? "");
-  const subscriptionId = String(object.subscription ?? "");
+  // Older Stripe API versions put the subscription on the invoice, newer ones under parent.subscription_details.
+  const subscriptionId = idOf(object.subscription) || idOf(details.subscription);
   if (!userId) return { duplicate: false, granted: 0 };
   const planName = String(metadata.plan ?? nested.plan ?? "grind");
   const plan = planName === "pro" || planName === "premium" || planName === "grind" ? planName : "grind";
@@ -142,7 +196,7 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
     userId,
     stripeEventId: eventId,
     stripeCheckoutId: null,
-    stripePaymentIntent: object.payment_intent ? String(object.payment_intent) : null,
+    stripePaymentIntent: await invoicePaymentIntent(object),
     amountCents: Number(object.amount_paid ?? serverConfig().grindPriceCents),
     currency: String(object.currency ?? "usd"),
     kind: "subscription",
@@ -160,7 +214,20 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
       priceCents: Number(object.amount_paid ?? config.grindPriceCents),
       currentPeriodEnd: null,
       createdAt: nowIso(),
+      plan,
+      kind: String(metadata.kind ?? nested.kind ?? "") || undefined,
+      stripeCustomerId: idOf(object.customer) || undefined,
     });
+    // Switching plans: the new one is paid for, so the old one stops billing.
+    const replaces = String(metadata.replaces ?? nested.replaces ?? "");
+    if (billingReason === "subscription_create" && replaces && replaces !== subscriptionId) {
+      try {
+        const stripe = await stripeClient();
+        await stripe?.subscriptions.cancel(replaces);
+      } catch (error) {
+        console.error("stripe_replaced_subscription_not_canceled", replaces, error instanceof Error ? error.message : error);
+      }
+    }
   }
   return { duplicate: false, granted: grant.granted ? credits : 0 };
 }
@@ -224,21 +291,62 @@ function checkoutOffer(kind: CheckoutKind, config: ReturnType<typeof serverConfi
   return { credits: config.packCredits, amount: config.packPriceCents, bucket: "purchased" as const, plan: "pack" as const, name: `Unnepo ${config.packCredits} credits`, priceId: process.env.STRIPE_PRICE_PACK, recurring: false };
 }
 
-export async function createStripeCheckout(userId: string, kind: CheckoutKind) {
-  const secret = process.env.STRIPE_SECRET_KEY;
+/** What a student can buy today, from what the upgrade buttons send. Legacy Grind can't be bought. */
+export function checkoutKind(plan: unknown, billing: unknown): CheckoutKind {
+  if (plan === "pack") return "pack";
+  if (plan !== "pro" && plan !== "premium") throw new ServiceError("Choose Pro or Premium.", "plan", 400);
+  return billing === "semester" ? `${plan}_semester` : plan;
+}
+
+/** The price the plan cards show, in cents. Null for what they don't list. */
+function advertisedCents(kind: CheckoutKind) {
+  const plan = PUBLIC_PLANS.find((item) => item.id === kind.replace("_semester", ""));
+  const label = kind.endsWith("_semester") ? plan?.semesterLabel : plan?.priceLabel;
+  const dollars = /\$(\d+)/.exec(label ?? "")?.[1];
+  return dollars ? Number(dollars) * 100 : null;
+}
+
+/** The student's live Stripe subscription: the one on record, else one Stripe has under their account id. */
+async function liveSubscription(stripe: NonNullable<Awaited<ReturnType<typeof stripeClient>>>, userId: string) {
+  const stored = (await repo.listSubscriptions()).filter((item) => item.userId === userId && item.status !== "canceled" && item.status !== "demo").at(-1);
+  if (stored) return { id: stored.stripeSubscriptionId, customer: stored.stripeCustomerId ?? null, kind: stored.kind ?? null, plan: stored.plan ?? null };
+  try {
+    const found = await stripe.subscriptions.search({ query: `metadata['userId']:'${userId.replace(/[^\w-]/g, "")}' AND status:'active'`, limit: 1 });
+    const subscription = found.data[0];
+    return subscription ? { id: subscription.id, customer: idOf(subscription.customer) || null, kind: subscription.metadata.kind ?? null, plan: subscription.metadata.plan ?? null } : null;
+  } catch (error) {
+    console.error("stripe_subscription_search_failed", error instanceof Error ? error.message : error);
+    return null;
+  }
+}
+
+export async function createStripeCheckout(user: { id: string; email: string }, kind: CheckoutKind, origin: string) {
+  const userId = user.id;
   const config = serverConfig();
   const offer = checkoutOffer(kind, config);
   if (kind === "pack" && (await repo.getAccount(userId))?.plan === "free") throw new ServiceError("Extra people are for Pro and Premium.", "plan", 409);
-  if (!secret) throw new ServiceError("Checkout isn't set up.", "stripe", 409);
-  const Stripe = (await import("stripe")).default;
-  const stripe = new Stripe(secret);
+  const stripe = await stripeClient();
+  if (!stripe) throw new ServiceError("Checkout isn't set up.", "stripe", 409);
+  // Nobody pays a different price from the one on the page, whatever a price id or setting says.
+  const advertised = advertisedCents(kind);
+  const charged = offer.priceId ? (await stripe.prices.retrieve(offer.priceId)).unit_amount : offer.amount;
+  if (charged !== offer.amount || (advertised !== null && charged !== advertised)) {
+    console.error("stripe_price_mismatch", { kind, advertised, configured: offer.amount, charged });
+    throw new ServiceError("This plan's price is being updated. Try again soon.", "stripe_price", 409);
+  }
+  const current = offer.recurring ? await liveSubscription(stripe, userId) : null;
+  if (current && (current.kind === kind || (!current.kind && current.plan === offer.plan))) {
+    throw new ServiceError("You're already on this plan. Use Manage subscription to change it.", "plan", 409);
+  }
+  const metadata = { userId, kind, plan: offer.plan, credits: String(offer.credits), ...(current ? { replaces: current.id } : {}) };
   const session = await stripe.checkout.sessions.create({
     mode: offer.recurring ? "subscription" : "payment",
     client_reference_id: userId,
-    success_url: `${config.appUrl}/settings?billing=success`,
-    cancel_url: `${config.appUrl}/settings?billing=cancelled`,
-    metadata: { userId, kind, plan: offer.plan, credits: String(offer.credits) },
-    subscription_data: offer.recurring ? { metadata: { userId, kind, plan: offer.plan, credits: String(offer.credits) } } : undefined,
+    ...(current?.customer ? { customer: current.customer } : { customer_email: user.email }),
+    success_url: `${origin}/home?billing=success`,
+    cancel_url: `${origin}/home?billing=cancelled`,
+    metadata,
+    subscription_data: offer.recurring ? { metadata } : undefined,
     line_items: offer.priceId
       ? [{ price: offer.priceId, quantity: 1 }]
       : [
@@ -255,4 +363,20 @@ export async function createStripeCheckout(userId: string, kind: CheckoutKind) {
   });
   if (!session.url) throw new ServiceError("Stripe did not return a checkout URL.", "stripe", 502);
   return { demo: false as const, url: session.url };
+}
+
+/** Stripe's page for cancelling a subscription, changing the card, and seeing invoices. */
+export async function createBillingPortal(userId: string, origin: string) {
+  const stripe = await stripeClient();
+  if (!stripe) throw new ServiceError("Billing isn't set up.", "stripe", 409);
+  const current = await liveSubscription(stripe, userId);
+  if (!current) throw new ServiceError("There's no subscription to manage on this account.", "no_subscription", 404);
+  const customer = current.customer ?? idOf((await stripe.subscriptions.retrieve(current.id)).customer);
+  try {
+    const session = await stripe.billingPortal.sessions.create({ customer, return_url: `${origin}/home` });
+    return { url: session.url };
+  } catch (error) {
+    console.error("stripe_portal_failed", error instanceof Error ? error.message : error);
+    throw new ServiceError("Couldn't open subscription settings right now. Try again in a bit.", "stripe", 502);
+  }
 }

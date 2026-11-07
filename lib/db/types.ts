@@ -352,6 +352,10 @@ export type Subscription = {
   priceCents: number;
   currentPeriodEnd: string | null;
   createdAt: string;
+  plan?: CreditAccount["plan"];
+  /** What was bought: "pro", "premium_semester" and so on. Older rows don't have it. */
+  kind?: string;
+  stripeCustomerId?: string;
 };
 
 export type Referral = {

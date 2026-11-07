@@ -42,6 +42,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [billingBusy, setBillingBusy] = useState(false);
   const [resumeBusy, setResumeBusy] = useState(false);
   const [resumeVersion, setResumeVersion] = useState(0);
   const [view, setView] = useState<View>(start);
@@ -62,6 +63,11 @@ export function AppHome({ start = "home" }: { start?: View }) {
       window.history.replaceState(null, "", "/home");
     } else if (params.get("job")) {
       setView("applications");
+    } else if (params.get("billing")) {
+      // Coming back from Stripe. The plan changes when Stripe's webhook arrives, usually within seconds.
+      setView("settings");
+      setNotice(params.get("billing") === "success" ? "Payment received, thank you. Your plan updates in a few seconds, so refresh if you don't see it yet." : "Checkout cancelled. You weren't charged.");
+      window.history.replaceState(null, "", "/home");
     }
     void extensionHere().then(setExtension);
   }, []);
@@ -162,18 +168,25 @@ export function AppHome({ start = "home" }: { start?: View }) {
     }
   }
 
-  async function requestUpgrade(planName: string) {
-    const response = await fetch("/api/billing/checkout", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ plan: planName }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (payload.url) {
-      window.location.assign(payload.url);
-      return;
+  /** Off to Stripe. The buttons stay disabled until the page leaves, so a double click can't start two checkouts. */
+  async function goToBilling(path: "checkout" | "portal", body: Record<string, string> = {}) {
+    setBillingBusy(true);
+    try {
+      const response = await fetch(`/api/billing/${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (payload.url) {
+        window.location.assign(payload.url);
+        return;
+      }
+      setNotice(payload.error || "Billing isn't available right now. Try again in a bit.");
+    } catch {
+      setNotice("Billing isn't available right now. Try again in a bit.");
     }
-    setNotice(payload.error || "Upgrades are not available right now.");
+    setBillingBusy(false);
   }
 
   async function buildHighlights() {
@@ -222,6 +235,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
 
   const currentPlan = data?.credits.plan ?? "free";
+  const subscribed = currentPlan === "pro" || currentPlan === "premium" || currentPlan === "grind";
   const usage = data?.credits.usage;
   const creditsLeft = usage?.credits ?? (data?.credits.balance ?? 0) * CREDIT_COST.people;
   const creditsLabel = data?.credits.unlimited ? "Unlimited credits" : `${creditsLeft} ${creditsLeft === 1 ? "credit" : "credits"} left`;
@@ -372,9 +386,16 @@ export function AppHome({ start = "home" }: { start?: View }) {
                       <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-sm text-muted">{plan.features.map((feature) => <li key={feature}>{feature}</li>)}</ul>
                       <div className="mt-auto pt-5">
                         {current ? (
-                          <p className="text-center text-sm text-muted">Your plan</p>
+                          plan.monthly ? (
+                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="w-full rounded-xl border border-line px-4 py-2 text-sm font-semibold hover:bg-white/5 disabled:opacity-50">Manage subscription</button>
+                          ) : (
+                            <p className="text-center text-sm text-muted">Your plan</p>
+                          )
                         ) : plan.monthly ? (
-                          <button type="button" onClick={() => void requestUpgrade(plan.id)} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">Upgrade to {plan.name}</button>
+                          <>
+                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: plan.id, billing: "monthly" })} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{subscribed ? "Switch" : "Upgrade"} to {plan.name}</button>
+                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: plan.id, billing: "semester" })} className="mt-2 w-full rounded-xl border border-line px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-50">Pay by the semester</button>
+                          </>
                         ) : null}
                       </div>
                     </div>
@@ -392,6 +413,12 @@ export function AppHome({ start = "home" }: { start?: View }) {
                   </div>
                 </div>
               </div>
+              {currentPlan !== "free" && (
+                <div className="flex flex-wrap gap-3">
+                  <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: "pack" })} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Buy 20 more companies for $10</button>
+                  {currentPlan === "grind" && <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Manage subscription</button>}
+                </div>
+              )}
             </section>
           </>
         )}
@@ -405,6 +432,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
           highlightsLoading={highlightsLoading}
           onClose={() => setLetter(null)}
           onGenerate={writeCoverLetter}
+          onSpent={() => void load()}
           usesNote={usage?.letters.note ?? ""}
         />
       )}

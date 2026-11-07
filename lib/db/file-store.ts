@@ -621,14 +621,15 @@ export const repo = {
       return { charged: input.amount, balance: account.balance, duplicate: false, insufficient: false };
     });
   },
-  async clawbackPurchased(input: { userId: string; amount: number; idempotencyKey: string; note: string }) {
+  async clawbackCredits(input: { userId: string; amount: number; bucket: LedgerEntry["bucket"]; idempotencyKey: string; note: string }) {
     return withLock((db) => {
       if (db.ledger.some((entry) => entry.idempotencyKey === input.idempotencyKey)) {
         return { applied: false, taken: 0, shortfall: 0 };
       }
       const account = ensureAccount(db, input.userId);
-      const taken = Math.min(account.purchasedBalance, input.amount);
-      account.purchasedBalance -= taken;
+      const field = input.bucket === "allowance" ? "allowanceBalance" : "purchasedBalance";
+      const taken = Math.min(account[field], input.amount);
+      account[field] -= taken;
       account.balance -= taken;
       account.updatedAt = nowIso();
       db.ledger.push({
@@ -636,7 +637,7 @@ export const repo = {
         userId: input.userId,
         entryType: "refund_clawback",
         amount: -taken,
-        bucket: "purchased",
+        bucket: input.bucket,
         idempotencyKey: input.idempotencyKey,
         referenceType: "refund",
         referenceId: null,
@@ -1010,6 +1011,11 @@ export const repo = {
       if (db.webhooks.some((item) => item.provider === provider && item.eventId === eventId)) return false;
       db.webhooks.push({ id: id(), provider, eventId, createdAt: nowIso() });
       return true;
+    });
+  },
+  async forgetWebhook(provider: string, eventId: string) {
+    return withLock((db) => {
+      db.webhooks = db.webhooks.filter((item) => item.provider !== provider || item.eventId !== eventId);
     });
   },
   async claimIdempotency(key: string) {

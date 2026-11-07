@@ -112,18 +112,20 @@ This environment cannot attach the repository to your Vercel team. After you imp
 | Empty or failed search | 0 |
 | Successful work-email unlock | 1 |
 | Failed or duplicate unlock | 0 |
-| AI email, follow-up draft, cover letter | Pro 200/month, Premium 600/month, free 0 |
+| AI email, follow-up draft, cover letter | Pro 150/month, Premium 300/month, free 0 |
 | Sending | 0 contact credits, and only after you approve |
 | Qualified referral | 25 promotional credits to the referrer |
-| Pro | $30/month, 200 credits. New purchases. |
-| Premium | $60/month, 500 credits. New purchases. |
+| Pro | $15/month or $45/semester, people at 25 companies a month. New purchases. |
+| Premium | $39/month or $117/semester, people at 75 companies a month. New purchases. |
 | Legacy Grind and credit pack | Kept for accounts that already bought them |
 
 Purchased credits stay in a separate balance from signup, referral, and subscription allowance. Stripe retries use the event id and a ledger idempotency key, so they cannot grant credits twice. Refunds claw back unused purchased credits.
 
 Webhook endpoint: `POST {APP_URL}/api/billing/webhook`
 
-Subscribe to `checkout.session.completed`, `invoice.paid`, `customer.subscription.deleted`, and `charge.refunded`. Set `STRIPE_WEBHOOK_SECRET`. Optional price ids: `STRIPE_PRICE_GRIND`, `STRIPE_PRICE_PACK`. Without them, Checkout uses inline prices.
+Subscribe to `checkout.session.completed`, `invoice.paid`, `customer.subscription.updated`, `customer.subscription.deleted`, and `charge.refunded`. Set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. Optional price ids: `STRIPE_PRICE_PRO`, `STRIPE_PRICE_PRO_SEMESTER`, `STRIPE_PRICE_PREMIUM`, `STRIPE_PRICE_PREMIUM_SEMESTER`, `STRIPE_PRICE_PACK`. Without them, Checkout uses inline prices. Checkout refuses to start when a plan's Stripe price or `*_PRICE_CENTS` setting differs from the price on the plan cards.
+
+"Manage subscription" opens Stripe's customer portal, so save its settings once in the Stripe dashboard (Settings > Billing > Customer portal), in test mode and in live mode. Switching plans runs through Checkout: when the new plan is paid for, the old subscription is cancelled with no proration.
 
 ## OAuth
 

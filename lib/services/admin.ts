@@ -1,4 +1,4 @@
-import { serverConfig } from "@/lib/config";
+import { SEMESTER_MONTHS, serverConfig } from "@/lib/config";
 import { repo } from "@/lib/db/file-store";
 import { applications } from "@/lib/apply/store";
 import { findPeopleForApplication } from "@/lib/apply/contacts";
@@ -13,7 +13,7 @@ export async function profitability() {
   const refunds = db.payments.filter((payment) => payment.status === "refunded" && !payment.demo);
   const revenueCents = realPayments.reduce((sum, payment) => sum + payment.amountCents, 0) + refunds.reduce((sum, payment) => sum + payment.amountCents, 0);
   const activeSubs = db.subscriptions.filter((subscription) => subscription.status === "active");
-  const mrrCents = activeSubs.reduce((sum, subscription) => sum + subscription.priceCents, 0);
+  const mrrCents = activeSubs.reduce((sum, subscription) => sum + subscription.priceCents / (subscription.kind?.endsWith("_semester") ? SEMESTER_MONTHS : 1), 0);
   const payingUsers = new Set([...realPayments.map((payment) => payment.userId), ...activeSubs.map((subscription) => subscription.userId)]);
   const users = db.users.filter((user) => !user.deletedAt);
   const contactCosts = db.usage.filter((item) => item.provider === "apollo");

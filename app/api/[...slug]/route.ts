@@ -3,7 +3,7 @@ import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { persistenceMode, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file-store";
 import { readStoredResume, storeResume } from "@/lib/services/resume";
-import { applyVerifiedStripeEvent } from "@/lib/services/billing";
+import { applyVerifiedStripeEvent, checkoutKind, createBillingPortal, createStripeCheckout } from "@/lib/services/billing";
 import { autofillProblems, peopleTest, profitability } from "@/lib/services/admin";
 import { beginOAuth, finishOAuth, oauthReady } from "@/lib/services/oauth";
 import { ServiceError } from "@/lib/errors";
@@ -166,7 +166,13 @@ async function handle(request: Request, slug: string[]) {
     if (!secret || !signature || !process.env.STRIPE_SECRET_KEY) throw new ServiceError("Stripe webhook is not configured.", "stripe", 400);
     const Stripe = (await import("stripe")).default;
     const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
-    const event = stripe.webhooks.constructEvent(await request.text(), signature, secret);
+    const payload = await request.text();
+    let event: ReturnType<typeof stripe.webhooks.constructEvent>;
+    try {
+      event = stripe.webhooks.constructEvent(payload, signature, secret);
+    } catch {
+      throw new ServiceError("Invalid Stripe signature.", "stripe_signature", 400);
+    }
     const result = await applyVerifiedStripeEvent({ id: event.id, type: event.type, data: { object: event.data.object as unknown as Record<string, unknown> } });
     return json(result);
   }
@@ -337,7 +343,13 @@ async function handle(request: Request, slug: string[]) {
   }
 
   if (root === "billing" && action === "checkout" && request.method === "POST") {
-    return json({ error: "New checkouts are paused. Existing subscriptions are unchanged." }, 409);
+    if (!rateLimit(`billing:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of tries in an hour. Try again later.", "rate_limited", 429);
+    const body = await request.json().catch(() => ({}));
+    return json(await createStripeCheckout(user, checkoutKind(body.plan, body.billing), publicOrigin(request)));
+  }
+  if (root === "billing" && action === "portal" && request.method === "POST") {
+    if (!rateLimit(`billing:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of tries in an hour. Try again later.", "rate_limited", 429);
+    return json(await createBillingPortal(user.id, publicOrigin(request)));
   }
   if (root === "billing" && action === "demo" && request.method === "POST") {
     return json({ error: "Demo credit purchases are paused. Existing balances are unchanged." }, 409);
