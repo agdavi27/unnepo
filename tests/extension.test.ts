@@ -7,6 +7,7 @@ import { setCompany, setDeferForTests, updateJobDetails } from "@/lib/apply/serv
 import { extensionMe, extensionWrite } from "@/lib/extension/service";
 import { issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { saveStudentProfile } from "@/lib/profile/service";
+import { CREDIT_COST_FALLBACK } from "../extension/src/shared/types";
 import { login, signUp, userFromSessionToken, verifyEmail } from "@/lib/services/auth";
 import { GET, OPTIONS, POST } from "@/app/api/[...slug]/route";
 import { useTempDb } from "./helpers";
@@ -606,6 +607,8 @@ describe("cover letters from the panel", () => {
     } });
     const { highlights, creditCost } = await (await call("GET", "me", token)).json();
     expect(creditCost).toEqual({ letters: 2, answers: 1 });
+    // The panel's fallback, for a server that doesn't send one, says the same.
+    expect(creditCost).toEqual(CREDIT_COST_FALLBACK);
     expect(highlights).toEqual(["Data Analyst Intern at Colby", "A Very Long Company Name Incorporated", "Campus Dashboard", "SQL", "Python", "Excel"]);
   });
 

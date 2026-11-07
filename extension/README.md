@@ -16,7 +16,7 @@ To point it at a local copy of the site: `UNNEPO_API=http://localhost:3000 npm r
 
 ## The panel
 
-One page at a time, centered, with the wordmark and spider on top (poke him and he gets mad, as on the front page)
+One page at a time, with the wordmark and spider on top (poke him and he gets mad, as on the front page)
 and **See my job dashboard**, **Settings**, credits left and **Upgrade plan** along the bottom:
 
 - **A job on the tab:** its name, **Autofill application**, **Skip this job** (until the browser closes), and
@@ -28,12 +28,12 @@ and **See my job dashboard**, **Settings**, credits left and **Upgrade plan** al
   a popup asking one question at a time. A cover letter asks for the job description when there's no job on the
   tab (left empty, **Write generic one** writes a letter for no job in particular), then length, tone and what to
   mention, with bubbles from the resume to pick from. An answer asks for the question, then how long. The last
-  question's button says what it costs on Free: **Write cover letter (2 credits)**, **Answer question (1 credit)**. Under the big
+  question's button says what it costs: **Write cover letter (2 credits)**, **Answer question (1 credit)**. Under the big
   buttons, smaller: the resume (its name opens it, **Change** picks a new one), the job-site password as stars
-  (click to copy, **Change** to type or make a new one), and **Feedback**. The line at the top says how it went.
+  (click to copy, **Change** to type or make a new one). The line at the top says how it went.
   Reloading the page after an error brings Autofill back.
 
-Settings has the profile, whether to press Submit, My jobs, activity, sign out and the version.
+Settings has the profile, whether to press Submit, My jobs, activity, **Feedback**, sign out and the version.
 
 ## Connect
 

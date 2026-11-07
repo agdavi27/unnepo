@@ -1,12 +1,12 @@
 import type { SpiderLook } from "@/lib/spiders";
 import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
-import { NEVER_READ, type Issue, type PanelState } from "../shared/types";
+import { CREDIT_COST_FALLBACK, NEVER_READ, type Issue, type PanelState } from "../shared/types";
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
  * while it fills, just the spider typing on his laptop; when it's applied, went wrong, or there's no job, two big
- * buttons that open a popup asking one question at a time, with the resume, password and feedback small under them. The dashboard, Settings and credits left are along the bottom of every page.
+ * buttons that open a popup asking one question at a time, with the resume and password small under them. The dashboard, Settings and credits left are along the bottom of every page.
  */
 
 const app = document.getElementById("app")!;
@@ -250,13 +250,12 @@ const SPARK_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="curre
 
 /** The blue AI spark on the two big buttons. */
 const SPARK = SPARK_SMALL.replace('width="13" height="13"', 'class="big-tool-icon" width="20" height="20"');
-/** "Write cover letter (2 credits)". Only Free spends credits on these; paid plans and unlimited accounts just say what it does. */
+/** "Write cover letter (2 credits)", on every plan. The server's number wins; the fallback covers a server that doesn't send one. */
 const withCost = (label: string, kind: "letters" | "answers") => {
-  const cost = lastState?.me?.creditCost?.[kind];
-  if (!cost || !usesNow?.free || usesNow.unlimited) return label;
+  const cost = lastState?.me?.creditCost?.[kind] ?? CREDIT_COST_FALLBACK[kind];
   return `${label} (${cost} ${cost === 1 ? "credit" : "credits"})`;
 };
-/** The tools: the whole page once a job is applied, went wrong, or there's no job. `extra` goes above Feedback. */
+/** The tools: the whole page once a job is applied, went wrong, or there's no job. `extra` goes under them. */
 function toolsPage(state: PanelState, extra = "") {
   return `
     <div class="tools">
@@ -264,7 +263,6 @@ function toolsPage(state: PanelState, extra = "") {
       <button type="button" class="big-tool" data-popup="answer">${SPARK}Answer a question</button>
       <div class="tool-lines">${resumeLine(state)}<div id="password-slot"></div></div>
       ${extra}
-      <button type="button" class="feedback-link" data-go="feedback">Feedback</button>
     </div>`;
 }
 
@@ -288,7 +286,7 @@ function homeView(state: PanelState) {
     ${toolsPage(state, `${onWeb && !how ? hereLinks() : ""}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`)}`;
 }
 
-const back = () => `<button type="button" class="back" data-go="home"><span aria-hidden="true">‹</span> Back</button>`;
+const back = () => `<button type="button" class="back" data-go="${view === "feedback" ? "settings" : "home"}"><span aria-hidden="true">‹</span> Back</button>`;
 
 /** A page that was asked for. */
 function pageView(state: PanelState) {
@@ -302,6 +300,7 @@ function pageView(state: PanelState) {
       <div class="rule"></div>
       ${part("jobs", "My jobs", () => jobsView(state))}
       ${part("activity", "Activity", () => activityCard())}
+      <button type="button" class="feedback-link" data-go="feedback">Feedback</button>
       <div class="rule"></div>
       <div class="row-between"><button type="button" class="quiet" id="disconnect">Sign out</button><span class="mono">V${escape(extensionVersion())}</span></div>`,
   };

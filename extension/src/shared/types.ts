@@ -92,3 +92,6 @@ export type PanelState = {
 
 /** The confirmation language a site shows after an application goes through. */
 export const CONFIRM_TEXT = /(thank(s| you) for (applying|your application|your interest|submitting)|application (has been |was )?(successfully )?(submitted|received|sent)|we(?:'|’)?ve received your application|successfully (submitted|applied)|your application is (in|complete))/i;
+
+/** What a cover letter and an answer cost, for a server that doesn't say. lib/config.ts can't be bundled here: it reads the server's environment. */
+export const CREDIT_COST_FALLBACK = { letters: 2, answers: 1 };

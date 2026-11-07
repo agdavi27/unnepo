@@ -49,7 +49,7 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
   const generic = !app.title && !app.description.trim();
   const prompt = [
     `Student: ${student.name}`,
-    generic ? "Role and company: none. This is a general letter the student can send to any employer. Don't name a company or a job title, and don't claim to match any requirements: lead with the student's strongest real experience and what they'd bring to a team." : app.title && app.company ? `Role: ${app.title} at ${app.company}${app.department ? ` (${app.department})` : ""}` : "Role and company: as the job description below names them. If it doesn't name the company, don't make one up; write around it.",
+    generic ? "Role and company: none. This is a general letter the student can send to any employer. Don't name a company or a job title, and don't claim to match any requirements: lead with the student's strongest real experience and what they'd bring to a team. It must read as finished as it is, with no blanks to fill in." : app.title && app.company ? `Role: ${app.title} at ${app.company}${app.department ? ` (${app.department})` : ""}` : "Role and company: as the job description below names them. If it doesn't name the company, don't make one up; write around it.",
     app.requirements.length ? `Requirements from the posting:\n${app.requirements.slice(0, 12).map((item) => `- ${item}`).join("\n")}` : "",
     generic ? "" : `Job description:\n${app.description.slice(0, 3500)}`,
     student.resumeText ? `Resume:\n${student.resumeText.slice(0, 6000)}` : "",
