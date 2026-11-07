@@ -1,27 +1,22 @@
-import { weekStart } from "@/lib/apply/stats";
 import type { SpiderLook } from "@/lib/spiders";
 import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { NEVER_READ, type Issue, type PanelState } from "../shared/types";
 
 /**
- * The side panel: a typing line and a hanging spider, then three tabs. Apply is the goal, the job on this tab and
- * four tools. Write is a cover letter and an answer from pasted text. Me is the resume, the job-site password,
- * the profile, the jobs saved, and problems to report.
+ * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
+ * while it fills, just the spider typing on his laptop; when it's applied, went wrong, or there's no job, five
+ * tools. The dashboard and Settings are along the bottom of every page.
  */
 
 const app = document.getElementById("app")!;
 const dashboard = document.getElementById("dashboard") as HTMLAnchorElement;
 const passwordSection = document.getElementById("password")!;
-const footer = document.getElementById("footer")!;
-const tabs = document.getElementById("tabs")!;
+const dock = document.getElementById("dock")!;
 
-type View = "apply" | "write" | "me";
-let view: View = "apply";
-/** The tool open under the four tiles. Until one is pressed, the cover letter when there's no job to apply to. */
-type Tool = "cover" | "answer" | "resume" | "password";
-let tool: Tool | "none" | null = null;
-let goalPeriod: "day" | "week" = "day";
+/** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
+type View = "home" | "more" | "cover" | "answer" | "resume" | "password" | "feedback" | "settings";
+let view: View = "home";
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 /** "1.001": the version name, which keeps the zeros Chrome's own version number can't have. */
@@ -75,20 +70,16 @@ const speech = (() => {
   };
 })();
 
-/** Applications today and this week, counted in the student's own time, against the goal. */
-function goals(state: PanelState) {
+/** Applications today, counted in the student's own time, against the goal. */
+function goalToday(state: PanelState) {
   const now = new Date();
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dates = (state.me?.goal?.appliedAt ?? []).map((at) => new Date(at));
   const weekly = state.me?.goal?.weekly ?? null;
-  return {
-    day: { done: dates.filter((at) => at >= dayStart).length, target: weekly ? Math.ceil(weekly / 5) : null, label: "today" },
-    week: { done: dates.filter((at) => at >= weekStart(now)).length, target: weekly, label: "this week" },
-  };
+  return { done: (state.me?.goal?.appliedAt ?? []).filter((at) => new Date(at) >= dayStart).length, target: weekly ? Math.ceil(weekly / 5) : null };
 }
 
 function goalLine(state: PanelState) {
-  const { done, target } = goals(state).day;
+  const { done, target } = goalToday(state);
   if (!target) return `${done} today so far.`;
   return done >= target ? `${done} of ${target} today. Goal hit.` : `${done} of ${target} today. ${target - done} to go.`;
 }
@@ -137,8 +128,37 @@ function onLinkedIn(state: PanelState) {
 /** A job is on the tab: a posting, an application form, or one Unnepo is working on. */
 function jobFound(state: PanelState) {
   const { job, page, tab } = state;
-  const onWeb = Boolean(tab && /^https:\/\//.test(tab.url)) && !onLinkedIn(state);
+  const onWeb = Boolean(tab && /^https:\/\//.test(tab.url)) && !onLinkedIn(state) && !onUnnepo(state);
+  if (dismissal(state) && !job?.running && !job?.submission) return false;
   return onWeb && Boolean(job?.applicationId || job?.running || job?.report || page?.fields || page?.posting);
+}
+
+/** "Skip this job" (until the browser closes) and "This isn't a job" (kept, and the page spider reads it too). */
+const NOT_JOBS = "notJobs";
+const SKIPPED_JOBS = "skippedJobs";
+let notJobs: string[] = [];
+let skippedJobs: string[] = [];
+void Promise.all([chrome.storage.local.get(NOT_JOBS), chrome.storage.session.get(SKIPPED_JOBS)]).then(([kept, session]) => {
+  notJobs = (kept[NOT_JOBS] as string[] | undefined) ?? [];
+  skippedJobs = (session[SKIPPED_JOBS] as string[] | undefined) ?? [];
+  void render();
+});
+/** The page, without what's after a #, which many sites change as you scroll. */
+const pageKey = (url: string) => url.split("#")[0];
+function dismissal(state: PanelState): "skipped" | "not_job" | null {
+  const key = state.tab ? pageKey(state.tab.url) : "";
+  return notJobs.includes(key) ? "not_job" : skippedJobs.includes(key) ? "skipped" : null;
+}
+function dismiss(state: PanelState, how: "skipped" | "not_job" | null) {
+  const key = state.tab ? pageKey(state.tab.url) : "";
+  if (!key) return;
+  notJobs = notJobs.filter((item) => item !== key);
+  skippedJobs = skippedJobs.filter((item) => item !== key);
+  if (how === "not_job") notJobs = [...notJobs, key].slice(-200);
+  if (how === "skipped") skippedJobs = [...skippedJobs, key].slice(-200);
+  void chrome.storage.local.set({ [NOT_JOBS]: notJobs });
+  void chrome.storage.session.set({ [SKIPPED_JOBS]: skippedJobs });
+  void render();
 }
 
 /** What's left on the plan, from the latest state. */
@@ -147,103 +167,108 @@ let usesNow: NonNullable<PanelState["me"]>["usage"] | null = null;
 /** "Only 2 autofills left": nothing until a tool's uses run low. */
 const usesLine = (note?: string) => (note ? `<span class="small uses-left" role="status" style="color: var(--warn)">${escape(note)}</span>` : "");
 
-/** The Autofill section: only with a job form on this tab. */
-function pageCard(state: PanelState) {
-  if (!jobFound(state)) return "";
+/** Autofill was pressed on this tab and the worker hasn't said it's running yet. */
+let fillPending: number | null = null;
+const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPending !== null && fillPending === state.tab?.id);
+
+/** The page for a job on this tab: its name, Autofill, and the two ways of saying no. */
+function jobPage(state: PanelState) {
   const { job, page, tab, me } = state;
-  const report = job?.report;
   let host = "";
   try { host = tab ? new URL(tab.url).hostname.replace(/^www\./, "") : ""; } catch { host = ""; }
-  const site = page?.site || host;
-  const title = job?.title || page?.title || tab!.title;
-  const company = job?.company || page?.company || "";
-  const chips: string[] = [];
-  if (report?.filled.length) chips.push(`${report.filled.length} filled`);
-  if (report?.needsYou.length) chips.push(`${report.needsYou.length} need you`);
-  if (report?.check?.length) chips.push(`${report.check.length} to check`);
-  if (page?.account === "new") chips.push("New account");
-  if (page?.account === "sign_in") chips.push("Sign in");
-  if (job?.submission) chips.push(job.submission === "confirmed" ? "Submitted" : "Looks submitted");
-  const fill = job?.running
-    ? `<button type="button" class="btn big stop" id="stop">Stop</button>`
-    : `<button type="button" class="btn primary big" id="fill" ${me!.profileReady ? "" : "disabled"}>${report ? "Fill again" : "Autofill application"}</button>`;
-  // What Unnepo couldn't fill that isn't already listed as needing the student. Each one goes to the question.
-  const couldnt = (report?.failed ?? []).filter((item) => !report!.needsYou.includes(item.label));
-  // One list of what's left, most urgent first: empty required questions, ones Unnepo couldn't fill, answers to check.
-  const todo = [
-    ...(report?.needsYou ?? []).map((label) => ({ kind: "needs", label, why: "" })),
-    ...couldnt.map((item) => ({ kind: "failed", label: item.label, why: item.reason })),
-    ...(report?.check ?? []).map((item) => ({ kind: "check", label: item.label, why: item.why })),
-  ];
-  // The job found card above already names the job.
-  const named = !foundCardShowing(state);
-  const detail = [company, site, page?.posting ? "Job posting" : page?.fields ? `${page.fields} ${page.fields === 1 ? "field" : "fields"}` : ""].filter(Boolean).join(" · ");
+  const title = job?.title || page?.title || tab?.title || "This job";
+  const size = page?.posting ? "Job posting" : page?.fields ? `${page.fields} ${page.fields === 1 ? "question" : "questions"}` : "";
+  const detail = [job?.company || page?.company, page?.site || host, size].filter(Boolean).join(" · ");
   return `${setupCard(state)}
-    <section class="stack" aria-label="Autofill">
-      <div class="row-between"><span class="eyebrow">On this page</span><span class="beta">BETA</span></div>
-      ${named ? `<div><div class="title">${escape(title || site || "This job")}</div><div class="sub">${escape(detail)}</div></div>` : ""}
-      ${chips.length ? `<div class="chips">${chips.map((chip) => `<span class="chip">${escape(chip)}</span>`).join("")}</div>` : ""}
-      ${fill}
+    <section class="job-page" aria-label="This job">
+      <div><div class="job-name">${escape(title)}</div><div class="sub job-detail">${escape(detail)}</div></div>
+      <button type="button" class="btn primary big" id="fill" ${me!.profileReady ? "" : "disabled"}>${job?.report ? "Fill again" : "Autofill application"}</button>
       ${usesLine(me?.usage?.autofills.note)}
+      <div class="row-between"><button type="button" class="quiet-link" id="skip-job">Skip this job</button><button type="button" class="quiet-link" id="not-job">This isn't a job</button></div>
       <span class="sub">Beta: check every field before you submit.</span>
-      ${job?.running || report ? `<p class="small resume-line">Resume: ${escape(me!.resume?.fileName ?? "none yet")}${me!.resume?.file ? " ✓" : ""}</p>` : ""}
-      ${todo.length ? `<p class="note${report?.needsYou.length ? " warn" : ""}">Left to do · ${todo.length} <span class="small">(the checklist on the page walks you through)</span>:</p>
-        <ul class="needs todo">${todo.map((item) => `<li class="todo-row"><span class="tag ${item.kind}">${item.kind === "needs" ? "Needs you" : item.kind === "failed" ? "Couldn't fill" : "Check"}</span>${needsLink(item.label, item.why).replace(/^<li>|<\/li>$/g, "")}</li>`).join("")}</ul>` : ""}
-      ${todo.length && fieldNote ? `<p class="small" role="status">${escape(fieldNote)}</p>` : ""}
-      ${job?.submission && here.step !== "saved" ? `<p class="note ok">${job.submission === "confirmed" ? "The site confirmed it." : "Looks submitted."} It's in your Unnepo tracker.</p>` : ""}
-    </section>`;
+      ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
+    </section>
+    <div class="job-foot">
+      <button type="button" class="more-row" data-go="more">Cover letter, resume, more <span aria-hidden="true">›</span></button>
+      ${goalBar(state)}
+    </div>`;
 }
 
-/** The day and week goal at the top of Apply. */
-function goalSection(state: PanelState, apiBase: string) {
-  const now = goals(state)[goalPeriod];
-  const share = now.target ? Math.min(100, Math.round((now.done / now.target) * 100)) : 0;
-  const period = (id: "day" | "week", label: string) => `<button type="button" data-goal="${id}" aria-pressed="${goalPeriod === id}">${label}</button>`;
+/** Today's goal, as one quiet line. */
+function goalBar(state: PanelState) {
+  const { done, target } = goalToday(state);
   return `
-    <section aria-label="Goals">
-      <div class="goal-row">
-        <span class="goal-num">${now.done}<small>${now.target ? ` / ${now.target}` : ""} ${now.label}</small></span>
-        <div class="seg" role="group" aria-label="Goal period">${period("day", "Day")}${period("week", "Week")}</div>
-      </div>
-      ${now.target
-        ? `<div class="bar" role="progressbar" aria-label="Goal for ${now.label}" aria-valuemin="0" aria-valuemax="${now.target}" aria-valuenow="${Math.min(now.done, now.target)}"><div style="width:${share}%"></div></div>`
-        : `<a class="small goal-set" href="${escape(apiBase)}/home" target="_blank" rel="noreferrer">Set a weekly goal on your dashboard ↗</a>`}
+    <div class="goal"><span>Today</span><span>${target ? `${done} of ${target}` : done}</span></div>
+    ${target ? `<div class="bar" role="progressbar" aria-label="Goal for today" aria-valuemin="0" aria-valuemax="${target}" aria-valuenow="${Math.min(done, target)}"><div style="width:${Math.min(100, Math.round((done / target) * 100))}%"></div></div>` : ""}`;
+}
+
+/** While it fills: just the spider on his laptop. What's happening is in the line at the top. */
+function fillingView() {
+  return `
+    <section class="filling" aria-label="Filling your application">
+      <div class="letter-writing">${typingSpiderSvg(120, spiderLook)}</div>
+      <button type="button" class="btn big stop" id="stop">Stop, I'll do it myself</button>
     </section>`;
 }
 
 const SPARK_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z"/></svg>`;
-const AI_TAG = `<span class="ai">${SPARK_SMALL.replace(/13/g, "12")}AI</span>`;
 
-/** The four tools, and the open one's panel under them. */
-function toolsSection(state: PanelState) {
-  const open = tool ?? (jobFound(state) ? "none" : "cover");
-  const tile = (id: Tool, code: string, label: string, ai: boolean) => `<button type="button" class="tile" data-tool="${id}" aria-pressed="${open === id}" aria-expanded="${open === id}"><span class="tile-top"><span class="code">${code}</span>${ai ? AI_TAG : ""}</span><span class="lbl">${label}</span></button>`;
-  const panels: Record<Tool, () => string> = {
-    cover: () => (jobFound(state) ? letterBlock() : pasteForm(false)),
-    answer: () => answerForm(false),
-    resume: () => resumeTool(state),
-    password: () => `<div id="password-slot"></div>`,
+const pillIcon = (shape: string) => `<svg class="pill-icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shape}</svg>`;
+const TOOLS: Array<[View, string, string]> = [
+  ["cover", "Write a cover letter", `<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7"/>`],
+  ["answer", "Answer a question", `<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.7"/><path d="M12 17h.01"/>`],
+  ["resume", "Resume", `<path d="M6 3h12v18H6z"/><circle cx="12" cy="9" r="2.5"/><path d="M8.5 17c.5-2 2-3 3.5-3s3 1 3.5 3"/>`],
+  ["password", "Job-site password", `<circle cx="8" cy="15" r="4"/><path d="M11 12l8-8M16 7l3 3"/>`],
+  ["feedback", "Feedback", `<path d="M4 5h16v11H9l-5 4z"/>`],
+];
+/** The five tools: the whole page once a job is applied, went wrong, or there's no job. */
+const toolButtons = () => `<div class="pills" role="group" aria-label="Tools">${TOOLS.map(([id, label, shape]) => `<button type="button" class="pill" data-go="${id}">${pillIcon(shape)}${escape(label)}</button>`).join("")}</div>`;
+
+/** "I already applied" and "Save for later": read the job on the tab and save it. */
+const hereLinks = () => {
+  const busy = here.step === "reading" || here.step === "saving";
+  return `<div class="row-between"><button type="button" class="quiet-link" id="here-applied" ${busy ? "disabled" : ""}>I already applied</button><button type="button" class="quiet-link" id="here-later" ${busy ? "disabled" : ""}>Save for later</button></div>`;
+};
+
+/** The page for the tab: what's happening decides it. */
+function homeView(state: PanelState) {
+  if (isRunning(state)) return fillingView();
+  if (onLinkedIn(state)) return linkedInCard(state) + toolButtons();
+  const card = openedCard(state);
+  if (state.job?.submission || state.job?.error) return card + toolButtons();
+  if (card) return here.step === "check" ? card : card + toolButtons();
+  if (jobFound(state)) return jobPage(state);
+  const how = dismissal(state);
+  const onWeb = Boolean(state.tab && /^https:\/\//.test(state.tab.url)) && !onUnnepo(state);
+  return `${how ? `<div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>` : ""}
+    ${toolButtons()}
+    ${onWeb && !how ? hereLinks() : ""}
+    ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`;
+}
+
+const back = () => `<button type="button" class="back" data-go="home"><span aria-hidden="true">‹</span> Back</button>`;
+
+/** A page that was asked for. */
+function pageView(state: PanelState) {
+  const heading = (text: string, side = "") => `<div class="row-between"><span class="heading">${text}</span>${side ? `<span class="small">${side}</span>` : ""}</div>`;
+  const pages: Record<Exclude<View, "home">, () => string> = {
+    more: () => `${jobFound(state) ? hereLinks() : ""}${toolButtons()}`,
+    cover: () => (jobFound(state) ? heading("Cover letter") + letterBlock() : pasteForm(true)),
+    answer: () => answerForm(true),
+    resume: () => `<section class="stack tight" aria-label="Resume">${heading("Resume")}${resumeTool(state)}</section>`,
+    password: () => `<section class="stack tight" aria-label="Job-site password">${heading("Job-site password", "Only on this computer")}<div id="password-slot"></div></section>`,
+    feedback: () => `${heading("Feedback")}${issuesCard()}`,
+    settings: () => `${profileCard(state)}
+      <div class="rule"></div>
+      ${settingsView(state)}
+      <div class="rule"></div>
+      ${part("jobs", "My jobs", () => jobsView(state))}
+      ${part("activity", "Activity", () => activityCard())}
+      <div class="rule"></div>
+      <div class="row-between"><button type="button" class="quiet" id="disconnect">Sign out</button><span class="mono">V${escape(extensionVersion())}</span></div>`,
   };
-  return `
-    <div class="grid2" role="group" aria-label="Tools">
-      ${tile("cover", "CL", "Cover letter", true)}${tile("answer", "QA", "Answer a question", true)}${tile("resume", "CV", "Resume", false)}${tile("password", "***", "Password", false)}
-    </div>
-    ${open !== "none" ? `<section class="box" aria-label="${open === "cover" ? "Cover letter" : open === "answer" ? "Answer a question" : open === "resume" ? "Resume" : "Password"}">${panels[open]()}</section>` : ""}`;
+  return back() + pages[view as Exclude<View, "home">]();
 }
-
-function applyView(state: PanelState) {
-  const onDash = onUnnepo(state);
-  // While a form is being filled (or was just filled), its card comes first.
-  const active = Boolean(state.job?.running || state.job?.report);
-  const cards = onDash ? "" : active ? pageCard(state) + openedCard(state) : openedCard(state) + pageCard(state);
-  const none = jobFound(state) && !onDash ? "" : `<p class="note">${onDash ? "This is your Unnepo dashboard. Open a job posting or an application and the Autofill button appears here." : onLinkedIn(state) ? "Unnepo doesn't read LinkedIn. Press Apply there to go to the company's own application." : "No application on this page. Open one and the Autofill button appears here."}</p>`;
-  return `${goalSection(state, state.apiBase)}<div class="rule"></div>${onLinkedIn(state) ? linkedInCard(state) : ""}${cards}${none}${toolsSection(state)}`;
-}
-
-function writeView() {
-  return `${pasteForm(true)}<div class="rule"></div>${answerForm(true)}`;
-}
-
 /** Saved between redraws: which parts of Me are open. */
 const openParts = new Set<string>();
 const part = (id: string, title: string, body: () => string) => `
@@ -252,22 +277,6 @@ const part = (id: string, title: string, body: () => string) => `
     ${openParts.has(id) ? body() : ""}
   </details>`;
 
-function meView(state: PanelState) {
-  return `${profileCard(state)}
-    <div class="rule"></div>
-    <section class="stack tight" aria-label="Resume"><span class="heading">Resume</span>${resumeTool(state)}</section>
-    <div class="rule"></div>
-    <section class="stack tight" aria-label="Job-site password">
-      <div class="row-between"><span class="heading">Job-site password</span><span class="small">Only on this computer</span></div>
-      <div id="password-slot"></div>
-    </section>
-    <div class="rule"></div>
-    ${settingsView(state)}
-    <div class="rule"></div>
-    ${part("jobs", "My jobs", () => jobsView(state))}
-    ${part("issues", "Report a problem", () => issuesCard())}
-    ${part("activity", "Activity", () => activityCard())}`;
-}
 
 /**
  * LinkedIn, which Unnepo never reads: after applying there (Easy Apply), the student adds the job to their
@@ -467,40 +476,16 @@ function openedCard(state: PanelState) {
       ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
     </section>`;
   }
-  const button = `
-      <button type="button" class="btn primary big" id="here-applied" ${here.step === "reading" || here.step === "saving" ? "disabled" : ""}>${here.step === "reading" ? "Reading the job…" : here.step === "saving" ? "Saving…" : "✓ I applied: add to tracker"}</button>
-      <div class="links"><button type="button" class="link" id="here-later" ${here.step === "reading" ? "disabled" : ""}>Save it for later</button></div>
-      ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`;
-  // A job on this page stands out: what the panel sees, so the student knows which job one press saves.
-  if (foundCardShowing(state)) {
-    const site = state.page?.site ? ` · ${escape(state.page.site)}` : "";
-    return `
-    <section class="page found" aria-label="Job found">
-      <span class="found-tag">✓ Job found${site}</span>
-      <div class="job">
-        <span class="job-title">${escape(state.page!.title)}</span>
-        ${state.page!.company ? `<span class="job-company">${escape(state.page!.company)}</span>` : ""}
-      </div>
-      ${button}
-    </section>`;
-  }
-  return `
-    <section class="page plain" aria-label="Applied to a job here?">
-      ${button}
-    </section>`;
-}
-
-/** Whether the job found card shows: a job on this page, the student not filling it right now. */
-function foundCardShowing(state: PanelState) {
-  if (!state.tab || !/^https:\/\//.test(state.tab.url) || onLinkedIn(state) || onUnnepo(state) || state.job?.running || state.job?.report || state.job?.submission) return false;
-  if (here.step === "saved" || here.step === "check" || (here.step === "saving" && !here.auto)) return false;
-  return Boolean(state.page?.title && (state.page.posting || state.page.fields || state.page.company));
+  // Reading and saving after "I already applied" or "Save for later".
+  if (here.step === "reading" || here.step === "saving") return `<p class="note" role="status">${here.step === "reading" ? "Reading the job…" : "Saving…"}</p>`;
+  return "";
 }
 function wireOpened(state: PanelState) {
   if (!state.tab) return;
   const tabId = state.tab.id;
   const read = async (applied: boolean) => {
     Object.assign(here, { step: "reading", applied, note: "", auto: false });
+    view = "home";
     void render();
     type Read = { ok: boolean; error?: string; job?: OpenedRead };
     const result = await ask<Read>({ type: "read-opened-job", tabId }).catch((): Read => ({ ok: false, error: "Couldn't reach the page." }));
@@ -567,7 +552,7 @@ function activityCard() {
     </section>`;
 }
 
-/** A cover letter from a pasted job description: on Write, and under the Cover letter tool with no job on the tab. */
+/** A cover letter from a pasted job description: the Cover letter tool with no job on the tab. */
 let pasteText = "";
 /** Which letter is showing: for the job on the tab, or for a pasted description. */
 let letterSource: "job" | "paste" = "job";
@@ -826,19 +811,6 @@ function wireLetter(tabId: number) {
   });
 }
 
-/** A question in the panel's lists: clicking it scrolls the page to it. */
-const needsLink = (label: string, why = "") =>
-  `<li><button type="button" class="needs-link" data-label="${escape(label)}" title="${escape(why || "Go to this question on the page")}">${escape(label)}<span aria-hidden="true">↗</span></button></li>`;
-
-/** Why the last "Still needs you" click couldn't find its question, kept across re-renders. */
-let fieldNote = "";
-
-/** Scrolls the job page to a question the student still has to answer, and highlights it. */
-async function goToField(tabId: number, label: string) {
-  const result = await ask<{ ok: boolean }>({ type: "focus-field", tabId, label }).catch(() => ({ ok: false }));
-  fieldNote = result.ok ? "" : `Couldn't find "${label}" on this page. It may be on another step of the form.`;
-  void render();
-}
 
 /** What happened with the last See / Replace, kept across re-renders. */
 let resumeNote = "";
@@ -1176,7 +1148,7 @@ function jobsView(state: PanelState) {
     </section>`;
 }
 
-/** Settings: submitting, then the job-site password and sign out (drawn outside this card). */
+/** Settings: whether Unnepo presses Submit. */
 function settingsView(state: PanelState) {
   return `
     <section class="stack tight" aria-label="Submitting">
@@ -1194,11 +1166,6 @@ resumeInput.addEventListener("change", () => {
   if (file) void replaceResume(file);
 });
 
-document.getElementById("version")!.textContent = `V${extensionVersion()}`;
-document.getElementById("disconnect")!.addEventListener("click", async () => {
-  await ask({ type: "disconnect" });
-  void render();
-});
 
 /** Puts the student's spider at the top of the panel. */
 let dressed = "";
@@ -1211,6 +1178,89 @@ function dressSpider(look?: SpiderLook) {
   const spider = document.getElementById("spider")!;
   spider.querySelector("svg")?.remove();
   spider.insertAdjacentHTML("beforeend", heroSpiderSvg(look));
+}
+
+/**
+ * The spider going down his thread from the top of the panel to the laptop when a fill starts, and back up when
+ * it ends. He's the same size in both places. Who's on show meanwhile is set on the body, so a redraw can't undo it.
+ */
+let travelling = 0;
+const heroRect = () => document.querySelector("#spider svg")!.getBoundingClientRect();
+function laptopRect() {
+  const svg = app.querySelector(".letter-writing svg");
+  if (!svg) return null;
+  const box = svg.getBoundingClientRect();
+  // Where typingSpiderSvg draws him: 40×30 at (10, 1) in its 60×48.
+  const scale = box.width / 60;
+  return { left: box.left + 10 * scale, top: box.top + scale, width: 40 * scale, height: 30 * scale };
+}
+type Spot = { left: number; top: number; width: number; height: number };
+function travel(from: Spot, to: Spot, ms: number, landed: () => void) {
+  const trip = ++travelling;
+  document.querySelector(".rappel")?.remove();
+  const anchorX = heroRect().left + heroRect().width / 2;
+  const box = document.createElement("div");
+  box.className = "rappel";
+  box.setAttribute("aria-hidden", "true");
+  box.innerHTML = `<div class="rappel-thread"></div><div class="rappel-spider">${document.querySelector("#spider svg")!.outerHTML}</div>`;
+  document.body.append(box);
+  const thread = box.children[0] as HTMLElement;
+  const spider = box.children[1] as HTMLElement;
+  const place = (x: number, y: number, shrink = 1) => {
+    const dx = x + from.width / 2 - anchorX;
+    const dy = y + 12;
+    thread.style.transform = `translate(${anchorX}px, 0) rotate(${-Math.atan2(dx, dy)}rad)`;
+    thread.style.height = `${Math.hypot(dx, dy) * shrink}px`;
+  };
+  const start = performance.now();
+  const frame = (now: number) => {
+    if (trip !== travelling) return box.remove();
+    const t = Math.min(1, (now - start) / ms);
+    const eased = t < .5 ? 2 * t * t : 1 - (2 - 2 * t) ** 2 / 2;
+    // A little swing on the thread, dying out. Moved in whole pixels of his art, so he stays crisp.
+    const sway = Math.sin(t * Math.PI * 3) * 8 * (1 - t);
+    const x = Math.round((from.left + (to.left - from.left) * eased + sway) / 2) * 2;
+    const y = Math.round((from.top + (to.top - from.top) * eased) / 2) * 2;
+    spider.style.transform = `translate(${x}px, ${y}px)`;
+    place(x, y);
+    if (t < 1) return void requestAnimationFrame(frame);
+    // He's there: the real one takes over and the thread pulls back up.
+    spider.remove();
+    landed();
+    const pulled = performance.now();
+    const pull = (later: number) => {
+      if (trip !== travelling) return box.remove();
+      const left = 1 - (later - pulled) / 200;
+      if (left <= 0) return box.remove();
+      place(x, y, left);
+      requestAnimationFrame(pull);
+    };
+    requestAnimationFrame(pull);
+  };
+  requestAnimationFrame(frame);
+}
+const stillMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+/** The last tab drawn and whether it was filling, to tell a fill starting from just opening one that's going. */
+let lastFill: { tab: number | undefined; running: boolean; shown: boolean } | null = null;
+function moveSpider(state: PanelState, shown: boolean, wasAt: Spot | null) {
+  const running = isRunning(state);
+  const same = lastFill?.tab === state.tab?.id;
+  const started = shown && same && running && !lastFill!.running;
+  const ended = !shown && same && !running && lastFill!.shown;
+  lastFill = { tab: state.tab?.id, running, shown };
+  const { classList } = document.body;
+  const at = laptopRect();
+  if (started && at && !stillMotion) {
+    classList.add("spider-away", "spider-landing");
+    travel(heroRect(), at, 1200, () => classList.remove("spider-landing"));
+  } else if (ended && wasAt && !stillMotion) {
+    classList.add("spider-away");
+    classList.remove("spider-landing");
+    travel(wasAt, heroRect(), 900, () => classList.remove("spider-away"));
+  } else if (shown !== classList.contains("spider-away") && !document.querySelector(".rappel-spider")) {
+    classList.toggle("spider-away", shown);
+    classList.remove("spider-landing");
+  }
 }
 
 /** The latest state, and what was last drawn from it, so a state that didn't change isn't drawn again. */
@@ -1257,11 +1307,9 @@ function draw(state: PanelState): boolean {
   dressSpider(state.me?.spider);
   const said = lines(state);
   speech(said.lines, said.alert);
-  if (!state.connected) view = "apply";
-  tabs.hidden = !state.connected;
-  tabs.querySelectorAll<HTMLButtonElement>("button").forEach((button) => button.setAttribute("aria-selected", String(button.dataset.view === view)));
-  app.setAttribute("aria-labelledby", `tab-${view}`);
-  footer.hidden = !state.connected;
+  if (!state.connected) view = "home";
+  if (state.job?.running && fillPending === state.tab?.id) fillPending = null;
+  dock.hidden = !state.connected;
   // Don't wipe a code being typed when something else changes.
   if (!state.connected && document.getElementById("code") === document.activeElement) return false;
   // Don't wipe what's being typed in the cover letter questions or edits box when the page changes.
@@ -1273,8 +1321,10 @@ function draw(state: PanelState): boolean {
   if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return false;
   // The password is drawn on its own, so a redraw can't lose what's typed: it's moved out, then back into its slot.
   document.body.append(passwordSection);
-  const views: Record<View, () => string> = { apply: () => applyView(state), write: () => writeView(), me: () => meView(state) };
-  app.innerHTML = state.connected ? views[view]() : connectView(state);
+  const shown = state.connected && view === "home" && isRunning(state);
+  const wasAt = shown ? null : laptopRect();
+  app.innerHTML = !state.connected ? connectView(state) : view === "home" ? homeView(state) : pageView(state);
+  moveSpider(state, shown, wasAt);
   const slot = document.getElementById("password-slot");
   passwordSection.hidden = !slot;
   // A password left showing is covered again once its panel closes, and forgotten on signing out.
@@ -1286,12 +1336,7 @@ function draw(state: PanelState): boolean {
     slot.append(passwordSection);
     if (!passwordSection.innerHTML.trim()) void renderPassword();
   }
-  app.querySelectorAll<HTMLButtonElement>("[data-goal]").forEach((button) => button.addEventListener("click", () => { goalPeriod = button.dataset.goal as "day" | "week"; void render(); }));
-  app.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach((button) => button.addEventListener("click", () => {
-    const chosen = button.dataset.tool as Tool;
-    tool = button.getAttribute("aria-pressed") === "true" ? "none" : chosen;
-    void render();
-  }));
+  app.querySelectorAll<HTMLButtonElement>("[data-go]").forEach((button) => button.addEventListener("click", () => go(button.dataset.go as View)));
   app.querySelectorAll<HTMLDetailsElement>("details.part").forEach((details) => details.addEventListener("toggle", () => {
     const id = details.dataset.partId!;
     if (details.open === openParts.has(id)) return;
@@ -1309,8 +1354,25 @@ function draw(state: PanelState): boolean {
     if (code.startsWith("unx_")) await ask({ type: "connect", token: code });
     void render();
   });
-  document.getElementById("fill")?.addEventListener("click", () => void ask({ type: "fill", tabId: state.tab!.id }));
-  document.getElementById("stop")?.addEventListener("click", () => void ask({ type: "stop", tabId: state.tab!.id }));
+  document.getElementById("fill")?.addEventListener("click", () => {
+    const tabId = state.tab!.id;
+    fillPending = tabId;
+    void ask({ type: "fill", tabId });
+    // If the worker never says it's running, the job comes back instead of the spider typing forever.
+    setTimeout(() => { if (fillPending === tabId) { fillPending = null; void render(); } }, 5000);
+    void render();
+  });
+  document.getElementById("stop")?.addEventListener("click", () => {
+    fillPending = null;
+    void ask({ type: "stop", tabId: state.tab!.id });
+  });
+  document.getElementById("skip-job")?.addEventListener("click", () => dismiss(state, "skipped"));
+  document.getElementById("not-job")?.addEventListener("click", () => dismiss(state, "not_job"));
+  document.getElementById("undo-dismiss")?.addEventListener("click", () => dismiss(state, null));
+  document.getElementById("disconnect")?.addEventListener("click", async () => {
+    await ask({ type: "disconnect" });
+    void render();
+  });
   wireLetter(state.tab?.id ?? 0);
   wireAnswer(state.tab?.id ?? 0);
   if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
@@ -1318,40 +1380,33 @@ function draw(state: PanelState): boolean {
   wireOpened(state);
   document.getElementById("download-resume")?.addEventListener("click", () => void seeResume(true));
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
-  app.querySelectorAll<HTMLButtonElement>(".needs-link").forEach((button) => button.addEventListener("click", () => void goToField(state.tab!.id, button.dataset.label ?? "")));
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
-  if (view === "me") {
-    wireIssues();
-    wireManualJob(state);
-  }
+  wireIssues();
+  wireManualJob(state);
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
   return true;
 }
 
-tabs.querySelectorAll<HTMLButtonElement>("button").forEach((button) => button.addEventListener("click", () => {
-  view = (button.dataset.view as View) ?? "apply";
-  if (view === "me") jobsList = null;
+/** Opens a page, from any button that says which. */
+function go(next: View) {
+  view = next;
+  if (view === "settings") jobsList = null;
   window.scrollTo(0, 0);
   void render();
-}));
-// Left and right move between the tabs.
-tabs.addEventListener("keydown", (event) => {
-  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-  const list = [...tabs.querySelectorAll<HTMLButtonElement>("button")];
-  const at = list.findIndex((button) => button.dataset.view === view);
-  const next = list[(at + (event.key === "ArrowRight" ? 1 : list.length - 1)) % list.length];
-  next.click();
-  next.focus();
-});
+}
+document.getElementById("open-settings")!.addEventListener("click", () => go(view === "settings" ? "home" : "settings"));
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type !== "state-changed") return;
   activityLog = null;
   // New problems may have been added; the open list reads them again.
-  if (view === "me" && openParts.has("issues")) void loadIssues();
+  if (view === "feedback") void loadIssues();
   else void refresh();
 });
-chrome.tabs.onUpdated.addListener((_id, info) => {
+chrome.tabs.onUpdated.addListener((id, info) => {
+  // Reloading the page after an error is how to try that job again: it comes back with its Autofill button.
+  const job = lastState?.job;
+  if (info.status === "loading" && id === lastState?.tab?.id && job?.error && !job.running) void ask({ type: "clear-error", tabId: id });
   if (info.status === "complete") void refresh();
 });
 

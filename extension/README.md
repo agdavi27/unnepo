@@ -14,6 +14,21 @@ Click the Unnepo icon to open the side panel.
 
 To point it at a local copy of the site: `UNNEPO_API=http://localhost:3000 npm run extension:build`.
 
+## The panel
+
+One page at a time, with the wordmark and spider on top and **See my job dashboard** and **Settings** along the
+bottom:
+
+- **A job on the tab:** its name, **Autofill application**, **Skip this job** (until the browser closes), and
+  **This isn't a job** (kept, and the spider on the page stays away too; both can be undone). **Cover letter,
+  resume, more** has the tools, **I already applied** and **Save for later**.
+- **Filling:** the spider rappels down from the top onto his laptop and types, with **Stop, I'll do it myself**.
+  The line at the top says what's happening, including what's waiting on the student. Stopping goes back to the job.
+- **Applied, an error, or no job:** five buttons: cover letter, answer a question, resume, job-site password and
+  feedback. The line at the top says how it went. Reloading the page after an error brings Autofill back.
+
+Settings has the profile, whether to press Submit, My jobs, activity, sign out and the version.
+
 ## Connect
 
 Side panel → **Connect on Unnepo** opens `/extension/connect`. Pressing Connect there hands the extension a

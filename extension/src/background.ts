@@ -638,7 +638,7 @@ async function run(tabId: number) {
       // After Submit the steps end and the posting shows again: that's done, not backward.
       const submitted = status.confirmed || trail.some((line) => /pressed "[^"]*submit/i.test(line));
       if (!submitted && wentBack(furthest, now, Boolean(status.apply || status.action?.kind === "apply"))) {
-        throw new Error(`Workday went back from ${stepText(furthest)} to ${stepText(now)}, so Unnepo stopped instead of filling it all again. Go back to ${stepText(furthest)} and press Fill. What happened is on your issues list (Profile).`);
+        throw new Error(`Workday went back from ${stepText(furthest)} to ${stepText(now)}, so Unnepo stopped instead of filling it all again. Go back to ${stepText(furthest)} and press Fill. What happened is under Feedback.`);
       }
       if (now && (!furthest || now.total !== furthest.total || now.index > furthest.index)) furthest = now;
       // First thing on every run: if there's an Apply button, press it.
@@ -856,7 +856,7 @@ async function run(tabId: number) {
         throw new Error("The site went back to the job posting after Unnepo had filled the application, so Unnepo stopped instead of starting over. What happened is on your issues list (Profile).");
       }
       if (!action) {
-        await step(status.confirmed ? "Looks submitted. Press ✓ I applied in the panel to add it to your tracker." : `Filled ${filledAll.length} fields. Watching the page; press Stop when you're done.`);
+        await step(status.confirmed ? "Looks submitted. Press Stop, then add it to your tracker with I already applied under More." : `Filled ${filledAll.length} fields. Watching the page; press Stop when you're done.`);
         await wait(1000);
         continue;
       }
@@ -1215,6 +1215,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "stop":
         runs.delete(Number(message.tabId));
         await saveJob(Number(message.tabId), { running: false, step: "Stopped. Press Fill to start again." });
+        return reply({ ok: true });
+      case "clear-error":
+        await saveJob(Number(message.tabId), { error: null, step: "" });
         return reply({ ok: true });
       case "applied":
         await record(Number(message.tabId), "likely", "Marked as applied in the extension.", "you_marked");

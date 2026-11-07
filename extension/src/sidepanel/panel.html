@@ -15,22 +15,15 @@
     <div class="spider" id="spider" aria-hidden="true"><div class="thread"></div></div>
   </header>
 
-  <div class="tabs" id="tabs" role="tablist" aria-label="Sections" hidden>
-    <button type="button" role="tab" data-view="apply" id="tab-apply" aria-controls="app" aria-selected="true">Apply</button>
-    <button type="button" role="tab" data-view="write" id="tab-write" aria-controls="app" aria-selected="false">Write</button>
-    <button type="button" role="tab" data-view="me" id="tab-me" aria-controls="app" aria-selected="false">Me</button>
-  </div>
-
-  <main id="app" class="body" role="tabpanel"></main>
+  <main id="app" class="body"></main>
   <input type="file" id="resume-input" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
 
   <section id="password" class="password" aria-label="Job-site password" hidden></section>
 
-  <footer id="footer" class="foot" hidden>
-    <button type="button" id="disconnect" class="quiet">Sign out</button>
-    <span id="version" class="mono"></span>
-    <a id="dashboard" class="dash" target="_blank" rel="noreferrer">Go to dashboard <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
-  </footer>
+  <nav id="dock" class="dock" aria-label="Dashboard and settings" hidden>
+    <a id="dashboard" target="_blank" rel="noreferrer">See my job dashboard <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
+    <button type="button" id="open-settings">Settings</button>
+  </nav>
 
   <script type="module" src="panel.js"></script>
 </body>

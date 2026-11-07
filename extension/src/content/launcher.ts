@@ -172,5 +172,8 @@ if (window.top === window && !/(^|\.)linkedin\.com$|unneponew\.vercel\.app$|^loc
     if (looksLikeJobPage()) return show();
     if (++tries < 15) setTimeout(check, 2000);
   };
-  check();
+  // "This isn't a job" in the panel keeps it off this page. If storage can't be read, it checks as usual.
+  void chrome.storage.local.get("notJobs").then((kept) => {
+    if (!((kept.notJobs as string[] | undefined) ?? []).includes(location.href.split("#")[0])) check();
+  }, check);
 }
