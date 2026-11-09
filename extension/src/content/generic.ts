@@ -336,3 +336,27 @@ async function settleAfterUpload() {
   const until = Date.now() + 6000;
   while (Date.now() < until && READING.test(document.body.innerText || "")) await sleep(250);
 }
+
+/**
+ * "Begin applying": the resume goes into every upload box that wants it, straight away, before anything else
+ * happens. Same rules as a fill (a box for a transcript or a cover letter gets nothing; an unnamed box only when
+ * no box asks for the resume by name), and a box that already holds a file is left alone. The labels it filled.
+ */
+export function uploadResumeNow(fields: PageField[], resume: FileData) {
+  const files = { resume, coverLetter: null };
+  const plan = uploadPlan(fields, files);
+  const done: string[] = [];
+  for (const field of fields) {
+    if (field.type !== "file" || !plan.has(field.id)) continue;
+    const el = findMarked(field.id);
+    if (!(el instanceof HTMLInputElement)) continue;
+    try {
+      attachFile(el, resume);
+      uploadedHere.add(`${location.pathname}|${field.label}`);
+      done.push(field.label);
+    } catch {
+      // A site that blocks setting files: the student uploads it themselves.
+    }
+  }
+  return done;
+}

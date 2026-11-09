@@ -3,7 +3,7 @@
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FileText, GraduationCap, Mail, Plus, Star, StickyNote, User, X } from "lucide-react";
+import { FileText, GraduationCap, Mail, Plus, Star, StickyNote, Trash2, User, X } from "lucide-react";
 import { ReviewInboxButton } from "@/components/unnepo/email-tracking";
 import { guessProvider } from "@/components/unnepo/email-wizard";
 import { HomePage, HomeTiles, MoreStats, PerDayCard, type Goals } from "@/components/unnepo/home";
@@ -353,6 +353,9 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
   const pressColumn = (column: Column) => setSort((now) => (now.column === column ? { column, ascending: !now.ascending } : { column, ascending: column !== "applied" }));
 
   function remove(app: App) {
+    // Always asked first: a job removed by mistake loses its people and emails too.
+    const name = [app.title, app.company].filter(Boolean).join(" at ") || "this job";
+    if (!window.confirm(`Are you sure you want to delete ${name}? Its people and emails go with it.`)) return;
     onApps((list) => list.filter((item) => item.id !== app.id));
     setRemoved((list) => [...list, app]);
     if (open === app.id) setOpen(null);
@@ -461,7 +464,14 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
             {fromEmail && <span className="ml-2 inline-block align-middle">{fromEmail}</span>}
           </td>
           <td className="hidden whitespace-nowrap px-2 py-3.5 align-middle font-mono text-xs text-[#8B8B94] sm:table-cell">{when(appliedOn(app))}</td>
-          <td className="px-1 py-3.5 align-middle sm:px-2">{stageCell(app)}</td>
+          <td className="px-1 py-3.5 align-middle sm:px-2">
+            <span className="flex items-center gap-1">
+              {stageCell(app)}
+              <button type="button" onClick={() => remove(app)} aria-label={`Delete ${app.company || "this job"}`} title="Delete job" className="flex h-7 w-7 flex-none items-center justify-center rounded-lg text-[#4A4A52] hover:bg-red-500/10 hover:text-red-300">
+                <Trash2 aria-hidden size={14} strokeWidth={1.8} />
+              </button>
+            </span>
+          </td>
         </tr>
         {expanded && (
           <tr>
@@ -476,7 +486,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
                       <div className={peopleCard}>
                         <PeopleCircles />
                         <p className="m-0 text-sm font-medium">Not submitted yet</p>
-                        <p className="m-0 max-w-xs text-[13px] text-muted">Open the application and press Fill in the Unnepo extension, or mark it applied if you sent it yourself.</p>
+                        <p className="m-0 max-w-xs text-[13px] text-muted">Open the application and press Begin applying in the Unnepo extension, or mark it applied if you sent it yourself.</p>
                         <button type="button" className={primary} onClick={() => void act("/applied", "POST", { applicationId: app.id })}>I applied</button>
                         <div className="w-full text-left empty:hidden"><PostedBy app={app} /></div>
                       </div>
@@ -494,7 +504,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
                   </span>
                   <span className="flex flex-wrap gap-4">
                     {app.confirmation?.receiptPath && <a className="hover:text-white" href={`/api/apply/receipt?applicationId=${encodeURIComponent(app.id)}`} target="_blank" rel="noreferrer">Receipt ↗</a>}
-                    <button type="button" className="hover:text-red-300" onClick={() => remove(app)}>Remove job</button>
+                    <button type="button" className="hover:text-red-300" onClick={() => remove(app)}>Delete job</button>
                   </span>
                 </div>
               </div>
@@ -578,7 +588,7 @@ function AppliedPage({ page, onPage, data, userName, onSetup, onJobs, onSpiders,
           {apps.length === 0 ? (
             <div className={`${card} flex flex-col items-start gap-3`}>
               <p className="font-medium">No applications yet</p>
-              <p className="max-w-xl text-sm text-muted">Open a job application in Chrome and press Fill in the Unnepo extension. Every job you submit shows up here, with people at the company to email.</p>
+              <p className="max-w-xl text-sm text-muted">Forward your job emails to Unnepo, or add a job yourself. Every job shows up here, with people at the company to email.</p>
               <a href="/extension/connect" className={primary}>Connect the extension</a>
             </div>
           ) : shown.length === 0 ? (

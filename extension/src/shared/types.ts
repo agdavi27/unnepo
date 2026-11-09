@@ -75,6 +75,29 @@ export const NEVER_READ = /(^|\.)linkedin\.com$/i;
 /** The quick questions asked once before the first fill. Null or "": not answered yet. */
 export type Setup = { salaryExpectation: string; earliestStart: string; willingToRelocate: boolean | null; inPerson: boolean | null; authorizedUS: boolean | null; needsSponsorship: boolean | null; classYear: string; hasSchool: boolean };
 
+/**
+ * Autofill (pressing Apply, filling every field, pressing Next and Submit) is switched off: the panel no longer
+ * offers it and the worker refuses a fill. The code stays; set this to true to bring it back.
+ */
+export const AUTOFILL_ENABLED = false;
+
+/** Everything the page says about the job on the tab, for the job box above "Write a cover letter". */
+export type JobDetails = {
+  title: string; company: string; location: string; pay: string; type: string; posted: string; remote: string;
+  description: string; url: string; site: string; from: string;
+  /** Questions on the form, upload boxes, and whether one of them takes a resume. */
+  questions: number; uploads: number; resumeBox: boolean;
+};
+
+/** A question that needs a written answer, which gets a spider beside it after "Begin applying". */
+export type ComplexQuestion = { id: string; label: string; required: boolean; answered: boolean };
+
+/** What "Begin applying" did on the page: the upload boxes it put the resume in, and the complex questions. */
+export type BeginResult = { uploaded: string[]; questions: ComplexQuestion[]; resumeBox: boolean };
+
+/** "Begin applying" on a tab: what it found, and answers written for the complex questions. */
+export type Applying = BeginResult & { url: string; resumeError?: string | null; answers?: Record<string, { text: string; put: boolean; error?: string }> };
+
 export type UsageLine = { used: number; limit: number; left: number; note: string };
 
 export type PanelState = {
@@ -86,6 +109,8 @@ export type PanelState = {
   job: { tabId: number; applicationId: string; title: string; company: string; step: string; report: FillReport | null; submission: "confirmed" | "likely" | null; error: string | null; llmCalls: number; running?: boolean; cv?: boolean; /** Free: questions left on the form that Pro would answer. */ locked?: number } | null;
   autoSubmit: boolean;
   apiBase: string;
+  /** "Begin applying" was pressed on this tab. */
+  applying?: Applying | null;
   /** "Did you apply to these?": jobs pressed Apply on or filled that nothing confirmed. */
   maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>;
 };

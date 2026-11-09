@@ -7,8 +7,8 @@ import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse,
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
-import { coverLetterPdf, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { answerMaybe, companyMissing, createApplication, findPeopleOnApply, minimalApplication, trackedAt, repairCompanies, answerWith, addAppliedFromLetter, ensureCharged, learnAnswers, markAppliedFromLetter, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { coverLetterPdf, LETTER_FORMATS, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
+import { answerMaybe, companyMissing, createApplication, findPeopleOnApply, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
 import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
@@ -313,8 +313,18 @@ ${WRITING_STYLE}
 Reply with only the answer text, no quotes and no preamble.`;
 
 /** The orange questions Unnepo couldn't fill: a short draft for one, on the student's request, for them to check. */
+/** A job as the extension read it off the page: title and company, with the posting's text when there was one. */
+function pageJob(raw: unknown) {
+  const job = (raw ?? {}) as { title?: unknown; company?: unknown; description?: unknown };
+  const text = (value: unknown, max: number) => String(value ?? "").replace(/[ \t]+/g, " ").trim().slice(0, max);
+  const title = text(job.title, 200);
+  const company = text(job.company, 200);
+  if (title.length < 2 || company.length < 2) return null;
+  return { title, company, description: text(job.description, 8000) };
+}
+
 export async function extensionWrite(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; question?: unknown; length?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; question?: unknown; length?: unknown; job?: unknown };
   const question = String(body.question ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
   // The student's choice in the panel. Without one (the orange questions on a form), a short draft.
   const length = body.length === "paragraph" || body.length === "long" ? body.length : null;
@@ -322,6 +332,8 @@ export async function extensionWrite(userId: string, raw: unknown) {
   if (classifyQuestion(question).sensitive) throw new ServiceError("Unnepo doesn't answer questions about you like this one. Answer it yourself.", "sensitive", 400);
   // No job: a question pasted in the panel, answered from the student's details alone.
   const app = body.applicationId ? await requireApp(userId, body.applicationId) : null;
+  // Or the job the extension read off the page ("Answer complex questions"), which isn't in the tracker.
+  const read = app ? null : pageJob(body.job);
   await assertUseAllowed(userId, "answers");
   if ((await aiCallsToday(userId)) >= DAILY_AI_CALLS) throw new ServiceError("That's today's AI limit. Write this one yourself, or try again tomorrow.", "limit", 429);
   const info = await student(userId);
@@ -329,7 +341,7 @@ export async function extensionWrite(userId: string, raw: unknown) {
   const text = await claudeAsk(userId, "question_draft")(DRAFT_PROMPT, [
     `Question: ${question}`,
     ...(length ? [`Length: ${length === "paragraph" ? "one full paragraph, about 4 to 6 sentences" : "a longer answer of 2 or 3 paragraphs"}.`] : []),
-    ...(app ? [`Job: ${app.title} at ${app.company}\n${app.description.slice(0, 3500)}`] : []),
+    ...(app ? [`Job: ${app.title} at ${app.company}\n${app.description.slice(0, 3500)}`] : read ? [`Job: ${read.title} at ${read.company}\n${read.description.slice(0, 3500)}`] : []),
     `Student's details:\n${context.facts}`,
     `Resume and profile:\n${context.sources.slice(0, 12000)}`,
   ].join("\n\n")).catch(() => {
@@ -478,12 +490,15 @@ export async function extensionLearn(userId: string, raw: unknown) {
 
 /** A cover letter for this job, as text and as a PDF to upload. Written once per job. */
 export async function extensionCoverLetter(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; generic?: unknown; track?: unknown; length?: unknown; tone?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown; part?: unknown; ask?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; description?: unknown; job?: unknown; generic?: unknown; length?: unknown; tone?: unknown; format?: unknown; mention?: unknown; edit?: unknown; previous?: unknown; text?: unknown; part?: unknown; ask?: unknown };
+  // The job the extension read off the page, used as it is: writing a letter never adds a job to the tracker.
+  const read = pageJob(body.job);
+  if (read && !body.applicationId && typeof body.description !== "string") body.description = read.description || `${read.title} at ${read.company}`;
   // No job on the page: the student pasted the job description instead. Nothing is opened in the tracker.
   const pasted = !body.applicationId && typeof body.description === "string" ? body.description.trim().slice(0, 8000) : "";
   // Or asked for a generic letter, for no job in particular.
   const generic = !body.applicationId && !pasted && body.generic === true;
-  if (!body.applicationId && !generic && pasted.length < 80) throw new ServiceError("Paste the whole job description (at least a few sentences).", "description", 400);
+  if (!body.applicationId && !generic && !read && pasted.length < 80) throw new ServiceError("Paste the whole job description (at least a few sentences).", "description", 400);
   const app = pasted || generic ? null : await requireApp(userId, body.applicationId);
   const info = await student(userId);
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
@@ -491,27 +506,29 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   const style: CoverLetterStyle = {
     length: pick(body.length, ["short", "standard", "detailed"] as const),
     tone: pick(body.tone, ["professional", "warm", "confident", "enthusiastic"] as const),
+    format: pick(body.format, LETTER_FORMATS),
     mention: typeof body.mention === "string" ? body.mention.slice(0, 800) : undefined,
     edit: typeof body.edit === "string" ? body.edit.slice(0, 600) : undefined,
     previous: typeof body.previous === "string" ? body.previous.slice(0, 6000) : undefined,
   };
   if (style.edit !== undefined && !style.edit.trim()) throw new ServiceError("Say what you'd like changed.", "edit", 400);
   // The student's choices (or edits) always mean a new letter; otherwise the one already written is reused.
-  const asked = Boolean(style.length || style.tone || style.mention?.trim() || style.edit?.trim());
+  const asked = Boolean(style.length || style.tone || style.format || style.mention?.trim() || style.edit?.trim());
   // Free writes a general letter (the job's title and company, not its description); Pro tailors it to the posting.
   const free = await isFree(userId);
   const tailored = !free && !generic;
   const job = !tailored && app
     ? { title: app.title, company: app.company, department: app.department, description: "", requirements: [] }
+    : !tailored && read ? { title: read.title, company: read.company, department: null, description: "", requirements: [] }
     : !tailored && pasted ? { title: "", company: "", department: null, description: "", requirements: [] }
-    : app ?? { title: "", company: "", department: null, description: pasted, requirements: [] };
+    : app ?? { title: read?.title ?? "", company: read?.company ?? "", department: null, description: read ? read.description : pasted, requirements: [] };
   // The student selected part of the letter and asked for it changed: only that part is rewritten.
   if (typeof body.part === "string" && typeof body.previous === "string") {
     const how = typeof body.ask === "string" ? body.ask.trim().slice(0, 300) : "";
     if (!how) throw new ServiceError("Say how to change it.", "ask", 400);
     // A rewrite is an AI call like a chat answer, and costs the same.
     await assertUseAllowed(userId, "answers");
-    const jobText = app ? `${app.title} at ${app.company}\n${app.requirements.join("\n")}\n${app.description}` : pasted;
+    const jobText = app ? `${app.title} at ${app.company}\n${app.requirements.join("\n")}\n${app.description}` : read ? `${read.title} at ${read.company}\n${read.description}` : pasted;
     const rewritten = await rewriteLetterPart(userId, body.previous.slice(0, 6000), body.part.slice(0, 2000), how, { job: jobText, student: { name, resumeText: info.resumeText, profile: info.profileText } });
     if (!rewritten) throw new ServiceError("Couldn't rewrite that part. Select it again and try once more.", "part", 502);
     await countUse(userId, "answers");
@@ -527,22 +544,11 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   if (fresh) await assertCoverLetterAllowed(userId);
   const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, style));
   if (fresh && text) await countCoverLetter(userId);
-  // The student asked for this letter (autofill writing one for a form doesn't count), so the job goes on Applied.
-  const addedToApplied = fresh && Boolean(text) && body.track === true && !generic && await (app ? markAppliedFromLetter(userId, app.id) : addPastedJob(userId, pasted)).catch(() => false);
   if (!text) throw new ServiceError("Couldn't write a cover letter. Add your resume and profile first.", "cover_letter", 409);
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
   if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
-  return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64"), addedToApplied, tailored: tailored || Boolean(reused && app?.fillReport?.coverLetter), upgrade: free && !generic ? "Pro tailors every letter to the job description." : null };
-}
-
-/** A letter from a pasted job description: the description says which job it was. Nothing is added if it doesn't. */
-async function addPastedJob(userId: string, description: string) {
-  const reply = await claudeAsk(userId, "letter_job")(`Reply with only JSON: {"title": string or null, "company": string or null}. Copy the job title and the hiring company's name exactly as this job description gives them. Use null if it doesn't say.`, description.slice(0, 6000));
-  const job = JSON.parse(reply.slice(reply.indexOf("{"), reply.lastIndexOf("}") + 1)) as { title?: unknown; company?: unknown };
-  const [title, company] = [job.title, job.company].map((value) => (typeof value === "string" ? value.trim().slice(0, 200) : ""));
-  if (title.length < 2 || company.length < 2) return false;
-  return addAppliedFromLetter(userId, { title, company, description });
+  return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64"), addedToApplied: false, tailored: tailored || Boolean(reused && app?.fillReport?.coverLetter), upgrade: free && !generic ? "Pro tailors every letter to the job description." : null };
 }
 
 /** Saves the confirmation screenshot the extension took. Only JPEG or PNG, at most about 2 MB. */

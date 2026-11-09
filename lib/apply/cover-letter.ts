@@ -34,11 +34,28 @@ export type CoverLetterStudent = { name: string; resumeText: string; profile: st
 export type CoverLetterStyle = {
   length?: "short" | "standard" | "detailed";
   tone?: "professional" | "warm" | "confident" | "enthusiastic";
+  /** How the letter is built: one of the research-backed structures in LETTER_FORMATS. */
+  format?: LetterFormat;
   /** Something the student wants mentioned, in their own words. */
   mention?: string;
   /** The letter they're revising, and what they want changed. */
   previous?: string;
   edit?: string;
+};
+
+/**
+ * The cover letter structures recruiters and career offices recommend most. The only controlled test (ResumeGo,
+ * about 7,300 applications) found the lift comes from tailoring to the posting: 16.4% callbacks for a tailored
+ * letter, 12.5% for a generic one, 10.7% for none. So every format is built on the posting's own requirements;
+ * they differ in what leads. See docs/cover-letter-formats.md.
+ */
+export const LETTER_FORMATS = ["match", "problem", "achievement", "story"] as const;
+export type LetterFormat = (typeof LETTER_FORMATS)[number];
+const FORMATS: Record<LetterFormat, string> = {
+  match: "Format: requirements match. Open with the role and the one-sentence reason the student fits. In the body, take the two or three requirements the posting stresses most and answer each with the student's real evidence, one short paragraph (or one tight sentence each) per requirement, in the order the posting lists them. Close by asking for a conversation.",
+  problem: "Format: problem-solution. Open by naming, in the posting's terms, the need or challenge this role exists to handle (only what the posting says). Then show how the student has already handled something like it, with what they did and what came of it. Then one more piece of evidence. Close with what they'd take on first and a request to talk.",
+  achievement: "Format: achievement first. Open with the student's single most relevant, concrete result (a number or a visible outcome, only if the resume gives it), then tie it to the role in the next sentence. The body gives one or two more results that match the posting's requirements. Close briefly.",
+  story: "Format: short story hook. Open with two or three sentences of a real, specific moment from the student's experience that shows the skill this role needs most (only what the resume, profile or notes support). Then connect it to the role and the company in plain words, add one more piece of evidence for the posting's main requirement, and close briefly.",
 };
 
 const LENGTHS: Record<NonNullable<CoverLetterStyle["length"]>, string> = {
@@ -51,6 +68,7 @@ const LENGTHS: Record<NonNullable<CoverLetterStyle["length"]>, string> = {
 function styleNotes(style: CoverLetterStyle) {
   const notes: string[] = [];
   if (style.length) notes.push(`Length for this letter (this replaces the usual length): ${LENGTHS[style.length]}`);
+  if (style.format) notes.push(`${FORMATS[style.format]} (This replaces the usual shape, but keep the greeting, sign-off and length.)`);
   if (style.tone) notes.push(`Tone: ${style.tone}.`);
   if (style.mention?.trim()) notes.push(`The student asked you to mention this, in their own words (it counts as something they told you): "${style.mention.trim()}"`);
   if (style.previous?.trim() && style.edit?.trim()) {

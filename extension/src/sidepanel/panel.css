@@ -243,3 +243,28 @@ details.part .view { padding: 12px 0 0; }
 .locked-line { margin: 0; padding: 8px 10px; border: 1px solid rgba(61, 139, 255, 0.4); border-radius: 10px; background: rgba(61, 139, 255, 0.08); color: var(--fg); }
 .locked-line svg { color: var(--accent); vertical-align: -2px; margin-right: 2px; }
 .locked-line a { font-weight: 600; }
+
+/* The job box above the big buttons: the job read off the page, Begin applying, and then the complex questions. */
+.job-box { padding: 16px; border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.job-box.empty { gap: 6px; }
+.job-box + .tools { padding-top: 0; }
+.job-name.small-name { font-size: 19px; }
+.facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.fact { padding: 3px 9px; border: 1px solid var(--control); border-radius: 999px; font-size: 12px; color: var(--muted-3); }
+.desc summary, .q-answer summary { cursor: pointer; font-size: 13px; color: var(--muted-3); }
+.desc summary .mono { margin-left: 6px; font-size: 11px; }
+.desc p { margin: 8px 0 0; max-height: 220px; overflow: auto; white-space: pre-wrap; font-size: 12px; color: var(--muted-2); }
+.quiet-link.tight { min-height: 28px; }
+.q-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.q-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.q-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 12px; }
+.q-row.done { border-color: rgba(74, 222, 128, .25); }
+.q-mark { flex: none; width: 18px; color: var(--ok); text-align: center; line-height: 18px; }
+.mini-spider { display: block; animation: q-bob 1.6s ease-in-out infinite; }
+@keyframes q-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(3px); } }
+@media (prefers-reduced-motion: reduce) { .mini-spider { animation: none; } }
+.q-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.q-label-link { padding: 0; border: 0; background: transparent; text-align: left; font: 500 13px/1.4 Geist, sans-serif; cursor: pointer; overflow-wrap: anywhere; }
+.q-label-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.req { color: var(--warn); }
+.q-answer .letter-form { margin-top: 6px; }

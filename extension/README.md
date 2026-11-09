@@ -19,14 +19,24 @@ To point it at a local copy of the site: `UNNEPO_API=http://localhost:3000 npm r
 One page at a time, with the wordmark and spider on top (poke him and he gets mad, as on the front page)
 and **See my job dashboard**, **Settings**, credits left and **Upgrade plan** along the bottom:
 
-- **A job on the tab:** its name, **Autofill application**, **Skip this job** (until the browser closes), and
-  **This isn't a job** (kept, and the spider on the page stays away too; both can be undone). **Cover letter,
-  resume, more** has the tools, **I already applied** and **Save for later**.
-- **Filling:** the spider rappels down from the top onto his laptop and types, with **Stop, I'll do it myself**.
-  The line at the top says what's happening, including what's waiting on the student. Stopping goes back to the job.
+- **The job box** (above **Write a cover letter**): with a job on the tab, everything the page says about it
+  (title, company, place, pay, kind of job, date posted, how many questions, whether there's a resume upload,
+  and the description), with **Begin applying**, **Skip** (until the browser closes) and **Not a job** (kept).
+  With none, it says **No job found yet**.
+- **Begin applying:** the resume goes into the upload box straight away (fetched as soon as the job box shows,
+  so it's ready), and every complex question (one that needs a written answer, not a name, a link or a
+  dropdown) gets a little spider beside it on the page. The panel lists them with **Answer complex questions**,
+  which writes an answer to each one still empty and types it into its box; each answer can be edited and put
+  in again, or copied. Later steps of the form, and reloads on the same site, get the same by themselves.
+  Nothing is pressed or submitted. `src/content/apply-help.ts`.
+- **Autofill is off** (`AUTOFILL_ENABLED` in `src/shared/types.ts`). The code is all still here; set it to true
+  to bring back the Autofill button, the quick-answers card and the fill run.
+- **Jobs are never added by themselves.** Writing a cover letter, answering a question or a page saying
+  "thanks for applying" adds nothing to the tracker. Jobs come from forwarded emails, **+ Add a job**,
+  **I already applied** / **Save for later**, or the LinkedIn card.
 - **Applied, an error, or no job:** two big buttons, **Write a cover letter** and **Answer a question**. Each opens
   a popup asking one question at a time. A cover letter asks for the job description when there's no job on the
-  tab (left empty, **Write generic one** writes a letter for no job in particular), then length, tone and what to
+  tab (left empty, **Write generic one** writes a letter for no job in particular), then how it's built (see `docs/cover-letter-formats.md`), length, tone and what to
   mention, with bubbles from the resume to pick from. An answer asks for the question, then how long. The last
   question's button says what it costs: **Write cover letter (2 credits)**, **Answer question (1 credit)**. Under the big
   buttons, smaller: the resume (its name opens it, **Change** picks a new one), the job-site password as stars

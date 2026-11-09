@@ -600,7 +600,7 @@ describe("Free and the Pro trial", () => {
 });
 
 describe("cover letters from the panel", () => {
-  it("adds the job to Applied when the student asks for a letter, not when autofill writes one", async () => {
+  it("never adds or changes a job when a letter is written", async () => {
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const userId = await readyStudent();
     const { token } = await issueExtensionToken(userId);
@@ -608,38 +608,26 @@ describe("cover letters from the panel", () => {
     const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/90", title: "Data Intern", company: "Globex" })).json();
 
     model.replies.push(letterText);
-    const forTheForm = await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json();
-    expect(forTheForm.addedToApplied).toBe(false);
+    const asked = await (await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm", format: "problem", track: true })).json();
+    expect(asked.addedToApplied).toBe(false);
     expect((await applications.get(userId, job.application.id))?.status).not.toBe("applied_manual");
-
-    model.replies.push(letterText);
-    const asked = await (await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm", track: true })).json();
-    expect(asked.addedToApplied).toBe(true);
-    const applied = await applications.get(userId, job.application.id);
-    expect(applied?.status).toBe("applied_manual");
-    expect(applied?.fillReport?.activity?.find((event) => event.kind === "applied")?.how).toBe("cover_letter");
-
-    // Already on Applied: nothing changes.
-    model.replies.push(letterText);
-    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm", track: true })).json()).addedToApplied).toBe(false);
   });
 
-  it("adds a pasted job under the name its description gives, and adds nothing when it gives none", async () => {
+  it("writes a letter for the job read off the page, or a pasted description, without adding a job", async () => {
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const userId = await readyStudent();
     const { token } = await issueExtensionToken(userId);
     const letterText = `Dear Hiring Team,\n\nI am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students.\n\nI would bring the same care to Globex's data team.\n\nSincerely,\nPat Doe`;
-    const description = "Initech is hiring a Research Analyst to work with data, write reports and support the team across many projects this summer.";
-    model.replies.push(letterText, JSON.stringify({ title: "Research Analyst", company: "Initech" }));
-    expect((await (await call("POST", "cover-letter", token, { description, track: true })).json()).addedToApplied).toBe(true);
-    const saved = (await applications.list(userId)).find((app) => app.company === "Initech");
-    expect(saved).toMatchObject({ title: "Research Analyst", status: "applied_manual" });
-
     const count = (await applications.list(userId)).length;
-    model.replies.push(letterText, JSON.stringify({ title: null, company: null }));
-    const response = await call("POST", "cover-letter", token, { description: "A role working with data, writing reports and supporting the team across many projects this summer and beyond.", track: true });
-    expect(response.status).toBe(200);
-    expect((await response.json()).addedToApplied).toBe(false);
+    model.replies.push(letterText);
+    const fromPage = await call("POST", "cover-letter", token, { job: { title: "Research Analyst", company: "Initech", description: "Initech is hiring a Research Analyst to work with data and write reports." }, format: "match" });
+    expect(fromPage.status).toBe(200);
+    expect((await fromPage.json()).text).toContain("Dear Hiring Team");
+
+    model.replies.push(letterText);
+    const pasted = await call("POST", "cover-letter", token, { description: "Initech is hiring a Research Analyst to work with data, write reports and support the team across many projects this summer.", track: true });
+    expect(pasted.status).toBe(200);
+    expect((await pasted.json()).addedToApplied).toBe(false);
     expect((await applications.list(userId)).length).toBe(count);
   });
 

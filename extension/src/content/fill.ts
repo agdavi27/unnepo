@@ -8,6 +8,8 @@ import { watchEdits } from "./edits";
 import { keptByStudent } from "./kept";
 import { fieldControl, markNeeds, reviewLeft, type CheckItem } from "./needs";
 import { celebrateSpiders, startSpiders, stopSpiders } from "./spiders";
+import { beginApplying, clearQuestionSpiders, jobDetails, putAnswer, showQuestion } from "./apply-help";
+import type { FileData } from "../shared/types";
 
 /**
  * Injected into the job page when the student presses Fill. Scans the form, fills it from the plan the
@@ -190,6 +192,30 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
     // "I applied": the job that's open on the page, for the student to check before it's saved.
     if (message?.type === "opened-job") {
       reply(openedJob());
+      return false;
+    }
+    // The job box in the panel: everything the page says about the job.
+    if (message?.type === "job-details") {
+      reply(jobDetails());
+      return false;
+    }
+    // "Begin applying": the resume into the upload boxes, and spiders beside the complex questions. Later
+    // steps of the form get the same by themselves, and the panel hears about them.
+    if (message?.type === "begin-applying") {
+      reply(beginApplying((message.resume as FileData | null) ?? null, (result) => tell({ type: "applying-changed", result })));
+      return false;
+    }
+    if (message?.type === "put-answer") {
+      reply(putAnswer(String(message.id ?? ""), String(message.text ?? ""), Boolean(message.replace)));
+      return false;
+    }
+    if (message?.type === "show-question") {
+      reply({ ok: showQuestion(String(message.id ?? "")) });
+      return false;
+    }
+    if (message?.type === "stop-applying") {
+      clearQuestionSpiders();
+      reply({ ok: true });
       return false;
     }
     if (message?.type === "spiders") {

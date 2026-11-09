@@ -1,6 +1,6 @@
 import { stepText, wentBack, type Step } from "./shared/steps";
 import { generatePassword, unmetRules } from "./shared/password";
-import { NEVER_READ, type Answer, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type PanelState, type Scan } from "./shared/types";
+import { AUTOFILL_ENABLED, NEVER_READ, type Answer, type Applying, type BeginResult, type JobDetails, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type PanelState, type Scan } from "./shared/types";
 import { QUICK_BOARDS } from "./content/quick-apply";
 
 /**
@@ -181,6 +181,60 @@ async function resumeFile(): Promise<{ file: FileData | null; error: string | nu
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
   return { file: { name, mime: response.headers.get("content-type") ?? "application/pdf", base64: btoa(binary) }, error: null };
+}
+
+/**
+ * The resume, kept ready for "Begin applying" so it goes into the upload box the moment it's pressed. Fetched
+ * as soon as the panel shows a job; kept ten minutes, and dropped when the student changes their resume.
+ */
+let resumeReady: { at: number; got: Promise<{ file: FileData | null; error: string | null }> } | null = null;
+function readyResume() {
+  if (!resumeReady || Date.now() - resumeReady.at > 10 * 60_000) {
+    const got = resumeFile().then((result) => { if (!result.file) resumeReady = null; return result; });
+    resumeReady = { at: Date.now(), got };
+  }
+  return resumeReady.got;
+}
+
+/** "Begin applying" on each tab, kept for the browser session so the panel can show it after a reload. */
+async function applyingAll(): Promise<Record<string, Applying>> {
+  return ((await chrome.storage.session.get("applying")).applying as Record<string, Applying> | undefined) ?? {};
+}
+async function saveApplying(tabId: number, value: Applying | null) {
+  const all = await applyingAll();
+  if (value) all[tabId] = value;
+  else delete all[tabId];
+  await chrome.storage.session.set({ applying: all });
+  void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+}
+
+/** The job on the tab as the page shows it, with the form's own counts when the form is in a frame. */
+async function readJobDetails(tabId: number): Promise<JobDetails | null> {
+  const scan = await look(tabId);
+  if (!scan) return null;
+  const top = await send<JobDetails>(tabId, { type: "job-details" }, 0).catch(() => null);
+  const frame = formFrame.get(tabId) ?? 0;
+  const form = frame ? await send<JobDetails>(tabId, { type: "job-details" }, frame).catch(() => null) : null;
+  const details = top ?? form;
+  if (!details) return null;
+  if (form && top) Object.assign(details, { questions: form.questions, uploads: form.uploads, resumeBox: form.resumeBox });
+  if (!details.title) details.title = scan.title;
+  if (!details.company) details.company = scan.company;
+  return details;
+}
+
+/** Puts the resume in the upload boxes and marks the complex questions, in the frame with the form. */
+async function beginApplying(tabId: number): Promise<Applying> {
+  const resume = await readyResume();
+  await look(tabId);
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const result = await send<BeginResult>(tabId, { type: "begin-applying", resume: resume.file });
+  const before = (await applyingAll())[tabId];
+  // Answers already written on this application stay with it across its steps.
+  const applying: Applying = { ...result, uploaded: [...new Set([...(before?.uploaded ?? []), ...result.uploaded])], url: tab?.url ?? "", resumeError: resume.file ? null : resume.error, answers: before?.answers ?? {} };
+  await saveApplying(tabId, applying);
+  void log(`Began applying${result.uploaded.length ? `: resume uploaded to "${result.uploaded[0].slice(0, 40)}"` : ""}. ${result.questions.length} complex ${result.questions.length === 1 ? "question" : "questions"} found.`);
+  return applying;
 }
 
 /** Uploads a new resume to Unnepo from the panel. Unnepo reads it into the profile, like the website does. */
@@ -383,7 +437,8 @@ async function state(): Promise<PanelState> {
   if (job?.submission && job.url && tab?.url && sameHost(job.url, tab.url) && QUICK_BOARDS.test(new URL(tab.url).hostname) && page?.title && page.company && !sameJobTitle(job, page)) job = null;
   // Asked about two minutes after Apply was pressed, when a confirmation would have shown by then.
   const maybe = (me?.maybe ?? []).filter((item) => Date.now() - Date.parse(item.at) > 120_000);
-  return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase, maybe };
+  const applying = tab?.id !== undefined ? (await applyingAll())[tab.id] ?? null : null;
+  return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase, maybe, applying };
 }
 
 /** The frame the application form is in, per tab: 0 for the page itself, or an embedded form's frame. */
@@ -1136,6 +1191,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         try {
           await uploadResume(String(message.name), String(message.mime), String(message.base64));
+          resumeReady = null;
           void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
           return reply({ ok: true });
         } catch (error) {
@@ -1151,17 +1207,17 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { description: message.description, ...(message.options ?? {}) });
             return reply({ ok: true, doc: letter });
           }
-          const scan = await look(tabId);
+          // A job already in the tracker for this tab is used; otherwise the job as the page shows it. Writing a
+          // letter never adds a job to the tracker: jobs come only from forwarded emails or "Add a job".
           const earlier = (await jobs())[tabId];
-          // The job the student has open now: after clicking another job (Handshake's search), that one.
-          let applicationId = earlier?.applicationId && (!scan || earlier.running || sameApplication(earlier.url, scan.url)) ? earlier.applicationId : undefined;
+          const scan = earlier?.applicationId ? await look(tabId) : null;
+          const applicationId = earlier?.applicationId && (!scan || earlier.running || sameApplication(earlier.url, scan.url)) ? earlier.applicationId : undefined;
           if (!applicationId) {
-            if (!scan) throw new Error("Open the job posting or its application in this tab first.");
-            const job = await api<{ application: { id: string; title: string; company: string } }>("POST", "jobs", { url: scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster });
-            applicationId = job.application.id;
-            // A different job than the one saved for this tab: start its record fresh.
-            if (earlier) await saveJob(tabId, null);
-            await saveJob(tabId, { applicationId, title: job.application.title, company: job.application.company, url: scan.url, host: new URL(scan.url).hostname });
+            const given = message.job as Partial<JobDetails> | undefined;
+            const job = given?.title ? given : await readJobDetails(tabId);
+            if (!job?.title) throw new Error("Open the job posting or its application in this tab first.");
+            const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { job: { title: job.title, company: job.company || job.site || "", description: job.description ?? "" }, ...(message.options ?? {}) });
+            return reply({ ok: true, doc: letter });
           }
           // The student's quick answers (length, tone, what to mention) or their edit request ride along.
           const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId, ...(message.options ?? {}) });
@@ -1209,6 +1265,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await chrome.storage.local.set({ autoSubmit: Boolean(message.value) });
         return reply({ ok: true });
       case "fill": {
+        if (!AUTOFILL_ENABLED) return reply({ ok: false, error: "Autofill is turned off." });
         const tab = await chrome.tabs.get(Number(message.tabId)).catch(() => null);
         if (tab?.url && NEVER_READ.test(new URL(tab.url).hostname)) {
           await saveJob(Number(message.tabId), { error: "Unnepo doesn't fill LinkedIn. Open the job's own application (Apply on the company's site), then press Fill.", step: "Stopped." });
@@ -1263,12 +1320,94 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         try {
           const job = (await jobs())[Number(message.tabId)];
-          const written = await api<{ answer: string }>("POST", "write", { question: String(message.question ?? ""), length: message.length, ...(job?.applicationId ? { applicationId: job.applicationId } : {}) });
+          const given = message.job as Partial<JobDetails> | undefined;
+          const written = await api<{ answer: string }>("POST", "write", { question: String(message.question ?? ""), length: message.length, ...(job?.applicationId ? { applicationId: job.applicationId } : given?.title ? { job: { title: given.title, company: given.company || given.site, description: given.description } } : {}) });
           return reply({ ok: true, answer: written.answer });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't write this one." });
         }
       }
+      // The job box: what the page says about the job. The resume starts loading now, for Begin applying.
+      case "job-details": {
+        if (sender.tab) return reply({ ok: false });
+        const details = await readJobDetails(Number(message.tabId)).catch(() => null);
+        if (details) void readyResume();
+        return reply({ ok: Boolean(details), details });
+      }
+      // "Begin applying": resume in, spiders beside the complex questions.
+      case "begin-applying": {
+        if (sender.tab) return reply({ ok: false });
+        try {
+          return reply({ ok: true, applying: await beginApplying(Number(message.tabId)) });
+        } catch {
+          return reply({ ok: false, error: "Couldn't reach the page. Reload it and press Begin applying again." });
+        }
+      }
+      // The form moved on to its next step (or an upload box showed up): the page did it again by itself.
+      case "applying-changed": {
+        if (tabId === undefined) return reply({ ok: false });
+        const before = (await applyingAll())[tabId];
+        if (!before) return reply({ ok: false });
+        const result = message.result as BeginResult;
+        await saveApplying(tabId, { ...before, ...result, uploaded: [...new Set([...before.uploaded, ...result.uploaded])], url: sender.tab?.url ?? before.url });
+        return reply({ ok: true });
+      }
+      case "stop-applying": {
+        if (sender.tab) return reply({ ok: false });
+        const id = Number(message.tabId);
+        await send(id, { type: "stop-applying" }).catch(() => undefined);
+        await saveApplying(id, null);
+        return reply({ ok: true });
+      }
+      // "Answer complex questions": writes an answer for each one still empty, and types it into its box.
+      case "answer-complex": {
+        if (sender.tab) return reply({ ok: false });
+        const id = Number(message.tabId);
+        const applying = (await applyingAll())[id];
+        if (!applying) return reply({ ok: false, error: "Press Begin applying first." });
+        const given = message.job as Partial<JobDetails> | undefined;
+        const tracked = (await jobs())[id];
+        const context = tracked?.applicationId ? { applicationId: tracked.applicationId } : given?.title ? { job: { title: given.title, company: given.company || given.site, description: given.description } } : {};
+        const answers = { ...(applying.answers ?? {}) };
+        const todo = applying.questions.filter((question) => !question.answered && !answers[question.id]?.put);
+        // A few at a time: quick, without asking Unnepo for everything at once.
+        let next = 0;
+        let stopped = "";
+        const worker = async () => {
+          while (next < todo.length && !stopped) {
+            const question = todo[next++];
+            try {
+              const long = question.label.length > 60 || /describe|tell us|explain|why/i.test(question.label);
+              const written = await api<{ answer: string }>("POST", "write", { question: question.label, ...(long ? { length: "paragraph" } : {}), ...context });
+              const put = await send<{ ok: boolean; reason?: string }>(id, { type: "put-answer", id: question.id, text: written.answer }).catch(() => ({ ok: false, reason: "Couldn't reach the page." }));
+              answers[question.id] = { text: written.answer, put: put.ok, ...(put.ok ? {} : { error: put.reason }) };
+            } catch (error) {
+              const why = error instanceof Error ? error.message : "Couldn't write this one.";
+              answers[question.id] = { text: "", put: false, error: why };
+              // Out of uses or today's limit: the rest would fail the same way.
+              if (error instanceof ApiError && (error.status === 402 || error.status === 429 || /limit|credits|upgrade/i.test(why))) stopped = why;
+            }
+          }
+        };
+        await Promise.all([worker(), worker(), worker()]);
+        await saveApplying(id, { ...applying, answers });
+        return reply({ ok: true, written: todo.filter((question) => answers[question.id]?.text).length, stopped });
+      }
+      // An answer edited in the panel, put in its box again; or the page scrolled to a question.
+      case "put-answer": {
+        if (sender.tab) return reply({ ok: false });
+        const id = Number(message.tabId);
+        const result = await send<{ ok: boolean; reason?: string }>(id, { type: "put-answer", id: String(message.id), text: String(message.text ?? ""), replace: true }).catch(() => ({ ok: false, reason: "Couldn't reach the page." }));
+        const applying = (await applyingAll())[id];
+        if (applying?.answers?.[String(message.id)]) {
+          applying.answers[String(message.id)] = { text: String(message.text ?? ""), put: result.ok, ...(result.ok ? {} : { error: result.reason }) };
+          await saveApplying(id, applying);
+        }
+        return reply(result);
+      }
+      case "show-question":
+        if (sender.tab) return reply({ ok: false });
+        return reply(await send<{ ok: boolean }>(Number(message.tabId), { type: "show-question", id: String(message.id) }).catch(() => ({ ok: false })));
       // An applying session, started or ended from the panel.
       case "session":
         if (sender.tab) return reply({ ok: false });
@@ -1521,11 +1660,24 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   runs.delete(tabId);
   applyClicks.delete(tabId);
   formFrame.delete(tabId);
+  void saveApplying(tabId, null);
   void tabGone(tabId);
 });
 // A restarted worker has no runs going, so nothing should say it's running.
 void jobs().then(async (all) => {
   for (const [tabId, job] of Object.entries(all)) if (job.running) await saveJob(Number(tabId), { running: false });
+});
+// A new page in a tab that's applying (the next step of the form, or a reload): resume and spiders again, on
+// the same site only. Going somewhere else ends it.
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  if (info.status !== "complete" || !tab.url) return;
+  void applyingAll().then((all) => {
+    const before = all[tabId];
+    if (!before) return;
+    const site = (url: string) => { try { return new URL(url).hostname.split(".").slice(-2).join("."); } catch { return ""; } };
+    if (site(before.url) !== site(tab.url!)) return void saveApplying(tabId, null);
+    void beginApplying(tabId).catch(() => undefined);
+  });
 });
 chrome.tabs.onActivated.addListener(() => void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined));
 

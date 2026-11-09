@@ -1,7 +1,8 @@
 import type { SpiderLook } from "@/lib/spiders";
 import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
-import { CREDIT_COST_FALLBACK, NEVER_READ, type Issue, type PanelState } from "../shared/types";
+import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
+import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, NEVER_READ, type Issue, type JobDetails, type PanelState } from "../shared/types";
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
@@ -129,6 +130,14 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
   if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Applied with Easy Apply? Add it below.", goalLine(state)] };
   if (!jobFound(state) || !page) return { lines: [goalLine(state), "Open an application, I'll wait.", "Need a cover letter? Tap Write a cover letter."] };
   const found = `${page.company || page.site} job found.${page.title ? ` ${short(page.title)}.` : ""}`;
+  if (!AUTOFILL_ENABLED) {
+    const applying = state.applying;
+    if (applying) {
+      const open = applying.questions.filter((question) => !question.answered && !applying.answers?.[question.id]?.put).length;
+      return { lines: [applying.uploaded.length ? "Resume's in." : applying.resumeBox ? "Couldn't upload your resume here. Add it yourself." : "No resume upload on this page yet.", open ? `${open} complex ${open === 1 ? "question" : "questions"}. I'm sitting next to ${open === 1 ? "it" : "them"}.` : "No complex questions left on this page.", goalLine(state)] };
+    }
+    return { lines: [found, "Press Begin applying. I'll upload your resume and find the hard questions.", goalLine(state)] };
+  }
   if (page.posting) return { lines: [found, "Press Autofill. I'll press Apply and crawl it for you.", goalLine(state)] };
   const extra = page.account === "new" ? ", and one new account to make" : page.account === "sign_in" ? ", and I'll sign you in" : "";
   return { lines: [found, `${page.fields} ${page.fields === 1 ? "field" : "fields"}${extra}.`, "Press Autofill and I'll crawl it for you.", goalLine(state)] };
@@ -299,6 +308,177 @@ function toolsPage(state: PanelState, extra = "") {
     </div>`;
 }
 
+/**
+ * The job box, above "Write a cover letter": everything Unnepo read about the job on the tab, with Begin applying
+ * and the two ways of saying no. After Begin applying: whether the resume went in, and the complex questions
+ * (each with a spider beside it on the page), with one button that answers them all.
+ */
+let details: { key: string; data: JobDetails | null; loading: boolean } = { key: "", data: null, loading: false };
+const detailsKey = (state: PanelState) => (state.tab ? `${state.tab.id}|${pageKey(state.tab.url)}|${state.page?.title ?? ""}` : "");
+function loadDetails(state: PanelState) {
+  const key = detailsKey(state);
+  if (!state.tab || details.key === key) return;
+  details = { key, data: null, loading: true };
+  const tabId = state.tab.id;
+  void ask<{ ok: boolean; details?: JobDetails }>({ type: "job-details", tabId }).catch(() => ({ ok: false })).then((result) => {
+    if (details.key !== key) return;
+    details = { key, data: result.ok ? (result as { details?: JobDetails }).details ?? null : null, loading: false };
+    void render();
+  });
+}
+/** The job as the panel knows it, for cover letters and answers: what the page showed, or the tab's own name. */
+function pageJob(state: PanelState): Partial<JobDetails> | null {
+  if (details.data?.title && details.key === detailsKey(state)) return details.data;
+  const title = state.job?.title || state.page?.title;
+  return title ? { title, company: state.job?.company || state.page?.company || "", site: state.page?.site ?? "", description: "" } : null;
+}
+
+const MINI_SPIDER = `<svg class="mini-spider" viewBox="0 0 ${SPRITE_W} ${SPRITE_H}" width="18" height="${Math.round((18 * SPRITE_H) / SPRITE_W)}" shape-rendering="crispEdges" aria-hidden="true"><g transform="rotate(180 ${SPRITE_W / 2} ${SPRITE_H / 2})">${spiderRects(0)}</g></svg>`;
+
+/** Answering every complex question: what's going on, and edits to answers not yet put back on the page. */
+const complex = { busy: false, note: "", drafts: {} as Record<string, string>, open: new Set<string>() };
+
+function jobBox(state: PanelState) {
+  const how = dismissal(state);
+  if (how && !state.applying) {
+    return `<section class="job-box empty" aria-label="Job on this tab">
+      <span class="eyebrow">No job found yet</span>
+      <div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>
+    </section>`;
+  }
+  if (!jobFound(state) && !state.applying) {
+    return `<section class="job-box empty" aria-label="Job on this tab">
+      <span class="eyebrow">No job found yet</span>
+      <p class="note">Open a job posting or an application, and what it says shows up here.</p>
+    </section>`;
+  }
+  if (state.applying) return applyingBox(state);
+  loadDetails(state);
+  const job = details.key === detailsKey(state) ? details.data : null;
+  const title = job?.title || state.page?.title || state.tab?.title || "This job";
+  const company = job?.company || state.page?.company || "";
+  const facts = [
+    job?.location, job?.remote, job?.pay, job?.type, job?.posted ? `Posted ${job.posted}` : "",
+    job?.questions ? `${job.questions} ${job.questions === 1 ? "question" : "questions"}` : state.page?.posting ? "Job posting" : "",
+    job?.resumeBox ? "Resume upload" : "",
+  ].filter(Boolean) as string[];
+  const description = job?.description?.trim() ?? "";
+  return `
+    <section class="job-box" aria-label="Job on this tab">
+      <div class="row-between"><span class="eyebrow">Job found</span><span class="mono">${escape(job?.site || state.page?.site || "")}</span></div>
+      <div>
+        <div class="job-name small-name">${escape(title)}</div>
+        ${company ? `<div class="job-detail">${escape(company)}</div>` : ""}
+      </div>
+      ${details.loading && !job ? `<p class="small" role="status">Reading the job…</p>` : ""}
+      ${facts.length ? `<div class="facts">${facts.map((fact) => `<span class="fact">${escape(fact)}</span>`).join("")}</div>` : ""}
+      ${description ? `<details class="desc"><summary>Job description <span class="mono">${description.length.toLocaleString()} characters</span></summary><p>${escape(description.slice(0, 4000))}${description.length > 4000 ? "…" : ""}</p></details>` : job ? `<p class="small">No job description on this page.</p>` : ""}
+      <button type="button" class="btn primary big" id="begin-applying" ${state.me!.profileReady ? "" : "disabled"}>Begin applying</button>
+      <div class="row-between"><button type="button" class="quiet-link" id="skip-job">Skip</button><button type="button" class="quiet-link" id="not-job">Not a job</button></div>
+      ${trialLine(state)}
+    </section>`;
+}
+
+/** The complex questions' cost on Free, where each answer uses credits. */
+function answersCost(count: number) {
+  const me = lastState?.me;
+  if (!count || me?.unlimitedCredits || (me?.usage && !me.usage.free)) return "";
+  const each = me?.creditCost?.answers ?? CREDIT_COST_FALLBACK.answers;
+  return ` (${each * count} ${each * count === 1 ? "credit" : "credits"})`;
+}
+
+function applyingBox(state: PanelState) {
+  const applying = state.applying!;
+  const answers = applying.answers ?? {};
+  const open = applying.questions.filter((question) => !question.answered && !answers[question.id]?.put);
+  const resume = applying.uploaded.length
+    ? `<p class="note ok">✓ Resume uploaded to “${escape(short(applying.uploaded[0], 50))}”.</p>`
+    : applying.resumeError ? `<p class="note warn">${escape(applying.resumeError)}</p>`
+    : applying.resumeBox ? `<p class="note">There's an upload box, but it already has a file or isn't for a resume.</p>`
+    : `<p class="note">No resume upload on this page yet. It goes in the moment one shows up.</p>`;
+  const row = (question: (typeof applying.questions)[number]) => {
+    const answer = answers[question.id];
+    const done = question.answered || answer?.put;
+    const draft = complex.drafts[question.id] ?? answer?.text ?? "";
+    return `<li class="q-row${done ? " done" : ""}">
+      <span class="q-mark">${done ? "✓" : MINI_SPIDER}</span>
+      <div class="q-body">
+        <button type="button" class="q-label-link" data-show-question="${escape(question.id)}" title="Show it on the page">${escape(short(question.label, 140))}${question.required ? " <span class=\"req\">*</span>" : ""}</button>
+        ${answer?.error ? `<span class="small" style="color: var(--warn)">${escape(answer.error)}</span>` : ""}
+        ${answer?.text ? `<details class="q-answer" data-answer-id="${escape(question.id)}" ${complex.open.has(question.id) ? "open" : ""}><summary>${answer.put ? "Answer, in the box" : "Answer"}</summary>
+          <div class="letter-form flat"><textarea class="field letter-input" rows="5" data-draft="${escape(question.id)}" aria-label="Answer to ${escape(short(question.label, 60))}">${escape(draft)}</textarea>
+          <div class="links"><button type="button" class="link" data-put="${escape(question.id)}">Put it in the box</button><button type="button" class="link" data-copy="${escape(question.id)}">Copy</button></div></div>
+        </details>` : ""}
+      </div>
+    </li>`;
+  };
+  return `
+    <section class="job-box applying" aria-label="Applying">
+      <div class="row-between"><span class="eyebrow">Applying${details.data?.company ? ` · ${escape(short(details.data.company, 28))}` : ""}</span><button type="button" class="quiet-link tight" id="stop-applying">Stop</button></div>
+      ${resume}
+      ${applying.questions.length ? `
+        <div class="q-head"><span class="heading">${applying.questions.length} complex ${applying.questions.length === 1 ? "question" : "questions"}</span><span class="mono">${open.length} LEFT</span></div>
+        <ul class="q-list">${applying.questions.map(row).join("")}</ul>
+        ${complex.busy
+          ? `<div class="letter-writing" role="status">${typingSpiderSvg(90, spiderLook)}<span class="small">Answering ${open.length} ${open.length === 1 ? "question" : "questions"}…</span></div>`
+          : open.length ? `<button type="button" class="btn primary big" id="answer-complex">${SPARK_SMALL}Answer complex questions${answersCost(open.length)}</button>${usesLine(usesNow?.answers.note)}` : ""}
+        <span class="sub">Written from your resume and profile. Read each one before you submit.</span>`
+        : `<p class="note">No complex questions on this page. If the form has more steps, the spiders show up there.</p>`}
+      ${complex.note ? `<p class="small" role="status">${escape(complex.note)}</p>` : ""}
+      ${hereLinks()}
+    </section>`;
+}
+
+function wireJobBox(state: PanelState) {
+  const tabId = state.tab?.id;
+  if (tabId === undefined) return;
+  document.getElementById("begin-applying")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    button.disabled = true;
+    button.textContent = "Uploading your resume…";
+    complex.note = "";
+    const result = await ask<{ ok: boolean; error?: string }>({ type: "begin-applying", tabId }).catch(() => ({ ok: false, error: "Couldn't reach the page." }));
+    if (!result.ok) complex.note = result.error ?? "Couldn't start.";
+    void render();
+  });
+  document.getElementById("stop-applying")?.addEventListener("click", async () => {
+    Object.assign(complex, { busy: false, note: "", drafts: {} });
+    complex.open.clear();
+    await ask({ type: "stop-applying", tabId });
+    void render();
+  });
+  document.getElementById("answer-complex")?.addEventListener("click", async () => {
+    complex.busy = true;
+    complex.note = "";
+    void render();
+    type Done = { ok: boolean; written?: number; stopped?: string; error?: string };
+    const result = await ask<Done>({ type: "answer-complex", tabId, job: pageJob(state) }).catch((): Done => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    complex.busy = false;
+    complex.note = !result.ok ? result.error ?? "Couldn't answer them." : result.stopped ? result.stopped : result.written ? `Answered ${result.written}. Check each one on the page.` : "Couldn't write any of these. Answer them yourself.";
+    void render();
+  });
+  app.querySelectorAll<HTMLButtonElement>("[data-show-question]").forEach((button) => button.addEventListener("click", () => void ask({ type: "show-question", tabId, id: button.dataset.showQuestion })));
+  app.querySelectorAll<HTMLDetailsElement>("details[data-answer-id]").forEach((box) => box.addEventListener("toggle", () => {
+    if (box.open) complex.open.add(box.dataset.answerId!);
+    else complex.open.delete(box.dataset.answerId!);
+  }));
+  app.querySelectorAll<HTMLTextAreaElement>("[data-draft]").forEach((box) => box.addEventListener("input", () => { complex.drafts[box.dataset.draft!] = box.value; }));
+  app.querySelectorAll<HTMLButtonElement>("[data-put]").forEach((button) => button.addEventListener("click", async () => {
+    const id = button.dataset.put!;
+    const text = complex.drafts[id] ?? state.applying?.answers?.[id]?.text ?? "";
+    const result = await ask<{ ok: boolean; reason?: string }>({ type: "put-answer", tabId, id, text }).catch(() => ({ ok: false, reason: "Couldn't reach the page." }));
+    if (result.ok) delete complex.drafts[id];
+    complex.note = result.ok ? "Put in the box." : result.reason ?? "Couldn't put it in.";
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    void render();
+  }));
+  app.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) => button.addEventListener("click", () => {
+    const id = button.dataset.copy!;
+    const text = complex.drafts[id] ?? state.applying?.answers?.[id]?.text ?? "";
+    void navigator.clipboard.writeText(text).then(() => { complex.note = "Copied."; void render(); }, () => undefined);
+  }));
+}
+
 /** "I already applied" and "Save for later": read the job on the tab and save it. */
 const hereLinks = () => {
   const busy = here.step === "reading" || here.step === "saving";
@@ -312,7 +492,8 @@ function homeView(state: PanelState) {
   const card = openedCard(state);
   if (state.job?.submission || state.job?.error) return card + toolsPage(state);
   if (card) return here.step === "check" ? card : card + toolsPage(state);
-  if (jobFound(state)) return jobPage(state);
+  if (AUTOFILL_ENABLED && jobFound(state)) return jobPage(state);
+  if (!AUTOFILL_ENABLED) return jobBox(state) + toolsPage(state, `${jobFound(state) && !state.applying ? hereLinks() : ""}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`);
   const how = dismissal(state);
   const onWeb = Boolean(state.tab && /^https:\/\//.test(state.tab.url)) && !onUnnepo(state);
   return `${how ? `<div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>` : ""}
@@ -436,7 +617,7 @@ const setupMissing = (setup: NonNullable<NonNullable<PanelState["me"]>["setup"]>
 function setupCard(state: PanelState) {
   const setup = state.me?.setup;
   // Asked before filling, never in the middle of one.
-  if (!setup || setupSkipped === null || state.job?.running || state.job?.report) return "";
+  if (!AUTOFILL_ENABLED || !setup || setupSkipped === null || state.job?.running || state.job?.report) return "";
   const missing = setupMissing(setup);
   if (!missing.length || setupSkipped === missing.join(",")) return "";
   const yesNo = (key: string, question: string) => {
@@ -651,15 +832,16 @@ function coverPopup(state: PanelState) {
     return popupShell("Your cover letter", `${writingSpider()}${letter ? writtenLetter(busy, forJob) : ""}${note}`);
   }
   const highlights = state.me?.highlights ?? [];
-  const steps = [...(forJob ? [] : ["paste"]), "length", "tone", "mention"];
+  const steps = [...(forJob ? [] : ["paste"]), "format", "length", "tone", "mention"];
   const step = Math.min(popup!.step, steps.length - 1);
   popup!.step = step;
   const title = state.job?.title || state.page?.title;
   const company = state.job?.company || state.page?.company;
   const forLine = forJob && title ? `<div class="sub">For ${escape(title)}${company ? ` at ${escape(company)}` : ""}</div>` : "";
-  const pick = (name: "length" | "tone", value: string, label: string, hint: string) => option("letter", `${name}:${value}`, label, hint, letterChoices[name] === value);
+  const pick = (name: "length" | "tone" | "format", value: string, label: string, hint: string) => option("letter", `${name}:${value}`, label, hint, letterChoices[name] === value);
   const bodies: Record<string, [string, () => string]> = {
     paste: ["Paste the job description", () => `<div class="letter-form flat"><textarea class="field letter-input paste" id="paste-desc" rows="8" maxlength="8000" aria-label="Job description" placeholder="Paste the whole job description">${escape(pasteText)}</textarea><button type="button" class="btn primary big" id="popup-next" ${pasteButton().disabled ? "disabled" : ""}>${pasteButton().label}</button></div>`],
+    format: ["How should it be built?", () => `<div class="stack tight">${pick("format", "match", "Match the job (recommended)", "Answers the posting's top asks, one by one")}${pick("format", "problem", "Problem, then solution", "Names what the role needs, shows you've done it")}${pick("format", "achievement", "Lead with a win", "Opens with your strongest result")}${pick("format", "story", "Short story", "Opens with a real moment from your experience")}</div>`],
     length: ["How long should it be?", () => `<div class="stack tight">${pick("length", "short", "Short", "A few lines")}${pick("length", "standard", "Standard", "The usual cover letter")}${pick("length", "detailed", "Detailed", "More on your experience")}</div>`],
     tone: ["What tone?", () => `<div class="stack tight">${pick("tone", "professional", "Professional", "Polished and direct")}${pick("tone", "warm", "Warm", "Friendly and personal")}${pick("tone", "confident", "Confident", "Leads with what you've done")}${pick("tone", "enthusiastic", "Enthusiastic", "Shows you're excited")}</div>`],
     mention: [highlights.length ? "Mention specific things from your resume" : "Anything to mention?", () => `<div class="letter-form flat">${highlights.length ? `<div class="choices" role="group" aria-label="Things from your resume">${highlights.map((item) => `<button type="button" class="choice${letterChoices.picked.includes(item) ? " on" : ""}" data-highlight="${escape(item)}" aria-pressed="${letterChoices.picked.includes(item)}">${escape(item)}</button>`).join("")}</div>` : ""}<textarea class="field letter-input" id="letter-mention" rows="2" maxlength="400" aria-label="Anything else to mention (optional)" placeholder="${highlights.length ? "Anything else? Optional" : "Optional: a project, why this company, a skill to lead with…"}">${escape(letterChoices.mention)}</textarea><button type="button" class="btn primary big" id="letter-write">${SPARK_SMALL}${withCost("Write cover letter", "letters")}</button>${usesLine(usesNow?.letters.note)}</div>`],
@@ -750,7 +932,7 @@ function wireAnswer(tabId: number) {
     answering.note = "";
     void render();
     type Written = { ok: boolean; answer?: string; error?: string };
-    const result = await ask<Written>({ type: "answer-question", tabId, question: answering.question, length: answering.length }).catch((): Written => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    const result = await ask<Written>({ type: "answer-question", tabId, question: answering.question, length: answering.length, job: lastState && jobFound(lastState) ? pageJob(lastState) : null }).catch((): Written => ({ ok: false, error: "Couldn't reach Unnepo." }));
     answering.busy = false;
     if (result.ok && result.answer) answering.answer = result.answer;
     else answering.note = result.error ?? "Couldn't write this one.";
@@ -780,7 +962,7 @@ let letterNote = "";
 let letterEdited = false;
 /** The tab and job the letter is for. */
 let letterFor = "";
-const letterChoices = { length: "standard", tone: "professional", picked: [] as string[], mention: "", edit: "" };
+const letterChoices = { format: "match", length: "standard", tone: "professional", picked: [] as string[], mention: "", edit: "" };
 
 /** While the AI writes: the spider typing on his laptop. */
 const writingSpider = () => (letterStep === "writing" || letterStep === "revising"
@@ -840,18 +1022,18 @@ async function writeLetter(tabId: number, revise: boolean, fromPaste = false, sa
     ? { text: letter?.text ?? "" }
     : revise
       ? { previous: letter?.text ?? "", edit: letterChoices.edit }
-      : { length: letterChoices.length, tone: letterChoices.tone, mention: [...letterChoices.picked, letterChoices.mention.trim()].filter(Boolean).join("; "), track: true };
+      : { format: letterChoices.format, length: letterChoices.length, tone: letterChoices.tone, mention: [...letterChoices.picked, letterChoices.mention.trim()].filter(Boolean).join("; ") };
   type Result = { ok: boolean; doc?: Letter; error?: string };
-  const result = await ask<Result>({ type: "generate-letter", tabId, options: { ...options, ...source }, ...(fromPaste ? { description: pasteText } : {}) }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  const job = !fromPaste && lastState ? pageJob(lastState) : null;
+  const result = await ask<Result>({ type: "generate-letter", tabId, options: { ...options, ...source }, ...(fromPaste ? { description: pasteText } : {}), ...(job ? { job } : {}) }).catch((): Result => ({ ok: false, error: "Couldn't reach Unnepo." }));
   if (result.ok && result.doc) {
     letter = result.doc;
     letterStep = "written";
     letterEdited = false;
     if (revise) letterChoices.edit = "";
     if (save) letterNote = "Saved. The PDF has your edits.";
-    if (result.doc.addedToApplied) letterNote = "Added to your applied jobs.";
     // Free: a general letter. Says what Pro does instead.
-    else if (result.doc.upgrade && !save) letterNote = `A general letter. ${result.doc.upgrade}`;
+    if (result.doc.upgrade && !save) letterNote = `A general letter. ${result.doc.upgrade}`;
   } else {
     letterStep = letter ? "written" : "closed";
     letterNote = result.error ?? "Couldn't write the cover letter.";
@@ -871,7 +1053,7 @@ function wireLetter(tabId: number, fromPaste: boolean) {
   // A choice answers the question and moves on to the next.
   app.querySelectorAll<HTMLButtonElement>("[data-letter]").forEach((button) => button.addEventListener("click", () => {
     const [name, value] = (button.dataset.letter ?? "").split(":");
-    letterChoices[name as "length" | "tone"] = value;
+    letterChoices[name as "length" | "tone" | "format"] = value;
     if (popup) popup.step += 1;
     void render();
   }));
@@ -1264,7 +1446,7 @@ function jobsView(state: PanelState) {
     : jobsList.error
       ? `<p class="note error">${escape(jobsList.error)}</p>`
       : !rows.length
-        ? `<p class="note">No jobs yet. Open a job posting and press Autofill, and it shows up here.</p>`
+        ? `<p class="note">No jobs yet. Forward job emails to Unnepo, or add one above.</p>`
         : `<ul class="jobs-list">${rows.map((row) => `
             <li><button type="button" class="job-row" data-url="${escape(`${state.apiBase}/home?job=${encodeURIComponent(row.id)}`)}" title="Open this job in Unnepo">
               <span class="job-row-text"><span class="job-row-title">${escape(row.title || "Job")}</span><span class="job-row-company">${escape(row.company)}</span></span>
@@ -1527,6 +1709,7 @@ function draw(state: PanelState): boolean {
   if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
   wireSetup(state);
   wireOpened(state);
+  wireJobBox(state);
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
   wireIssues();
