@@ -338,3 +338,27 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .bubble-btn:disabled { opacity: .6; cursor: default; }
 @keyframes bubble-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 @media (prefers-reduced-motion: reduce) { .bubble { animation: none; } }
+
+/* The tab's count (Follow up: jobs with no email yet). */
+.tab-count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 2px; padding: 0 4px; border-radius: 999px; background: rgba(245, 165, 36, .18); color: var(--warn); font: 600 10px var(--mono); vertical-align: 1px; }
+.tabs { grid-template-columns: repeat(5, auto); justify-content: space-between; }
+.tab { padding: 0 8px; font-size: 12.5px; white-space: nowrap; }
+
+/* "People you emailed: None yet · 1 · 2 · 3+". */
+.seg { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg); }
+.seg-btn { flex: 1; min-height: 30px; border: 0; border-radius: 7px; background: transparent; color: var(--muted-3); font: 500 12.5px Geist, sans-serif; cursor: pointer; white-space: nowrap; }
+.seg-btn:hover { color: var(--fg); }
+.seg-btn.on { background: var(--control); color: var(--fg); box-shadow: inset 0 0 0 1px rgba(74, 222, 128, .35); }
+.seg-btn:disabled { opacity: .6; cursor: default; }
+.status.todo { color: var(--muted-3); }
+.warn-text { color: var(--warn); font-weight: 600; }
+.nudge { text-align: left; cursor: pointer; }
+
+/* Settings: each group is its own card. */
+.settings-card { gap: 12px; }
+.settings-card .part { border: 0; padding: 0; }
+.settings-foot { padding: 0 2px; }
+.bubble-btn.wide { flex-basis: 100%; }
+.reach-row { flex-basis: 100%; display: flex; align-items: center; gap: 6px; }
+.reach-row .small { margin-right: auto; }
+.reach-row .bubble-btn { flex: 0 0 36px; padding: 0; }

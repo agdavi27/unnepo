@@ -99,6 +99,8 @@ export type FillReport = {
   peopleReveals?: number;
   /** When the student marked each person (by contact id) as emailed, for follow-up reminders. */
   emailedAt?: Record<string, string>;
+  /** How many people the student says they emailed about this job (anyone, on the list or not), and when. */
+  reachedOut?: { count: number; at: string };
   /** The credit for this job's person was spent, so searching again is free. */
   personCharged?: boolean;
   /** This job has used one of the plan's autofills, so filling it again is free. */

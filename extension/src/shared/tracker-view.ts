@@ -1,4 +1,5 @@
 import { stageOf } from "@/lib/apply/stats";
+import { followUpsDue } from "@/lib/apply/follow-ups";
 import { MAX_FOLLOW_UPS, reminders, type Reminder } from "./reminders";
 import type { Detected, Mailer, OpenedEmails, ReminderMarks, Tracker, TrackerContact, TrackerJob } from "./types";
 
@@ -73,6 +74,14 @@ const STAGE_LABEL: Record<string, string> = {
 };
 export const stageLabel = (job: TrackerJob) => STAGE_LABEL[stageOf(job as never)] ?? "Applied";
 export const isAppliedJob = (job: TrackerJob) => job.status === "submitted" || job.status === "applied_manual";
+/** How many people were emailed about a job: the student's own count, or the people on the list marked emailed. */
+export const emailedCount = (job: TrackerJob) => Math.max(job.fillReport?.reachedOut?.count ?? 0, job.contacts.filter((person) => person.outreachStatus !== "not_contacted").length);
+/** Applied, still in the running, and nobody emailed yet: the Follow up tab's list. */
+export const needsFirstEmail = (job: TrackerJob) => {
+  if (!isAppliedJob(job) || emailedCount(job)) return false;
+  const stage = stageOf(job as never);
+  return stage !== "rejected" && stage !== "offer";
+};
 
 const ROLE_LABEL: Record<string, string> = { alumni: "Alum", recruiter: "Recruiter", department: "Team", poster: "Posted the job" };
 const EMAIL_SOURCE: Record<string, string> = {
@@ -128,6 +137,7 @@ export function jobPage(job: TrackerJob, focus?: string) {
       ${applied
         ? `<label class="question"><span class="q-label">Status</span><select class="field" data-outcome="${job.id}">${pick("submitted", "Applied")}${pick("follow_up", "Follow up")}${stage === "assessment" ? pick("assessment", "Assessment") : ""}${pick("interviewing", "Interviewing")}${pick("offer", "Offer")}${pick("rejected", "Rejected")}</select></label>`
         : `<button type="button" class="solid" data-mark-applied="${job.id}">I applied to this</button>`}
+      ${applied ? reachPicker(job) : ""}
       <div class="links">
         ${job.url ? `<a class="link" href="${escape(job.url)}" target="_blank" rel="noreferrer">Job posting ↗</a>` : ""}
         <button type="button" class="link" data-delete-job="${job.id}">Delete job</button>
@@ -135,6 +145,39 @@ export function jobPage(job: TrackerJob, focus?: string) {
       ${note ? `<p class="small" role="status">${escape(note)}</p>` : ""}
     </section>
     ${peopleCard(job)}`;
+}
+
+/** "People you emailed: None · 1 · 2 · 3+", one tap to say how many people were reached out to. */
+function reachPicker(job: TrackerJob) {
+  const count = emailedCount(job);
+  const busy = store.busy.has(`reach:${job.id}`);
+  const option = (value: number, label: string) => {
+    const on = value === 3 ? count >= 3 : count === value;
+    return `<button type="button" class="seg-btn${on ? " on" : ""}" data-reach="${value}" data-reach-job="${job.id}" aria-pressed="${on}" ${busy ? "disabled" : ""}>${label}</button>`;
+  };
+  return `<div class="question" role="group" aria-label="People you emailed about this job">
+    <span class="q-label">People you emailed</span>
+    <div class="seg">${option(0, "None yet")}${option(1, "1")}${option(2, "2")}${option(3, "3+")}</div>
+  </div>`;
+}
+
+/** Saves how many people were emailed; the job leaves the Follow up tab's "No email yet" list once it's 1 or more. */
+async function setReached(jobId: string, count: number) {
+  const key = `reach:${jobId}`;
+  store.busy.add(key);
+  // Shown at once; the tracker is read again behind it.
+  const job = jobById(jobId);
+  if (job) job.fillReport = { ...(job.fillReport ?? { outcome: null, peopleReveals: 0 }), reachedOut: count ? { count, at: job.fillReport?.reachedOut?.at ?? new Date().toISOString() } : undefined };
+  host.redraw();
+  const result = await ask<{ ok: boolean; error?: string }>({ type: "job-status", applicationId: jobId, reachedOut: count }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  store.busy.delete(key);
+  store.notes[jobId] = result.ok ? "" : result.error ?? "Couldn't save it.";
+  await loadTracker(true);
+}
+
+/** The emailed buttons, on a job's page and on the Follow up tab. */
+export function wireReach(root: HTMLElement) {
+  root.querySelectorAll<HTMLButtonElement>("[data-reach-job]").forEach((button) => button.addEventListener("click", () => void setReached(button.dataset.reachJob!, Number(button.dataset.reach))));
 }
 
 function peopleCard(job: TrackerJob) {
@@ -230,6 +273,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
 
 /** Wires a job page drawn by `jobPage` inside `root`. */
 export function wireJobPage(root: HTMLElement, job: TrackerJob) {
+  wireReach(root);
   const say = (text: string) => { store.notes[job.id] = text; host.redraw(); };
   const run = async (what: string, contactId: string, message: Record<string, unknown>) => {
     store.busy.add(`${what}:${contactId}`);
@@ -450,7 +494,7 @@ export function detectedMenu() {
   return `
     <details class="detected-menu" id="detected-menu" ${detectedOpen ? "open" : ""}>
       <summary><span>Detected jobs${asking ? ` <span class="count">${asking}</span>` : ""}</span><span class="mono">LAST ${Math.min(5, list.length) || 5}</span></summary>
-      ${list.length ? `<ul class="detected-list">${list.slice(0, 5).map(row).join("")}</ul>` : `<p class="note">When you apply somewhere, the job shows up here. Ones the site confirms are saved by themselves.</p>`}
+      ${list.length ? `<ul class="detected-list">${list.slice(0, 5).map(row).join("")}</ul><button type="button" class="quiet-link" id="detected-clear">Clear list</button>` : `<p class="note">When you apply somewhere, the job shows up here. Ones the site confirms are saved by themselves.</p>`}
     </details>`;
 }
 
@@ -467,6 +511,7 @@ export function wireDetected(root: HTMLElement) {
   root.querySelectorAll<HTMLButtonElement>("[data-detected-yes]").forEach((button) => button.addEventListener("click", () => { button.disabled = true; void act({ type: "detected-answer", id: button.dataset.detectedYes, applied: true }, item(button.dataset.detectedYes!)); }));
   root.querySelectorAll<HTMLButtonElement>("[data-detected-no]").forEach((button) => button.addEventListener("click", () => void act({ type: "detected-answer", id: button.dataset.detectedNo, applied: false })));
   root.querySelectorAll<HTMLButtonElement>("[data-detected-undo]").forEach((button) => button.addEventListener("click", () => void act({ type: "detected-undo", id: button.dataset.detectedUndo })));
+  root.querySelector<HTMLButtonElement>("#detected-clear")?.addEventListener("click", () => void act({ type: "detected-clear" }));
   root.querySelectorAll<HTMLButtonElement>(".detected-title[data-open-job]").forEach((button) => button.addEventListener("click", () => host.openJob(button.dataset.openJob!)));
 }
 
@@ -490,33 +535,89 @@ export function recentJobs(limit = 5) {
     </button></li>`).join("")}</ul>`;
 }
 
-/**
- * Every job applied to, as a floating bubble: its name, the company, when, and two buttons, See info (its page,
- * with the people there) and Delete.
- */
-export function appliedBubbles() {
-  if (!store.tracker) return `<p class="note">${escape(store.error || "Loading your jobs…")}</p>`;
-  const applied = store.tracker.jobs.filter(isAppliedJob);
-  const head = `<div class="row-between"><span class="eyebrow">Applied</span><span class="mono">${applied.length} ${applied.length === 1 ? "JOB" : "JOBS"}</span></div>`;
-  if (!applied.length) return `<section class="page" aria-label="Jobs applied to">${head}<p class="note">Every job you apply to floats here.</p></section>`;
-  const day = (at: string | null) => (at ? new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
-  return `<section class="page" aria-label="Jobs applied to">${head}
-    <ul class="bubbles">${applied.map((job, index) => {
-      const busy = store.busy.has(`delete:${job.id}`);
-      const stage = stageLabel(job);
-      return `<li class="bubble" style="--float-delay:${(index % 5) * -1.3}s">
-        <span class="bubble-title">${escape(job.titleMissing ? "Job title missing" : job.title)}</span>
-        <span class="bubble-sub">${escape(job.company)}${job.submittedAt ? ` · ${escape(day(job.submittedAt))}` : ""}</span>
-        ${stage !== "Applied" ? `<span class="status">${escape(stage)}</span>` : ""}
-        <span class="bubble-actions">
-          <button type="button" class="bubble-btn" data-bubble-open="${job.id}">See info</button>
-          <button type="button" class="bubble-btn danger" data-bubble-delete="${job.id}" ${busy ? "disabled" : ""}>${busy ? "Deleting…" : "Delete"}</button>
-        </span>
-        ${store.notes[`delete:${job.id}`] ? `<span class="small" role="status">${escape(store.notes[`delete:${job.id}`])}</span>` : ""}
-      </li>`;
-    }).join("")}</ul>
-  </section>`;
+const day = (at: string | null) => (at ? new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
+const daysSince = (at: string | null) => (at ? Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 86_400_000)) : 0);
+
+/** One job as a floating bubble: its name, the company, when, and See info / Delete (or what's given instead). */
+function bubble(job: TrackerJob, index: number, extra = "", actions?: string) {
+  const busy = store.busy.has(`delete:${job.id}`);
+  const stage = stageLabel(job);
+  const when = isAppliedJob(job) ? day(job.submittedAt ?? job.createdAt) : "";
+  return `<li class="bubble" style="--float-delay:${(index % 5) * -1.3}s">
+    <span class="bubble-title">${escape(job.titleMissing ? "Job title missing" : job.title)}</span>
+    <span class="bubble-sub">${escape(job.company)}${when ? ` · ${escape(when)}` : ""}</span>
+    ${stage !== "Applied" ? `<span class="status${isAppliedJob(job) ? "" : " todo"}">${escape(stage)}</span>` : ""}
+    ${extra}
+    <span class="bubble-actions">${actions ?? `
+      <button type="button" class="bubble-btn" data-bubble-open="${job.id}">See info</button>
+      <button type="button" class="bubble-btn danger" data-bubble-delete="${job.id}" ${busy ? "disabled" : ""}>${busy ? "Deleting…" : "Delete"}</button>`}
+    </span>
+    ${store.notes[`delete:${job.id}`] ? `<span class="small" role="status">${escape(store.notes[`delete:${job.id}`])}</span>` : ""}
+  </li>`;
 }
+
+const loadingNote = () => `<p class="note">${escape(store.error || "Loading your jobs…")}</p>`;
+
+/** The Jobs tab: every job as a bubble, applied ones first, then the ones not applied to yet. */
+export function jobBubbles() {
+  if (!store.tracker) return loadingNote();
+  const jobs = store.tracker.jobs;
+  const applied = jobs.filter(isAppliedJob);
+  const saved = jobs.filter((job) => !isAppliedJob(job));
+  const group = (label: string, list: TrackerJob[], empty: string) => `
+    <section class="page" aria-label="${label}">
+      <div class="row-between"><span class="eyebrow">${label}</span><span class="mono">${list.length} ${list.length === 1 ? "JOB" : "JOBS"}</span></div>
+      ${list.length ? `<ul class="bubbles">${list.map((job, index) => bubble(job, index)).join("")}</ul>` : `<p class="note">${empty}</p>`}
+    </section>`;
+  return group("Applied", applied, "Every job you apply to floats here.") + (saved.length ? group("Not applied yet", saved, "") : "");
+}
+
+/**
+ * The Follow up tab: jobs applied to where nobody's been emailed yet, each with who Unnepo found there and one
+ * tap to say you emailed 1 or 2 people. Then the ones waiting on a reply.
+ */
+export function followUpView() {
+  if (!store.tracker) return loadingNote();
+  const jobs = store.tracker.jobs;
+  const todo = jobs.filter(needsFirstEmail).sort((a, b) => Date.parse(a.submittedAt ?? a.createdAt) - Date.parse(b.submittedAt ?? b.createdAt));
+  const waiting = jobs.filter((job) => isAppliedJob(job) && emailedCount(job) > 0 && !["rejected", "offer"].includes(stageOf(job as never)));
+  const due = new Set(followUpsDue(jobs as never).map((item) => item.applicationId));
+  const people = (job: TrackerJob) => {
+    const withEmail = job.contacts.filter((person) => person.email).length;
+    if (job.contactsStatus === "finding") return "Finding people…";
+    if (job.contacts.length) return `${job.contacts.length} ${job.contacts.length === 1 ? "person" : "people"} found${withEmail ? `, ${withEmail} with email` : ""}`;
+    return "No one found yet";
+  };
+  const todoRow = (job: TrackerJob, index: number) => {
+    const days = daysSince(job.submittedAt ?? job.createdAt);
+    const busy = store.busy.has(`reach:${job.id}`);
+    return bubble(job, index,
+      `<span class="small">${days ? `Applied ${days} ${days === 1 ? "day" : "days"} ago` : "Applied today"} · ${escape(people(job))}</span>`,
+      `<button type="button" class="bubble-btn wide" data-bubble-open="${job.id}">${job.contacts.length ? "See people" : "Find people"}</button>
+       <span class="reach-row" role="group" aria-label="Already emailed people about this job?"><span class="small">Emailed</span>
+         <button type="button" class="bubble-btn" data-reach-job="${job.id}" data-reach="1" aria-label="I emailed 1 person" ${busy ? "disabled" : ""}>1</button>
+         <button type="button" class="bubble-btn" data-reach-job="${job.id}" data-reach="2" aria-label="I emailed 2 people" ${busy ? "disabled" : ""}>2</button></span>`);
+  };
+  const waitRow = (job: TrackerJob, index: number) => {
+    const count = emailedCount(job);
+    return bubble(job, index,
+      `<span class="small">Emailed ${count} ${count === 1 ? "person" : "people"}${due.has(job.id) ? ` · <strong class="warn-text">follow-up due</strong>` : ""}</span>`,
+      `<button type="button" class="bubble-btn" data-bubble-open="${job.id}">${due.has(job.id) ? "Write follow-up" : "See info"}</button>`);
+  };
+  return `
+    <section class="page" aria-label="No email sent yet">
+      <div class="row-between"><span class="eyebrow">No email sent yet</span><span class="mono">${todo.length}</span></div>
+      <p class="small">Jobs you applied to where you haven't emailed anyone. A short note to a recruiter or someone on the team gets your application read.</p>
+      ${todo.length ? `<ul class="bubbles">${todo.map(todoRow).join("")}</ul>` : `<p class="note ok">You've emailed someone for every job. Nice.</p>`}
+    </section>
+    ${waiting.length ? `<section class="page" aria-label="Waiting on a reply">
+      <div class="row-between"><span class="eyebrow">Waiting on a reply</span><span class="mono">${waiting.length}</span></div>
+      <ul class="bubbles">${waiting.map(waitRow).join("")}</ul>
+    </section>` : ""}`;
+}
+
+/** How many applied jobs have nobody emailed yet, for the tab's count. */
+export const firstEmailCount = () => (store.tracker?.jobs ?? []).filter(needsFirstEmail).length;
 
 export function wireBubbles(root: HTMLElement) {
   root.querySelectorAll<HTMLButtonElement>("[data-bubble-open]").forEach((button) => button.addEventListener("click", () => host.openJob(button.dataset.bubbleOpen!)));

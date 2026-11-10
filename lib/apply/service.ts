@@ -991,6 +991,19 @@ export async function setOutcome(userId: string, raw: unknown) {
   return { application: summary(updated!) };
 }
 
+/** "I emailed 1 / 2 people": the student's own count of people reached out to for a job. 0 clears it. */
+export async function setReachedOut(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; count?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  const count = Number(body.count);
+  if (!Number.isInteger(count) || count < 0 || count > 20) throw new ServiceError("Say how many people you emailed.", "count", 400);
+  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  const rest = { ...report };
+  delete rest.reachedOut;
+  const updated = await applications.update(userId, app.id, { fillReport: count ? { ...rest, reachedOut: { count, at: report.reachedOut?.at ?? nowIso() } } : rest });
+  return { application: summary(updated!) };
+}
+
 export async function deleteApplication(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
   await applications.remove(userId, app.id);

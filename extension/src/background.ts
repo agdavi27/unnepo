@@ -2,6 +2,7 @@ import { stepText, wentBack, type Step } from "./shared/steps";
 import { generatePassword, unmetRules } from "./shared/password";
 import { AUTOFILL_ENABLED, NEVER_READ, type Answer, type Applying, type BeginResult, type Detected, type JobDetails, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type OpenedEmails, type PanelState, type ReminderMarks, type Scan, type Tracker } from "./shared/types";
 import { QUICK_BOARDS } from "./content/quick-apply";
+import { isJobPage, sendsApplication } from "./shared/job-page";
 import { dueCount, reminders } from "./shared/reminders";
 
 /**
@@ -285,7 +286,8 @@ async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
  * company), so applying there without pressing Fill still saves it, with its description. A tab opened from
  * that page (Apply sends you to the company's site) starts with it.
  */
-type Seen = { url: string; title: string; company: string; description?: string; poster?: Scan["poster"]; at: number; pressed?: boolean };
+/** `pressed`: Apply was pressed for it (here, or on the page that opened this tab). `form`: an application form showed in this tab. `sent`: a button that sends the application was pressed. */
+type Seen = { url: string; title: string; company: string; description?: string; poster?: Scan["poster"]; at: number; pressed?: boolean; form?: boolean; sent?: boolean };
 async function seenJobs(): Promise<Record<string, Seen>> {
   return ((await chrome.storage.session.get("seen")).seen as Record<string, Seen> | undefined) ?? {};
 }
@@ -297,20 +299,28 @@ const sameCompany = (a: string, b: string) => {
 };
 async function rememberSeen(tabId: number, scan: Scan) {
   if (!scan.title.trim() || !scan.company.trim()) return;
+  // Only real jobs: an article or a shop with a title and a site name isn't one.
+  if (!isJobPage({ url: scan.jobUrl || scan.url, ats: scan.ats, description: scan.description, fields: scan.fields.length })) return;
   const all = await seenJobs();
   const before = all[tabId];
+  const form = scan.fields.length >= 3;
   // The company's application form knows less than the posting it came from: keep the posting's details.
-  if (before?.description && !scan.description && sameCompany(before.company, scan.company)) return;
-  all[tabId] = { url: scan.jobUrl || scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now(), pressed: before?.pressed && sameCompany(before.company, scan.company) };
+  if (before?.description && !scan.description && sameCompany(before.company, scan.company)) {
+    if (form && !before.form) { all[tabId] = { ...before, form: true }; await chrome.storage.session.set({ seen: all }); }
+    return;
+  }
+  const same = before && sameCompany(before.company, scan.company);
+  all[tabId] = { url: scan.jobUrl || scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now(), pressed: same && before?.pressed, form: form || (same && before?.form), sent: same && before?.sent };
   await chrome.storage.session.set({ seen: all });
 }
 chrome.tabs.onCreated.addListener((tab) => {
   if (tab.id === undefined || tab.openerTabId === undefined) return;
   void seenJobs().then(async (all) => {
     const from = all[tab.openerTabId!];
-    if (from && Date.now() - from.at < 60 * 60 * 1000) {
-      // Opened from a job page (its Apply went to the company's site): applying here is likely.
-      all[tab.id!] = { ...from, at: Date.now(), pressed: true };
+    // Only when Apply was pressed there a moment ago (it went to the company's site). Any other link opened
+    // from a job page isn't applying.
+    if (from?.pressed && Date.now() - from.at < 10 * 60 * 1000) {
+      all[tab.id!] = { ...from, at: Date.now(), pressed: true, form: false, sent: false };
       await chrome.storage.session.set({ seen: all });
     }
   });
@@ -387,7 +397,8 @@ async function tabGone(tabId: number) {
   const [job, seen] = [(await jobs())[tabId], (await seenJobs())[tabId]];
   if (job?.applicationId && !job.submission && (job.report?.filled.length || job.clickedAt)) {
     await addMaybe({ url: job.url, title: job.title, company: job.company, applicationId: job.applicationId });
-  } else if (seen?.pressed && !job?.submission) {
+  } else if (seen?.pressed && (seen.form || seen.sent) && !job?.submission) {
+    // Apply was pressed and an application form showed (or a send button was pressed), but nothing confirmed it.
     await addMaybe({ url: seen.url, title: seen.title, company: seen.company, description: seen.description });
   }
   const all = await seenJobs();
@@ -429,12 +440,8 @@ async function recordSeen(tabId: number, text: string, how: AppliedHow = "page_s
     if (scan?.description) await rememberSeen(tabId, scan);
     seen = (await seenJobs())[tabId];
   }
-  // Nothing says which job it was: on the "Did you apply?" list under the page's name, for the student to name.
-  if (!seen) {
-    const tab = await chrome.tabs.get(tabId).catch(() => null);
-    if (tab?.url && /^https:/.test(tab.url)) await addMaybe({ url: tab.url, title: (tab.title || "A job").slice(0, 200), company: "" });
-    return;
-  }
+  // Nothing says which job it was: a "thanks" page with no job seen before it isn't added (it was mostly noise).
+  if (!seen) return void log(`The page says you applied, but no job was seen in this tab, so nothing was added.`);
   // Only a job board saving the application is sure enough to save it without asking.
   const caught = how !== "you_marked";
   if (caught && !(SURE_HOWS.has(how) && (await savesByItself()))) {
@@ -1727,8 +1734,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           const tracked = (await jobs())[tabId];
           if (tracked?.submission && !sameJobTitle(tracked, scan)) await saveJob(tabId, null);
           const seen = await seenJobs();
+          const sends = Boolean(message.final) && sendsApplication(String(message.label ?? ""));
           if (seen[tabId]) {
             seen[tabId].pressed = true;
+            if (sends) seen[tabId].sent = true;
             // The company's tab may have opened before the job was read: it gets the job now.
             for (const opened of await chrome.tabs.query({}).catch(() => [] as chrome.tabs.Tab[])) {
               if (opened.id !== undefined && opened.openerTabId === tabId && !seen[opened.id]) seen[opened.id] = { ...seen[tabId], at: Date.now(), pressed: true };
@@ -1738,8 +1747,10 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           // On the list now; the panel only asks about it after two minutes, and a confirmation takes it off.
           // (A timer wouldn't do: Chrome puts the extension's background to sleep.) Going to the company's site
           // isn't applying yet: that tab asks when it closes.
+          // Only a press that sends the application ("1-Click Apply", "Submit application") is asked about at once;
+          // a bare "Apply" opens a form or a filter.
           const latest = seen[tabId];
-          if (latest && !message.elsewhere) await addMaybe({ url: latest.url, title: latest.title, company: latest.company, description: latest.description });
+          if (latest && sends && !message.elsewhere) await addMaybe({ url: latest.url, title: latest.title, company: latest.company, description: latest.description });
         }
         if (message.final) applyClicks.set(tabId, Date.now());
         void log(`Saw "${String(message.label ?? "Apply").slice(0, 40)}" pressed${scan?.title ? ` on ${scan.title}${scan.company ? ` at ${scan.company}` : ""}` : ""}. Watching for the confirmation.`);
@@ -1806,7 +1817,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "job-status":
         if (!fromExtension(sender)) return reply({ ok: false });
         try {
-          await api("POST", "status", { applicationId: message.applicationId, applied: message.applied === true, outcome: message.outcome ?? null });
+          await api("POST", "status", typeof message.reachedOut === "number"
+            ? { applicationId: message.applicationId, reachedOut: message.reachedOut }
+            : { applicationId: message.applicationId, applied: message.applied === true, outcome: message.outcome ?? null });
           await readTracker().catch(() => undefined);
           return reply({ ok: true });
         } catch (error) {
@@ -1879,6 +1892,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         }
       }
       // Undo on a job saved by itself (or a ✓): back to not applied, and it asks again.
+      // "Clear list": empties the Detected jobs menu. Saved jobs stay in the tracker.
+      case "detected-clear":
+        if (!fromExtension(sender)) return reply({ ok: false });
+        await saveDetectedList([]);
+        return reply({ ok: true });
       case "detected-undo": {
         if (!fromExtension(sender)) return reply({ ok: false });
         const list = await detectedList();
