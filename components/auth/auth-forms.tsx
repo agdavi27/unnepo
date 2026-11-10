@@ -83,6 +83,7 @@ export function SignupForm() {
         {error ? <p className="text-sm text-red-300">{error}</p> : null}
         <button type="submit" disabled={busy} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Creating account…" : "Create account"}</button>
       </form>
+      <p className="mt-4 text-center text-xs text-faint">By creating an account, you agree to the <Link href="/terms" className="underline underline-offset-4 hover:text-white">Terms of Service</Link> and <Link href="/privacy" className="underline underline-offset-4 hover:text-white">Privacy Policy</Link>.</p>
       <p className="mt-4 text-center text-sm text-muted">Already have an account? <Link href="/login" className="text-white">Log in</Link></p>
     </AuthShell>
   );

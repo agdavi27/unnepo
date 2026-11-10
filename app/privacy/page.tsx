@@ -158,7 +158,7 @@ export default function PrivacyPage() {
       </main>
 
       <footer className="border-t border-line px-5 py-8 text-center text-sm text-faint">
-        <Link href="/" className="hover:text-white">Unnepo</Link> · Built for students · <a href={`mailto:${email}`} className="hover:text-white">{email}</a>
+        <Link href="/" className="hover:text-white">Unnepo</Link> · <Link href="/terms" className="hover:text-white">Terms of Service</Link> · <a href={`mailto:${email}`} className="hover:text-white">{email}</a>
       </footer>
     </div>
   );
