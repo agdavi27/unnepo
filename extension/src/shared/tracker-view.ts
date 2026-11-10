@@ -490,6 +490,50 @@ export function recentJobs(limit = 5) {
     </button></li>`).join("")}</ul>`;
 }
 
+/**
+ * Every job applied to, as a floating bubble: its name, the company, when, and two buttons, See info (its page,
+ * with the people there) and Delete.
+ */
+export function appliedBubbles() {
+  if (!store.tracker) return `<p class="note">${escape(store.error || "Loading your jobs…")}</p>`;
+  const applied = store.tracker.jobs.filter(isAppliedJob);
+  const head = `<div class="row-between"><span class="eyebrow">Applied</span><span class="mono">${applied.length} ${applied.length === 1 ? "JOB" : "JOBS"}</span></div>`;
+  if (!applied.length) return `<section class="page" aria-label="Jobs applied to">${head}<p class="note">Every job you apply to floats here.</p></section>`;
+  const day = (at: string | null) => (at ? new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "");
+  return `<section class="page" aria-label="Jobs applied to">${head}
+    <ul class="bubbles">${applied.map((job, index) => {
+      const busy = store.busy.has(`delete:${job.id}`);
+      const stage = stageLabel(job);
+      return `<li class="bubble" style="--float-delay:${(index % 5) * -1.3}s">
+        <span class="bubble-title">${escape(job.titleMissing ? "Job title missing" : job.title)}</span>
+        <span class="bubble-sub">${escape(job.company)}${job.submittedAt ? ` · ${escape(day(job.submittedAt))}` : ""}</span>
+        ${stage !== "Applied" ? `<span class="status">${escape(stage)}</span>` : ""}
+        <span class="bubble-actions">
+          <button type="button" class="bubble-btn" data-bubble-open="${job.id}">See info</button>
+          <button type="button" class="bubble-btn danger" data-bubble-delete="${job.id}" ${busy ? "disabled" : ""}>${busy ? "Deleting…" : "Delete"}</button>
+        </span>
+        ${store.notes[`delete:${job.id}`] ? `<span class="small" role="status">${escape(store.notes[`delete:${job.id}`])}</span>` : ""}
+      </li>`;
+    }).join("")}</ul>
+  </section>`;
+}
+
+export function wireBubbles(root: HTMLElement) {
+  root.querySelectorAll<HTMLButtonElement>("[data-bubble-open]").forEach((button) => button.addEventListener("click", () => host.openJob(button.dataset.bubbleOpen!)));
+  root.querySelectorAll<HTMLButtonElement>("[data-bubble-delete]").forEach((button) => button.addEventListener("click", async () => {
+    const job = jobById(button.dataset.bubbleDelete!);
+    if (!job || !confirm(`Delete ${job.title} at ${job.company} from your tracker? Its people go too.`)) return;
+    const key = `delete:${job.id}`;
+    store.busy.add(key);
+    delete store.notes[key];
+    host.redraw();
+    const result = await ask<{ ok: boolean; error?: string }>({ type: "delete-job", applicationId: job.id }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    store.busy.delete(key);
+    if (!result.ok) store.notes[key] = result.error ?? "Couldn't delete it.";
+    await loadTracker(true);
+  }));
+}
+
 export function wireJobRows(root: HTMLElement) {
   root.querySelectorAll<HTMLButtonElement>(".job-row[data-open-job]").forEach((button) => button.addEventListener("click", () => host.openJob(button.dataset.openJob!)));
 }

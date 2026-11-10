@@ -3,7 +3,7 @@ import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, NEVER_READ, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
-import { detectedMenu, ensureTracker, jobById, jobPage, loadTracker, recentJobs, refreshDetected, remindersCard, setHost, store, todayList, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
+import { appliedBubbles, detectedMenu, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { dueCount } from "../shared/reminders";
 
 /**
@@ -16,14 +16,19 @@ const app = document.getElementById("app")!;
 const dashboard = document.getElementById("dashboard") as HTMLAnchorElement;
 const passwordSection = document.getElementById("password")!;
 const dock = document.getElementById("dock")!;
+const tabBar = document.getElementById("tabs")!;
 const creditsLeft = document.getElementById("credits-left")!;
 const upgrade = document.getElementById("upgrade") as HTMLAnchorElement;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-type View = "home" | "more" | "feedback" | "settings" | "job";
+/** The four tabs (home, jobs, more = Tools, settings), and the pages opened from them. */
+type View = "home" | "jobs" | "more" | "feedback" | "settings" | "job";
+const TABS: View[] = ["home", "jobs", "more", "settings"];
 let view: View = "home";
 /** The job open on the "job" page, and the person to show on it. */
 let openedJob = { id: "", contact: "" };
+/** The tab a job's page was opened from, where Back goes. */
+let jobFrom: View = "home";
 /** The extension's own dashboard: every job in one table. */
 const DASHBOARD_URL = chrome.runtime.getURL("dashboard/dashboard.html");
 /** The cover letter or answer popup, and which of its questions is showing. */
@@ -229,13 +234,7 @@ const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPen
  * company), adding one by hand, and the dashboard.
  */
 function homeLists(state: PanelState) {
-  return `${startCard(state)}${remindersCard()}
-    <section class="page" aria-label="Your jobs">
-      <div class="row-between"><span class="eyebrow">Your jobs</span>${store.tracker ? `<span class="mono">${store.tracker.jobs.length} IN ALL</span>` : ""}</div>
-      ${recentJobs()}
-      ${manualJobForm()}
-      <a class="btn" href="${escape(DASHBOARD_URL)}" target="_blank" rel="noreferrer">Open my dashboard</a>
-    </section>`;
+  return `${startCard(state)}${remindersCard()}${appliedBubbles()}`;
 }
 
 /**
@@ -531,20 +530,26 @@ function homeView(state: PanelState) {
   if (isRunning(state)) return fillingView();
   ensureTracker();
   const menu = detectedMenu();
-  if (onLinkedIn(state)) return menu + linkedInCard(state) + toolsPage(state);
+  const note = here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : "";
+  if (onLinkedIn(state)) return menu + linkedInCard(state) + homeLists(state);
   const card = openedCard(state);
-  if (state.job?.submission || state.job?.error) return menu + card + toolsPage(state);
-  if (card) return here.step === "check" ? card : menu + card + toolsPage(state);
+  if (state.job?.submission || state.job?.error) return menu + card + homeLists(state);
+  if (card) return here.step === "check" ? card : menu + card + homeLists(state);
   if (AUTOFILL_ENABLED && jobFound(state)) return jobFillPage(state);
-  // A job on the tab: its box on top. None: Home, with what's due today and the newest jobs.
-  if (!AUTOFILL_ENABLED) return menu + (jobFound(state) || state.applying ? jobBox(state) : homeLists(state)) + toolsPage(state, `${jobFound(state) && !state.applying ? hereLinks() : ""}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`);
+  // A job on the tab: its box on top. Then what's due today and every job applied to. The cover letter and
+  // question tools are on the Tools tab.
+  if (!AUTOFILL_ENABLED) {
+    const onJob = jobFound(state) || state.applying;
+    return menu + (onJob ? `${jobBox(state)}${jobFound(state) && !state.applying ? hereLinks() : ""}${note}` : note) + homeLists(state);
+  }
   const how = dismissal(state);
   const onWeb = Boolean(state.tab && /^https:\/\//.test(state.tab.url)) && !onUnnepo(state);
   return `${how ? `<div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>` : ""}
-    ${toolsPage(state, `${onWeb && !how ? hereLinks() : ""}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`)}`;
+    ${menu}${onWeb && !how ? hereLinks() : ""}${note}${homeLists(state)}`;
 }
 
-const back = () => `<button type="button" class="back" data-go="${view === "feedback" ? "settings" : "home"}"><span aria-hidden="true">‹</span> Back</button>`;
+/** Back, on a page opened from a tab: a job's page goes back where it came from, Feedback to Settings. */
+const back = () => `<button type="button" class="back" data-go="${view === "feedback" ? "settings" : jobFrom}"><span aria-hidden="true">‹</span> Back</button>`;
 
 /** A job's own page: its status, its link, and the people at the company with their emails. */
 function jobView() {
@@ -559,6 +564,7 @@ function pageView(state: PanelState) {
   const heading = (text: string) => `<div class="row-between"><span class="heading">${text}</span></div>`;
   const pages: Record<Exclude<View, "home">, () => string> = {
     job: jobView,
+    jobs: () => jobsView(),
     more: () => toolsPage(state, jobFound(state) ? hereLinks() : ""),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     settings: () => `${profileCard(state)}
@@ -567,13 +573,12 @@ function pageView(state: PanelState) {
       <div class="rule"></div>
       ${trackingSettings()}
       <div class="rule"></div>
-      ${part("jobs", "My jobs", () => jobsView())}
       ${part("activity", "Activity", () => activityCard())}
       <button type="button" class="feedback-link" data-go="feedback">Feedback</button>
       <div class="rule"></div>
       <div class="row-between"><button type="button" class="quiet" id="disconnect">Sign out</button><span class="mono">V${escape(extensionVersion())}</span></div>`,
   };
-  return back() + pages[view as Exclude<View, "home">]();
+  return (TABS.includes(view) ? "" : back()) + pages[view as Exclude<View, "home">]();
 }
 /** Saved between redraws: which parts of Me are open. */
 const openParts = new Set<string>();
@@ -1733,6 +1738,14 @@ function draw(state: PanelState): boolean {
   if (!state.connected) view = "home";
   if (state.job?.running && fillPending === state.tab?.id) fillPending = null;
   dock.hidden = !state.connected;
+  tabBar.hidden = !state.connected;
+  const tabNow = view === "job" ? jobFrom : view === "feedback" ? "settings" : view;
+  tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => {
+    const on = tab.dataset.tab === tabNow;
+    tab.classList.toggle("on", on);
+    if (on) tab.setAttribute("aria-current", "page");
+    else tab.removeAttribute("aria-current");
+  });
   // Don't wipe a code being typed when something else changes.
   if (!state.connected && document.getElementById("code") === document.activeElement) return false;
   // Don't wipe what's being typed in the cover letter questions or edits box when the page changes.
@@ -1775,6 +1788,7 @@ function draw(state: PanelState): boolean {
   if (state.connected) {
     wireDetected(app);
     wireReminders(app);
+    wireBubbles(app);
     const job = view === "job" ? jobById(openedJob.id) : null;
     if (job) wireJobPage(app, job);
     wireTracking();
@@ -1821,15 +1835,16 @@ function draw(state: PanelState): boolean {
 
 /** Opens a job's own page; no id goes back Home (after deleting one). */
 function openJob(id: string, contact = "") {
-  if (!id) return go("home");
+  if (!id) return go(jobFrom);
   openedJob = { id, contact };
+  if (TABS.includes(view)) jobFrom = view;
   go("job");
 }
 
 /** "✓ I applied" on a detected job Unnepo couldn't name: the add-a-job form, filled in with what it saw. */
 function addDetected(item: Detected) {
   Object.assign(manualJob, { open: true, key: item.url, title: item.title, company: item.company, url: item.url, stage: "applied", note: "Unnepo didn't catch the company. Fill it in, then add it.", saving: false, readFor: "", description: item.description ?? "" });
-  go("home");
+  go("jobs");
 }
 
 setHost({ redraw: () => void render(), openJob, upgradeUrl: () => (lastState ? upgradeUrl(lastState) : ""), addJob: addDetected });
@@ -1837,11 +1852,11 @@ setHost({ redraw: () => void render(), openJob, upgradeUrl: () => (lastState ? u
 /** Opens a page, from any button that says which. */
 function go(next: View) {
   view = next;
-  if (view === "settings") jobsList = null;
+  if (view === "jobs") void loadJobs();
   window.scrollTo(0, 0);
   void render();
 }
-document.getElementById("open-settings")!.addEventListener("click", () => go(view === "settings" ? "home" : "settings"));
+tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => tab.addEventListener("click", () => go(tab.dataset.tab as View)));
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "tracker-changed") return void loadTracker();

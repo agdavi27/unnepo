@@ -15,15 +15,21 @@
     <button type="button" class="spider" id="spider" aria-label="Poke the spider"><span class="thread"></span></button>
   </header>
 
+  <nav id="tabs" class="tabs" aria-label="Sections" hidden>
+    <button type="button" class="tab" data-tab="home">Home</button>
+    <button type="button" class="tab" data-tab="jobs">Jobs</button>
+    <button type="button" class="tab" data-tab="more">Tools</button>
+    <button type="button" class="tab" data-tab="settings">Settings</button>
+  </nav>
+
   <main id="app" class="body"></main>
   <input type="file" id="resume-input" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
 
   <section id="password" class="password" aria-label="Job-site password" hidden></section>
 
-  <nav id="dock" class="dock" aria-label="Dashboard, settings and plan" hidden>
+  <nav id="dock" class="dock" aria-label="Dashboard and plan" hidden>
     <div class="dock-side">
       <a id="dashboard" target="_blank" rel="noreferrer">See my job dashboard <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
-      <button type="button" id="open-settings">Settings</button>
     </div>
     <div class="dock-side right">
       <span id="credits-left"></span>
