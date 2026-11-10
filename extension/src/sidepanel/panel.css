@@ -164,14 +164,6 @@ details.part .view { padding: 12px 0 0; }
 .back { align-self: flex-start; min-height: 36px; padding: 0; border: 0; background: transparent; color: var(--muted-3); font: 500 13px Geist, sans-serif; cursor: pointer; }
 .back:hover { color: var(--fg); }
 
-/* Along the bottom of every page */
-.dock { flex: none; margin-top: auto; padding: 6px 20px; border-top: 1px solid var(--line-2); display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.dock-side { display: flex; flex-direction: column; align-items: flex-start; }
-.dock-side.right { align-items: flex-end; text-align: right; }
-#credits-left { min-height: 34px; display: flex; align-items: center; font-size: 13px; color: var(--muted-3); }
-.dock #upgrade { color: #6FA8FF; }
-.dock a, .dock button { min-height: 34px; padding: 0; border: 0; background: transparent; color: var(--fg); font: 500 13px Geist, sans-serif; text-decoration: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-.dock a:hover, .dock button:hover { color: var(--accent); }
 
 @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(5px); } }
 @keyframes shake { 0%, 100% { transform: translateX(0); } 20%, 60% { transform: translateX(-6px) rotate(-3deg); } 40%, 80% { transform: translateX(6px) rotate(3deg); } }
@@ -317,11 +309,6 @@ button.email-link:disabled { color: var(--muted); cursor: default; text-decorati
 .person .links .quiet-link { min-height: 32px; }
 button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: pointer; }
 
-/* The tabs under the header: Home, Jobs, Tools, Settings. */
-.tabs { position: sticky; top: 0; z-index: 5; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin: 0 20px; padding: 4px; border: 1px solid var(--line-2); border-radius: 12px; background: var(--surface); }
-.tab { min-height: 34px; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 500 13px Geist, sans-serif; cursor: pointer; }
-.tab:hover { color: var(--fg); }
-.tab.on { background: var(--control); color: var(--fg); }
 
 /* Home: every job applied to, as a bubble floating gently. */
 .bubbles { list-style: none; margin: 0; padding: 4px 0; display: flex; flex-wrap: wrap; gap: 12px; }
@@ -339,10 +326,6 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 @keyframes bubble-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
 @media (prefers-reduced-motion: reduce) { .bubble { animation: none; } }
 
-/* The tab's count (Follow up: jobs with no email yet). */
-.tab-count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 2px; padding: 0 4px; border-radius: 999px; background: rgba(245, 165, 36, .18); color: var(--warn); font: 600 10px var(--mono); vertical-align: 1px; }
-.tabs { grid-template-columns: repeat(5, auto); justify-content: space-between; }
-.tab { padding: 0 8px; font-size: 12.5px; white-space: nowrap; }
 
 /* "People you emailed: None yet · 1 · 2 · 3+". */
 .seg { display: flex; gap: 4px; padding: 3px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--bg); }
@@ -362,3 +345,64 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .reach-row { flex-basis: 100%; display: flex; align-items: center; gap: 6px; }
 .reach-row .small { margin-right: auto; }
 .reach-row .bubble-btn { flex: 0 0 36px; padding: 0; }
+
+/* The menu, along the bottom: Week, Jobs, Tools, Me. It stays put while the page scrolls. */
+.tabs { position: sticky; bottom: 0; z-index: 4; flex: none; display: grid; grid-template-columns: repeat(4, 1fr); padding: 6px 8px 8px; border-top: 1px solid var(--line-2); background: #0A0A0C; }
+.tab { position: relative; min-height: 50px; padding: 4px 0; border: 0; background: transparent; color: var(--muted); font: 500 11px Geist, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: pointer; }
+.tab:hover { color: var(--fg); }
+.tab.on { color: var(--fg); }
+.tab.on::before { content: ""; position: absolute; top: -7px; left: 32%; right: 32%; height: 2px; border-radius: 2px; background: var(--accent); }
+.tab-count { position: absolute; top: 2px; left: calc(50% + 7px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: #fff; font: 600 10px/16px var(--mono); text-align: center; }
+
+/* Week: seven squares that fill in with each application, the streak, then the day picked. */
+.week-card, .day-card, .jobs-card { gap: 12px; }
+.streak { display: inline-flex; align-items: center; gap: 4px; font: 600 13px Geist, sans-serif; color: var(--muted-2); }
+.streak.lit { color: #FF7A45; }
+.week-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.day { min-width: 0; padding: 0; border: 0; background: transparent; display: flex; flex-direction: column; align-items: center; gap: 5px; font: 10px var(--mono); color: var(--muted); cursor: pointer; }
+.day i { width: 100%; height: 34px; border-radius: 8px; background: #15151A; display: grid; place-items: center; font: 600 12px Geist, sans-serif; font-style: normal; color: var(--muted-2); }
+.day i.l1 { background: rgba(61, 139, 255, .25); color: #CFE0FF; }
+.day i.l2 { background: rgba(61, 139, 255, .5); color: #fff; }
+.day i.l3 { background: var(--accent); color: #fff; }
+.day.today span { color: var(--fg); font-weight: 600; }
+.day.on i { box-shadow: 0 0 0 1.5px var(--fg); }
+.day.future { cursor: default; }
+.day.future i { background: transparent; border: 1px dashed var(--control); }
+.day:hover:not(:disabled) i { filter: brightness(1.2); }
+
+/* A job's row: its name on the left, its progress as five bars on the right. */
+.jobs-list .job-row { padding: 10px 2px; }
+.dots-wrap { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+.dots { display: flex; gap: 3px; }
+.dots i { width: 13px; height: 4px; border-radius: 2px; background: var(--control); }
+.dots i.d { background: var(--ok); }
+.dots i.n { background: var(--accent); }
+.dots i.w { background: var(--warn); }
+.dots-label { font: 10px var(--mono); letter-spacing: .4px; text-transform: uppercase; color: var(--muted-2); }
+.dots-label.due { color: var(--warn); }
+.dots-label.ok { color: var(--ok); }
+
+/* Jobs: search and a chip per step. */
+.search { height: 40px; font: 13px Geist, sans-serif; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { height: 30px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--control); background: transparent; color: var(--muted-3); font: 500 12px Geist, sans-serif; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.chip b { font: 600 10.5px var(--mono); opacity: .7; }
+.chip:hover { color: var(--fg); }
+.chip.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+/* A job's page: Applied → Reach out → Waiting → Follow up → Interview. */
+.progress { display: flex; flex-direction: column; gap: 10px; }
+.steps-line { list-style: none; margin: 0; padding: 0; display: flex; }
+.step { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted); text-align: center; }
+.step i { position: relative; z-index: 1; width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--control); background: var(--surface); display: grid; place-items: center; font: 600 11px Geist, sans-serif; font-style: normal; }
+.step::after { content: ""; position: absolute; top: 10px; left: 50%; width: 100%; height: 1.5px; background: var(--control); }
+.step:last-child::after { display: none; }
+.step.done, .step.now, .step.due { color: var(--fg); }
+.step.done i { background: var(--ok); border-color: var(--ok); color: #052E14; }
+.step.done::after { background: var(--ok); }
+.step.now i { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(61, 139, 255, .18); }
+.step.due i { border-color: var(--warn); box-shadow: 0 0 0 4px rgba(245, 165, 36, .18); }
+.progress.rejected .steps-line { opacity: .45; }
+.progress-next { margin: 0; font-size: 13px; color: var(--muted-3); }
+.progress-next.due { color: var(--warn); }
+.progress-next .status { margin-right: 4px; }

@@ -30,6 +30,8 @@ export const store = {
 
 let host: Host = { redraw: () => undefined, openJob: () => undefined, upgradeUrl: () => "" };
 export function setHost(next: Host) { host = next; }
+/** Draws the page around this again. */
+export const redraw = () => host.redraw();
 
 export async function loadTracker(fresh = false) {
   if (store.loading) return;
@@ -83,6 +85,61 @@ export const needsFirstEmail = (job: TrackerJob) => {
   return stage !== "rejected" && stage !== "offer";
 };
 
+// ---- A job's progress: Applied → Reach out → Waiting → Follow up → Interview ----
+
+export const STEPS = ["Applied", "Reach out", "Waiting", "Follow up", "Interview"] as const;
+export type Progress = {
+  /** How many steps are behind it. */
+  done: number;
+  /** The step it's on: blue, or orange when it's waiting on the student (a follow-up due). */
+  due: boolean;
+  /** Where it ended, when it did. */
+  ended: "Rejected" | "Offer" | null;
+  /** What to do next, in a few words. */
+  next: string;
+};
+
+/** Where a job is, worked out from its status, who was emailed, and whether a follow-up is due. */
+export function progressOf(job: TrackerJob, now = new Date()): Progress {
+  const stage = stageOf(job as never);
+  const company = job.companyMissing ? "the company" : job.company;
+  if (!isAppliedJob(job)) return { done: 0, due: false, ended: null, next: "Apply, then it moves along here." };
+  if (stage === "offer") return { done: 5, due: false, ended: "Offer", next: "You got an offer." };
+  if (stage === "interviewing" || stage === "assessment") return { done: 5, due: false, ended: null, next: stage === "assessment" ? "You have an assessment." : "You're interviewing." };
+  const emailed = emailedCount(job);
+  const replied = job.contacts.some((person) => person.outreachStatus === "replied");
+  const followedUp = job.contacts.some((person) => (store.followUps[person.id] ?? 0) > 0);
+  const progress: Progress = !emailed
+    ? { done: 1, due: false, ended: null, next: `Email someone at ${company}.` }
+    : followUpsDue([job] as never, now).length
+      ? { done: 3, due: true, ended: null, next: "A follow-up is due." }
+      : replied || followedUp
+        ? { done: 4, due: false, ended: null, next: replied ? "Someone replied. Waiting on an interview." : "Followed up. Waiting on an interview." }
+        : { done: 2, due: false, ended: null, next: `Emailed ${emailed} ${emailed === 1 ? "person" : "people"}. Waiting on a reply.` };
+  return stage === "rejected" ? { ...progress, due: false, ended: "Rejected", next: "This one said no." } : progress;
+}
+
+/** The progress line on a job's page: five dots joined by a line, done ones green, the current one ringed. */
+export function progressLine(job: TrackerJob) {
+  const progress = progressOf(job);
+  const steps = STEPS.map((label, index) => {
+    const state = index < progress.done ? "done" : index === progress.done && !progress.ended ? (progress.due ? "due" : "now") : "";
+    return `<li class="step ${state}"${state === "now" || state === "due" ? ' aria-current="step"' : ""}><i aria-hidden="true">${state === "done" ? "✓" : ""}</i>${label}</li>`;
+  }).join("");
+  return `<div class="progress${progress.ended ? ` ended ${progress.ended.toLowerCase()}` : ""}">
+    <ol class="steps-line" aria-label="Progress">${steps}</ol>
+    <p class="progress-next${progress.due ? " due" : ""}">${progress.ended ? `<span class="status${progress.ended === "Offer" ? " done" : ""}">${progress.ended}</span> ` : ""}${escape(progress.next)}</p>
+  </div>`;
+}
+
+/** The same line, small: five bars for a job's row in a list. */
+export function progressDots(job: TrackerJob) {
+  const progress = progressOf(job);
+  const bars = STEPS.map((_, index) => `<i class="${index < progress.done ? "d" : index === progress.done && !progress.ended ? (progress.due ? "w" : "n") : ""}"></i>`).join("");
+  const label = progress.ended ?? ["Not applied", "Reach out", "Waiting", "Follow up", "Waiting", "Interview"][progress.done];
+  return `<span class="dots-wrap"><span class="dots" aria-hidden="true">${bars}</span><span class="dots-label${progress.due ? " due" : progress.ended === "Offer" || progress.done >= 5 ? " ok" : ""}">${escape(label)}</span></span>`;
+}
+
 const ROLE_LABEL: Record<string, string> = { alumni: "Alum", recruiter: "Recruiter", department: "Team", poster: "Posted the job" };
 const EMAIL_SOURCE: Record<string, string> = {
   apollo: "Verified", hunter: "Verified", pattern: "Verified", job_posting: "From the job posting", website: "From the company's website",
@@ -134,6 +191,7 @@ export function jobPage(job: TrackerJob, focus?: string) {
         <div class="job-detail">${escape(job.companyMissing ? "Company missing" : job.company)}${job.location ? ` · ${escape(job.location)}` : ""}</div>
         <div class="sub">${applied ? `Applied ${when(job.submittedAt ?? job.createdAt)}${job.confirmation?.confidence === "confirmed" ? " · the site confirmed it" : ""}` : `Saved ${when(job.createdAt)}`}</div>
       </div>
+      ${progressLine(job)}
       ${applied
         ? `<label class="question"><span class="q-label">Status</span><select class="field" data-outcome="${job.id}">${pick("submitted", "Applied")}${pick("follow_up", "Follow up")}${stage === "assessment" ? pick("assessment", "Assessment") : ""}${pick("interviewing", "Interviewing")}${pick("offer", "Offer")}${pick("rejected", "Rejected")}</select></label>`
         : `<button type="button" class="solid" data-mark-applied="${job.id}">I applied to this</button>`}
@@ -406,12 +464,12 @@ export function todayList() {
   return reminders(store.tracker, store.marks, store.opened, store.followUps);
 }
 
-export function remindersCard(limit = 6) {
+export function remindersCard(limit = 6, title = "Today", showGoal = true) {
   if (!store.tracker) {
     return `<section class="page" aria-label="Today"><span class="eyebrow">Today</span><p class="note">${store.error ? escape(store.error) : "Loading your reminders…"}</p></section>`;
   }
   const { goal, items } = todayList();
-  const goalLine = goal?.daily ? `<div class="goal"><span>Applied today</span><span>${goal.today} of ${goal.daily}</span></div><div class="bar" role="progressbar" aria-label="Goal for today" aria-valuemin="0" aria-valuemax="${goal.daily}" aria-valuenow="${Math.min(goal.today, goal.daily)}"><div style="width:${Math.min(100, Math.round((goal.today / goal.daily) * 100))}%"></div></div>` : "";
+  const goalLine = showGoal && goal?.daily ? `<div class="goal"><span>Applied today</span><span>${goal.today} of ${goal.daily}</span></div><div class="bar" role="progressbar" aria-label="Goal for today" aria-valuemin="0" aria-valuemax="${goal.daily}" aria-valuenow="${Math.min(goal.today, goal.daily)}"><div style="width:${Math.min(100, Math.round((goal.today / goal.daily) * 100))}%"></div></div>` : "";
   const row = (item: Reminder) => `
     <li class="reminder">
       <div class="reminder-text"><span class="reminder-title">${escape(item.title)}</span>${item.detail ? `<span class="sub">${escape(item.detail)}</span>` : ""}</div>
@@ -421,8 +479,8 @@ export function remindersCard(limit = 6) {
       </div>
     </li>`;
   return `
-    <section class="page" aria-label="Today">
-      <div class="row-between"><span class="eyebrow">Today</span>${items.length ? `<span class="mono">${items.length} TO DO</span>` : ""}</div>
+    <section class="page" aria-label="${title}">
+      <div class="row-between"><span class="eyebrow">${title}</span>${items.length ? `<span class="mono">${items.length} TO DO</span>` : ""}</div>
       ${goalLine}
       ${items.length ? `<ul class="reminders">${items.slice(0, limit).map(row).join("")}</ul>${items.length > limit ? `<p class="small">And ${items.length - limit} more on the dashboard.</p>` : ""}` : `<p class="note">Nothing due. Email someone at a company you applied to, and Unnepo reminds you to follow up.</p>`}
     </section>`;

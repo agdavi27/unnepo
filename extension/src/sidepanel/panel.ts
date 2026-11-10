@@ -3,28 +3,27 @@ import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, NEVER_READ, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
-import { detectedMenu, firstEmailCount, followUpView, jobBubbles, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, store, todayList, wireBubbles, wireDetected, wireReach, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
+import { detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
+import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { dueCount } from "../shared/reminders";
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
  * while it fills, just the spider typing on his laptop; when it's applied, went wrong, or there's no job, two big
- * buttons that open a popup asking one question at a time, with the resume and password small under them. The dashboard, Settings and credits left are along the bottom of every page.
+ * buttons that open a popup asking one question at a time, with the resume and password small under them. The menu
+ * runs along the bottom: Week, Jobs, Tools and Me.
  */
 
 const app = document.getElementById("app")!;
-const dashboard = document.getElementById("dashboard") as HTMLAnchorElement;
 const passwordSection = document.getElementById("password")!;
-const dock = document.getElementById("dock")!;
 const tabBar = document.getElementById("tabs")!;
-const followBadge = document.getElementById("follow-count")!;
-const creditsLeft = document.getElementById("credits-left")!;
-const upgrade = document.getElementById("upgrade") as HTMLAnchorElement;
+const weekBadge = document.getElementById("week-count")!;
+const jobsBadge = document.getElementById("jobs-count")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-/** The five tabs (home, jobs, follow = Follow up, more = Tools, settings), and the pages opened from them. */
-type View = "home" | "jobs" | "follow" | "more" | "feedback" | "settings" | "job";
-const TABS: View[] = ["home", "jobs", "follow", "more", "settings"];
+/** The four tabs along the bottom (home = Week, jobs, more = Tools, settings = Me), and the pages opened from them. */
+type View = "home" | "jobs" | "more" | "feedback" | "settings" | "job";
+const TABS: View[] = ["home", "jobs", "more", "settings"];
 let view: View = "home";
 /** The job open on the "job" page, and the person to show on it. */
 let openedJob = { id: "", contact: "" };
@@ -236,8 +235,8 @@ const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPen
  */
 function homeLists(state: PanelState) {
   const noEmail = firstEmailCount();
-  const nudge = noEmail ? `<button type="button" class="note warn nudge" data-go="follow">${noEmail} ${noEmail === 1 ? "job you applied to has" : "jobs you applied to have"} no email sent yet. See Follow up →</button>` : "";
-  return `${startCard(state)}${nudge}${remindersCard()}`;
+  const nudge = noEmail ? `<button type="button" class="note warn nudge" data-show-jobs="reach">${noEmail} ${noEmail === 1 ? "job you applied to has" : "jobs you applied to have"} no email sent yet. See them →</button>` : "";
+  return `${startCard(state)}${weekView()}${nudge}${remindersCard(6, "To do", false)}`;
 }
 
 /**
@@ -568,7 +567,6 @@ function pageView(state: PanelState) {
   const pages: Record<Exclude<View, "home">, () => string> = {
     job: jobView,
     jobs: () => jobsView(),
-    follow: () => { ensureTracker(); return followUpView(); },
     more: () => toolsPage(state, jobFound(state) ? hereLinks() : ""),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     settings: () => `${profileCard(state)}
@@ -1493,7 +1491,7 @@ function wireManualJob(state: PanelState) {
 /** The Jobs tab: every job as a floating bubble (See info, Delete), adding one by hand, and the dashboard. */
 function jobsView() {
   ensureTracker();
-  return `${manualJobForm()}${jobBubbles()}
+  return `${manualJobForm()}${jobsList()}
     <a class="btn" href="${escape(DASHBOARD_URL)}" target="_blank" rel="noreferrer">Open my dashboard</a>`;
 }
 
@@ -1681,19 +1679,6 @@ async function render() {
   await refresh();
 }
 
-/** Bottom right: what's left, and the way to more. */
-function drawPlan(state: PanelState) {
-  const me = state.me;
-  const left = me?.usage?.credits ?? (me ? me.credits * 5 : 0);
-  creditsLeft.textContent = me?.unlimitedCredits ? "Unlimited credits" : `${left} ${left === 1 ? "credit" : "credits"} left`;
-  upgrade.href = upgradeUrl(state);
-  // Nothing to upgrade to from the top plan or an unlimited account.
-  // Pro (and the old Premium) has nothing above it: the way to more is 50 more companies for $15.
-  const paid = me?.plan === "pro" || me?.plan === "premium";
-  upgrade.textContent = paid ? "Get 50 more companies" : "Upgrade plan";
-  upgrade.hidden = Boolean(me?.unlimitedCredits);
-}
-
 /** Draws the panel. False when it left the page as it was, because the student is typing in it. */
 function draw(state: PanelState): boolean {
   usesNow = state.me?.usage ?? null;
@@ -1705,19 +1690,17 @@ function draw(state: PanelState): boolean {
     if (letterFor && letterSource === "job" && letterStep !== "writing" && letterStep !== "revising") { letter = null; letterStep = "closed"; letterNote = ""; letterChoices.picked = []; letterChoices.mention = ""; letterChoices.edit = ""; }
     letterFor = letterJob;
   }
-  dashboard.href = DASHBOARD_URL;
-  drawPlan(state);
   dressSpider(state.me?.spider);
   const said = lines(state);
   speech(said.lines, said.alert);
   if (!state.connected) view = "home";
   if (state.job?.running && fillPending === state.tab?.id) fillPending = null;
-  dock.hidden = !state.connected;
   tabBar.hidden = !state.connected;
   const tabNow = view === "job" ? jobFrom : view === "feedback" ? "settings" : view;
-  const followCount = state.connected ? firstEmailCount() : 0;
-  followBadge.textContent = followCount ? String(followCount) : "";
-  followBadge.hidden = !followCount;
+  // Week: what's due today. Jobs: jobs applied to with nobody emailed yet.
+  const badge = (element: HTMLElement, count: number) => { element.textContent = count ? String(count) : ""; element.hidden = !count; };
+  badge(weekBadge, state.connected && store.tracker ? dueCount(todayList().items) : 0);
+  badge(jobsBadge, state.connected ? firstEmailCount() : 0);
   tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => {
     const on = tab.dataset.tab === tabNow;
     tab.classList.toggle("on", on);
@@ -1731,6 +1714,8 @@ function draw(state: PanelState): boolean {
   if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea, input")) return false;
   // Nor a new password being typed.
   if (document.activeElement?.matches("#password input")) return false;
+  // Nor a search in Jobs.
+  if (document.activeElement?.matches("#job-search")) return false;
   // Nor the job being checked before "I applied" saves it.
   if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return false;
   // The password is drawn on its own, so a redraw can't lose what's typed: it's moved out, then back into its slot.
@@ -1767,7 +1752,9 @@ function draw(state: PanelState): boolean {
     wireDetected(app);
     wireReminders(app);
     wireBubbles(app);
-    if (view === "follow") wireReach(app);
+    wireWeek(app);
+    wireJobsList(app);
+    app.querySelectorAll<HTMLButtonElement>("[data-show-jobs]").forEach((button) => button.addEventListener("click", () => { showJobs("reach"); go("jobs"); }));
     const job = view === "job" ? jobById(openedJob.id) : null;
     if (job) wireJobPage(app, job);
     wireTracking();
