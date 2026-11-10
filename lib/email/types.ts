@@ -25,7 +25,7 @@ export type EmailEvent = {
   userId: string;
   messageKey: string;
   receivedAt: string;
-  source: "forward" | "paste";
+  source: "forward" | "paste" | "gmail";
   fromDomain: string;
   kind: EmailKind | "verification";
   company: string;
@@ -52,3 +52,17 @@ export type EmailEvent = {
 
 /** The text of an email about a job, encrypted in `data`. Saved under its event's id. */
 export type EmailText = { eventId: string; userId: string; data: string; createdAt: string };
+
+/**
+ * A student's Gmail, connected so Unnepo reads their job emails on its own. The refresh token is encrypted.
+ * `status` is "expired" once Google stops accepting the token (it must be connected again).
+ */
+export type GmailConnection = {
+  userId: string;
+  email: string;
+  refreshToken: string;
+  status: "active" | "expired";
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+};

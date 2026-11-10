@@ -153,7 +153,7 @@ async function learnSenderFormat(email: InboundEmail) {
   await repo.setEmailFormat(domain, { pattern, acceptAll: false, source: "forwarded email" });
 }
 
-export async function processEmail(userId: string, email: InboundEmail, source: "forward" | "paste"): Promise<Processed> {
+export async function processEmail(userId: string, email: InboundEmail, source: "forward" | "paste" | "gmail"): Promise<Processed> {
   const key = keyOf(email);
   if (await emailEvents.seen(userId, key)) return { outcome: "duplicate" };
   const at = receivedAt(email);
@@ -168,7 +168,7 @@ export async function processEmail(userId: string, email: InboundEmail, source: 
   // Not about a job: dropped now, and nothing from it is kept. A forwarded one adds to a count, so the page can
   // show it arrived. A pasted one doesn't need to: the student is told on the spot.
   if (!passesPrefilter(email)) {
-    if (source === "forward") await countSkipped(userId, at);
+    if (source !== "paste") await countSkipped(userId, at);
     return { outcome: "dropped" };
   }
 
@@ -192,7 +192,7 @@ export async function processEmail(userId: string, email: InboundEmail, source: 
   if (!event) return { outcome: "duplicate" };
   await keepText(event.id);
   // Free: a forwarded email is read now and put on the job a day later. A pasted one is the student's own doing.
-  if (source === "forward" && (await isFree(userId))) {
+  if (source !== "paste" && (await isFree(userId))) {
     const held = await emailEvents.update(userId, event.id, { outcome: "held" });
     return { outcome: "held", event: held ?? event, applicationId: null };
   }

@@ -68,7 +68,7 @@ export async function finishOAuth(provider: Provider, code: string, state: strin
   return loginWithOAuth({ email: profile.email, name: profile.name, provider, emailVerified: profile.verified });
 }
 
-function envValue(name: string) {
+export function envValue(name: string) {
   if (process.env[name]) return process.env[name] || "";
   if (process.env.NODE_ENV === "production") return "";
   try {

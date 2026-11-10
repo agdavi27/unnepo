@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { setSession } from "@/lib/apply/activity";
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
@@ -21,6 +22,7 @@ import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { handlePostmark, webhookAuthorized } from "@/lib/email/inbound";
 import { emailState, emailsForJob, pasteEmail, regenerateAddress, reviewInboxAction } from "@/lib/email/service";
 import { removeEmailData } from "@/lib/email/store";
+import { beginGmailConnect, disconnectGmail, finishGmailConnect, syncAllGmail, syncGmail } from "@/lib/email/gmail";
 import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
 import { contactBounced, revealContact, applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
@@ -144,6 +146,35 @@ async function handle(request: Request, slug: string[]) {
     return json({ ok: true });
   }
 
+  // Vercel's schedule checking every connected Gmail. Only with the CRON_SECRET it sends; not set up, nothing runs.
+  if (root === "cron" && action === "gmail" && request.method === "GET") {
+    const secret = process.env.CRON_SECRET?.trim();
+    if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) return json({ error: "Not allowed." }, 401);
+    return json(await syncAllGmail());
+  }
+
+  // Connect Gmail (read-only), so job emails are read without forwarding. Only for a signed-in student.
+  if (root === "oauth" && action === "gmail" && request.method === "GET") {
+    const back = (params: Record<string, string>) => {
+      const url = new URL("/home", publicOrigin(request));
+      url.searchParams.set("tab", "setup");
+      for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
+      return Response.redirect(url, 303);
+    };
+    const session = await readSession();
+    if (!session) return Response.redirect(new URL("/login", publicOrigin(request)), 303);
+    try {
+      if (slug[2] !== "callback") return Response.redirect(await beginGmailConnect(session.user.id, publicOrigin(request)), 303);
+      const url = new URL(request.url);
+      if (url.searchParams.get("error")) return back({ gmail_error: "Gmail wasn't connected. You can try again any time." });
+      await finishGmailConnect(session.user.id, url.searchParams.get("code") || "", url.searchParams.get("state") || "", publicOrigin(request));
+      after(() => syncGmail(session.user.id).then(() => undefined));
+      return back({ gmail: "connected" });
+    } catch (error) {
+      return back({ gmail_error: error instanceof ServiceError ? error.message : "Gmail wasn't connected. Try again." });
+    }
+  }
+
   // Sign in with Google or Microsoft.
   if (root === "oauth" && request.method === "GET" && (action === "google" || action === "microsoft") && slug[2] !== "callback") {
     const session = await readSession();
@@ -248,6 +279,11 @@ async function handle(request: Request, slug: string[]) {
       return json(await pasteEmail(user.id, await request.json()));
     }
     if (action === "review" && request.method === "POST") return json(await reviewInboxAction(user.id, await request.json()));
+    if (action === "gmail-sync" && request.method === "POST") {
+      if (!rateLimit(`gmail-sync:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("Checked a lot already. Try again in a bit.", "rate_limited", 429);
+      return json(await syncGmail(user.id));
+    }
+    if (action === "gmail" && request.method === "DELETE") return json(await disconnectGmail(user.id));
   }
 
   if (root === "app" && action === "state" && request.method === "GET") {
@@ -376,6 +412,7 @@ async function handle(request: Request, slug: string[]) {
     return json(await repo.exportUser(user.id));
   }
   if (root === "account" && request.method === "DELETE") {
+    await disconnectGmail(user.id).catch(() => undefined);
     await removeEmailData(user.id);
     await repo.deleteUser(user.id);
     await clearSessionCookie();

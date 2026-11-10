@@ -6,6 +6,8 @@ import { SKIPPED_KEY, processEmail, releaseHeldEmails, reviewEmail } from "@/lib
 import { applications as jobs } from "@/lib/apply/store";
 import { emailEvents, emailInboxes, emailTexts } from "@/lib/email/store";
 import { unwrapForward } from "@/lib/email/inbound";
+import { after } from "next/server";
+import { gmailConnections, gmailStale, gmailState, syncGmail } from "@/lib/email/gmail";
 
 /** What the Email tracking page shows, and what it can do: regenerate the address, paste an email, review. */
 
@@ -15,11 +17,14 @@ const SKIPPED_SHOWN = 5;
 export async function emailState(userId: string) {
   // Free's held emails that are due go on their jobs first, so the page shows them.
   const held = await releaseHeldEmails(userId).catch(() => ({ waiting: 0, nextAt: null }));
+  // Connected Gmail is checked in the background when it's been a few minutes; the page picks up what it finds.
+  const connection = await gmailConnections.get(userId).catch(() => null);
+  if (gmailStale(connection)) after(() => syncGmail(userId).then(() => undefined));
   const [inbox, events, apps, count] = await Promise.all([emailInboxes.forUser(userId), emailEvents.list(userId, 200), applications.names(userId), emailEvents.byKey(userId, SKIPPED_KEY)]);
   const name = new Map(apps.map((app) => [app.id, { id: app.id, title: app.title, company: app.company }]));
   // The newest forwarding confirmation from the last few days: its code and link, to finish setting up.
   const verification = events.find((event) => event.outcome === "verification" && Date.now() - Date.parse(event.createdAt) < VERIFICATION_DAYS * 86_400_000);
-  const lastEmail = events.find((event) => event.source === "forward" && event.outcome !== "verification" && event.messageKey !== SKIPPED_KEY);
+  const lastEmail = events.find((event) => event.source !== "paste" && event.outcome !== "verification" && event.messageKey !== SKIPPED_KEY);
   const show = (event: (typeof events)[number]) => ({
     id: event.id, at: event.receivedAt, kind: event.kind, company: event.company, jobTitle: event.jobTitle, confidence: event.confidence, summary: event.summary,
     outcome: event.outcome, reason: event.reason ?? null, source: event.source, application: event.applicationId ? name.get(event.applicationId) ?? null : null,
@@ -29,11 +34,12 @@ export async function emailState(userId: string) {
     address: addressFor(inbox.token),
     ready: inboundReady(),
     // Any forwarded email at all, the forwarding code or a skipped one included: forwarding works.
-    forwarded: events.some((event) => event.source === "forward") || Boolean(count),
+    forwarded: events.some((event) => event.source !== "paste") || Boolean(count),
     // The newest real email forwarded in (not the forwarding code): the setup's test looks for a new one.
     lastEmail: lastEmail ? { id: lastEmail.id, at: lastEmail.createdAt, outcome: lastEmail.outcome, company: lastEmail.company, jobTitle: lastEmail.jobTitle, summary: lastEmail.summary } : null,
     // Free: emails read and waiting to go on their jobs (a day after each arrived). Pro updates right away.
     held,
+    gmail: await gmailState(userId),
     gmailQuery: gmailFilterQuery(),
     atsDomains: ATS_DOMAINS,
     phrases: JOB_PHRASES,

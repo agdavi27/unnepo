@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Inbox, X } from "lucide-react";
 import { UPGRADE_URL } from "@/lib/plan";
+import { GoogleMark } from "@/components/auth/auth-forms";
 import { AddressRow, CopyButton, EmailWizard, guessProvider, type Progress, type Provider } from "@/components/unnepo/email-wizard";
 
 /**
@@ -15,7 +16,7 @@ import { AddressRow, CopyButton, EmailWizard, guessProvider, type Progress, type
 type Named = { id: string; title: string; company: string };
 type Item = {
   id: string; at: string; kind: string; company: string; jobTitle: string | null; confidence: number; summary: string;
-  outcome: string; reason: "low_confidence" | "several_matches" | "no_match" | null; source: "forward" | "paste";
+  outcome: string; reason: "low_confidence" | "several_matches" | "no_match" | null; source: "forward" | "paste" | "gmail";
   application: Named | null; candidates: Named[];
 };
 export type State = {
@@ -26,6 +27,8 @@ export type State = {
   review: Item[]; recent: Item[]; applications: Named[];
   /** Free: emails read and waiting a day before they update the jobs. */
   held?: { waiting: number; nextAt: string | null };
+  /** Connected Gmail: read on its own, no forwarding. `available` is false until Unnepo's Google keys are set. */
+  gmail?: { available: boolean; connected: boolean; email: string | null; status: "active" | "expired" | null; lastSyncedAt: string | null; lastError: string | null };
   skipped: { read: Array<{ id: string; at: string; summary: string }>; dropped: number; droppedAt: string | null };
 };
 
@@ -237,6 +240,80 @@ function writeSaved(key: string, value: Progress | "finished") {
     // Private windows can refuse this. The wizard still works, it just won't remember its place.
   }
 }
+const ago = (at: string) => {
+  const minutes = Math.round((Date.now() - Date.parse(at)) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours} hr ago` : when(at);
+};
+
+/** Connect Gmail once and Unnepo reads job emails on its own: the easy way, instead of forwarding. */
+function GmailCard({ gmail, onChange }: { gmail: NonNullable<State["gmail"]>; onChange: () => Promise<void> }) {
+  const [busy, setBusy] = useState("");
+  const [note, setNote] = useState(() => (typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("gmail_error") ?? ""));
+  if (!gmail.available && !gmail.connected) return null;
+  async function check() {
+    setBusy("check");
+    setNote("");
+    try {
+      const result = await call<{ read: number; status: string }>("/gmail-sync", "POST", {});
+      if (result.status === "active") setNote(result.read ? `Read ${result.read} new ${result.read === 1 ? "email" : "emails"}.` : "No new job emails.");
+      await onChange();
+    } catch (reason) {
+      setNote(reason instanceof Error ? reason.message : "Couldn't check Gmail.");
+    } finally {
+      setBusy("");
+    }
+  }
+  async function disconnect() {
+    if (!window.confirm("Disconnect Gmail? Unnepo stops reading your job emails. Jobs it already updated stay as they are.")) return;
+    setBusy("disconnect");
+    try {
+      await call("/gmail", "DELETE");
+      await onChange();
+    } finally {
+      setBusy("");
+    }
+  }
+  const connect = (
+    // eslint-disable-next-line @next/next/no-html-link-for-pages -- a server route that redirects to Google
+    <a href="/api/oauth/gmail" className="inline-flex h-11 items-center gap-2 rounded-[11px] bg-[#F7F7F8] px-[18px] text-sm font-semibold text-[#070708] hover:bg-white">
+      <GoogleMark /> {gmail.status === "expired" ? "Reconnect Gmail" : "Connect Gmail"}
+    </a>
+  );
+  return (
+    <section className="flex flex-col gap-3 rounded-[20px] border border-[#26262C] bg-[#0C0C0E] p-5 sm:p-6" aria-labelledby="gmail-card">
+      {!gmail.connected ? (
+        <>
+          <h2 id="gmail-card" className="m-0 text-lg font-semibold">Use Gmail? Skip the forwarding.</h2>
+          <p className="m-0 text-[13px] leading-normal text-[#9A9AA3]">Connect it once and Unnepo reads your job emails on its own: application received, interviews, rejections. It only looks at emails that match job searches, can&apos;t send or delete anything, and you can disconnect any time.</p>
+          <div>{connect}</div>
+        </>
+      ) : gmail.status === "expired" ? (
+        <>
+          <h2 id="gmail-card" className="m-0 text-lg font-semibold">Gmail needs reconnecting.</h2>
+          <p className="m-0 text-[13px] leading-normal text-[#9A9AA3]">{gmail.lastError || "Google stopped Unnepo's access."} {gmail.email && <>({gmail.email})</>}</p>
+          <div className="flex flex-wrap items-center gap-2.5">{connect}<button type="button" disabled={Boolean(busy)} onClick={() => void disconnect()} className="px-2 py-1 text-[13px] text-[#9A9AA3] underline underline-offset-4 hover:text-white">Disconnect</button></div>
+        </>
+      ) : (
+        <>
+          <h2 id="gmail-card" className="m-0 text-lg font-semibold">Gmail is connected.</h2>
+          <p className="m-0 text-[13px] leading-normal text-[#9A9AA3]">
+            Unnepo reads job emails from {gmail.email || "your Gmail"} on its own. {gmail.lastSyncedAt ? `Last checked ${ago(gmail.lastSyncedAt)}.` : "Checking for the first time…"}
+            {gmail.lastError && <span className="block text-[#F5A524]">{gmail.lastError}</span>}
+          </p>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button type="button" disabled={Boolean(busy)} onClick={() => void check()} className="h-[38px] rounded-[10px] border border-[#26262C] px-3.5 text-[13px] font-medium hover:bg-white/5 disabled:opacity-40">{busy === "check" ? "Checking…" : "Check now"}</button>
+            <button type="button" disabled={Boolean(busy)} onClick={() => void disconnect()} className="px-2 py-1 text-[13px] text-[#9A9AA3] underline underline-offset-4 hover:text-white">{busy === "disconnect" ? "Disconnecting…" : "Disconnect"}</button>
+          </div>
+        </>
+      )}
+      {note && <p role="status" className="m-0 text-[13px] text-[#D4D4D4]">{note}</p>}
+    </section>
+  );
+}
+
 const savedKey = (address: string) => `unnepo-email-setup:${address}`;
 
 export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEmail?: string | null; spider: string; onState?: (state: { received: boolean; toReview: number }) => void; onNext?: () => void }) {
@@ -254,14 +331,15 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
     try {
       const next = await call<State>("/state");
       setState(next);
-      const received = Boolean(next.lastEmail || next.skipped.dropped);
+      const received = Boolean(next.lastEmail || next.skipped.dropped || (next.gmail?.connected && next.gmail.status === "active"));
       onState?.({ received, toReview: next.review.length });
       setProblem("");
       if (!loaded.current) {
         loaded.current = true;
         // Back where they were, on the tracker if forwarding already works, and otherwise at the start.
         const saved = readSaved(savedKey(next.address));
-        setProgress(saved === "finished" ? null : saved ?? (received ? null : { provider: guess ?? "gmail", step: 0, baseline: null }));
+        const viaGmail = next.gmail?.connected && next.gmail.status === "active";
+        setProgress(saved === "finished" || viaGmail ? null : saved ?? (received ? null : { provider: guess ?? "gmail", step: 0, baseline: null }));
         setPlaced(true);
       }
     } catch (reason) {
@@ -316,6 +394,8 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
           <h1 className={headingClass}>Connect your email in about 3 minutes.</h1>
           <p className={introClass}>One step at a time. Unnepo shows you when each email arrives, so you&apos;ll know it worked before moving on.</p>
         </div>
+        {state.gmail && <GmailCard gmail={state.gmail} onChange={load} />}
+        {state.gmail?.available && <p className="m-0 text-xs font-mono tracking-[1.4px] text-[#8B8B94]">OR FORWARD YOUR EMAILS</p>}
         {offWarning}
         <EmailWizard state={state} progress={progress} guess={guess} spider={spider} onProgress={moveTo} onFinish={finish} onCheck={load} onPaste={() => setPasting(true)} />
         {pasting && <PasteBox focus onDone={load} />}
@@ -324,15 +404,16 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
     );
   }
 
-  const working = Boolean(state.lastEmail || state.skipped.dropped);
+  const working = Boolean(state.lastEmail || state.skipped.dropped || (state.gmail?.connected && state.gmail.status === "active"));
   const codeIsNew = state.verification && (!state.lastEmail || state.verification.at > state.lastEmail.at);
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <h1 className={headingClass}>{working ? "Your tracker updates itself." : "Almost there."}</h1>
-        <p className={introClass}>{working ? "New job emails update your applications on their own. Anything Unnepo isn't sure about waits in the Review Inbox on your Applications page." : "Forward one job email to your Unnepo address to check that it works."}</p>
+        <p className={introClass}>{working ? "New job emails update your applications on their own. Anything Unnepo isn't sure about waits in the Review Inbox on your Applications page." : "Connect Gmail, or forward one job email to your Unnepo address to check that it works."}</p>
       </div>
-      {offWarning}
+      {state.gmail && <GmailCard gmail={state.gmail} onChange={load} />}
+      {!state.gmail?.connected && offWarning}
 
       <section className="flex flex-col gap-5 rounded-[20px] border border-[#26262C] bg-[#0C0C0E] p-5 sm:p-7" aria-labelledby="email-on">
         <div className="flex items-center gap-3.5">

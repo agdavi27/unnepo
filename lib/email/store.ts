@@ -224,6 +224,7 @@ export async function removeEmailData(userId: string) {
       client.from("email_inboxes").delete().eq("user_id", userId),
       client.from("email_events").delete().eq("user_id", userId),
       client.from("email_texts").delete().eq("user_id", userId),
+      client.from("gmail_connections").delete().eq("user_id", userId),
     ]);
     for (const { error } of results) if (error) console.error("email data not removed", error.code ?? "");
     return;
@@ -232,5 +233,6 @@ export async function removeEmailData(userId: string) {
     db.emailInboxes = (db.emailInboxes ?? []).filter((row) => row.userId !== userId);
     db.emailEvents = (db.emailEvents ?? []).filter((row) => row.userId !== userId);
     db.emailTexts = (db.emailTexts ?? []).filter((row) => row.userId !== userId);
+    db.gmailConnections = (db.gmailConnections ?? []).filter((row) => row.userId !== userId);
   });
 }

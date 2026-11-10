@@ -29,6 +29,7 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
         <li><strong>Resume:</strong> the file you upload and the text we read from it, used to build your profile and prepare application answers, email drafts, and cover letters.</li>
         <li><strong>Job applications:</strong> the job links you paste, the answers you give or approve, and the status of each application.</li>
         <li><strong>Emails you forward or paste:</strong> we read each one to update your applications. For an email about a job, we keep its sender, subject, and text, encrypted, so you can read it on that job, along with the company, job, and status we took from it. We don&apos;t keep attachments, and for an email that isn&apos;t about a job we keep at most a one-line note or a count.</li>
+        <li><strong>Gmail, if you connect it:</strong> read-only access to your Gmail. Unnepo only fetches emails that match job-application searches (for example, from Greenhouse or Workday, or saying &quot;thank you for applying&quot;) and handles them exactly like emails you forward. It can&apos;t send, change, or delete email. Unnepo&apos;s use of information received from Google APIs adheres to the <a className="text-ink underline underline-offset-4" href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noreferrer">Google API Services User Data Policy</a>, including the Limited Use requirements: Gmail data is used only to update your applications, isn&apos;t sold, isn&apos;t used for ads, and isn&apos;t used to train AI models. Disconnecting in Setup, or deleting your account, removes Unnepo&apos;s access.</li>
         <li><strong>Cover letters and email drafts:</strong> text you write or generate. Unnepo doesn&apos;t send email; you copy a draft or open it in your own mail app.</li>
       </ul>
     ),
@@ -70,6 +71,7 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
           <li><strong>Supabase</strong> stores the database and resume files.</li>
           <li><strong>Apollo.io</strong> receives the company and kinds of roles you&apos;re looking for (such as recruiters) to find people at companies you applied to and verify their emails.</li>
           <li><strong>Anthropic</strong> receives your profile, resume text, a job&apos;s application questions, and emails you forward or paste, so its AI can prepare answers, drafts, highlights, and cover letters and read those emails. It also receives a job&apos;s company, title, and location to search the web for its posting or for people who work there. Anthropic does not use this data to train its models.</li>
+          <li><strong>Google</strong> provides sign-in with Google and, if you connect Gmail, the job emails Unnepo reads from it.</li>
           <li><strong>Postmark</strong> receives the emails you forward to your Unnepo address and passes them to us.</li>
           <li><strong>Resend</strong> delivers account emails such as verification links.</li>
           <li><strong>Stripe</strong> processes payments if you buy a plan. We never see or store your full card number.</li>

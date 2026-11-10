@@ -17,7 +17,7 @@ const signupSchema = z.object({
   password: z.string().min(8, "Use at least 8 characters"),
 });
 
-export function SignupForm() {
+export function SignupForm({ google = false }: { google?: boolean }) {
   const params = useSearchParams();
   const router = useRouter();
   const [error, setError] = useState(params.get("error") || "");
@@ -73,6 +73,7 @@ export function SignupForm() {
 
   return (
     <AuthShell title="Create your account" subtitle="Use a school email such as name@college.edu. Personal addresses like Gmail are not eligible.">
+      {google ? <GoogleButton /> : null}
       <form method="post" action="/api/auth/signup" onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
         <input className="field" placeholder="Full name" autoComplete="name" suppressHydrationWarning {...form.register("name")} />
         {form.formState.errors.name ? <p className="text-sm text-red-300">{form.formState.errors.name.message}</p> : null}
@@ -89,7 +90,7 @@ export function SignupForm() {
   );
 }
 
-export function LoginForm() {
+export function LoginForm({ google = false }: { google?: boolean }) {
   const router = useRouter();
   const params = useSearchParams();
   const [error, setError] = useState(params.get("error") || "");
@@ -139,6 +140,7 @@ export function LoginForm() {
 
   return (
     <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your monthly credits are ready." : params.get("reset") ? "Password updated. Sign in with the new password." : "Sign in with the school email you used to sign up."}>
+      {google ? <GoogleButton /> : null}
       <form onSubmit={submit} className="space-y-3">
         <SchoolEmailField placeholder="School email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         <input className="field" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} suppressHydrationWarning />
@@ -151,6 +153,32 @@ export function LoginForm() {
       {unverified ? <button type="button" onClick={verifyAndLogin} disabled={busy} className="mt-3 h-11 w-full rounded-xl border border-line">Verify school email and continue</button> : null}
       <p className="mt-4 text-center text-sm text-muted">Need an account? <Link href="/signup" className="text-white">Create one</Link></p>
     </AuthShell>
+  );
+}
+
+/** Sign in, or make an account, with the school Google account. A plain link: the server sends it to Google. */
+function GoogleButton() {
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- a server route that redirects to Google */}
+      <a href="/api/oauth/google" className="flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-line bg-white text-sm font-medium text-black hover:bg-zinc-200">
+        <GoogleMark /> Continue with Google
+      </a>
+      <div className="my-4 flex items-center gap-3 text-xs text-muted" aria-hidden>
+        <span className="h-px flex-1 bg-[#26262C]" />or<span className="h-px flex-1 bg-[#26262C]" />
+      </div>
+    </>
+  );
+}
+
+export function GoogleMark() {
+  return (
+    <svg viewBox="0 0 18 18" className="h-4 w-4" aria-hidden="true">
+      <path fill="#4285F4" d="M17.6 9.2c0-.6-.1-1.2-.2-1.8H9v3.4h4.8a4.1 4.1 0 0 1-1.8 2.7v2.2h2.9c1.7-1.6 2.7-3.9 2.7-6.5Z" />
+      <path fill="#34A853" d="M9 18c2.4 0 4.5-.8 6-2.2l-2.9-2.2c-.8.6-1.9.9-3.1.9-2.4 0-4.4-1.6-5.1-3.8H.9v2.3A9 9 0 0 0 9 18Z" />
+      <path fill="#FBBC05" d="M3.9 10.7A5.4 5.4 0 0 1 3.6 9c0-.6.1-1.2.3-1.7V5H.9A9 9 0 0 0 0 9c0 1.4.3 2.8.9 4l3-2.3Z" />
+      <path fill="#EA4335" d="M9 3.6c1.3 0 2.5.5 3.4 1.3L15.1 2A9 9 0 0 0 .9 5l3 2.3C4.6 5.2 6.6 3.6 9 3.6Z" />
+    </svg>
   );
 }
 
