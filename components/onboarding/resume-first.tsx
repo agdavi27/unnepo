@@ -2,6 +2,8 @@
 
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { useCallback, useEffect, useId, useState } from "react";
+import { EmailTracking } from "@/components/unnepo/email-tracking";
+import { spiderSvg, wornSkin } from "@/lib/spiders";
 import { CLASS_YEARS, EEO_OPTIONS, classYearOf, type Education, type Experience, type GapId, type Project, type StudentProfile } from "@/lib/profile/student";
 
 /**
@@ -308,7 +310,7 @@ const ALL_GAPS: Array<{ id: GapId; title: string }> = [
 export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onDone: () => void }) {
   const [state, setState] = useState<State | null>(null);
   const [draft, setDraft] = useState<StudentProfile | null>(null);
-  const [step, setStep] = useState<"upload" | "confirm" | "gaps" | "finish">("upload");
+  const [step, setStep] = useState<"upload" | "confirm" | "gaps" | "email" | "finish">("upload");
   const [busy, setBusy] = useState("");
   const [problem, setProblem] = useState("");
   const [note, setNote] = useState("");
@@ -324,7 +326,7 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
       .then((next) => {
         take(next);
         // A returning student skips the upload; someone who already confirmed goes straight to the gaps.
-        if (mode === "onboarding" && next.profile.confirmedAt) setStep(next.missing.length ? "gaps" : "finish");
+        if (mode === "onboarding" && next.profile.confirmedAt) setStep(next.missing.length ? "gaps" : "email");
         else if (mode === "onboarding" && next.resume) setStep("confirm");
       })
       .catch((reason) => setProblem(reason instanceof Error ? reason.message : "Couldn't load your profile."));
@@ -370,9 +372,9 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
   return (
     <section className="mx-auto w-full max-w-3xl space-y-8">
       <div className="space-y-4">
-        <p className={eyebrow}>{mode === "edit" ? "Your profile" : step === "upload" ? "Step 1 of 3" : step === "confirm" ? "Step 2 of 3" : "Step 3 of 3"}</p>
+        <p className={eyebrow}>{mode === "edit" ? "Your profile" : step === "upload" ? "Step 1 of 4" : step === "confirm" ? "Step 2 of 4" : step === "gaps" ? "Step 3 of 4" : step === "email" ? "Step 4 of 4" : "All set"}</p>
         <h1 className="text-[32px] font-bold leading-tight tracking-[-1.2px] sm:text-[40px] sm:tracking-[-1.4px]">
-          {mode === "edit" ? "Everything Unnepo applies with" : step === "upload" ? "Start with your resume" : step === "confirm" ? "Check what we found" : step === "gaps" ? (gap?.title ?? "Almost done") : "You're ready"}
+          {mode === "edit" ? "Everything Unnepo applies with" : step === "upload" ? "Start with your resume" : step === "confirm" ? "Check what we found" : step === "gaps" ? (gap?.title ?? "Almost done") : step === "email" ? "Track your applications automatically" : "You're ready"}
         </h1>
         <Progress value={draft.completeness} />
       </div>
@@ -400,7 +402,7 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
           <Sections profile={draft} set={setDraft} />
           {mode === "onboarding" && (
             <div className="flex flex-wrap gap-3 border-t border-[#17171B] pt-6">
-              <button type="button" className={primary} disabled={Boolean(busy)} onClick={async () => { const next = await save({}, true); if (next) { setNote(""); setStep(next.missing.length ? "gaps" : "finish"); } }}>
+              <button type="button" className={primary} disabled={Boolean(busy)} onClick={async () => { const next = await save({}, true); if (next) { setNote(""); setStep(next.missing.length ? "gaps" : "email"); } }}>
                 {busy === "save" ? "Saving…" : "Looks right, continue"}
               </button>
             </div>
@@ -413,8 +415,8 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
           <p className="text-sm text-[#9A9AA3]">{gap.why}</p>
           <GapFields id={gap.id} profile={draft} set={setDraft} />
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className={primary} disabled={Boolean(busy)} onClick={async () => { const next = await save({ done: [...draft.done, gap.id] }); if (next && !next.missing.length) setStep("finish"); }}>{busy === "save" ? "Saving…" : "Save and continue"}</button>
-            {gap.optional && <button type="button" className={secondary} disabled={Boolean(busy)} onClick={async () => { const next = await save({ done: [...draft.done, gap.id] }); if (next && !next.missing.length) setStep("finish"); }}>Skip</button>}
+            <button type="button" className={primary} disabled={Boolean(busy)} onClick={async () => { const next = await save({ done: [...draft.done, gap.id] }); if (next && !next.missing.length) setStep("email"); }}>{busy === "save" ? "Saving…" : "Save and continue"}</button>
+            {gap.optional && <button type="button" className={secondary} disabled={Boolean(busy)} onClick={async () => { const next = await save({ done: [...draft.done, gap.id] }); if (next && !next.missing.length) setStep("email"); }}>Skip</button>}
             <span className="text-xs text-[#8B8B94]">{state.missing.length} left</span>
           </div>
         </div>
@@ -432,6 +434,25 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
             <button type="button" className={primary} disabled={Boolean(busy)} onClick={async () => { if (await save({}, true)) setNote("Saved. Every application uses these details from now on."); }}>{busy === "save" ? "Saving…" : "Save profile"}</button>
             <button type="button" className={secondary} onClick={onDone}>Done</button>
             {note && <span className="text-xs text-[#9A9AA3]">{note}</span>}
+          </div>
+        </div>
+      )}
+
+      {step === "email" && mode === "onboarding" && (
+        <div className="space-y-6">
+          <div className="space-y-3 rounded-2xl border border-[#17171B] bg-[#0C0C0E] p-5 text-[15px] leading-[1.55] text-[#B4B4BC] sm:p-6">
+            <p className="m-0">Every time a company emails you about an application, Unnepo can update your tracker for you: applied, interview, rejected. It works by forwarding.</p>
+            <ol className="m-0 list-decimal space-y-1.5 pl-5">
+              <li>You get a private Unnepo email address (below).</li>
+              <li>You add one rule in Gmail or Outlook that forwards <strong className="text-[#F7F7F8]">only job emails</strong> to it. Nothing else leaves your inbox.</li>
+              <li>Unnepo reads each one and updates the right job.</li>
+            </ol>
+            <p className="m-0 text-[13px] text-[#8B8B94]">Takes about 3 minutes. Follow the steps below; each one shows exactly what to click.</p>
+          </div>
+          <EmailTracking embedded applyEmail={draft.contact?.email ?? null} spider={spiderSvg({ skin: wornSkin(null, 0), school: null }, { size: 80 })} onFinished={() => setStep("finish")} />
+          <div className="flex flex-wrap items-center gap-3 border-t border-[#17171B] pt-6">
+            <button type="button" className={secondary} onClick={() => setStep("finish")}>Skip for now</button>
+            <span className="text-xs text-[#8B8B94]">You can set it up any time in Setup, under Email tracking.</span>
           </div>
         </div>
       )}

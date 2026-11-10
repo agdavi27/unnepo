@@ -316,7 +316,11 @@ function GmailCard({ gmail, onChange }: { gmail: NonNullable<State["gmail"]>; on
 
 const savedKey = (address: string) => `unnepo-email-setup:${address}`;
 
-export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEmail?: string | null; spider: string; onState?: (state: { received: boolean; toReview: number }) => void; onNext?: () => void }) {
+export function EmailTracking({ applyEmail, spider, onState, onNext, embedded = false, onFinished }: {
+  applyEmail?: string | null; spider: string; onState?: (state: { received: boolean; toReview: number }) => void; onNext?: () => void;
+  /** Inside onboarding: the page around it has the heading, and finishing the wizard moves onboarding on. */
+  embedded?: boolean; onFinished?: () => void;
+}) {
   const [state, setState] = useState<State | null>(null);
   const [problem, setProblem] = useState("");
   const [busy, setBusy] = useState("");
@@ -366,6 +370,7 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
     setProgress(null);
     setPasting(false);
     window.scrollTo({ top: 0 });
+    onFinished?.();
   }
   async function regenerate() {
     if (!window.confirm("Make a new address? The old one stops working right away, so you'll need to set up forwarding again.")) return;
@@ -390,10 +395,12 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
   if (progress) {
     return (
       <div className="flex flex-col gap-7">
-        <div className="flex flex-col gap-2">
-          <h1 className={headingClass}>Connect your email in about 3 minutes.</h1>
-          <p className={introClass}>One step at a time. Unnepo shows you when each email arrives, so you&apos;ll know it worked before moving on.</p>
-        </div>
+        {!embedded && (
+          <div className="flex flex-col gap-2">
+            <h1 className={headingClass}>Connect your email in about 3 minutes.</h1>
+            <p className={introClass}>One step at a time. Unnepo shows you when each email arrives, so you&apos;ll know it worked before moving on.</p>
+          </div>
+        )}
         {state.gmail && <GmailCard gmail={state.gmail} onChange={load} />}
         {state.gmail?.available && <p className="m-0 text-xs font-mono tracking-[1.4px] text-[#8B8B94]">OR FORWARD YOUR EMAILS</p>}
         {offWarning}
@@ -408,7 +415,7 @@ export function EmailTracking({ applyEmail, spider, onState, onNext }: { applyEm
   const codeIsNew = state.verification && (!state.lastEmail || state.verification.at > state.lastEmail.at);
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-2">
+      <div hidden={embedded} className="flex flex-col gap-2">
         <h1 className={headingClass}>{working ? "Your tracker updates itself." : "Almost there."}</h1>
         <p className={introClass}>{working ? "New job emails update your applications on their own. Anything Unnepo isn't sure about waits in the Review Inbox on your Applications page." : "Connect Gmail, or forward one job email to your Unnepo address to check that it works."}</p>
       </div>

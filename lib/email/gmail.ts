@@ -7,6 +7,7 @@ import { processEmail } from "@/lib/email/process";
 import type { GmailConnection } from "@/lib/email/types";
 import { decryptSecret, encryptSecret, randomToken } from "@/lib/security";
 import { envValue } from "@/lib/services/oauth";
+import { integrations } from "@/lib/integrations/flags";
 
 /**
  * Connected Gmail: the student says yes once on Google's screen, and Unnepo reads their job emails on its own,
@@ -32,6 +33,7 @@ function client() {
 }
 
 export const gmailReady = () => {
+  if (!integrations.gmailConnect) return false;
   const { id, secret } = client();
   return Boolean(id && secret);
 };

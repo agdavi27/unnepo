@@ -177,6 +177,7 @@ async function handle(request: Request, slug: string[]) {
 
   // Sign in with Google or Microsoft.
   if (root === "oauth" && request.method === "GET" && (action === "google" || action === "microsoft") && slug[2] !== "callback") {
+    if (action === "google" && !integrations.googleSignIn) throw new ServiceError("Signing in with Google is off for now. Use your school email and a password.", "oauth_unconfigured", 400);
     const session = await readSession();
     return Response.redirect(await beginOAuth(action, session?.user.id ?? null, publicOrigin(request)));
   }

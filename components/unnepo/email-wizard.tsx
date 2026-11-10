@@ -14,7 +14,14 @@ export type Progress = { provider: Provider; step: number; baseline: string | nu
 
 type StepKind = "address" | "code" | "filter" | "test" | "manual";
 type WizardStep = {
-  kind: StepKind; rail: string; title: string; body: string; next: string;
+  kind: StepKind; rail: string; title: string;
+  /** One or two sentences: why this step, in plain words. */
+  body: string;
+  /** Exactly what to click, in order. */
+  how: string[];
+  /** A tip under the steps, for the thing people most often get wrong. */
+  tip?: string;
+  next: string;
   link?: { label: string; href: string };
   copy?: { show: string; text: string };
   mock?: { title: string; tabs: string[]; active: number; hint: string; action: string };
@@ -22,37 +29,131 @@ type WizardStep = {
 
 const GMAIL_TABS = ["General", "Labels", "Filters and Blocked Addresses", "Forwarding and POP/IMAP"];
 const OUTLOOK_TABS = ["Layout", "Compose and reply", "Rules", "Forwarding"];
+const GMAIL_FORWARDING = { label: "Open Gmail forwarding settings", href: "https://mail.google.com/mail/u/0/#settings/fwdandpop" };
+const GMAIL_FILTERS = { label: "Open Gmail filters", href: "https://mail.google.com/mail/u/0/#settings/filters" };
 const OUTLOOK_RULES = { label: "Open Outlook rules", href: "https://outlook.live.com/mail/0/options/mail/rules" };
-const TEST: WizardStep = { kind: "test", rail: "Send a test", title: "Send one test email", body: "Forward a job email you already have, like an application confirmation, to your Unnepo address. Use one you haven't sent to Unnepo before. It shows up here when it lands.", next: "Finish" };
+const TEST: WizardStep = {
+  kind: "test", rail: "Send a test", title: "Send one test email",
+  body: "This proves everything works. Unnepo shows the email here the moment it arrives.",
+  how: [
+    "Press Copy address above.",
+    "In your inbox, open a job email you already have, like \"Thank you for applying\". Pick one you haven't sent to Unnepo before.",
+    "Press Forward, paste your Unnepo address in To, and press Send.",
+    "Come back to this page. The email shows up below in about a minute.",
+  ],
+  next: "Finish",
+};
 const NAME: Record<Provider, string> = { gmail: "Gmail", outlook: "Outlook", yahoo: "Yahoo or AOL" };
 
 function stepsFor(provider: Provider, state: State): WizardStep[] {
   if (provider === "gmail") return [
-    { kind: "address", rail: "Add the forwarding address", title: "Add Unnepo as a forwarding address", body: "Copy your Unnepo address. Then open Gmail's forwarding settings, press Add a forwarding address, paste it, and press Next and Proceed. Signed in to more than one Gmail? Check it opened the one you apply with.", next: "I've added it",
-      link: { label: "Open Gmail forwarding settings", href: "https://mail.google.com/mail/u/0/#settings/fwdandpop" },
-      mock: { title: "Gmail · Settings (illustration)", tabs: GMAIL_TABS, active: 3, hint: "Forwarding:", action: "Add a forwarding address" } },
-    { kind: "code", rail: "Confirm the code", title: "Paste the code Gmail sends", body: "Gmail sends a confirmation code to Unnepo, and it shows up right here. Copy it into Gmail and press Verify. Leave forwarding itself turned off: only job emails should go to Unnepo.", next: "I've verified it",
-      link: { label: "Open Gmail forwarding settings", href: "https://mail.google.com/mail/u/0/#settings/fwdandpop" } },
-    { kind: "filter", rail: "Forward only job emails", title: "Only send job emails to Unnepo", body: "Open Gmail filters, press Create a new filter and paste this into Has the words. Press Create filter, tick Forward it to, pick your Unnepo address and press Create filter again.", next: "Filter is on",
-      link: { label: "Open Gmail filters", href: "https://mail.google.com/mail/u/0/#settings/filters" },
+    {
+      kind: "address", rail: "Add the forwarding address", title: "Add Unnepo as a forwarding address",
+      body: "This lets Gmail send emails to Unnepo. Nothing gets forwarded yet: you choose which emails in step 4.",
+      how: [
+        "Press Copy address above.",
+        "Press Open Gmail forwarding settings below. Gmail opens on the Forwarding and POP/IMAP tab.",
+        "Press Add a forwarding address.",
+        "Paste your Unnepo address and press Next.",
+        "A small window opens. Press Proceed, then OK.",
+      ],
+      tip: "Signed in to more than one Gmail? Check the picture in Gmail's top right is the account you apply with before you start.",
+      next: "I've added it", link: GMAIL_FORWARDING,
+      mock: { title: "Gmail · Settings (illustration)", tabs: GMAIL_TABS, active: 3, hint: "Forwarding:", action: "Add a forwarding address" },
+    },
+    {
+      kind: "code", rail: "Confirm the code", title: "Paste the code Gmail sends",
+      body: "Gmail emails a code to Unnepo to check the address is real. It shows up right here, usually in under a minute.",
+      how: [
+        "Wait for the code to appear below, then press Copy code.",
+        "Go back to Gmail's Forwarding and POP/IMAP tab (or press Open Gmail forwarding settings below).",
+        "Paste the code in the box next to Verify and press Verify.",
+        "Leave Disable forwarding selected. That is fine: your filter in the next step forwards only job emails.",
+      ],
+      tip: "No code after two minutes? Go back a step and check you added the address exactly as shown, with no extra spaces.",
+      next: "I've verified it", link: GMAIL_FORWARDING,
+    },
+    {
+      kind: "filter", rail: "Forward only job emails", title: "Only send job emails to Unnepo",
+      body: "A Gmail filter picks out emails from job sites and emails like \"Thank you for applying\", and sends only those. Everything else stays private in your inbox.",
+      how: [
+        "Press Copy above to copy the job-email search.",
+        "Press Open Gmail filters below, then Create a new filter.",
+        "Paste into the Has the words box. Leave every other box empty.",
+        "Press Create filter at the bottom right of that box.",
+        "Tick Forward it to, and pick your Unnepo address from the list.",
+        "Press Create filter again. You're done with Gmail.",
+      ],
+      tip: "Don't see your Unnepo address in the Forward it to list? The code in step 3 isn't verified yet. Press Back and verify it.",
+      next: "Filter is on", link: GMAIL_FILTERS,
       copy: { show: state.gmailQuery, text: state.gmailQuery },
-      mock: { title: "Gmail · Create filter (illustration)", tabs: GMAIL_TABS, active: 2, hint: `Has the words: (pasted) · Forward it to: ${state.address}`, action: "Create filter" } },
+      mock: { title: "Gmail · Create filter (illustration)", tabs: GMAIL_TABS, active: 2, hint: `Has the words: (pasted) · Forward it to: ${state.address}`, action: "Create filter" },
+    },
     TEST,
   ];
   if (provider === "outlook") return [
-    { kind: "address", rail: "Make a forwarding rule", title: "Make a rule that forwards to Unnepo", body: "Open Outlook's Rules, press Add new rule and name it Unnepo jobs. For the action pick Forward to and paste your Unnepo address. Don't save yet.", next: "Rule started", link: OUTLOOK_RULES,
-      mock: { title: "Outlook · Settings (illustration)", tabs: OUTLOOK_TABS, active: 2, hint: "Rules", action: "Add new rule" } },
-    { kind: "filter", rail: "Pick which emails", title: "Only forward job emails", body: "For the condition, pick From, then Sender address includes, and add each of these. Save the rule.", next: "Rule saved", link: OUTLOOK_RULES,
+    {
+      kind: "address", rail: "Start a forwarding rule", title: "Start a rule that forwards to Unnepo",
+      body: "An Outlook rule forwards job emails to Unnepo. First you tell it where to send them.",
+      how: [
+        "Press Copy address above.",
+        "Press Open Outlook rules below.",
+        "Press + Add new rule and name it Unnepo jobs.",
+        "Under Add an action, choose Forward to, and paste your Unnepo address.",
+        "Don't press Save yet. The next step picks which emails.",
+      ],
+      next: "Rule started", link: OUTLOOK_RULES,
+      mock: { title: "Outlook · Settings (illustration)", tabs: OUTLOOK_TABS, active: 2, hint: "Rules", action: "Add new rule" },
+    },
+    {
+      kind: "filter", rail: "Pick which emails", title: "Only forward emails from job sites",
+      body: "This keeps everything else private: only emails from job application systems go to Unnepo.",
+      how: [
+        "Press Copy above to copy the list of job sites.",
+        "In the same rule, under Add a condition, choose Sender address includes.",
+        "Paste the list. If Outlook keeps it as one line, add each site one at a time.",
+        "Press Save.",
+      ],
+      next: "Rule saved", link: OUTLOOK_RULES,
       copy: { show: state.atsDomains.join(", "), text: state.atsDomains.join("\n") },
-      mock: { title: "Outlook · Add new rule (illustration)", tabs: OUTLOOK_TABS, active: 2, hint: "Condition: Sender address includes (pasted)", action: "Save" } },
-    { kind: "filter", rail: "Catch the rest", title: "Catch emails from other senders", body: "Some companies send job emails from their own address. Make a second rule the same way, with the condition Subject or body includes and these phrases, and forward it to your Unnepo address too.", next: "Second rule saved", link: OUTLOOK_RULES,
-      copy: { show: state.phrases.map((phrase) => `"${phrase}"`).join(", "), text: state.phrases.join("\n") } },
-    { kind: "code", rail: "Confirm if asked", title: "Confirm, if Outlook asks", body: "Some accounts ask to confirm a new forwarding address. If yours does, the code shows up here.", next: "Done or not asked" },
-    { ...TEST, body: "Forward a job email you already have to your Unnepo address. Use one you haven't sent to Unnepo before. It shows up here when it lands." },
+      mock: { title: "Outlook · Add new rule (illustration)", tabs: OUTLOOK_TABS, active: 2, hint: "Condition: Sender address includes (pasted)", action: "Save" },
+    },
+    {
+      kind: "filter", rail: "Catch the rest", title: "Catch emails from other senders",
+      body: "Some companies send job emails from their own address. A second rule catches those by what they say.",
+      how: [
+        "Press Copy above to copy the phrases.",
+        "Press + Add new rule again and name it Unnepo jobs 2.",
+        "Under Add a condition, choose Subject or body includes, and add the phrases.",
+        "Under Add an action, choose Forward to and paste your Unnepo address.",
+        "Press Save.",
+      ],
+      next: "Second rule saved", link: OUTLOOK_RULES,
+      copy: { show: state.phrases.map((phrase) => `"${phrase}"`).join(", "), text: state.phrases.join("\n") },
+    },
+    {
+      kind: "code", rail: "Confirm if asked", title: "Confirm, if Outlook asks",
+      body: "Some Outlook accounts ask to confirm a new forwarding address. Most don't.",
+      how: [
+        "If Outlook asked you to confirm, the code or link shows up below in about a minute. Copy it into Outlook.",
+        "If Outlook didn't ask, press Done or not asked.",
+      ],
+      next: "Done or not asked",
+    },
+    TEST,
   ];
   return [
-    { kind: "manual", rail: "Forward by hand", title: "Forward job emails by hand", body: "Free Yahoo and AOL accounts can't forward automatically. When a job email arrives, forward it to this address. Unnepo reads who it was originally from.", next: "Got it" },
-    { ...TEST, body: "Forward a job email you already have to your Unnepo address. Use one you haven't sent to Unnepo before. It shows up here when it lands." },
+    {
+      kind: "manual", rail: "Forward by hand", title: "Forward job emails by hand",
+      body: "Free Yahoo and AOL accounts can't forward on their own, so you forward job emails yourself. It takes a few seconds each.",
+      how: [
+        "Press Copy address above and save it as a contact named Unnepo, so it's quick to pick.",
+        "When a job email arrives (application received, interview, rejection), press Forward.",
+        "Send it to Unnepo. Unnepo reads who it was originally from and updates that job.",
+      ],
+      next: "Got it",
+    },
+    TEST,
   ];
 }
 
@@ -196,7 +297,7 @@ export function EmailWizard({ state, progress, guess, spider, onProgress, onFini
               <h2 id="wizard-step" ref={heading} tabIndex={-1} className="m-0 text-2xl font-bold tracking-[-0.5px] outline-none">{current?.title ?? "Which email do you apply with?"}</h2>
             </div>
           </div>
-          <p className="m-0 text-[15px] leading-[1.55] text-[#B4B4BC]">{current?.body ?? "Unnepo works with the inbox you already use. Forwarding rules send job emails here, and your tracker updates on its own."}</p>
+          <p className="m-0 text-[15px] leading-[1.55] text-[#B4B4BC]">{current?.body ?? "You set up a rule in your inbox once. From then on, job emails (application received, interview, rejection) are forwarded to your private Unnepo address, and your tracker updates on its own. Nothing else leaves your inbox. Pick the inbox you use to apply."}</p>
 
           {!current && (
             <>
@@ -220,6 +321,18 @@ export function EmailWizard({ state, progress, guess, spider, onProgress, onFini
               <CopyButton text={current.copy.text} />
             </div>
           )}
+
+          {current && (
+            <ol className="m-0 flex list-none flex-col gap-2.5 p-0" aria-label={`How to do step ${step + 1}`}>
+              {current.how.map((line, index) => (
+                <li key={line} className="flex items-start gap-3 text-[15px] leading-[1.5] text-[#E4E4E7]">
+                  <span aria-hidden className="mt-px flex h-[22px] w-[22px] flex-none items-center justify-center rounded-full bg-[#1F1F24] font-mono text-[11px] text-[#B4B4BC]">{index + 1}</span>
+                  <span className="min-w-0">{line}</span>
+                </li>
+              ))}
+            </ol>
+          )}
+          {current?.tip && <p className="m-0 rounded-xl border border-[#26262C] bg-[#070708] px-4 py-3 text-[13px] leading-normal text-[#9A9AA3]"><strong className="text-[#E4E4E7]">Tip:</strong> {current.tip}</p>}
 
           {current?.mock && <Illustration mock={current.mock} name={name} />}
 
