@@ -5,14 +5,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
-import { CoverLetterModal, JobsPage, type Job } from "@/components/unnepo/jobs";
 import { CREDIT_COST, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
-import type { PlanUsage } from "@/components/unnepo/apply";
+import type { planUsage } from "@/lib/apply/limits";
 import { Logo } from "@/components/brand/logo";
-import { ApplyArea, SpiderSettings, loadApplicationsEarly } from "@/components/unnepo/apply";
-import { SetupPage } from "@/components/unnepo/setup";
+import { SpiderSettings } from "@/components/unnepo/spider-settings";
 import { extensionHere } from "@/lib/extension-bridge";
 import { trialLeftLabel } from "@/lib/plan";
+
+type PlanUsage = Awaited<ReturnType<typeof planUsage>>;
 
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
@@ -28,30 +28,26 @@ type Workspace = {
   integrations: { apollo: boolean; anthropic: boolean };
 };
 
-// Applications are added by the Chrome extension. "Jobs for you" suggests postings that fit the resume.
-type View = "home" | "applications" | "jobs" | "setup" | "settings";
+// The tracker, reminders, people and follow-ups live in the Chrome extension. The site keeps the profile and the plans.
+type View = "home" | "settings";
 const VIEWS: { id: View; label: string }[] = [
   { id: "home", label: "Home" },
-  { id: "applications", label: "Applications" },
-  { id: "jobs", label: "Jobs for you" },
-  { id: "setup", label: "Setup" },
+  { id: "settings", label: "Settings and plans" },
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 
-export function AppHome({ start = "home" }: { start?: View }) {
+export function AppHome({ start = "home" }: { start?: View } = {}) {
   const router = useRouter();
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [billingBusy, setBillingBusy] = useState(false);
-  const [resumeBusy, setResumeBusy] = useState(false);
-  const [resumeVersion, setResumeVersion] = useState(0);
   const [view, setView] = useState<View>(start);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [extension, setExtension] = useState<boolean | null>(null);
   const menu = useRef<HTMLDivElement>(null);
-  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=setup opens that tab; /home?job=<id> opens that job in Applications.
+  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
@@ -59,11 +55,9 @@ export function AppHome({ start = "home" }: { start?: View }) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
       setEditing(true);
       window.history.replaceState(null, "", window.location.pathname);
-    } else if (tab === "setup" || tab === "jobs" || tab === "settings") {
+    } else if (tab === "settings") {
       setView(tab);
       window.history.replaceState(null, "", "/home" + window.location.hash);
-    } else if (params.get("job")) {
-      setView("applications");
     } else if (params.get("billing")) {
       // Coming back from Stripe. The plan changes when Stripe's webhook arrives, usually within seconds.
       setView("settings");
@@ -77,11 +71,6 @@ export function AppHome({ start = "home" }: { start?: View }) {
   useEffect(() => {
     if (loaded && view === "settings" && window.location.hash === "#plans") requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" }));
   }, [loaded, view]);
-  // Applications has its own address, so a refresh or a saved link stays on it.
-  useEffect(() => {
-    const path = view === "applications" ? "/applications" : "/home";
-    if (window.location.pathname !== path) window.history.replaceState(null, "", path + window.location.search);
-  }, [view]);
   // The account menu closes on Escape or a click outside it.
   useEffect(() => {
     if (!menuOpen) return;
@@ -94,8 +83,6 @@ export function AppHome({ start = "home" }: { start?: View }) {
       document.removeEventListener("mousedown", onClick);
     };
   }, [menuOpen]);
-  const [highlightsLoading, setHighlightsLoading] = useState(false);
-  const [letter, setLetter] = useState<{ job: Job | null; jobs: Job[] } | null>(null);
 
   /** Loads the workspace, giving up after 30 seconds so the page never waits forever. */
   const fetchState = useCallback(async (): Promise<Workspace | null> => {
@@ -133,9 +120,6 @@ export function AppHome({ start = "home" }: { start?: View }) {
 
   useEffect(() => {
     let cancelled = false;
-    // Home and Applications both show the list, so it's fetched alongside the workspace instead of after it.
-    const tab = new URLSearchParams(window.location.search).get("tab");
-    if ((start === "home" || start === "applications") && tab !== "setup" && tab !== "jobs") loadApplicationsEarly();
     fetchState()
       .then((body) => {
         if (!cancelled && body) setData(body);
@@ -146,32 +130,11 @@ export function AppHome({ start = "home" }: { start?: View }) {
     return () => {
       cancelled = true;
     };
-  }, [fetchState, start]);
+  }, [fetchState]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/");
-  }
-
-  /** The header's resume button: the newest upload becomes the resume autofill uses. */
-  async function replaceResume(file: File) {
-    setResumeBusy(true);
-    try {
-      const body = new FormData();
-      body.set("file", file);
-      // The profile endpoint also reads the new resume into the profile, keeping anything the student typed.
-      const response = await fetch("/api/profile/resume", { method: "POST", body });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setNotice(payload.error || "Couldn't save that resume. Try a PDF or DOCX under 10 MB.");
-        return;
-      }
-      setNotice(`${hadResume ? "Replaced your resume with" : "Attached"} ${payload.resume?.fileName ?? file.name}.${payload.read ? " New details from it were added to your profile; anything you typed yourself was kept." : ""}`);
-      await load();
-      setResumeVersion((value) => value + 1);
-    } finally {
-      setResumeBusy(false);
-    }
   }
 
   /** Off to Stripe. The buttons stay disabled until the page leaves, so a double click can't start two checkouts. */
@@ -195,47 +158,6 @@ export function AppHome({ start = "home" }: { start?: View }) {
     setBillingBusy(false);
   }
 
-  async function buildHighlights() {
-    setHighlightsLoading(true);
-    try {
-      const response = await fetch("/api/app/highlights", { method: "POST" });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        setNotice(payload.error || "Highlights could not be built right now.");
-        return;
-      }
-      await load();
-    } catch {
-      setNotice("Highlights could not be built right now.");
-    } finally {
-      setHighlightsLoading(false);
-    }
-  }
-
-
-
-
-  function openCoverLetter(job: Job | null, jobs: Job[]) {
-    setLetter({ job, jobs });
-    if (data?.profile?.ready && !data.highlights.length && !highlightsLoading) void buildHighlights();
-  }
-
-  async function writeCoverLetter(input: { job: { title: string; company: string; description: string }; studentFactIds: string[]; detailFactIds: string[]; tone: string; length: string; notes: string }) {
-    const response = await fetch("/api/app/cover-letter", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(payload.error || "Could not write that letter.");
-    void load();
-    if (payload.addedToApplied) setNotice(`Added ${input.job.title} at ${input.job.company} to your applied jobs.`);
-    return String(payload.body ?? "");
-  }
-
-  // The Applications page reloads what's left after every action, so the header keeps up.
-  const onUsage = useCallback((next: PlanUsage) => setData((previous) => (previous ? { ...previous, credits: { ...previous.credits, balance: next.people.left, usage: next } } : previous)), []);
-
   const showOnboarding = !data?.ready || editing;
 
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
@@ -249,14 +171,7 @@ export function AppHome({ start = "home" }: { start?: View }) {
     ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"}`, `${usage.answers.left} ${usage.answers.left === 1 ? "chat answer" : "chat answers"}`] : []),
     ...(usage.unlimited ? [] : [`${usage.people.left} ${usage.people.left === 1 ? "people search" : "people searches"}`]),
   ] : [];
-  const hadResume = Boolean(data?.resume);
   const initials = (data?.user.name || data?.user.email || "").split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
-  const openJob = (appId: string) => {
-    window.history.replaceState(null, "", `/applications?job=${encodeURIComponent(appId)}`);
-    setView("applications");
-    window.scrollTo({ top: 0 });
-  };
-
   return (
     <div className="min-h-screen bg-bg text-ink [color-scheme:dark]">
       <header className="z-20 border-b sm:sticky sm:top-0 border-[#17171B] bg-bg/90 backdrop-blur">
@@ -325,22 +240,10 @@ export function AppHome({ start = "home" }: { start?: View }) {
           <ResumeFirst
             key={editing ? "edit" : "onboarding"}
             mode={data.ready ? "edit" : "onboarding"}
-            onDone={() => { setEditing(false); setResumeVersion((value) => value + 1); void load(); }}
+            onDone={() => { setEditing(false); void load(); }}
           />
         )}
-        {data && !showOnboarding && (view === "home" || view === "applications") && <ApplyArea page={view} onPage={setView} refreshKey={resumeVersion} userName={data.user.name} onUsage={onUsage} onSetup={() => { setView("setup"); window.scrollTo({ top: 0 }); }} onJobs={() => { setView("jobs"); window.scrollTo({ top: 0 }); }} onSpiders={() => { setView("settings"); window.scrollTo({ top: 0 }); }} />}
-        {data && !showOnboarding && view === "jobs" && <JobsPage onCoverLetter={openCoverLetter} />}
-        {data && !showOnboarding && view === "setup" && (
-          <SetupPage
-            resume={data.resume}
-            completeness={data.completeness}
-            resumeBusy={resumeBusy}
-            onReplaceResume={(file) => void replaceResume(file)}
-            onEditProfile={() => { setEditing(true); window.scrollTo({ top: 0 }); }}
-            onOpenJob={openJob}
-            refreshKey={resumeVersion}
-          />
-        )}
+        {data && !showOnboarding && view === "home" && <ExtensionHome installed={extension} completeness={data.completeness} onEdit={() => { setEditing(true); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "settings" && (
           <>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
@@ -434,19 +337,6 @@ export function AppHome({ start = "home" }: { start?: View }) {
           </>
         )}
       </main>
-      {letter && (
-        <CoverLetterModal
-          key={letter.job?.id ?? "new"}
-          jobs={letter.jobs}
-          initialJob={letter.job}
-          highlights={data?.highlights ?? []}
-          highlightsLoading={highlightsLoading}
-          onClose={() => setLetter(null)}
-          onGenerate={writeCoverLetter}
-          onSpent={() => void load()}
-          usesNote={usage?.letters.note ?? ""}
-        />
-      )}
     </div>
   );
 }
@@ -469,5 +359,31 @@ function TrialBanner({ usage, onPlans }: { usage: PlanUsage; onPlans: () => void
       </p>
       <button type="button" onClick={onPlans} className="shrink-0 rounded-xl bg-white px-3.5 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">{usage.trial ? "Keep Pro" : "Get Pro back"}</button>
     </div>
+  );
+}
+
+/**
+ * Home on the site: everything day to day happens in the extension (the tracker, reminders, the people at each
+ * company, follow-ups), so this says where to find it, with the profile it all runs on.
+ */
+function ExtensionHome({ installed, completeness, onEdit }: { installed: boolean | null; completeness: number; onEdit: () => void }) {
+  const card = "rounded-2xl border border-line bg-panel p-5 sm:p-6";
+  return (
+    <section className="flex max-w-3xl flex-col gap-5">
+      <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Unnepo lives in Chrome now</h1>
+      <p className="m-0 text-[15px] leading-[1.6] text-muted">Your applications, reminders, the people to email at each company, and follow-ups are all in the Unnepo extension&apos;s side panel. Click the Unnepo icon in Chrome&apos;s toolbar to open it.</p>
+      <div className={card}>
+        <ul className="m-0 flex list-none flex-col gap-3 p-0 text-sm text-[#B4B4BC]">
+          <li><strong className="text-ink">Home</strong>: what to do today, jobs the extension caught you applying to, and follow-ups that are due.</li>
+          <li><strong className="text-ink">People</strong>: on any applied job, find who to email. Their address opens a ready-to-send email.</li>
+          <li><strong className="text-ink">Dashboard</strong>: every job in one table, opened from the panel.</li>
+        </ul>
+        <div className="mt-5 flex flex-wrap gap-3">
+          <a href="/extension/connect" className="inline-flex items-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">{installed ? "Connect the extension" : "Get the extension"}</a>
+          <button type="button" onClick={onEdit} className="rounded-xl border border-line px-4 py-2 text-sm hover:bg-white/5">Edit my info</button>
+        </div>
+      </div>
+      <p className="m-0 text-xs text-faint">Your profile is {completeness}% ready. The extension applies with it.</p>
+    </section>
   );
 }

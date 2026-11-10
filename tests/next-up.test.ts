@@ -10,12 +10,12 @@ const replied = { outcome: "follow_up", statusHistory: [{ at: "2026-11-04T12:00:
 
 describe("Home's next up sections", () => {
   it("says how many more to apply to, today first, then this week", () => {
-    expect(nextUp([], { now, goal: { today: 1, daily: 3, week: 4, weekly: 10 } }).goals.items[0]).toMatchObject({ title: "Apply to 2 more jobs today", detail: "1 of 3 today · 4 of 10 this week", action: "See suggested jobs" });
+    expect(nextUp([], { now, goal: { today: 1, daily: 3, week: 4, weekly: 10 } }).goals.items[0]).toMatchObject({ title: "Apply to 2 more jobs today", detail: "1 of 3 today · 4 of 10 this week", action: "Find a job" });
     expect(nextUp([], { now, goal: { today: 3, daily: 3, week: 4, weekly: 30 } }).goals.items[0].title).toBe("Apply to 26 more jobs this week");
     expect(nextUp([], { now, goal: { today: 3, daily: 3, week: 10, weekly: 10 } }).goals.items).toEqual([]);
   });
 
-  it("lists companies that replied, then people to follow up with", () => {
+  it("lists jobs marked Follow up, then people to follow up with", () => {
     const next = nextUp([
       app("follow", { fillReport: { emailedAt: { c1: "2026-10-20T12:00:00.000Z" } }, contacts: [{ id: "c1", name: "Maya", outreachStatus: "emailed" }] }),
       app("acme", { fillReport: replied }),
@@ -23,7 +23,7 @@ describe("Home's next up sections", () => {
     ], { now });
     expect(next.follow_ups.replied).toBe(1);
     expect(next.follow_ups.items.map((item) => item.kind)).toEqual(["reply", "follow_up"]);
-    expect(next.follow_ups.items[0]).toMatchObject({ title: "acme replied to your application", detail: "acme role · Acme wants to set up a call.", when: "Today" });
+    expect(next.follow_ups.items[0]).toMatchObject({ title: "Follow up with acme", detail: "acme role · Acme wants to set up a call.", when: "Today" });
     expect(next.follow_ups.items[1].title).toBe("Follow up with Maya");
   });
 
@@ -36,17 +36,5 @@ describe("Home's next up sections", () => {
     ], { now });
     expect(next.applications.items.map((item) => item.key)).toEqual(["finish:started", "update:quiet"]);
     expect(next.applications.items[1].title).toBe("Heard back from quiet?");
-  });
-
-  it("counts emails to review", () => {
-    expect(nextUp([], { now, toReview: 2 }).review).toMatchObject({ count: 2, items: [{ title: "2 emails need a look", action: "Review emails" }] });
-    expect(nextUp([], { now }).review.items).toEqual([]);
-  });
-
-  it("lists each email to review when they're passed in", () => {
-    const review = nextUp([], { now, reviewEmails: [{ id: "e1", company: "Stripe", jobTitle: "Intern", summary: "Next steps" }, { id: "e2" }] }).review;
-    expect(review.count).toBe(2);
-    expect(review.items.map((item) => item.title)).toEqual(["Email from Stripe", "Email about a job"]);
-    expect(review.items[0].detail).toBe("Intern · Next steps");
   });
 });

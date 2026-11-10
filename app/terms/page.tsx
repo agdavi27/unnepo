@@ -46,7 +46,7 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
       <>
         <p>
           Unnepo helps you apply to jobs and follow up: it prepares answers and cover letters, helps fill in application forms, keeps track of your
-          applications, reads job emails you forward or let it read, and finds people at companies you applied to.
+          applications and reminds you to follow up, and finds people at companies you applied to.
         </p>
         <p>
           You stay in charge. You review and submit every application, and you decide whether to contact anyone. Unnepo doesn&apos;t send email on your behalf.
@@ -59,19 +59,9 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     title: "AI-written content",
     body: (
       <p>
-        Unnepo uses AI to write drafts, answers, cover letters, and summaries, and to read emails. AI can be wrong or incomplete. Check everything before you
+        Unnepo uses AI to write drafts, answers, cover letters, and summaries. AI can be wrong or incomplete. Check everything before you
         use it. You&apos;re responsible for what you submit to employers, and it must be truthful: don&apos;t use Unnepo to claim experience, degrees, or
         qualifications you don&apos;t have.
-      </p>
-    ),
-  },
-  {
-    title: "Connected Gmail and forwarded email",
-    body: (
-      <p>
-        If you connect Gmail, you allow Unnepo read-only access so it can find emails about your job applications and update your tracker. Unnepo can&apos;t
-        send, change, or delete your email. You can disconnect at any time in Setup or from your Google account settings. Emails you forward or paste are
-        handled the same way. Our <Link href="/privacy">Privacy Policy</Link> explains exactly what we keep.
       </p>
     ),
   },

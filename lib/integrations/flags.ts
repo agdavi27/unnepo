@@ -17,8 +17,6 @@ export const integrations = {
   outlook: true,
   /** "Continue with Google" on login and signup. Off until Google's redirect setup is sorted out. */
   googleSignIn: false,
-  /** Connect Gmail (read-only) on Setup, instead of forwarding. Off for now: everyone forwards. */
-  gmailConnect: false,
 } as const;
 
 export type IntegrationName = keyof typeof integrations;

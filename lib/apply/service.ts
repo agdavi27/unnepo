@@ -16,9 +16,8 @@ import { applicationContacts, applicationProfiles, applications } from "@/lib/ap
 import { hasUnlimitedCredits, isFree, planState, planUsage } from "@/lib/apply/limits";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
-import { removeEmailTextsFor } from "@/lib/email/store";
 import { profileReady, profileState } from "@/lib/profile/service";
-import { sameCompany } from "@/lib/email/match";
+import { sameCompany } from "@/lib/apply/match";
 import { patternOf } from "@/lib/apply/email-guess";
 import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState, PostedRecruiter } from "@/lib/apply/types";
@@ -450,8 +449,6 @@ export async function repairCompanies(userId: string, apps: JobApplication[]) {
 }
 
 export async function applyState(userId: string) {
-  // Free's held emails that are due go on their jobs first. Imported here, since the email code imports this file.
-  const held = await import("@/lib/email/process").then((email) => email.releaseHeldEmails(userId)).catch(() => ({ waiting: 0, nextAt: null }));
   const [saved, info] = await Promise.all([applications.list(userId).then((apps) => mergeRepeats(userId, apps)), student(userId)]);
   const apps = await repairCompanies(userId, saved);
   // A new resume is read in the background, so blank details fill from it without waiting for an application.
@@ -473,7 +470,6 @@ export async function applyState(userId: string) {
     school: info.context.school,
     // The plan it works as: Pro during the trial.
     plan: usage.plan,
-    heldEmails: held,
     maybe: liveMaybe(info.profile.maybeApplied).map(({ description, ...item }) => (void description, item)),
     session: sessionNow(info.profile.session),
   };
@@ -997,7 +993,6 @@ export async function setOutcome(userId: string, raw: unknown) {
 
 export async function deleteApplication(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  await removeEmailTextsFor(userId, app.id);
   await applications.remove(userId, app.id);
   return { ok: true };
 }

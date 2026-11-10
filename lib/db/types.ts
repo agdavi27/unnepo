@@ -1,4 +1,3 @@
-import type { EmailEvent, EmailInbox, EmailText, GmailConnection } from "@/lib/email/types";
 import type { ApplicationContact, ApplicationProfile, JobApplication } from "@/lib/apply/types";
 export type OutreachStatus =
   | "not_contacted"
@@ -592,10 +591,6 @@ export type Database = {
   jobApplications?: JobApplication[];
   applicationContacts?: ApplicationContact[];
   applicationProfiles?: Array<{ userId: string; data: ApplicationProfile; updatedAt: string }>;
-  emailInboxes?: EmailInbox[];
-  emailEvents?: EmailEvent[];
-  emailTexts?: EmailText[];
-  gmailConnections?: GmailConnection[];
 };
 
 export function emptyDatabase(): Database {

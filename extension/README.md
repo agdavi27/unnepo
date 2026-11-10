@@ -31,9 +31,19 @@ and **See my job dashboard**, **Settings**, credits left and **Upgrade plan** al
   Nothing is pressed or submitted. `src/content/apply-help.ts`.
 - **Autofill is off** (`AUTOFILL_ENABLED` in `src/shared/types.ts`). The code is all still here; set it to true
   to bring back the Autofill button, the quick-answers card and the fill run.
-- **Jobs are never added by themselves.** Writing a cover letter, answering a question or a page saying
-  "thanks for applying" adds nothing to the tracker. Jobs come from forwarded emails, **+ Add a job**,
-  **I already applied** / **Save for later**, or the LinkedIn card.
+- **Jobs only save by themselves when the site confirms it.** A page saying "thanks for applying" on a known job
+  board (or a board's own "applied" mark) saves the job, with Undo. Anything less sure, like pressing Apply,
+  goes into **Detected jobs**, a menu at the top of Home with the last 5 jobs noticed, each with **✓ I applied** /
+  **✗ No**. Settings → Tracking can turn the automatic save off so every job asks. Jobs also come from
+  **+ Add a job**, **I already applied** / **Save for later**, or the LinkedIn card. There is no email tracking.
+- **Home is the tracker.** With no job on the tab, Home shows **Today** (reminders worked out in the extension from
+  the jobs: follow-ups due, unfinished applications, "heard back?", the daily goal; each has **Later** and
+  **Done**), then your jobs. A job opens its own page: status, the posting, and **People at the company**, where
+  Find people searches, Show person reveals one, and a found email address is a link that opens Gmail, Outlook
+  or the mail app with the email filled in (Settings → Tracking picks which). Reminders run every few hours
+  (`chrome.alarms`) and can show one notification a day. `src/shared/tracker-view.ts`, `src/shared/reminders.ts`.
+- **Dashboard** (`src/dashboard/`): a full tab with every job in a table (search, filter, sort, follow-ups due
+  first), the reminders and Detected jobs beside it, and the open job's page with its people.
 - **Applied, an error, or no job:** two big buttons, **Write a cover letter** and **Answer a question**. Each opens
   a popup asking one question at a time. A cover letter asks for the job description when there's no job on the
   tab (left empty, **Write generic one** writes a letter for no job in particular), then how it's built (see `docs/cover-letter-formats.md`), length, tone and what to

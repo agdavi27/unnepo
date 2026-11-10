@@ -120,3 +120,52 @@ export const CONFIRM_TEXT = /(thank(s| you) for (applying|your application|your 
 
 /** What a cover letter and an answer cost, for a server that doesn't say. lib/config.ts can't be bundled here: it reads the server's environment. */
 export const CREDIT_COST_FALLBACK = { letters: 2, answers: 1 };
+
+/** A person at a job's company, as the tracker sends it. */
+export type TrackerContact = {
+  id: string; name: string; title: string; role: "alumni" | "recruiter" | "department" | "poster" | string; email: string | null;
+  emailSource: "apollo" | "hunter" | "job_posting" | "pattern" | "website" | "likely" | "cant_check" | "guess" | null;
+  relevance: string; linkedinUrl: string | null; outreachStatus: "not_contacted" | "emailed" | "replied" | "no_response";
+  emailSubject: string | null; emailBody: string | null;
+};
+
+/** One job in the tracker (lib/extension/service.ts, trackerJob). */
+export type TrackerJob = {
+  id: string; title: string; company: string; status: string; location: string | null; department: string | null;
+  createdAt: string; submittedAt: string | null; updatedAt: string; url: string;
+  companyMissing: boolean; titleMissing: boolean;
+  contactsStatus: "idle" | "finding" | "writing" | "done" | "failed"; contactsMessage: string;
+  confirmation: { confidence: "confirmed" | "likely" } | null;
+  postedRecruiter: { name: string; title: string; email: string | null; linkedinUrl: string | null } | null;
+  fillReport: {
+    outcome: "follow_up" | "assessment" | "interviewing" | "offer" | "rejected" | null;
+    statusHistory?: Array<{ at: string; status: string; source: string; summary: string }>;
+    lastEmailAt?: string; emailedAt?: Record<string, string>; notCounted?: boolean; peopleReveals: number;
+    peopleLinks?: Record<string, Array<{ label: string; url: string }>>;
+    peoplePreview?: { rows: Array<{ role: string; title: string }> };
+  } | null;
+  hidden: string[];
+  contacts: TrackerContact[];
+};
+
+export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boolean; peopleNote: string };
+
+/**
+ * A job the extension caught being applied to, for Home's "Detected jobs" menu (the last 5, newest first).
+ * `sure`: how it knew. `state`: saved by itself, waiting for the student, or answered.
+ */
+export type Detected = {
+  id: string; url: string; title: string; company: string; site: string; at: number;
+  description?: string; poster?: { name: string; title: string; profileUrl: string };
+  sure: "confirmed" | "likely" | "pressed";
+  state: "saved" | "ask" | "yes" | "no" | "undone";
+  applicationId?: string; error?: string;
+};
+
+/** Where an email link opens: Gmail, Outlook on the web, or the computer's own mail app. */
+export type Mailer = "gmail" | "outlook" | "mailto";
+
+/** What the student did with a reminder: snoozed until a time, or done. Kept on this computer. */
+export type ReminderMarks = Record<string, { until?: number; done?: boolean }>;
+/** Email links the student opened and when, so Home can ask whether they sent it. */
+export type OpenedEmails = Record<string, { at: number; applicationId: string; name: string; company: string; followUp: boolean }>;

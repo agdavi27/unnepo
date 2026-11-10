@@ -3,16 +3,15 @@ import { isApplied, stageOf } from "@/lib/apply/stats";
 import type { ApplicationContact, JobApplication } from "@/lib/apply/types";
 
 /**
- * Home's "Next up", in four sections:
+ * The extension's reminders on Home, in three sections:
  * - goals: how many more to apply to for today's (and this week's) goal;
- * - follow_ups: companies that wrote back (Follow up), and people whose follow-up email is due;
- * - applications: applications left unfinished, and applied ones quiet long enough to ask how they went;
- * - review: emails Unnepo couldn't place on a job, one row each when they're passed in.
- * No server imports, so the web app runs it.
+ * - follow_ups: jobs the student marked Follow up, and people whose follow-up email is due;
+ * - applications: applications left unfinished, and applied ones quiet long enough to ask how they went.
+ * No server imports, so the extension bundles it and works it out in the student's own time.
  */
 
-export type NextKind = "goal" | "reply" | "follow_up" | "finish" | "update" | "review";
-export type NextSection = "goals" | "follow_ups" | "applications" | "review";
+export type NextKind = "goal" | "reply" | "follow_up" | "finish" | "update";
+export type NextSection = "goals" | "follow_ups" | "applications";
 
 export type NextItem = {
   key: string;
@@ -54,13 +53,10 @@ export type NextUp = {
   goals: { today: number; daily: number; week: number; weekly: number; items: NextItem[] };
   follow_ups: { replied: number; count: number; items: NextItem[] };
   applications: { count: number; items: NextItem[] };
-  review: { count: number; items: NextItem[] };
 };
 
-/** An email in the Review Inbox, as /api/email/state lists it. */
-export type ReviewEmail = { id: string; at?: string | null; company?: string | null; jobTitle?: string | null; summary?: string | null };
-
-export function nextUp(apps: NextApp[], options: { toReview?: number; reviewEmails?: ReviewEmail[]; now?: Date; goal?: { today: number; daily: number; week?: number; weekly?: number } } = {}): NextUp {
+export function nextUp(apps: NextApp[], options: { now?: Date; goal?: { today: number; daily: number; week?: number; weekly?: number }; shown?: number } = {}): NextUp {
+  const shown = options.shown ?? SHOWN;
   const now = options.now ?? new Date();
   const role = (app: NextApp) => (app.titleMissing ? "" : app.title);
   const named = apps.filter((app) => !app.companyMissing);
@@ -76,11 +72,11 @@ export function nextUp(apps: NextApp[], options: { toReview?: number; reviewEmai
       key: `goal:${goal.today}:${goal.week}`, kind: "goal",
       title: `Apply to ${left} more ${left === 1 ? "job" : "jobs"}${leftToday ? " today" : " this week"}`,
       detail: [goal.daily ? `${goal.today} of ${goal.daily} today` : "", goal.weekly ? `${goal.week} of ${goal.weekly} this week` : ""].filter(Boolean).join(" · "),
-      when: `${left} to go`, action: "See suggested jobs",
+      when: `${left} to go`, action: "Find a job",
     });
   }
 
-  // Follow ups: companies that wrote back, newest first, then people to nudge.
+  // Follow ups: jobs marked Follow up, newest first, then people to nudge.
   const replied = named
     .filter((app) => stageOf(app) === "follow_up")
     .map((app) => {
@@ -90,13 +86,13 @@ export function nextUp(apps: NextApp[], options: { toReview?: number; reviewEmai
     .sort((a, b) => b.at - a.at);
   const followItems: NextItem[] = replied.map(({ app, at, summary }) => ({
     key: `reply:${app.id}`, kind: "reply", applicationId: app.id,
-    title: `${app.company} replied to your application`,
-    detail: [role(app), summary].filter(Boolean).join(" · "), when: dayWords(at, now), action: "Read email",
+    title: `Follow up with ${app.company}`,
+    detail: [role(app), summary].filter(Boolean).join(" · "), when: dayWords(at, now), action: "Open job",
   }));
   for (const due of followUpsDue(named, now)) {
     followItems.push({
       key: `follow:${due.contactId}`, kind: "follow_up", applicationId: due.applicationId, contactId: due.contactId,
-      title: `Follow up with ${due.name}`, detail: `${due.company} · emailed ${due.days} business days ago`, when: `${due.days} business days`, action: "Write email",
+      title: `Follow up with ${due.name}`, detail: `${due.company} · emailed ${due.days} business days ago`, when: `${due.days} business days`, action: "Write follow-up",
     });
   }
 
@@ -121,22 +117,9 @@ export function nextUp(apps: NextApp[], options: { toReview?: number; reviewEmai
     });
   }
 
-  const emails = options.reviewEmails;
-  const toReview = emails ? emails.length : options.toReview ?? 0;
-  const reviewItems: NextItem[] = emails ? emails.slice(0, SHOWN).map((email) => ({
-    key: `review:${email.id}`, kind: "review" as const,
-    title: email.company ? `Email from ${email.company}` : "Email about a job",
-    detail: [email.jobTitle, email.summary].filter(Boolean).join(" · ") || "Unnepo wasn't sure which job it belongs to",
-    when: email.at ? dayWords(Date.parse(email.at), now) : "", action: "Review",
-  })) : toReview > 0 ? [{
-    key: "review", kind: "review", title: toReview === 1 ? "1 email needs a look" : `${toReview} emails need a look`,
-    detail: "Unnepo wasn't sure which job they belong to. Your tracker is off until you place them", when: "To review", action: "Review emails",
-  }] : [];
-
   return {
     goals: { ...goal, items: goalItems },
-    follow_ups: { replied: replied.length, count: followItems.length, items: followItems.slice(0, SHOWN) },
-    applications: { count: appItems.length, items: appItems.slice(0, SHOWN) },
-    review: { count: toReview, items: reviewItems },
+    follow_ups: { replied: replied.length, count: followItems.length, items: followItems.slice(0, shown) },
+    applications: { count: appItems.length, items: appItems.slice(0, shown) },
   };
 }

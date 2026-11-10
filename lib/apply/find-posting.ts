@@ -6,8 +6,7 @@ import { safeGetJson } from "@/lib/apply/safe-fetch";
 import { companyMissing, runLater, summary, titleMissing } from "@/lib/apply/service";
 import { applications } from "@/lib/apply/store";
 import type { JobApplication, PostingChoice } from "@/lib/apply/types";
-import { emailEvents } from "@/lib/email/store";
-import { normalizeCompany, sameCompany, sameTitle } from "@/lib/email/match";
+import { normalizeCompany, sameCompany, sameTitle } from "@/lib/apply/match";
 import { ServiceError } from "@/lib/errors";
 import { rateLimit } from "@/lib/http";
 
@@ -232,18 +231,12 @@ export function findPostingLater(userId: string, applicationId: string, hints: H
   }
 }
 
-/** "Find the posting" on a job: uses what its emails said too. */
+/** "Find the posting" on a job, from its title and links. */
 export async function findPostingNow(userId: string, raw: unknown) {
   const applicationId = String((raw as { applicationId?: unknown } | null)?.applicationId ?? "");
   const app = await applications.get(userId, applicationId);
   if (!app) throw new ServiceError("That job isn't on your list any more.", "not_found", 404);
-  const events = await emailEvents.forApplication(userId, app.id).catch(() => []);
-  const hints: Hints = {
-    title: events.find((event) => event.jobTitle)?.jobTitle ?? null,
-    location: events.find((event) => event.location)?.location ?? null,
-    jobNumber: events.find((event) => event.jobNumber)?.jobNumber ?? null,
-    links: [...new Set(events.flatMap((event) => event.jobLinks ?? []))],
-  };
+  const hints: Hints = { title: app.title || null, location: app.location ?? null, jobNumber: null, links: [] };
   const result = await findPosting(userId, app.id, hints, { web: true });
   return { ...result, application: await listed(userId, app.id) };
 }

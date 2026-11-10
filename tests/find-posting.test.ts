@@ -1,14 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { addJobByHand, setDeferForTests, summary, titleMissing, updateJobDetails, deleteApplication, jobDescription } from "@/lib/apply/service";
-import { choosePosting, findPosting, findPostingNow, postingsFor, setPostingSearcherForTests } from "@/lib/apply/find-posting";
+import { addJobByHand, setDeferForTests, summary, titleMissing, updateJobDetails, jobDescription } from "@/lib/apply/service";
+import { choosePosting, findPosting, postingsFor, setPostingSearcherForTests } from "@/lib/apply/find-posting";
 import { setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { applications } from "@/lib/apply/store";
-import { setClassifierForTests } from "@/lib/email/classify";
-import { fromPostmark } from "@/lib/email/inbound";
-import { jobLinksIn } from "@/lib/email/links";
-import { processEmail, reviewEmail } from "@/lib/email/process";
-import { emailsForJob } from "@/lib/email/service";
-import { emailEvents, emailTexts, removeEmailData } from "@/lib/email/store";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { useTempDb } from "./helpers";
 
@@ -57,7 +51,6 @@ afterEach(() => {
   setDeferForTests(null);
   setJobPageFetcherForTests(null);
   setPostingSearcherForTests(null);
-  setClassifierForTests(null);
 });
 
 describe("job details", () => {
@@ -76,36 +69,6 @@ describe("job details", () => {
     expect(summary(saved!)).toMatchObject({ descriptionCut: true });
     expect(summary(saved!).description.length).toBe(4000);
     expect((await jobDescription(userId, app.id)).description).toBe(long);
-  });
-});
-
-describe("links in emails", () => {
-  it("keeps posting links and leaves out anything that could do something when opened", () => {
-    const html = `
-      <a href="https://job-boards.greenhouse.io/acme/jobs/123">The job</a>
-      <a href="https://jobs.lever.co/acme/abc-def">Another</a>
-      <a href="https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Analyst_R-1">Workday</a>
-      <a href="https://acme.com/careers/jobs/4471">On their site</a>
-      <a href="https://acme.com/careers/jobs/4471/withdraw">Withdraw</a>
-      <a href="https://acme.com/careers/jobs/4472?token=abc">Your application</a>
-      <a href="https://u123.ct.sendgrid.net/ls/click?upn=xyz">Tracked</a>
-      <a href="https://click.acme.com/careers/jobs/1">Also tracked</a>
-      <a href="https://acme.com/unsubscribe">Unsubscribe</a>
-      <a href="https://www.linkedin.com/jobs/view/123">LinkedIn</a>
-      <a href="http://acme.com/careers/jobs/1">Not secure</a>`;
-    expect(jobLinksIn({ html, text: "See https://jobs.ashbyhq.com/acme/9f8e7d." }).sort()).toEqual([
-      "https://acme.com/careers/jobs/4471",
-      "https://acme.wd5.myworkdayjobs.com/en-US/Careers/job/Boston/Analyst_R-1",
-      "https://job-boards.greenhouse.io/acme/jobs/123",
-      "https://jobs.ashbyhq.com/acme/9f8e7d",
-      "https://jobs.lever.co/acme/abc-def",
-    ].sort());
-  });
-
-  it("reads the HTML when the plain text only says to view it in a browser", () => {
-    const body = { Subject: "Thanks", TextBody: "View in browser", HtmlBody: "<p>Thank you for applying to the Data Intern role at Acme. We have your application and will review it soon, and a recruiter will reach out if your experience fits.</p>" };
-    expect(fromPostmark(body).email.text).toContain("Data Intern role");
-    expect(fromPostmark({ ...body, TextBody: "x".repeat(300) }).email.text).toBe("x".repeat(300));
   });
 });
 
@@ -194,72 +157,5 @@ describe("finding a posting", () => {
     const app = await emailJob(userId, "Data Intern", "Acme");
     expect(await findPosting(userId, app.id, {}, { web: true })).toMatchObject({ found: false });
     expect((await applications.get(userId, app.id))!.fillReport?.postingUrl).toBeUndefined();
-  });
-});
-
-describe("emails saved on a job", () => {
-  // On the Pro trial, so emails go on their jobs right away.
-  beforeEach(() => { process.env.TRIAL_DAYS = "7"; });
-  const confirmation = { messageId: "<one@x>", from: "AlphaSights <no-reply@greenhouse.io>", subject: "Thank you for applying", text: "Thank you for applying to the Data Intern role at AlphaSights. Secret detail in the body.", html: '<a href="https://acme.com/unsubscribe">Unsubscribe</a>' };
-  const reply = '{"type":"applied","company":"AlphaSights","job_title":"Data Intern","location":"London","job_number":"R-77","confidence":0.95,"summary":"AlphaSights confirmed your application."}';
-
-  it("saves the email encrypted and shows it on its job, with what it said about the job", async () => {
-    let later: Array<() => Promise<void>> = [];
-    setDeferForTests((task) => { later.push(task); });
-    fakeSites();
-    setClassifierForTests(async () => reply);
-    const userId = await student();
-    const result = await processEmail(userId, confirmation, "forward");
-    const id = result.applicationId!;
-    expect((await applications.get(userId, id))!.location).toBe("London");
-    for (const task of later) await task();
-    later = [];
-    const saved = await applications.get(userId, id);
-    expect(saved!.fillReport?.jobNumber).toBe("R-77");
-    expect(saved!.fillReport?.postingUrl).toContain("gh_jid=4");
-    const { emails } = await emailsForJob(userId, id);
-    expect(emails).toHaveLength(1);
-    expect(emails[0]).toMatchObject({ subject: "Thank you for applying", from: confirmation.from });
-    expect(emails[0].text).toContain("Secret detail");
-    const { withLock } = await import("@/lib/db/file-store");
-    const raw = await withLock((db) => JSON.stringify(db.emailTexts));
-    expect(raw).not.toContain("Secret detail");
-  });
-
-  it("keeps nothing from an email that isn't about a job", async () => {
-    setClassifierForTests(async () => '{"type":"not_job_related","company":"","job_title":null,"confidence":0.95,"summary":"A newsletter."}');
-    const userId = await student();
-    const result = await processEmail(userId, { messageId: "<n@x>", from: "News <n@x.com>", subject: "Your application for our newsletter", text: "Thank you for applying to our newsletter." }, "forward");
-    expect(result.outcome).toBe("ignored");
-    expect(await emailTexts.read(userId, [result.event!.id])).toEqual(new Map());
-  });
-
-  it("removes a dismissed email's text, a deleted job's emails, and everything when an account goes", async () => {
-    setClassifierForTests(async (email) => (email.messageId === "<unsure@x>" ? '{"type":"applied","company":"Globex","job_title":null,"confidence":0.3,"summary":"Unclear."}' : reply));
-    const userId = await student();
-    const unsure = await processEmail(userId, { ...confirmation, messageId: "<unsure@x>" }, "forward");
-    expect((await emailTexts.read(userId, [unsure.event!.id])).size).toBe(1);
-    await reviewEmail(userId, { eventId: unsure.event!.id, action: "dismiss" });
-    expect((await emailTexts.read(userId, [unsure.event!.id])).size).toBe(0);
-
-    const kept = await processEmail(userId, confirmation, "forward");
-    expect((await emailTexts.read(userId, [kept.event!.id])).size).toBe(1);
-    await deleteApplication(userId, { applicationId: kept.applicationId });
-    expect((await emailTexts.read(userId, [kept.event!.id])).size).toBe(0);
-
-    const again = await processEmail(userId, { ...confirmation, messageId: "<two@x>" }, "forward");
-    await removeEmailData(userId);
-    expect((await emailTexts.read(userId, [again.event!.id])).size).toBe(0);
-    expect(await emailEvents.list(userId)).toEqual([]);
-  });
-
-  it("Find the posting uses what the job's emails said", async () => {
-    fakeSites();
-    setClassifierForTests(async () => '{"type":"applied","company":"AlphaSights","job_title":null,"confidence":0.95,"summary":"AlphaSights confirmed your application."}');
-    const userId = await student();
-    const result = await processEmail(userId, confirmation, "forward");
-    const first = await findPostingNow(userId, { applicationId: result.applicationId });
-    expect(first).toMatchObject({ found: false, choices: 4 });
-    expect(first.application?.titleMissing).toBe(true);
   });
 });

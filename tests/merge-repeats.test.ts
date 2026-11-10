@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { mergeRepeats, repeatGroups, sameJob } from "@/lib/apply/merge-repeats";
 import { applicationContacts, applications } from "@/lib/apply/store";
 import type { JobApplication } from "@/lib/apply/types";
-import { emailEvents } from "@/lib/email/store";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { useTempDb } from "./helpers";
 
@@ -43,14 +42,13 @@ describe("finding repeat jobs", () => {
 describe("combining repeat jobs", () => {
   beforeEach(() => { useTempDb(); });
 
-  it("keeps one job with everything both knew, and its people and emails", async () => {
+  it("keeps one job with everything both knew, and its people", async () => {
     const userId = await student();
     const base = { userId, ats: "other" as const, companyDomain: null, department: null, requirements: [], postedRecruiter: null, statusMessage: "", questions: [], browserSessionId: null, confirmation: null, contactsMessage: "", charged: true, attempts: 0, title: "Data Intern", company: "Acme" };
     const report = { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
     const first = (await applications.insert({ ...base, jobKey: "url:one", jobUrl: "https://unnepo.local/manual/1", applicationUrl: null, location: null, description: "Short.", status: "applied_manual", submittedAt: "2026-11-03T00:00:00Z", contactsStatus: "idle", fillReport: { ...report, notes: "My note", statusHistory: [{ at: "2026-11-03T00:00:00Z", status: "applied", source: "you", summary: "" }] } })).app;
     const second = (await applications.insert({ ...base, company: "Acme, Inc.", jobKey: "url:two", jobUrl: "https://careers.acme.example/9", applicationUrl: "https://careers.acme.example/9", location: "Boston", description: "A much longer description of the job.", status: "submitted", submittedAt: "2026-11-01T00:00:00Z", contactsStatus: "done", fillReport: { ...report, outcome: "interviewing", notes: "From the site", autofillCounted: true, statusHistory: [{ at: "2026-11-04T00:00:00Z", status: "interviewing", source: "email", summary: "" }] } })).app;
     await applicationContacts.replace(userId, second.id, [{ userId, applicationId: second.id, rank: 1, role: "recruiter", name: "Sam Lee", title: "Recruiter", email: "sam@acme.example", emailSource: "apollo", relevance: "", linkedinUrl: null, photoUrl: null, outreachStatus: "emailed", emailSubject: "Hello", emailBody: "Hi Sam" }]);
-    const event = await emailEvents.add({ userId, key: "k1", applicationId: second.id, kind: "interview", outcome: "updated" } as never);
 
     const merged = await mergeRepeats(userId, await applications.list(userId));
     expect(merged).toHaveLength(1);
@@ -59,7 +57,6 @@ describe("combining repeat jobs", () => {
     expect(kept).toMatchObject({ id: first.id, status: "submitted", submittedAt: "2026-11-01T00:00:00Z", jobUrl: "https://careers.acme.example/9", location: "Boston", description: "A much longer description of the job." });
     expect(kept.fillReport).toMatchObject({ outcome: "interviewing", notes: "My note\n\nFrom the site", autofillCounted: true });
     expect(kept.fillReport?.statusHistory?.map((change) => change.status)).toEqual(["applied", "interviewing"]);
-    if (event) expect((await emailEvents.forApplication(userId, first.id)).map((item) => item.id)).toContain(event.id);
     expect((await applicationContacts.list(userId, [first.id])).map((person) => person.name)).toEqual(["Sam Lee"]);
     // Run again: nothing left to do.
     expect(await mergeRepeats(userId, await applications.list(userId))).toHaveLength(1);

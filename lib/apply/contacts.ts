@@ -5,9 +5,7 @@ import { contactFetch } from "@/lib/providers/contacts/http";
 import { ServiceError } from "@/lib/errors";
 import { safeGet } from "@/lib/apply/safe-fetch";
 import { HUNTER_CENTS, buildEmail, checkerReady, guessEmail, hunterCheck, hunterCount, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, siteEmails, type EmailFormat, type KnownEmail } from "@/lib/apply/email-guess";
-import { ATS_DOMAINS } from "@/lib/email/filter";
-import { emailEvents } from "@/lib/email/store";
-import { sameCompany } from "@/lib/email/match";
+import { sameCompany } from "@/lib/apply/match";
 import { peopleFromWeb } from "@/lib/apply/people-web";
 import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, searchCompanies, searchPeopleQuery, spentTodayCents } from "@/lib/providers/contacts/router";
 import { COMPANY_DOMAINS, RECRUITER_TITLES, type ApolloPeopleQuery } from "@/lib/providers/contacts/apollo";
@@ -195,12 +193,6 @@ async function companyDomains(userId: string, app: JobApplication) {
   };
   add(app.companyDomain);
   add(siteDomain(app.applicationUrl) ?? siteDomain(app.jobUrl));
-  // Who the company's own emails come from, when the address fits its name.
-  const skip = new RegExp(`(^|\\.)(${ATS_DOMAINS.map((item) => item.replace(/\./g, "\\.")).join("|")})$`, "i");
-  for (const event of app.id ? await emailEvents.forApplication(userId, app.id).catch(() => []) : []) {
-    const own = siteDomain(`https://${event.fromDomain}`);
-    if (own && !skip.test(event.fromDomain) && domainFits(own, app.company)) add(own);
-  }
   const names = companyNames(app);
   const cached = await repo.getCompanyDomains(names);
   for (const name of names) for (const domain of [...(COMPANY_DOMAINS[name.toLowerCase()] ?? []), ...(cached[name.toLowerCase()] ?? [])]) add(domain);

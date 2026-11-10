@@ -384,7 +384,7 @@ export async function generateWorkspaceCoverLetter(userId: string, raw: unknown)
   await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
   await repo.insertGeneration({ id: id(), userId, purpose: "cover_letter", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
   await countCoverLetter(userId);
-  // Writing a letter never adds the job: jobs come only from forwarded emails or the student adding one.
+  // Writing a letter never adds the job: jobs come only from the extension or the student adding one.
   return { body: letter.slice(0, 8000), addedToApplied: false };
 }
 

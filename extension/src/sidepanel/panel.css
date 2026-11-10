@@ -268,3 +268,51 @@ details.part .view { padding: 12px 0 0; }
 .q-label-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 .req { color: var(--warn); }
 .q-answer .letter-form { margin-top: 6px; }
+
+/* Home: the Detected jobs menu (closed by default; the last 5 jobs caught being applied to) */
+.detected-menu { border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); }
+.detected-menu > summary { list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px 16px; cursor: pointer; font-size: 14px; font-weight: 600; }
+.detected-menu > summary::-webkit-details-marker { display: none; }
+.detected-menu > summary::after { content: "▾"; color: var(--muted); font-size: 12px; margin-left: 6px; transition: transform .15s; }
+.detected-menu[open] > summary::after { transform: rotate(180deg); }
+.detected-menu > summary > span:first-child { flex: 1; }
+.detected-menu .count { display: inline-block; min-width: 20px; margin-left: 6px; padding: 1px 6px; border-radius: 999px; background: var(--warn); color: #000; font: 600 11px var(--mono); text-align: center; }
+.detected-menu > .note { padding: 0 16px 14px; }
+.detected-list { list-style: none; margin: 0; padding: 0 16px 6px; }
+.detected { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.detected.answered { opacity: .55; }
+.detected-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.detected-title { all: unset; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+button.detected-title { cursor: pointer; }
+button.detected-title:hover { text-decoration: underline; text-underline-offset: 4px; }
+.detected-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.detected-actions .solid { height: 32px; padding: 0 12px; }
+.detected-actions .quiet-link { min-height: 32px; }
+
+/* Home: today's reminders */
+.reminders { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.reminder { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.reminder:first-child { border-top: 0; padding-top: 0; }
+.reminder-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.reminder-title { font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.reminder-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.reminder-actions .solid { height: 32px; padding: 0 12px; }
+.reminder-actions .quiet-link { min-height: 32px; }
+
+/* A job's page: the People card */
+.job-view select.field { height: 40px; }
+.people-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.person { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line-2); border-radius: 12px; min-width: 0; }
+.person.first { border-color: var(--accent); }
+.person-name { font-weight: 600; overflow-wrap: anywhere; }
+.person .role { margin-left: 4px; padding: 1px 6px; border: 1px solid var(--control); border-radius: 999px; font: 10px var(--mono); color: var(--muted-3); vertical-align: middle; }
+.person .start-here { color: var(--accent); font-weight: 600; }
+.person-line { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.email-link { all: unset; color: var(--accent); font-size: 14px; cursor: pointer; overflow-wrap: anywhere; text-decoration: underline; text-underline-offset: 4px; }
+.email-link:hover { color: var(--fg); }
+.email-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+button.email-link:disabled { color: var(--muted); cursor: default; text-decoration: none; }
+.sent-check { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px; border: 1px dashed var(--accent); border-radius: 10px; }
+.sent-check .solid { height: 32px; padding: 0 12px; }
+.person .links .quiet-link { min-height: 32px; }
+button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: pointer; }

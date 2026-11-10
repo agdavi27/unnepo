@@ -2,7 +2,9 @@ import type { SpiderLook } from "@/lib/spiders";
 import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
-import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, NEVER_READ, type Issue, type JobDetails, type PanelState } from "../shared/types";
+import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, NEVER_READ, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
+import { detectedMenu, ensureTracker, jobById, jobPage, loadTracker, recentJobs, refreshDetected, remindersCard, setHost, store, todayList, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
+import { dueCount } from "../shared/reminders";
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
@@ -18,8 +20,12 @@ const creditsLeft = document.getElementById("credits-left")!;
 const upgrade = document.getElementById("upgrade") as HTMLAnchorElement;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-type View = "home" | "more" | "feedback" | "settings";
+type View = "home" | "more" | "feedback" | "settings" | "job";
 let view: View = "home";
+/** The job open on the "job" page, and the person to show on it. */
+let openedJob = { id: "", contact: "" };
+/** The extension's own dashboard: every job in one table. */
+const DASHBOARD_URL = chrome.runtime.getURL("dashboard/dashboard.html");
 /** The cover letter or answer popup, and which of its questions is showing. */
 let popup: { kind: "cover" | "answer"; step: number } | null = null;
 
@@ -126,9 +132,12 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
   const { job, page, me } = state;
   if (job?.error) return { lines: [job.error], alert: true };
   if (job?.step && (job.running || job.submission || job.report)) return { lines: [job.step] };
-  if (!me!.profileReady) return { lines: ["Finish your profile on Unnepo first, so I have something to fill with."] };
+  if (!me!.profileReady) return { lines: [me!.resume ? "Almost there. Finish your profile and I'm ready." : "Hi! Upload your resume and I'll set up your profile."] };
   if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Applied with Easy Apply? Add it below.", goalLine(state)] };
-  if (!jobFound(state) || !page) return { lines: [goalLine(state), "Open an application, I'll wait.", "Need a cover letter? Tap Write a cover letter."] };
+  if (!jobFound(state) || !page) {
+    const due = store.tracker ? dueCount(todayList().items) : 0;
+    return { lines: [goalLine(state), due ? `${due} ${due === 1 ? "thing" : "things"} on your list today.` : "Open an application, I'll wait.", "Need a cover letter? Tap Write a cover letter."] };
+  }
   const found = `${page.company || page.site} job found.${page.title ? ` ${short(page.title)}.` : ""}`;
   if (!AUTOFILL_ENABLED) {
     const applying = state.applying;
@@ -215,8 +224,40 @@ const usesLine = (note?: string) => (note ? `<span class="small uses-left" role=
 let fillPending: number | null = null;
 const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPending !== null && fillPending === state.tab?.id);
 
+/**
+ * Home with no job on the tab: today's reminders, the newest jobs (each opens its page, with the people at the
+ * company), adding one by hand, and the dashboard.
+ */
+function homeLists(state: PanelState) {
+  return `${startCard(state)}${remindersCard()}
+    <section class="page" aria-label="Your jobs">
+      <div class="row-between"><span class="eyebrow">Your jobs</span>${store.tracker ? `<span class="mono">${store.tracker.jobs.length} IN ALL</span>` : ""}</div>
+      ${recentJobs()}
+      ${manualJobForm()}
+      <a class="btn" href="${escape(DASHBOARD_URL)}" target="_blank" rel="noreferrer">Open my dashboard</a>
+    </section>`;
+}
+
+/**
+ * First run, until the profile is ready: the resume goes in right here (Unnepo builds the profile from it), and
+ * the rest of the profile is a link to the site.
+ */
+function startCard(state: PanelState) {
+  const me = state.me;
+  if (!me || me.profileReady) return "";
+  return `
+    <section class="page" aria-label="Get started">
+      <span class="eyebrow">Get started · ${me.completeness}% ready</span>
+      <div class="bar" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}"><div style="width:${me.completeness}%"></div></div>
+      <p class="note">${me.resume ? "Your resume is in. A few details are still missing" : "Start with your resume: Unnepo fills in your profile from it"}${me.missing?.length ? `: ${escape(me.missing.join(", "))}.` : "."}</p>
+      ${me.resume ? "" : `<button type="button" class="btn primary" id="start-resume" ${resumeBusy ? "disabled" : ""}>${resumeBusy ? "Reading your resume…" : "Upload my resume"}</button>`}
+      <a class="btn" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">Finish my profile</a>
+      ${resumeNote ? `<p class="small" role="status">${escape(resumeNote)}</p>` : ""}
+    </section>`;
+}
+
 /** The page for a job on this tab: its name, Autofill, and the two ways of saying no. */
-function jobPage(state: PanelState) {
+function jobFillPage(state: PanelState) {
   const { job, page, tab, me } = state;
   let host = "";
   try { host = tab ? new URL(tab.url).hostname.replace(/^www\./, "") : ""; } catch { host = ""; }
@@ -488,12 +529,15 @@ const hereLinks = () => {
 /** The page for the tab: what's happening decides it. */
 function homeView(state: PanelState) {
   if (isRunning(state)) return fillingView();
-  if (onLinkedIn(state)) return linkedInCard(state) + toolsPage(state);
+  ensureTracker();
+  const menu = detectedMenu();
+  if (onLinkedIn(state)) return menu + linkedInCard(state) + toolsPage(state);
   const card = openedCard(state);
-  if (state.job?.submission || state.job?.error) return card + toolsPage(state);
-  if (card) return here.step === "check" ? card : card + toolsPage(state);
-  if (AUTOFILL_ENABLED && jobFound(state)) return jobPage(state);
-  if (!AUTOFILL_ENABLED) return jobBox(state) + toolsPage(state, `${jobFound(state) && !state.applying ? hereLinks() : ""}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`);
+  if (state.job?.submission || state.job?.error) return menu + card + toolsPage(state);
+  if (card) return here.step === "check" ? card : menu + card + toolsPage(state);
+  if (AUTOFILL_ENABLED && jobFound(state)) return jobFillPage(state);
+  // A job on the tab: its box on top. None: Home, with what's due today and the newest jobs.
+  if (!AUTOFILL_ENABLED) return menu + (jobFound(state) || state.applying ? jobBox(state) : homeLists(state)) + toolsPage(state, `${jobFound(state) && !state.applying ? hereLinks() : ""}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}`);
   const how = dismissal(state);
   const onWeb = Boolean(state.tab && /^https:\/\//.test(state.tab.url)) && !onUnnepo(state);
   return `${how ? `<div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>` : ""}
@@ -502,17 +546,28 @@ function homeView(state: PanelState) {
 
 const back = () => `<button type="button" class="back" data-go="${view === "feedback" ? "settings" : "home"}"><span aria-hidden="true">‹</span> Back</button>`;
 
+/** A job's own page: its status, its link, and the people at the company with their emails. */
+function jobView() {
+  ensureTracker();
+  const job = jobById(openedJob.id);
+  if (!job) return store.tracker ? `<p class="note">That job isn't in your tracker any more.</p>` : `<p class="note">Loading the job…</p>`;
+  return jobPage(job, openedJob.contact || undefined);
+}
+
 /** A page that was asked for. */
 function pageView(state: PanelState) {
   const heading = (text: string) => `<div class="row-between"><span class="heading">${text}</span></div>`;
   const pages: Record<Exclude<View, "home">, () => string> = {
+    job: jobView,
     more: () => toolsPage(state, jobFound(state) ? hereLinks() : ""),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     settings: () => `${profileCard(state)}
       <div class="rule"></div>
       ${settingsView(state)}
       <div class="rule"></div>
-      ${part("jobs", "My jobs", () => jobsView(state))}
+      ${trackingSettings()}
+      <div class="rule"></div>
+      ${part("jobs", "My jobs", () => jobsView())}
       ${part("activity", "Activity", () => activityCard())}
       <button type="button" class="feedback-link" data-go="feedback">Feedback</button>
       <div class="rule"></div>
@@ -595,6 +650,7 @@ function wireLinkedIn(tabId: number) {
       .catch((): Tracked => ({ ok: false, error: "Couldn't reach Unnepo." }));
     linkedInJob.saving = false;
     linkedInJob.note = result.ok ? `Added: ${result.title} at ${result.company}. It's in your Applied jobs.` : result.error ?? "Couldn't add it.";
+    if (result.ok) void loadTracker(true);
     if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
     void render();
   });
@@ -704,7 +760,7 @@ function openedCard(state: PanelState) {
   const key = state.tab ? `${state.tab.id}|${state.tab.url}` : "";
   if (here.key !== key && here.step !== "saving") Object.assign(here, { key, step: "idle", job: null, note: "" });
   if (here.step === "saved") {
-    return `<section class="page" aria-label="Saved"><p class="note ok" role="status">${escape(here.note)}</p>${here.savedUrl ? `<div class="links"><a class="link" href="${escape(here.savedUrl)}" target="_blank" rel="noreferrer">See it in Applied jobs ↗</a></div>` : ""}</section>`;
+    return `<section class="page" aria-label="Saved"><p class="note ok" role="status">${escape(here.note)}</p>${here.savedUrl ? `<div class="links"><button type="button" class="link" data-open-saved="${escape(here.savedUrl)}">See it and the people there</button></div>` : ""}</section>`;
   }
   if (!state.tab || !/^https:\/\//.test(state.tab.url) || onLinkedIn(state) || onUnnepo(state) || state.job?.running || state.job?.submission) return "";
   if (here.step === "check" || (here.step === "saving" && !here.auto)) {
@@ -759,7 +815,8 @@ function wireOpened(state: PanelState) {
     type Saved = { ok: boolean; error?: string; title?: string; company?: string; id?: string; companyMissing?: boolean };
     const result = await ask<Saved>({ type: "save-opened-job", tabId, applied: here.applied, job: here.job }).catch((): Saved => ({ ok: false, error: "Couldn't reach Unnepo." }));
     const named = result.companyMissing ? (result.title ?? "The job") : `${result.title} at ${result.company}`;
-    if (result.ok) Object.assign(here, { step: "saved", savedUrl: result.id ? `${state.apiBase}/home?job=${encodeURIComponent(result.id)}` : "", note: `✓ Success! ${named} ${here.applied ? "is added to your Applied jobs" : "is saved for later"}.${result.companyMissing ? " Unnepo is finding the company from the job's link." : ""}` });
+    if (result.ok) void loadTracker(true);
+    if (result.ok) Object.assign(here, { step: "saved", savedUrl: result.id ?? "", note: `✓ Success! ${named} ${here.applied ? "is added to your Applied jobs" : "is saved for later"}.${result.companyMissing ? " Unnepo is finding the company from the job's link." : ""}` });
     else Object.assign(here, { step: "check", note: result.error ?? "Couldn't save it." });
     void render();
   };
@@ -1432,13 +1489,14 @@ function wireManualJob(state: PanelState) {
       manualJob.open = false;
       manualJob.key = "";
       jobsList = null;
+      void loadTracker(true);
     } else manualJob.note = result.error ?? "Couldn't add it.";
     if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
     void render();
   });
 }
 
-function jobsView(state: PanelState) {
+function jobsView() {
   if (!jobsList || Date.now() - jobsList.loadedAt > 30_000) void loadJobs();
   const rows = jobsList?.rows ?? [];
   const body = !jobsList
@@ -1446,20 +1504,57 @@ function jobsView(state: PanelState) {
     : jobsList.error
       ? `<p class="note error">${escape(jobsList.error)}</p>`
       : !rows.length
-        ? `<p class="note">No jobs yet. Forward job emails to Unnepo, or add one above.</p>`
+        ? `<p class="note">No jobs yet. Apply somewhere and the extension catches it, or add one above.</p>`
         : `<ul class="jobs-list">${rows.map((row) => `
-            <li><button type="button" class="job-row" data-url="${escape(`${state.apiBase}/home?job=${encodeURIComponent(row.id)}`)}" title="Open this job in Unnepo">
+            <li><button type="button" class="job-row" data-open-job="${escape(row.id)}" title="Open this job">
               <span class="job-row-text"><span class="job-row-title">${escape(row.title || "Job")}</span><span class="job-row-company">${escape(row.company)}</span></span>
               <span class="status${row.status === "submitted" || row.status === "applied_manual" ? " done" : ""}">${escape(STATUS[row.status] ?? row.status)}</span>
             </button></li>`).join("")}</ul>`;
   return `
     <section class="view" aria-label="My jobs">
       ${jobsList && !jobsList.error ? `<span class="mono">${jobsList.total} IN ALL</span>` : ""}
-      ${jobsList?.followUpsDue ? `<a class="note warn" href="${escape(state.apiBase)}/home" target="_blank" rel="noreferrer">${jobsList.followUpsDue} ${jobsList.followUpsDue === 1 ? "follow-up is" : "follow-ups are"} due. Open your tracker to write ${jobsList.followUpsDue === 1 ? "it" : "them"} →</a>` : ""}
+      ${jobsList?.followUpsDue ? `<button type="button" class="note warn" data-go="home">${jobsList.followUpsDue} ${jobsList.followUpsDue === 1 ? "follow-up is" : "follow-ups are"} due. See ${jobsList.followUpsDue === 1 ? "it" : "them"} on Home →</button>` : ""}
       ${manualJobForm()}
       ${body}
-      <a class="btn" href="${escape(state.apiBase)}/home" target="_blank" rel="noreferrer">Open my tracker on Unnepo</a>
+      <a class="btn" href="${escape(DASHBOARD_URL)}" target="_blank" rel="noreferrer">Open my dashboard</a>
     </section>`;
+}
+
+/** Settings for catching applications, email links and reminders. Kept on this computer. */
+let tracking: { autoDetect: "auto" | "ask"; mailer: Mailer; notify: boolean } | null = null;
+void chrome.storage.local.get(["autoDetect", "mailer", "notify"]).then((stored) => {
+  tracking = { autoDetect: stored.autoDetect === "ask" ? "ask" : "auto", mailer: (stored.mailer as Mailer | undefined) ?? "gmail", notify: stored.notify !== false };
+});
+function trackingSettings() {
+  if (!tracking) return "";
+  const option = (name: string, value: string, label: string, on: boolean) => `<label class="check"><input type="radio" name="${name}" value="${value}" ${on ? "checked" : ""}>${label}</label>`;
+  return `
+    <section class="stack tight" aria-label="Tracking">
+      <span class="heading">When you apply somewhere</span>
+      ${option("auto-detect", "auto", "Save it to my tracker when the site confirms it", tracking.autoDetect === "auto")}
+      ${option("auto-detect", "ask", "Ask me every time", tracking.autoDetect === "ask")}
+      <p class="small">Either way, the last 5 jobs Unnepo caught are under Detected jobs on Home, with Undo.</p>
+      <span class="heading">Email links open in</span>
+      ${option("mailer", "gmail", "Gmail", tracking.mailer === "gmail")}
+      ${option("mailer", "outlook", "Outlook on the web", tracking.mailer === "outlook")}
+      ${option("mailer", "mailto", "My computer's mail app", tracking.mailer === "mailto")}
+      <label class="check"><input type="checkbox" id="notify" ${tracking.notify ? "checked" : ""}>Remind me once a day when follow-ups are due</label>
+    </section>`;
+}
+function wireTracking() {
+  app.querySelectorAll<HTMLInputElement>('input[name="auto-detect"]').forEach((input) => input.addEventListener("change", () => {
+    tracking!.autoDetect = input.value as "auto" | "ask";
+    void chrome.storage.local.set({ autoDetect: input.value });
+  }));
+  app.querySelectorAll<HTMLInputElement>('input[name="mailer"]').forEach((input) => input.addEventListener("change", () => {
+    tracking!.mailer = input.value as Mailer;
+    store.mailer = input.value as Mailer;
+    void chrome.storage.local.set({ mailer: input.value });
+  }));
+  document.getElementById("notify")?.addEventListener("change", (event) => {
+    tracking!.notify = (event.target as HTMLInputElement).checked;
+    void chrome.storage.local.set({ notify: tracking!.notify });
+  });
 }
 
 /** Settings: whether Unnepo presses Submit. */
@@ -1630,7 +1725,7 @@ function draw(state: PanelState): boolean {
     if (letterFor && letterSource === "job" && letterStep !== "writing" && letterStep !== "revising") { letter = null; letterStep = "closed"; letterNote = ""; letterChoices.picked = []; letterChoices.mention = ""; letterChoices.edit = ""; }
     letterFor = letterJob;
   }
-  dashboard.href = `${state.apiBase}/home`;
+  dashboard.href = DASHBOARD_URL;
   drawPlan(state);
   dressSpider(state.me?.spider);
   const said = lines(state);
@@ -1674,11 +1769,16 @@ function draw(state: PanelState): boolean {
     else openParts.delete(id);
     void render();
   }));
-  // A job opens on its own page in Unnepo, the tracker with its details open.
-  app.querySelectorAll<HTMLButtonElement>(".job-row").forEach((button) => button.addEventListener("click", () => {
-    const url = button.dataset.url ?? "";
-    if (url.startsWith(`${state.apiBase}/home?job=`)) void chrome.tabs.create({ url });
-  }));
+  // A job opens on its own page here, with the people at the company.
+  wireJobRows(app);
+  app.querySelectorAll<HTMLButtonElement>("[data-open-saved]").forEach((button) => button.addEventListener("click", () => openJob(button.dataset.openSaved!)));
+  if (state.connected) {
+    wireDetected(app);
+    wireReminders(app);
+    const job = view === "job" ? jobById(openedJob.id) : null;
+    if (job) wireJobPage(app, job);
+    wireTracking();
+  }
   document.getElementById("use-code")?.addEventListener("click", async () => {
     const code = (document.getElementById("code") as HTMLInputElement).value.trim();
     if (code.startsWith("unx_")) await ask({ type: "connect", token: code });
@@ -1712,11 +1812,27 @@ function draw(state: PanelState): boolean {
   wireJobBox(state);
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
+  document.getElementById("start-resume")?.addEventListener("click", () => resumeInput.click());
   wireIssues();
   wireManualJob(state);
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
   return true;
 }
+
+/** Opens a job's own page; no id goes back Home (after deleting one). */
+function openJob(id: string, contact = "") {
+  if (!id) return go("home");
+  openedJob = { id, contact };
+  go("job");
+}
+
+/** "✓ I applied" on a detected job Unnepo couldn't name: the add-a-job form, filled in with what it saw. */
+function addDetected(item: Detected) {
+  Object.assign(manualJob, { open: true, key: item.url, title: item.title, company: item.company, url: item.url, stage: "applied", note: "Unnepo didn't catch the company. Fill it in, then add it.", saving: false, readFor: "", description: item.description ?? "" });
+  go("home");
+}
+
+setHost({ redraw: () => void render(), openJob, upgradeUrl: () => (lastState ? upgradeUrl(lastState) : ""), addJob: addDetected });
 
 /** Opens a page, from any button that says which. */
 function go(next: View) {
@@ -1728,7 +1844,9 @@ function go(next: View) {
 document.getElementById("open-settings")!.addEventListener("click", () => go(view === "settings" ? "home" : "settings"));
 
 chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "tracker-changed") return void loadTracker();
   if (message?.type !== "state-changed") return;
+  void refreshDetected();
   activityLog = null;
   // New problems may have been added; the open list reads them again.
   if (view === "feedback") void loadIssues();

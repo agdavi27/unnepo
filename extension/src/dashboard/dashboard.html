@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unnepo dashboard</title>
+  <link rel="stylesheet" href="../sidepanel/panel.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body class="dashboard">
+  <header class="dash-top">
+    <div class="logo">unnepo<span class="dot">.</span></div>
+    <span class="mono" id="dash-count"></span>
+  </header>
+  <main class="dash">
+    <aside class="dash-side" id="side" aria-label="Today"></aside>
+    <section class="dash-table" aria-label="Your jobs">
+      <div class="dash-controls">
+        <input class="field" type="search" id="search" placeholder="Search jobs and companies" aria-label="Search jobs and companies">
+        <select class="field" id="filter" aria-label="Show">
+          <option value="all">All jobs</option>
+          <option value="applied">Applied</option>
+          <option value="in_progress">Not applied yet</option>
+          <option value="follow_up">Follow up</option>
+          <option value="interviewing">Interviewing</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <select class="field" id="sort" aria-label="Sort by">
+          <option value="recent">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="company">Company A–Z</option>
+          <option value="follow">Follow-ups due first</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">Job</th><th scope="col">Company</th><th scope="col">Status</th><th scope="col">Applied</th><th scope="col">People</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p class="note" id="empty" hidden></p>
+    </section>
+    <section class="dash-detail" id="detail" aria-label="The job"></section>
+  </main>
+  <script type="module" src="dashboard.js"></script>
+</body>
+</html>

@@ -1,7 +1,0 @@
-{
-  "messageId": "<CAGmail-fwd-123@mail.gmail.com>",
-  "from": "Gmail Team <forwarding-noreply@google.com>",
-  "subject": "(#418923567) Gmail Forwarding Confirmation - Receive Mail from pat.doe@gmail.com",
-  "date": "Mon, 2 Nov 2026 10:00:00 -0800",
-  "text": "pat.doe@gmail.com has requested to automatically forward mail to your email address abc123+u_aaaaaaaaaaaaaaaaaaaa@inbound.postmarkapp.com.\nConfirmation code: 418923567\n\nTo allow pat.doe@gmail.com to automatically forward mail to your address, please click the link below to confirm the request:\n\nhttps://mail-settings.google.com/mail/vf-%5BANGjdJ8example%5D-abc123\n\nIf you click the link and it appears to be broken, please copy and paste it into a new browser window."
-}

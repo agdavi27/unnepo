@@ -8,7 +8,8 @@ import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, LETTER_FORMATS, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { answerMaybe, companyMissing, createApplication, findPeopleOnApply, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, runContext, runLater, student, summary } from "@/lib/apply/service";
+import { answerMaybe, companyMissing, contactBounced, createApplication, findPeopleOnApply, markApplied, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, retryContacts, revealContact, runContext, runLater, setOutcome, student, summary, titleMissing, updateOutreach, writeContactEmail } from "@/lib/apply/service";
+import { postingLink } from "@/lib/apply/applied-list";
 import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
 import type { FormSchema, SchemaField, SchemaFieldType } from "@/lib/apply/fast/schema";
@@ -16,7 +17,7 @@ import { WRITING_STYLE, classifyQuestion, normalizeLabel, plainWriting, shortAns
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { isApplied } from "@/lib/apply/stats";
 import { wornSkin } from "@/lib/spiders";
-import type { FillAttempt, FillProblem, JobApplication, PostedRecruiter } from "@/lib/apply/types";
+import type { ApplicationContact, FillAttempt, FillProblem, JobApplication, PostedRecruiter } from "@/lib/apply/types";
 import { profileReady, profileState, saveStudentProfile } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
 
@@ -233,6 +234,76 @@ export async function extensionJobs(userId: string) {
     // People emailed five business days ago or more with no reply: the panel points to the tracker.
     followUpsDue: apps.some((app) => Object.keys(app.fillReport?.emailedAt ?? {}).length) ? followUpsDue(await withContacts(userId, apps)).length : 0,
   };
+}
+
+/**
+ * The extension's tracker: every job with its people, for Home's reminders, a job's own page and the dashboard.
+ * Reminders are worked out in the extension (lib/apply/next-up.ts), in the student's own time.
+ */
+export async function extensionTracker(userId: string) {
+  const apps = await repairCompanies(userId, await mergeRepeats(userId, await applications.list(userId)));
+  const [contacts, usage, stored] = await Promise.all([applicationContacts.list(userId, apps.map((app) => app.id)), planUsage(userId), applicationProfiles.get(userId)]);
+  return {
+    jobs: apps.map((app) => trackerJob(app, contacts.filter((contact) => contact.applicationId === app.id))),
+    weeklyGoal: stored?.weeklyGoal ?? null,
+    free: usage.free,
+    peopleNote: usage.people.note,
+  };
+}
+
+export type TrackerJob = ReturnType<typeof trackerJob>;
+
+function trackerJob(app: JobApplication, people: ApplicationContact[]) {
+  const report = app.fillReport;
+  return {
+    id: app.id, title: app.title, company: app.company, status: app.status, location: app.location, department: app.department,
+    createdAt: app.createdAt, submittedAt: app.submittedAt, updatedAt: app.updatedAt,
+    url: postingLink(app) || (app.applicationUrl && /^https:\/\//i.test(app.applicationUrl) ? app.applicationUrl : ""),
+    companyMissing: companyMissing(app), titleMissing: titleMissing(app.title),
+    contactsStatus: app.contactsStatus, contactsMessage: app.contactsMessage,
+    confirmation: app.confirmation ? { confidence: app.confirmation.confidence } : null,
+    postedRecruiter: app.postedRecruiter ? { name: app.postedRecruiter.name, title: app.postedRecruiter.title, email: app.postedRecruiter.email, linkedinUrl: app.postedRecruiter.linkedinUrl } : null,
+    fillReport: report ? {
+      outcome: report.outcome ?? null, statusHistory: report.statusHistory, lastEmailAt: report.lastEmailAt, emailedAt: report.emailedAt,
+      notCounted: report.notCounted, peopleReveals: report.peopleReveals ?? 0, peopleLinks: report.peopleLinks,
+      peoplePreview: report.peoplePreview ? { rows: report.peoplePreview.rows } : undefined,
+    } : null,
+    /** People on the list Unnepo can still look up ("Show person"), by lowercase name. */
+    hidden: Object.keys(report?.peopleHidden ?? {}),
+    contacts: people.sort((a, b) => a.rank - b.rank).map((person) => ({
+      id: person.id, name: person.name, title: person.title, role: person.role, email: person.email, emailSource: person.emailSource,
+      relevance: person.relevance, linkedinUrl: person.linkedinUrl, outreachStatus: person.outreachStatus, emailSubject: person.emailSubject, emailBody: person.emailBody,
+    })),
+  };
+}
+
+/**
+ * The People card: find people at the company (after applying), show one more, write an email to one (or a
+ * follow-up), mark them emailed or replied, or say an address bounced. Credits are spent as on the website.
+ */
+export async function extensionPeople(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { action?: unknown; applicationId?: unknown; contactId?: unknown; website?: unknown; status?: unknown; followUp?: unknown; followedUp?: unknown; subject?: unknown; body?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  const forApp = async () => (await applicationContacts.list(userId, [app.id])).find((row) => row.id === String(body.contactId ?? ""));
+  switch (body.action) {
+    case "find": return retryContacts(userId, { applicationId: app.id, website: body.website });
+    case "reveal": return revealContact(userId, { applicationId: app.id, contactId: body.contactId });
+    case "write": return writeContactEmail(userId, { applicationId: app.id, contactId: body.contactId, followUp: body.followUp === true, ...(typeof body.body === "string" ? { subject: body.subject, body: body.body } : {}) });
+    case "status": {
+      // Only someone on this job's list.
+      if (!(await forApp())) throw new ServiceError("That person wasn't found.", "not_found", 404);
+      return updateOutreach(userId, { contactId: body.contactId, status: body.status, followedUp: body.followedUp === true });
+    }
+    case "bounced": return contactBounced(userId, { applicationId: app.id, contactId: body.contactId });
+    default: throw new ServiceError("Unknown action.", "action", 400);
+  }
+}
+
+/** A job's status from the extension: applied (the student says so), or what happened after (interviewing, rejected…). */
+export async function extensionStatus(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; applied?: unknown; outcome?: unknown };
+  if (body.applied === true) return markApplied(userId, { applicationId: body.applicationId });
+  return setOutcome(userId, { applicationId: body.applicationId, outcome: body.outcome || null });
 }
 
 async function withContacts(userId: string, apps: JobApplication[]) {

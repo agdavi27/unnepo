@@ -1,7 +1,6 @@
 import { isApplied } from "@/lib/apply/stats";
 import { applicationContacts, applications } from "@/lib/apply/store";
 import type { ApplicationOutcome, FillReport, JobApplication } from "@/lib/apply/types";
-import { emailEvents } from "@/lib/email/store";
 
 /**
  * One job saved twice on the Applied list (from a job board and from the company's own site, say) becomes one job,
@@ -114,11 +113,10 @@ export async function mergeRepeats(userId: string, apps: JobApplication[]) {
         const merged = await applications.update(userId, keep.id, mergedJob(keep, other));
         if (!merged) break;
         keep = merged;
-        // The repeat's people and emails move over before it goes.
+        // The repeat's people move over before it goes.
         const [people, known] = await Promise.all([applicationContacts.list(userId, [other.id]), applicationContacts.list(userId, [keep.id])]);
         const same = (a: { email: string | null; name: string }, b: { email: string | null; name: string }) => (a.email && b.email ? a.email.toLowerCase() === b.email.toLowerCase() : plain(a.name) === plain(b.name));
         await applicationContacts.move(userId, people.filter((person) => !known.some((row) => same(row, person))).map((person) => person.id), keep.id, known.length);
-        for (const event of await emailEvents.forApplication(userId, other.id)) await emailEvents.update(userId, event.id, { applicationId: keep.id });
         await applications.remove(userId, other.id);
         gone.add(other.id);
       }

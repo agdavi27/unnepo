@@ -1,0 +1,30 @@
+/* The dashboard: every job in one table, today's reminders beside it, and the open job's page. */
+body.dashboard { display: block; min-height: 100vh; }
+.dash-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 18px 24px; border-bottom: 1px solid var(--line); }
+.dash { display: grid; grid-template-columns: minmax(260px, 320px) minmax(0, 1fr) minmax(320px, 420px); gap: 20px; padding: 20px 24px 48px; align-items: start; }
+.dash-side, .dash-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; position: sticky; top: 20px; max-height: calc(100vh - 40px); overflow: auto; }
+.dash-table { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.dash-controls { display: flex; gap: 10px; flex-wrap: wrap; }
+.dash-controls input { flex: 1 1 220px; }
+.dash-controls select { flex: 0 1 180px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font: 500 11px var(--mono); letter-spacing: 1px; text-transform: uppercase; color: var(--muted); padding: 10px 12px; border-bottom: 1px solid var(--line-2); white-space: nowrap; }
+td { padding: 10px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: #101013; }
+tbody tr.selected td { background: #0C1424; }
+tbody tr.due td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.cell-title { font-weight: 500; overflow-wrap: anywhere; }
+td .status { white-space: nowrap; }
+.cell-sub { display: block; font-size: 12px; color: var(--muted); }
+.due-tag { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 999px; background: rgba(245, 165, 36, .15); color: var(--warn); font: 600 10px var(--mono); }
+.dash-detail .placeholder { padding: 18px; border: 1px dashed var(--line-2); border-radius: 16px; color: var(--muted); font-size: 13px; }
+@media (max-width: 1100px) {
+  .dash { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); }
+  .dash-side { grid-column: 1 / -1; position: static; max-height: none; }
+}
+@media (max-width: 760px) {
+  .dash { grid-template-columns: minmax(0, 1fr); padding: 16px; }
+  .dash-detail { position: static; max-height: none; }
+}
