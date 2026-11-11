@@ -16,6 +16,7 @@ import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/pro
 import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
+import { friendAction, listFriends } from "@/lib/social/friends";
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
@@ -242,6 +243,8 @@ async function handle(request: Request, slug: string[]) {
     await resetStructuredProfile(user.id);
     return json({ ok: true });
   }
+  // The website's Jobs tab: every job applied to, as the extension's tracker sends it.
+  if (root === "app" && action === "tracker" && request.method === "GET") return json(await extensionTracker(user.id));
   if (root === "app" && action === "jobs" && request.method === "GET") {
     return json(await listRecommendedJobs(user.id, { refresh: new URL(request.url).searchParams.get("refresh") === "1" }));
   }
@@ -411,6 +414,12 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   if (action === "jobs" && method === "GET") return json(await extensionJobs(user.id));
   // The tracker, people and statuses: everything the website's Home and Applications did, now in the extension.
   if (action === "tracker" && method === "GET") return json(await extensionTracker(user.id));
+  // Friends: who they are and how many each applied to this week (`since`: the start of the student's week).
+  if (action === "friends" && method === "GET") return json(await listFriends(user.id, new URL(request.url).searchParams.get("since")));
+  if (action === "friends" && method === "POST") {
+    if (!rateLimit(`extension-friends:${user.id}`, 60, 60 * 60 * 1000)) throw new ServiceError("That's a lot of friend requests in an hour. Try again later.", "rate_limited", 429);
+    return json(await friendAction(user.id, await request.json()));
+  }
   if (action === "status" && method === "POST") return json(await extensionStatus(user.id, await request.json()));
   if (action === "people" && method === "POST") {
     const body = await request.json();

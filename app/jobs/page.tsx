@@ -1,5 +1,6 @@
-import { redirect } from "next/navigation";
+import { AppHome } from "@/components/unnepo/app-home";
 
+// The Jobs tab: every job applied to, and where each one is.
 export default function Page() {
-  redirect("/home");
+  return <AppHome start="jobs" />;
 }

@@ -15,27 +15,17 @@
     <button type="button" class="spider" id="spider" aria-label="Poke the spider"><span class="thread"></span></button>
   </header>
 
-  <nav id="tabs" class="tabs" aria-label="Sections" hidden>
-    <button type="button" class="tab" data-tab="home">Home</button>
-    <button type="button" class="tab" data-tab="jobs">Jobs</button>
-    <button type="button" class="tab" data-tab="follow">Follow up <span class="tab-count" id="follow-count" hidden></span></button>
-    <button type="button" class="tab" data-tab="more">Tools</button>
-    <button type="button" class="tab" data-tab="settings">Settings</button>
-  </nav>
-
   <main id="app" class="body"></main>
   <input type="file" id="resume-input" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
 
   <section id="password" class="password" aria-label="Job-site password" hidden></section>
 
-  <nav id="dock" class="dock" aria-label="Dashboard and plan" hidden>
-    <div class="dock-side">
-      <a id="dashboard" target="_blank" rel="noreferrer">See my job dashboard <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></a>
-    </div>
-    <div class="dock-side right">
-      <span id="credits-left"></span>
-      <a id="upgrade" target="_blank" rel="noreferrer">Upgrade plan</a>
-    </div>
+  <!-- The menu, along the bottom: Week, Jobs, Tools and Me. -->
+  <nav id="tabs" class="tabs" aria-label="Sections" hidden>
+    <button type="button" class="tab" data-tab="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span class="tab-count" id="week-count" hidden></span>Week</button>
+    <button type="button" class="tab" data-tab="jobs"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg><span class="tab-count" id="jobs-count" hidden></span>Jobs</button>
+    <button type="button" class="tab" data-tab="more"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>Tools</button>
+    <button type="button" class="tab" data-tab="settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span class="tab-count" id="me-count" hidden></span>Me</button>
   </nav>
 
   <script type="module" src="panel.js"></script>

@@ -1,0 +1,130 @@
+import { weekStart } from "@/lib/apply/stats";
+import { escape, redraw } from "./tracker-view";
+
+/**
+ * Friends, in the side panel. On Week: each friend and how many jobs they applied to this week, or an empty box
+ * with a button to add some. On Me: add a friend by email, answer requests, and remove friends. Only the count
+ * is shared, and only once the friend accepts.
+ */
+
+type Friend = { id: string; name: string; applied: number };
+type Incoming = { id: string; name: string; email: string };
+type Outgoing = { id: string; email: string };
+
+const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
+
+const friends = {
+  list: null as Friend[] | null, incoming: [] as Incoming[], outgoing: [] as Outgoing[],
+  error: "", loading: false, loadedAt: 0,
+  /** What happened after Add, Accept or Remove. */
+  note: "", noteBad: false, busy: false, email: "",
+};
+
+export async function loadFriends() {
+  if (friends.loading) return;
+  friends.loading = true;
+  type Answer = { ok: boolean; error?: string; friends?: Friend[]; incoming?: Incoming[]; outgoing?: Outgoing[] };
+  const result = await ask<Answer>({ type: "friends", since: weekStart(new Date()).toISOString() }).catch((): Answer => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  friends.loading = false;
+  friends.loadedAt = Date.now();
+  if (result.ok) {
+    friends.list = result.friends ?? [];
+    friends.incoming = result.incoming ?? [];
+    friends.outgoing = result.outgoing ?? [];
+    friends.error = "";
+  } else friends.error = result.error ?? "Couldn't load your friends.";
+  redraw();
+}
+
+/** Loads friends the first time, and again when the copy is a minute old. */
+export function ensureFriends(maxAge = 60_000) {
+  if (!friends.loading && (!friends.list || Date.now() - friends.loadedAt > maxAge)) void loadFriends();
+}
+
+/** Requests waiting on the student, for Me's badge. */
+export const friendRequests = () => friends.incoming.length;
+
+const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]!.toUpperCase()).join("") || "?";
+
+/** Week's friends box: each friend's applications this week, most first, or "lol no friends added yet". */
+export function friendsWeekCard(myWeek: number) {
+  ensureFriends();
+  const head = (extra = "") => `<div class="row-between"><span class="eyebrow">Friends this week</span>${extra}</div>`;
+  if (!friends.list) return `<section class="page friends-card" aria-label="Friends this week">${head()}<p class="note">${escape(friends.error || "Loading your friends…")}</p></section>`;
+  const requests = friends.incoming.length ? `<button type="button" class="note warn nudge" data-go="settings">${friends.incoming.length} friend ${friends.incoming.length === 1 ? "request" : "requests"} waiting. See ${friends.incoming.length === 1 ? "it" : "them"} →</button>` : "";
+  if (!friends.list.length) {
+    return `<section class="page friends-card empty" aria-label="Friends this week">
+      ${head()}
+      <p class="friends-empty">lol no friends added yet</p>
+      <button type="button" class="btn" data-go="settings">Add friends</button>
+      ${requests}
+    </section>`;
+  }
+  const rows = [{ id: "me", name: "You", applied: myWeek }, ...friends.list].sort((a, b) => b.applied - a.applied);
+  const top = Math.max(1, ...rows.map((row) => row.applied));
+  return `<section class="page friends-card" aria-label="Friends this week">
+    ${head(`<button type="button" class="quiet-link tight" data-go="settings">Add</button>`)}
+    <ul class="friend-list">${rows.map((row) => `
+      <li class="friend${row.id === "me" ? " me" : ""}">
+        <span class="friend-av" aria-hidden="true">${escape(row.id === "me" ? "★" : initials(row.name))}</span>
+        <span class="friend-name">${escape(row.name)}</span>
+        <span class="friend-bar" aria-hidden="true"><span style="width:${Math.round((row.applied / top) * 100)}%"></span></span>
+        <span class="friend-count">${row.applied}</span>
+      </li>`).join("")}</ul>
+    ${requests}
+  </section>`;
+}
+
+/** Me's Friends card: add by email, requests to answer, friends, and requests sent. */
+export function friendsSettingsCard() {
+  ensureFriends();
+  const busy = friends.busy ? "disabled" : "";
+  const list = friends.list ?? [];
+  const row = (name: string, sub: string, actions: string) => `<li class="friend-row"><span class="friend-row-text"><span class="friend-name">${escape(name)}</span>${sub ? `<span class="sub">${escape(sub)}</span>` : ""}</span><span class="friend-actions">${actions}</span></li>`;
+  return `<section class="page settings-card" aria-label="Friends">
+    <div class="row-between"><span class="eyebrow">Friends</span>${list.length ? `<span class="mono">${list.length}</span>` : ""}</div>
+    <p class="small">Add a friend by email. Once they accept, you each see how many jobs the other applied to this week. Nothing else is shared.</p>
+    <form class="connect-code" id="friend-form">
+      <input class="field" id="friend-email" type="email" placeholder="friend@school.edu" aria-label="Friend's email" value="${escape(friends.email)}" autocomplete="off" required>
+      <button type="submit" class="solid" ${busy}>${friends.busy ? "Adding…" : "Add"}</button>
+    </form>
+    ${friends.note ? `<p class="small" role="status"${friends.noteBad ? ' style="color: var(--warn)"' : ""}>${escape(friends.note)}</p>` : ""}
+    ${friends.error && !friends.list ? `<p class="note">${escape(friends.error)}</p>` : ""}
+    ${friends.incoming.length ? `<span class="q-label">Requests</span><ul class="friend-rows">${friends.incoming.map((item) => row(item.name, item.email, `<button type="button" class="solid" data-friend-accept="${item.id}" ${busy}>Accept</button><button type="button" class="quiet-link" data-friend-decline="${item.id}" ${busy}>Decline</button>`)).join("")}</ul>` : ""}
+    ${list.length ? `<ul class="friend-rows">${list.map((item) => row(item.name, `${item.applied} this week`, `<button type="button" class="quiet-link" data-friend-remove="${item.id}" ${busy}>Remove</button>`)).join("")}</ul>` : ""}
+    ${friends.outgoing.length ? `<span class="q-label">Waiting for them to accept</span><ul class="friend-rows">${friends.outgoing.map((item) => row(item.email, "", `<button type="button" class="quiet-link" data-friend-remove="${item.id}" ${busy}>Cancel</button>`)).join("")}</ul>` : ""}
+  </section>`;
+}
+
+async function act(body: Record<string, unknown>, done: (result: { status?: string; emailed?: boolean }) => string) {
+  friends.busy = true;
+  friends.note = "";
+  redraw();
+  type Answer = { ok: boolean; error?: string; status?: string; emailed?: boolean };
+  const result = await ask<Answer>({ type: "friend-action", body }).catch((): Answer => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  friends.busy = false;
+  friends.noteBad = !result.ok;
+  friends.note = result.ok ? done(result) : result.error ?? "Couldn't do that.";
+  await loadFriends();
+}
+
+export function wireFriends(root: HTMLElement) {
+  const form = root.querySelector<HTMLFormElement>("#friend-form");
+  const input = root.querySelector<HTMLInputElement>("#friend-email");
+  input?.addEventListener("input", () => { friends.email = input.value; });
+  form?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const email = input?.value.trim() ?? "";
+    if (!email) return;
+    void act({ action: "invite", email }, (result) => {
+      friends.email = "";
+      if (result.status === "accepted") return "They'd already asked you, so you're friends now.";
+      if (result.status === "already") return "You're already friends.";
+      if (result.status === "waiting") return "Already sent. Waiting for them to accept.";
+      return result.emailed ? `Sent. ${email} got an email to accept.` : `Sent. ${email} sees it in Unnepo under Me.`;
+    });
+  });
+  root.querySelectorAll<HTMLButtonElement>("[data-friend-accept]").forEach((button) => button.addEventListener("click", () => void act({ action: "respond", id: button.dataset.friendAccept, accept: true }, () => "You're friends now.")));
+  root.querySelectorAll<HTMLButtonElement>("[data-friend-decline]").forEach((button) => button.addEventListener("click", () => void act({ action: "respond", id: button.dataset.friendDecline, accept: false }, () => "Declined.")));
+  root.querySelectorAll<HTMLButtonElement>("[data-friend-remove]").forEach((button) => button.addEventListener("click", () => void act({ action: "remove", id: button.dataset.friendRemove }, () => "Removed.")));
+}

@@ -9,6 +9,7 @@ import { CREDIT_COST, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
 import type { planUsage } from "@/lib/apply/limits";
 import { Logo } from "@/components/brand/logo";
 import { SpiderSettings } from "@/components/unnepo/spider-settings";
+import { JobsView } from "@/components/unnepo/jobs-view";
 import { extensionHere } from "@/lib/extension-bridge";
 import { trialLeftLabel } from "@/lib/plan";
 
@@ -28,10 +29,12 @@ type Workspace = {
   integrations: { apollo: boolean; anthropic: boolean };
 };
 
-// The tracker, reminders, people and follow-ups live in the Chrome extension. The site keeps the profile and the plans.
-type View = "home" | "settings";
+// The tracker, reminders, people and follow-ups live in the Chrome extension. The site keeps the profile and the
+// plans, and shows the jobs applied to.
+type View = "home" | "jobs" | "settings";
 const VIEWS: { id: View; label: string }[] = [
   { id: "home", label: "Home" },
+  { id: "jobs", label: "Jobs" },
   { id: "settings", label: "Settings and plans" },
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
@@ -47,7 +50,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [extension, setExtension] = useState<boolean | null>(null);
   const menu = useRef<HTMLDivElement>(null);
-  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans.
+  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans, ?tab=jobs the Jobs tab.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
@@ -55,7 +58,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
       setEditing(true);
       window.history.replaceState(null, "", window.location.pathname);
-    } else if (tab === "settings") {
+    } else if (tab === "settings" || tab === "jobs") {
       setView(tab);
       window.history.replaceState(null, "", "/home" + window.location.hash);
     } else if (params.get("billing")) {
@@ -243,6 +246,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
             onDone={() => { setEditing(false); void load(); }}
           />
         )}
+        {data && !showOnboarding && view === "jobs" && <JobsView />}
         {data && !showOnboarding && view === "home" && <ExtensionHome installed={extension} completeness={data.completeness} onEdit={() => { setEditing(true); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "settings" && (
           <>
