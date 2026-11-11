@@ -547,6 +547,22 @@ export type OAuthState = {
   expiresAt: string;
 };
 
+/**
+ * A friend request: sent to an email, which may not have an account yet. Accepted, the two see each other's
+ * applications this week (a count, nothing else). Declined or removed, it's deleted.
+ */
+export type Friendship = {
+  id: string;
+  fromUserId: string;
+  /** Normalized, so it matches the account it's sent to. */
+  toEmail: string;
+  /** Filled in once the email belongs to an account. */
+  toUserId: string | null;
+  status: "pending" | "accepted";
+  createdAt: string;
+  acceptedAt: string | null;
+};
+
 export type Database = {
   users: User[];
   sessions: Session[];
@@ -591,6 +607,7 @@ export type Database = {
   jobApplications?: JobApplication[];
   applicationContacts?: ApplicationContact[];
   applicationProfiles?: Array<{ userId: string; data: ApplicationProfile; updatedAt: string }>;
+  friendships?: Friendship[];
 };
 
 export function emptyDatabase(): Database {

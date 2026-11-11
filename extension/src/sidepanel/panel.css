@@ -406,3 +406,43 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .progress-next { margin: 0; font-size: 13px; color: var(--muted-3); }
 .progress-next.due { color: var(--warn); }
 .progress-next .status { margin-right: 4px; }
+
+/* "Beta" next to Autofill. */
+.beta { display: inline-block; margin-left: 4px; padding: 1px 6px; border: 1px solid rgba(61, 139, 255, .5); border-radius: 999px; background: rgba(61, 139, 255, .12); color: #8FBBFF; font: 600 9.5px var(--mono); letter-spacing: .8px; text-transform: uppercase; vertical-align: 2px; }
+.big-tool-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.big-tool-text .small { font-weight: 400; }
+.big-tool:disabled { cursor: default; opacity: .6; }
+.big-tool:disabled:hover { border-color: #33333B; background: #111114; }
+
+/* Me: the account at the top. */
+.account-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.account-av { width: 40px; height: 40px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--control); font: 600 14px Geist, sans-serif; }
+.account-text { display: flex; flex-direction: column; min-width: 0; }
+.account-name { font-size: 16px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-text .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-plan { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; font-size: 13px; color: var(--muted-3); }
+.account-plan strong { color: var(--fg); font-weight: 600; }
+.account-plan .link { height: auto; }
+.settings-card > .link { align-self: flex-start; height: 32px; }
+
+/* Friends: on Week, each friend's applications this week as a bar; on Me, the list with its buttons. */
+.friends-card.empty { align-items: flex-start; }
+.friends-empty { margin: 0; padding: 14px 0 4px; width: 100%; text-align: center; font: 13px var(--mono); color: var(--muted-2); }
+.friends-card.empty .btn { align-self: stretch; }
+.friend-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.friend { display: grid; grid-template-columns: 26px minmax(0, 7.5em) 1fr 26px; align-items: center; gap: 8px; font-size: 13px; }
+.friend-av { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: var(--control); font: 600 10px Geist, sans-serif; color: var(--muted-3); }
+.friend.me .friend-av { background: rgba(61, 139, 255, .2); color: #8FBBFF; }
+.friend-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friend-bar { height: 6px; border-radius: 6px; background: #1A1A1F; overflow: hidden; }
+.friend-bar span { display: block; height: 100%; border-radius: 6px; background: var(--muted); }
+.friend.me .friend-bar span { background: var(--accent); }
+.friend-count { text-align: right; font: 600 13px var(--mono); }
+.friend-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.friend-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.friend-row:first-child { border-top: 0; }
+.friend-row-text { display: flex; flex-direction: column; min-width: 0; }
+.friend-row-text .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.friend-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.friend-actions .solid { height: 32px; padding: 0 12px; }
+.friend-actions .quiet-link { min-height: 32px; }

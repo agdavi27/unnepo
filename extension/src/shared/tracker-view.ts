@@ -1,5 +1,6 @@
 import { stageOf } from "@/lib/apply/stats";
 import { followUpsDue } from "@/lib/apply/follow-ups";
+import { STEPS, STEP_LABEL, progressOf as sharedProgress, type Progress } from "@/lib/apply/progress";
 import { MAX_FOLLOW_UPS, reminders, type Reminder } from "./reminders";
 import type { Detected, Mailer, OpenedEmails, ReminderMarks, Tracker, TrackerContact, TrackerJob } from "./types";
 
@@ -87,36 +88,9 @@ export const needsFirstEmail = (job: TrackerJob) => {
 
 // ---- A job's progress: Applied → Reach out → Waiting → Follow up → Interview ----
 
-export const STEPS = ["Applied", "Reach out", "Waiting", "Follow up", "Interview"] as const;
-export type Progress = {
-  /** How many steps are behind it. */
-  done: number;
-  /** The step it's on: blue, or orange when it's waiting on the student (a follow-up due). */
-  due: boolean;
-  /** Where it ended, when it did. */
-  ended: "Rejected" | "Offer" | null;
-  /** What to do next, in a few words. */
-  next: string;
-};
-
-/** Where a job is, worked out from its status, who was emailed, and whether a follow-up is due. */
+/** Where a job is; the extension also knows who was sent a follow-up. */
 export function progressOf(job: TrackerJob, now = new Date()): Progress {
-  const stage = stageOf(job as never);
-  const company = job.companyMissing ? "the company" : job.company;
-  if (!isAppliedJob(job)) return { done: 0, due: false, ended: null, next: "Apply, then it moves along here." };
-  if (stage === "offer") return { done: 5, due: false, ended: "Offer", next: "You got an offer." };
-  if (stage === "interviewing" || stage === "assessment") return { done: 5, due: false, ended: null, next: stage === "assessment" ? "You have an assessment." : "You're interviewing." };
-  const emailed = emailedCount(job);
-  const replied = job.contacts.some((person) => person.outreachStatus === "replied");
-  const followedUp = job.contacts.some((person) => (store.followUps[person.id] ?? 0) > 0);
-  const progress: Progress = !emailed
-    ? { done: 1, due: false, ended: null, next: `Email someone at ${company}.` }
-    : followUpsDue([job] as never, now).length
-      ? { done: 3, due: true, ended: null, next: "A follow-up is due." }
-      : replied || followedUp
-        ? { done: 4, due: false, ended: null, next: replied ? "Someone replied. Waiting on an interview." : "Followed up. Waiting on an interview." }
-        : { done: 2, due: false, ended: null, next: `Emailed ${emailed} ${emailed === 1 ? "person" : "people"}. Waiting on a reply.` };
-  return stage === "rejected" ? { ...progress, due: false, ended: "Rejected", next: "This one said no." } : progress;
+  return sharedProgress(job, job.contacts.some((person) => (store.followUps[person.id] ?? 0) > 0), now);
 }
 
 /** The progress line on a job's page: five dots joined by a line, done ones green, the current one ringed. */
@@ -136,7 +110,7 @@ export function progressLine(job: TrackerJob) {
 export function progressDots(job: TrackerJob) {
   const progress = progressOf(job);
   const bars = STEPS.map((_, index) => `<i class="${index < progress.done ? "d" : index === progress.done && !progress.ended ? (progress.due ? "w" : "n") : ""}"></i>`).join("");
-  const label = progress.ended ?? ["Not applied", "Reach out", "Waiting", "Follow up", "Waiting", "Interview"][progress.done];
+  const label = progress.ended ?? STEP_LABEL[progress.done];
   return `<span class="dots-wrap"><span class="dots" aria-hidden="true">${bars}</span><span class="dots-label${progress.due ? " due" : progress.ended === "Offer" || progress.done >= 5 ? " ok" : ""}">${escape(label)}</span></span>`;
 }
 

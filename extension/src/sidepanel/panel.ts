@@ -5,6 +5,7 @@ import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, NEVER_READ, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
 import { detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
+import { friendRequests, friendsSettingsCard, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
 
 /**
@@ -19,6 +20,7 @@ const passwordSection = document.getElementById("password")!;
 const tabBar = document.getElementById("tabs")!;
 const weekBadge = document.getElementById("week-count")!;
 const jobsBadge = document.getElementById("jobs-count")!;
+const meBadge = document.getElementById("me-count")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
 /** The four tabs along the bottom (home = Week, jobs, more = Tools, settings = Me), and the pages opened from them. */
@@ -339,10 +341,23 @@ const withCost = (label: string, kind: "letters" | "answers") => {
   const cost = lastState?.me?.creditCost?.[kind] ?? CREDIT_COST_FALLBACK[kind];
   return `${label} (${cost} ${cost === 1 ? "credit" : "credits"})`;
 };
+/**
+ * Autofill, in beta: fills the application on this tab from the profile and stops at Submit (unless Me says
+ * otherwise). Only offered on a job page; everywhere else it says where to go.
+ */
+function autofillTool(state: PanelState) {
+  const ready = jobFound(state) && !state.job?.running && Boolean(state.me?.profileReady);
+  const why = !state.me?.profileReady ? "Finish your profile first." : jobFound(state) ? "Fills this application. You check it and press Submit." : "Open a job application, then press this.";
+  return `<button type="button" class="big-tool autofill-tool" id="beta-fill" ${ready ? "" : "disabled"}>
+      ${SPARK}<span class="big-tool-text"><span>Autofill this application <span class="beta">Beta</span></span><span class="small">${why}</span></span>
+    </button>`;
+}
+
 /** The tools: the whole page once a job is applied, went wrong, or there's no job. `extra` goes under them. */
 function toolsPage(state: PanelState, extra = "") {
   return `
     <div class="tools">
+      ${autofillTool(state)}
       <button type="button" class="big-tool" data-popup="cover">${SPARK}Write a cover letter</button>
       <button type="button" class="big-tool" data-popup="answer">${SPARK}Answer a question</button>
       <div class="tool-lines">${resumeLine(state)}<div id="password-slot"></div></div>
@@ -569,9 +584,10 @@ function pageView(state: PanelState) {
     jobs: () => jobsView(),
     more: () => toolsPage(state, jobFound(state) ? hereLinks() : ""),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
+    // Me: who you are and your plan, friends, how Unnepo behaves, then help. Sign out and the version last.
     settings: () => `${profileCard(state)}
-      ${trackingSettings()}
-      ${AUTOFILL_ENABLED ? settingsView(state) : ""}
+      ${friendsSettingsCard()}
+      ${trackingSettings(state)}
       <section class="page settings-card" aria-label="Help">
         <span class="eyebrow">Help</span>
         ${part("activity", "What Unnepo noticed lately", () => activityCard())}
@@ -1247,20 +1263,20 @@ function profileCard(state: PanelState) {
   const me = state.me!;
   const missing = me.missing ?? [];
   const credits = me.unlimitedCredits ? "Unlimited credits" : `${me.usage?.credits ?? me.credits * 5} credits left`;
+  const plan = me.trial ? "Pro trial" : (me.effectivePlan ?? me.plan ?? "free").replace(/^\w/, (letter) => letter.toUpperCase());
+  const name = me.user.name || me.user.email;
+  const initials = name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((part) => part[0]!.toUpperCase()).join("");
   return `
     <section class="page settings-card" aria-label="Account">
-      <div class="row-between"><span class="eyebrow">Account</span><span class="mono">${me.completeness}% READY</span></div>
-      <div>
-        <div class="job-name small-name">${escape(me.user.name || me.user.email)}</div>
-        <div class="sub">${me.user.name ? `${escape(me.user.email)} · ` : ""}${credits}</div>
+      <div class="account-head">
+        <span class="account-av" aria-hidden="true">${escape(initials || "?")}</span>
+        <span class="account-text"><span class="account-name">${escape(name)}</span>${me.user.name ? `<span class="sub">${escape(me.user.email)}</span>` : ""}</span>
       </div>
-      ${me.completeness < 100 ? `<div class="bar" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}"><div style="width:${me.completeness}%"></div></div>` : ""}
+      <div class="account-plan"><span><strong>${escape(plan)}</strong> · ${credits}</span><a class="link" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Plans ↗</a></div>
       ${me.usage?.free ? `<span class="small">Left this month: ${me.usage.letters.left} cover letters · ${me.usage.answers.left} answers${me.usage.unlimited ? "" : ` · ${me.usage.people.left} people searches`}</span>` : ""}
-      ${!me.profileReady ? `<span class="small" style="color: var(--warn)">Finish your profile${missing.length ? `: ${missing.map(escape).join(", ")}` : ""}.</span>` : missing.length ? `<span class="small">Missing: ${missing.map(escape).join(", ")}</span>` : ""}
-      <div class="row-between">
-        <a class="link" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">Edit my profile ↗</a>
-        <a class="link" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Plans ↗</a>
-      </div>
+      ${me.completeness < 100 ? `<div class="row-between"><span class="small"${!me.profileReady ? ' style="color: var(--warn)"' : ""}>Profile ${me.completeness}% done${missing.length ? `: ${missing.map(escape).join(", ")}` : ""}</span></div>
+      <div class="bar" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}"><div style="width:${me.completeness}%"></div></div>` : ""}
+      <a class="link" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">${me.completeness < 100 ? "Finish my profile" : "Edit my profile"} ↗</a>
     </section>`;
 }
 
@@ -1500,15 +1516,15 @@ let tracking: { autoDetect: "auto" | "ask"; mailer: Mailer; notify: boolean } | 
 void chrome.storage.local.get(["autoDetect", "mailer", "notify"]).then((stored) => {
   tracking = { autoDetect: stored.autoDetect === "ask" ? "ask" : "auto", mailer: (stored.mailer as Mailer | undefined) ?? "gmail", notify: stored.notify !== false };
 });
-function trackingSettings() {
+function trackingSettings(state: PanelState) {
   if (!tracking) return "";
   const option = (name: string, value: string, label: string, on: boolean) => `<label class="check"><input type="radio" name="${name}" value="${value}" ${on ? "checked" : ""}>${label}</label>`;
   const mail = (value: Mailer, label: string) => `<option value="${value}"${tracking!.mailer === value ? " selected" : ""}>${label}</option>`;
   return `
-    <section class="page settings-card" aria-label="Tracking">
-      <span class="eyebrow">Tracking</span>
+    <section class="page settings-card" aria-label="Settings">
+      <span class="eyebrow">Settings</span>
       <div class="stack tight">
-        <span class="q-label">When the site confirms you applied</span>
+        <span class="q-label">When a site confirms you applied</span>
         ${option("auto-detect", "auto", "Save it to my jobs (with Undo)", tracking.autoDetect === "auto")}
         ${option("auto-detect", "ask", "Ask me first", tracking.autoDetect === "ask")}
       </div>
@@ -1516,6 +1532,7 @@ function trackingSettings() {
         <select class="field" id="mailer">${mail("gmail", "Gmail")}${mail("outlook", "Outlook on the web")}${mail("mailto", "My computer's mail app")}</select>
       </label>
       <label class="check"><input type="checkbox" id="notify" ${tracking.notify ? "checked" : ""}>Remind me once a day when follow-ups are due</label>
+      <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}><span>Autofill <span class="beta">Beta</span> stops at Submit so I can check it</span></label>
     </section>`;
 }
 function wireTracking() {
@@ -1533,16 +1550,6 @@ function wireTracking() {
     tracking!.notify = (event.target as HTMLInputElement).checked;
     void chrome.storage.local.set({ notify: tracking!.notify });
   });
-}
-
-/** Settings: whether Unnepo presses Submit. */
-function settingsView(state: PanelState) {
-  return `
-    <section class="page settings-card" aria-label="Submitting">
-      <span class="eyebrow">Submitting</span>
-      <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}>Let me press Submit myself.</label>
-      <p class="small">On: Unnepo fills every page and stops at Submit for you to check. Off: it submits for you.</p>
-    </section>`;
 }
 
 // The file picker lives outside the redrawn part of the panel, so a refresh can't lose the chosen file.
@@ -1701,6 +1708,7 @@ function draw(state: PanelState): boolean {
   const badge = (element: HTMLElement, count: number) => { element.textContent = count ? String(count) : ""; element.hidden = !count; };
   badge(weekBadge, state.connected && store.tracker ? dueCount(todayList().items) : 0);
   badge(jobsBadge, state.connected ? firstEmailCount() : 0);
+  badge(meBadge, state.connected ? friendRequests() : 0);
   tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => {
     const on = tab.dataset.tab === tabNow;
     tab.classList.toggle("on", on);
@@ -1714,8 +1722,8 @@ function draw(state: PanelState): boolean {
   if (document.activeElement?.closest(".letter-form") && document.activeElement.matches("textarea, input")) return false;
   // Nor a new password being typed.
   if (document.activeElement?.matches("#password input")) return false;
-  // Nor a search in Jobs.
-  if (document.activeElement?.matches("#job-search")) return false;
+  // Nor a search in Jobs, or a friend's email.
+  if (document.activeElement?.matches("#job-search, #friend-email")) return false;
   // Nor the job being checked before "I applied" saves it.
   if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return false;
   // The password is drawn on its own, so a redraw can't lose what's typed: it's moved out, then back into its slot.
@@ -1753,6 +1761,7 @@ function draw(state: PanelState): boolean {
     wireReminders(app);
     wireBubbles(app);
     wireWeek(app);
+    wireFriends(app);
     wireJobsList(app);
     app.querySelectorAll<HTMLButtonElement>("[data-show-jobs]").forEach((button) => button.addEventListener("click", () => { showJobs("reach"); go("jobs"); }));
     const job = view === "job" ? jobById(openedJob.id) : null;
@@ -1771,6 +1780,14 @@ function draw(state: PanelState): boolean {
     // If the worker never says it's running, the job comes back instead of the spider typing forever.
     setTimeout(() => { if (fillPending === tabId) { fillPending = null; void render(); } }, 5000);
     void render();
+  });
+  document.getElementById("beta-fill")?.addEventListener("click", () => {
+    const tabId = state.tab!.id;
+    fillPending = tabId;
+    void ask({ type: "fill", tabId, beta: true });
+    setTimeout(() => { if (fillPending === tabId) { fillPending = null; void render(); } }, 5000);
+    // The spider types on his laptop on Week while it fills.
+    go("home");
   });
   document.getElementById("stop")?.addEventListener("click", () => {
     fillPending = null;

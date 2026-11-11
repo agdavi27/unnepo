@@ -1398,7 +1398,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await chrome.storage.local.set({ autoSubmit: Boolean(message.value) });
         return reply({ ok: true });
       case "fill": {
-        if (!AUTOFILL_ENABLED) return reply({ ok: false, error: "Autofill is turned off." });
+        // Autofill is off, except from Tools' "Autofill (Beta)" button.
+        if (!AUTOFILL_ENABLED && message.beta !== true) return reply({ ok: false, error: "Autofill is turned off." });
         const tab = await chrome.tabs.get(Number(message.tabId)).catch(() => null);
         if (tab?.url && NEVER_READ.test(new URL(tab.url).hostname)) {
           await saveJob(Number(message.tabId), { error: "Unnepo doesn't fill LinkedIn. Open the job's own application (Apply on the company's site), then press Fill.", step: "Stopped." });
@@ -1792,6 +1793,22 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ ok: true, tracker: await tracker(Boolean(message.fresh)) });
         } catch (error) {
           return reply(failed(error, "Couldn't load your jobs."));
+        }
+      // Friends, and how many each applied to since the start of the student's week.
+      case "friends":
+        if (!fromExtension(sender)) return reply({ ok: false });
+        try {
+          return reply({ ok: true, ...(await api<Record<string, unknown>>("GET", `friends?since=${encodeURIComponent(String(message.since ?? ""))}`)) });
+        } catch (error) {
+          return reply(failed(error, "Couldn't load your friends."));
+        }
+      // Add a friend by email, accept or decline a request, remove a friend.
+      case "friend-action":
+        if (!fromExtension(sender)) return reply({ ok: false });
+        try {
+          return reply({ ok: true, ...(await api<Record<string, unknown>>("POST", "friends", message.body ?? {})) });
+        } catch (error) {
+          return reply(failed(error, "Couldn't do that."));
         }
       // The People card: find, show one more, write an email or follow-up, mark emailed or replied, bounced.
       case "people":

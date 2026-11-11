@@ -1089,6 +1089,7 @@ export const repo = {
       db.messages = db.messages.filter((message) => message.userId !== userId);
       db.saved = db.saved.filter((item) => item.userId !== userId);
       db.followups = db.followups.filter((item) => item.userId !== userId);
+      db.friendships = (db.friendships ?? []).filter((item) => item.fromUserId !== userId && item.toUserId !== userId);
       return true;
     });
   },

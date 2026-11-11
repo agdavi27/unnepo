@@ -1,5 +1,6 @@
 import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
 import { escape, isAppliedJob, progressDots, progressOf, redraw, store } from "./tracker-view";
+import { friendsWeekCard } from "./friends";
 import type { TrackerJob } from "./types";
 
 /**
@@ -100,6 +101,7 @@ export function weekView(now = new Date()) {
       ${weekly ? `<div class="bar" role="progressbar" aria-label="Weekly goal" aria-valuemin="0" aria-valuemax="${weekly}" aria-valuenow="${Math.min(week, weekly)}"><div style="width:${Math.min(100, Math.round((week / weekly) * 100))}%"></div></div>` : ""}
       <div class="row-between"><span class="small">${weekly ? (week >= weekly ? "Weekly goal hit." : `${weekly - week} to go this week.`) : "Set a weekly goal on unnepo.com to fill these in."}</span><span class="small">${emails} ${emails === 1 ? "email" : "emails"} sent</span></div>
     </section>
+    ${friendsWeekCard(week)}
     <section class="page day-card" aria-label="${dayName}">
       <div class="row-between"><span class="eyebrow">${dayName}</span><span class="small">${dayJobs.length} applied · ${dayEmails} emailed</span></div>
       ${dayJobs.length ? `<ul class="jobs-list">${dayJobs.map((job) => jobRow(job, time(job))).join("")}</ul>` : `<p class="note">${pickedDay === today ? "Nothing yet today. Apply somewhere and it shows up here." : "No applications that day."}</p>`}
