@@ -23,6 +23,21 @@ button { font: inherit; color: inherit; }
 .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 20px 14px; }
 .top-text { min-width: 0; }
 .logo { font-size: 20px; font-weight: 700; letter-spacing: -0.6px; }
+/* Beside the logo: "Upgrade to Pro" on Free, or a small Pro tag. */
+.logo-row { display: flex; align-items: center; gap: 8px; }
+.plan-badge { height: 22px; padding: 0 8px; border-radius: 6px; display: inline-flex; align-items: center; font: 600 11px Geist, sans-serif; white-space: nowrap; }
+.plan-badge.pro { border: 1px solid var(--accent); color: var(--accent); letter-spacing: .4px; }
+button.plan-badge { border: 0; background: var(--accent); color: #000; cursor: pointer; }
+button.plan-badge:hover { filter: brightness(1.1); }
+/* Get Pro: why Pro, then the button to the plans. */
+.pro-page { display: flex; flex-direction: column; gap: 14px; }
+.pro-price { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+.pro-price small { font-size: 13px; font-weight: 400; color: var(--muted); }
+.pro-reasons { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.pro-reasons li { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; }
+.pro-reasons li::before { content: "✓"; color: var(--accent); font-weight: 700; }
+.pro-reasons strong { display: block; font-weight: 600; }
+.pro-reasons span { color: var(--muted-3); font-size: 13px; }
 .dot { color: var(--accent); }
 .ticker { margin: 4px 0 0; font-size: 12px; color: var(--muted-3); min-height: 18px; overflow-wrap: anywhere; }
 .ticker.alert { color: #FCA5A5; }
@@ -239,6 +254,14 @@ details.part .view { padding: 12px 0 0; }
 /* The job box above the big buttons: the job read off the page, Begin applying, and then the complex questions. */
 .job-box { padding: 16px; border: 1px solid var(--line-2); border-radius: 16px; background: var(--surface); display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .job-box.empty { gap: 6px; }
+/* The job on the tab, kept small: name and company, Begin applying, and the rest tucked away. */
+.job-box.compact { padding: 10px 12px; gap: 8px; border-radius: 12px; }
+.job-box.compact .job-line { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.job-box.compact .job-line > div { flex: 1; min-width: 0; }
+.job-box.compact .job-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-box.compact .job-detail { font-size: 12px; color: var(--muted-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.job-box.compact .solid { height: 32px; padding: 0 12px; font-size: 12px; }
+.job-box.compact .desc summary, .job-box.compact .quiet-link { font-size: 12px; }
 .job-box + .tools { padding-top: 0; }
 .job-name.small-name { font-size: 19px; }
 .facts { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -295,6 +318,14 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .job-view select.field { height: 40px; }
 .people-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .person { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line-2); border-radius: 12px; min-width: 0; }
+/* On Free: one tight row per person, a blank photo, the name and title, then Show person. */
+.person.compact { flex-direction: row; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; }
+.person.compact .person-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.person.compact .person-name { font-size: 13px; line-height: 1.3; }
+.person.compact .sub { font-size: 12px; color: var(--muted-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person.compact .solid { height: 30px; padding: 0 10px; font-size: 12px; }
+.avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--control); display: grid; place-items: end center; overflow: hidden; }
+.avatar svg { display: block; width: 26px; height: 26px; color: var(--muted); }
 .person.first { border-color: var(--accent); }
 .person-name { font-weight: 600; overflow-wrap: anywhere; }
 .person .role { margin-left: 4px; padding: 1px 6px; border: 1px solid var(--control); border-radius: 999px; font: 10px var(--mono); color: var(--muted-3); vertical-align: middle; }
@@ -347,7 +378,7 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .reach-row .bubble-btn { flex: 0 0 36px; padding: 0; }
 
 /* The menu, along the bottom: Week, Jobs, Tools, Me. It stays put while the page scrolls. */
-.tabs { position: sticky; bottom: 0; z-index: 4; flex: none; display: grid; grid-template-columns: repeat(3, 1fr); padding: 6px 8px 8px; border-top: 1px solid var(--line-2); background: #0A0A0C; }
+.tabs { position: sticky; bottom: 0; z-index: 4; flex: none; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 6px 8px 8px; border-top: 1px solid var(--line-2); background: #0A0A0C; }
 .tab { position: relative; min-height: 50px; padding: 4px 0; border: 0; background: transparent; color: var(--muted); font: 500 11px Geist, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; cursor: pointer; }
 .tab:hover { color: var(--fg); }
 .tab.on { color: var(--fg); }
@@ -457,3 +488,5 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .section-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 2px; font: 600 11px var(--mono); letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted-2); }
 .section-divider::before, .section-divider::after { content: ""; flex: 1; height: 1px; background: #33333B; }
 .section-divider + .tools { padding-top: 6px; }
+.job-box.compact .desc summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person.compact .person-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -15,7 +15,7 @@ const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Prom
 const short = (text: string, max = 60) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
 /** What the page around this does: draw again, open a job (and a person on it), and where the plans are. */
-export type Host = { redraw: () => void; openJob: (id: string, contactId?: string) => void; upgradeUrl: () => string; addJob?: (from: Detected) => void };
+export type Host = { redraw: () => void; openJob: (id: string, contactId?: string) => void; upgradeUrl: () => string; addJob?: (from: Detected) => void; /** The Get Pro page, on Free. */ openUpgrade?: () => void };
 
 // ---- The tracker, kept here between draws ----
 
@@ -114,7 +114,20 @@ export function progressDots(job: TrackerJob) {
   return `<span class="dots-wrap"><span class="dots" aria-hidden="true">${bars}</span><span class="dots-label${progress.due ? " due" : progress.ended === "Offer" || progress.done >= 5 ? " ok" : ""}">${escape(label)}</span></span>`;
 }
 
-const ROLE_LABEL: Record<string, string> = { alumni: "Alum", recruiter: "Recruiter", department: "Team", poster: "Posted the job" };
+const ROLE_LABEL: Record<string, string> = { alumni: "Alum", recruiter: "Recruiter", department: "Team", team_member: "Team", poster: "Posted the job", job_poster: "Posted the job" };
+
+/** A blank profile photo, for people Free doesn't show yet. */
+const AVATAR = `<span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="9" r="4.2"/><path d="M3.5 24c.8-5 4.2-8 8.5-8s7.7 3 8.5 8z"/></svg></span>`;
+
+/** One tight row on Free: blank photo, who they are, and Show person, which opens Get Pro. No name yet: the title leads. */
+function freeRow(name: string | null, title: string, role: string) {
+  const label = ROLE_LABEL[role] ?? role;
+  const main = name || title || label;
+  const sub = name ? [title || label] : [title ? label : "", "Name hidden"];
+  return `<li class="person compact">${AVATAR}
+    <div class="person-text"><span class="person-name" title="${escape(main)}">${escape(main)}</span><span class="sub">${escape(sub.filter(Boolean).join(" · "))}</span></div>
+    <button type="button" class="solid" data-upgrade>Show person</button></li>`;
+}
 const EMAIL_SOURCE: Record<string, string> = {
   apollo: "Verified", hunter: "Verified", pattern: "Verified", job_posting: "From the job posting", website: "From the company's website",
   likely: "Likely: follows the company's format, not checked", cant_check: "Can't be checked: the company accepts every address", guess: "Best guess",
@@ -225,10 +238,10 @@ function peopleCard(job: TrackerJob) {
   if (preview?.rows.length && store.tracker?.free) {
     const count = (role: string) => preview.rows.filter((row) => row.role === role).length;
     const words = (n: number, one: string, many: string) => (n ? `${n} ${n === 1 ? one : many}` : "");
-    const parts = [words(count("recruiter"), "recruiter", "recruiters"), words(count("alumni"), "alum", "alumni"), words(count("department"), "person on the team", "people on the team")].filter(Boolean);
+    const parts = [words(count("recruiter"), "recruiter", "recruiters"), words(count("alumni"), "alum", "alumni"), words(count("department") + count("team_member"), "person on the team", "people on the team")].filter(Boolean);
     return `<section class="page people" aria-label="People">${head}${posted}
-      <p class="note">Unnepo found ${escape(parts.join(", ") || `${preview.rows.length} people`)} at ${escape(company)}.</p>
-      <a class="btn primary" href="${escape(host.upgradeUrl())}" target="_blank" rel="noreferrer">See who they are with Pro</a></section>`;
+      <p class="small">Unnepo found ${escape(parts.join(", ") || `${preview.rows.length} people`)} at ${escape(company)}.</p>
+      <ul class="people-list">${preview.rows.map((row) => freeRow(null, row.title, row.role)).join("")}</ul></section>`;
   }
   if (job.contactsStatus === "idle" || (preview && !store.tracker?.free)) {
     return `<section class="page people" aria-label="People">${head}${posted}
@@ -249,12 +262,11 @@ function peopleCard(job: TrackerJob) {
         <p class="note">${stale || job.contactsStatus === "failed" ? "That search didn't finish." : `No one found at ${escape(company)} yet.`}</p>
         <div class="links">${linkedIn("Recruiters", `recruiter ${job.company}`)}${linkedIn("The team", `${job.department || job.title} ${job.company}`)}</div>
         <div class="connect-code"><input class="field" data-website="${job.id}" value="${escape(websites[job.id] ?? "")}" placeholder="Company website, like acme.com" aria-label="Company website"><button type="button" class="solid" data-find-people="${job.id}">Search again</button></div>`
-        : `<ul class="people-list">${job.contacts.map((person, index) => personRow(job, person, index === job.contacts.findIndex((other) => other.email))).join("")}</ul>`}
+        : `<ul class="people-list">${job.contacts.map((person, index) => store.tracker?.free && !person.email && job.hidden.includes(person.name.toLowerCase())
+          ? freeRow(person.name, person.title, person.role)
+          : personRow(job, person, index === job.contacts.findIndex((other) => other.email))).join("")}</ul>`}
     </section>`;
 }
-
-/** On Free, beside "Show person": Pro shows everyone's name and email. */
-const upgradeLink = () => (store.tracker?.free && host.upgradeUrl() ? `<a class="link upgrade-link" href="${escape(host.upgradeUrl())}" target="_blank" rel="noreferrer">Upgrade to Pro ↗</a>` : "");
 
 function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
   const key = person.name.toLowerCase();
@@ -274,7 +286,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
       ? `<a class="email-link" href="${escape(link.url)}" ${link.url.startsWith("mailto:") ? "" : 'target="_blank" rel="noreferrer"'} data-email-link="${person.id}" data-cut="${link.cut}" title="Open this email in ${MAILER_NAME[store.mailer]}">${escape(person.email)} ↗</a>`
       : `<button type="button" class="email-link" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""} title="Write the email, then open it in ${MAILER_NAME[store.mailer]}">${busy("write") ? "Writing your email…" : `${escape(person.email)} ↗`}</button>`
     : hidden
-      ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>${upgradeLink()}` : `<span class="small">You've shown 3 people for this job.</span>${upgradeLink()}`
+      ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>` : `<span class="small">You've shown 3 people for this job.</span>`
       : `<span class="small">No email found</span>`;
   return `
     <li class="person${first ? " first" : ""}">
@@ -348,6 +360,11 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     store.busy.delete(`find:${job.id}`);
     store.notes[job.id] = result.ok ? "" : result.error ?? "Couldn't start the search.";
     await loadTracker(true);
+  }));
+  // On Free, Show person opens Get Pro (or the plans, where the panel has no such page).
+  root.querySelectorAll<HTMLButtonElement>("[data-upgrade]").forEach((button) => button.addEventListener("click", () => {
+    if (host.openUpgrade) host.openUpgrade();
+    else if (host.upgradeUrl()) window.open(host.upgradeUrl(), "_blank", "noreferrer");
   }));
   root.querySelectorAll<HTMLButtonElement>("[data-reveal]").forEach((button) => button.addEventListener("click", () => void run("reveal", button.dataset.reveal!, { action: "reveal" })));
   root.querySelectorAll<HTMLDetailsElement>("details[data-person]").forEach((box) => box.addEventListener("toggle", () => {

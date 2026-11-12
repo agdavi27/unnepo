@@ -366,12 +366,24 @@ export function linkedinJob(where: { hostname: string; pathname: string; href: s
     }
     return null;
   };
-  const heading = first([
+  // The job's name: LinkedIn's known title boxes first. Otherwise the biggest heading or link to this job on the
+  // page, outside the site's own menu bar ("0 notifications", "Messaging") and never a screen-reader-only line.
+  const jobId = linkedinJobId(where.href);
+  const readable = (el: HTMLElement) => {
+    const text = clean(el.textContent);
+    const rect = el.getBoundingClientRect();
+    return visible(el) && rect.width >= 20 && rect.height >= 10 && text.length >= 3 && text.length <= 150 && !notJobTitle(text) && !NOT_JOB_NAME.test(text)
+      && !el.closest("header, nav, [role='navigation'], #global-nav, .global-nav, [class*='global-nav']");
+  };
+  const known = [
     ".job-details-jobs-unified-top-card__job-title h1", ".job-details-jobs-unified-top-card__job-title", ".jobs-unified-top-card__job-title",
     ".top-card-layout__title", ".jobs-details-top-card__job-title", "[data-testid*='job-title' i]",
-  ]) ?? Array.from(document.querySelectorAll<HTMLElement>("h1, h2")).find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !notJobTitle(clean(el.textContent)) && !NOT_JOB_NAME.test(clean(el.textContent)));
-  // The tab's own name on a job's page: "Growth Intern | MealPal | LinkedIn".
-  const fromTab = /\/jobs\/view\//.test(where.pathname) ? titleParts(document.title) : null;
+  ].flatMap((selector) => Array.from(document.querySelectorAll<HTMLElement>(selector))).find(readable);
+  const size = (el: HTMLElement) => parseFloat(window.getComputedStyle(el).fontSize) || 0;
+  const heading = known ?? Array.from(document.querySelectorAll<HTMLElement>(`h1, h2, a[href*='/jobs/view/${jobId}']`)).filter(readable)
+    .sort((a, b) => size(b) - size(a))[0];
+  // The tab's own name: "Growth Intern | MealPal | LinkedIn".
+  const fromTab = titleParts(document.title);
   const title = clean(heading?.textContent) || fromTab?.title || "";
   if (!title || notJobTitle(title)) return null;
   // The results list links to many jobs; the details pane to at most one.
@@ -381,7 +393,7 @@ export function linkedinJob(where: { hostname: string; pathname: string; href: s
     ".job-details-jobs-unified-top-card__company-name a", ".job-details-jobs-unified-top-card__company-name", ".jobs-unified-top-card__company-name a",
     ".jobs-unified-top-card__company-name", ".topcard__org-name-link", ".top-card-layout__second-subline a", "a[href*='/company/']",
   ], pane);
-  const company = [clean(companyEl?.textContent), fromTab?.company ?? ""].map((name) => cleanCompanyName(name)).find((name) => goodEmployer(name, title))
+  const company = [clean(companyEl?.textContent), fromTab && sameName(fromTab.title, title) ? fromTab.company : ""].map((name) => cleanCompanyName(name)).find((name) => goodEmployer(name, title))
     || employerIn(pane, heading ?? null, title);
   const about = first(["#job-details", ".jobs-description__content", ".jobs-description-content__text", ".jobs-box__html-content", ".show-more-less-html__markup", ".description__text"], pane)
     ?? first(["#job-details", ".jobs-description__content", ".show-more-less-html__markup", ".description__text"]);
@@ -564,7 +576,7 @@ export function scanPage(): Scan {
 const JOB_HREF = /\/(jobs?|job-search|stu\/jobs|viewjob|job-listing|job-detail|jobs\/view|rc\/clk|partner\/joblisting\.htm|c\/[^/]+\/job)(\/|\?|$|\.htm)|[?&](jk|vjk|jid|jl|joblistingid|currentjobid|jobid|job_id)=/i;
 const APPLY_LABEL = /^(1-click apply|one-click apply|quick apply|easy apply|instant apply|apply|apply now|apply externally|apply on company (site|website)|apply on employer site|apply with (my )?(profile|resume)|i'?m interested)$/i;
 // Section headings in a job's pane that aren't the job's name.
-const NOT_JOB_NAME = /^(job details|about the job|about (the |this )?(company|role|position)|description|job description|overview|qualifications|requirements|benefits|similar jobs|more jobs|recommended( jobs)?|people also viewed|jobs you may like|salary|location|full job description|apply|share|report)$/i;
+const NOT_JOB_NAME = /^(job details|about the job|meet the hiring team|people you can reach out to|about the company|job search faster with premium|show more|see more|about (the |this )?(company|role|position)|description|job description|overview|qualifications|requirements|benefits|similar jobs|more jobs|recommended( jobs)?|people also viewed|jobs you may like|salary|location|full job description|apply|share|report)$/i;
 // Where boards put the employer: its own page, or an element named for it.
 const COMPANY_LINK = "a[href*='/company/'], a[href*='/cmp/'], a[href*='/companies/'], a[href*='/e/'], a[href*='/emp/'], a[href*='/employers/'], a[href*='/organizations/'], a[href*='/Overview/'], a[href*='/c/']";
 const COMPANY_NAMED = "[data-testid*='company' i], [data-testid*='employer' i], [data-test*='employer' i], [data-test*='company' i], [data-hook*='employer' i], [data-hook*='company' i], [class*='companyName' i], [class*='company-name' i], [class*='employer-name' i], [class*='employerName' i], [class*='employer_name' i], [itemprop='hiringOrganization']";
