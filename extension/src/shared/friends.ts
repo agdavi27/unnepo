@@ -2,8 +2,8 @@ import { weekStart } from "@/lib/apply/stats";
 import { escape, redraw } from "./tracker-view";
 
 /**
- * Friends, in the side panel. On Week: each friend and how many jobs they applied to this week, or an empty box
- * with a button to add some. On Me: add a friend by email, answer requests, and remove friends. Only the count
+ * Friends, in the side panel. On Week, once there's a friend: each friend and how many jobs they applied to this
+ * week. On Me: add a friend by email, answer requests, and remove friends. Only the count
  * is shared, and only once the friend accepts.
  */
 
@@ -46,20 +46,14 @@ export const friendRequests = () => friends.incoming.length;
 
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]!.toUpperCase()).join("") || "?";
 
-/** Week's friends box: each friend's applications this week, most first, or "lol no friends added yet". */
+/** Week's friends box: each friend's applications this week, most first. Shown only once a friend is added. */
 export function friendsWeekCard(myWeek: number) {
   ensureFriends();
   const head = (extra = "") => `<div class="row-between"><span class="eyebrow">Friends this week</span>${extra}</div>`;
-  if (!friends.list) return `<section class="page friends-card" aria-label="Friends this week">${head()}<p class="note">${escape(friends.error || "Loading your friends…")}</p></section>`;
+  if (!friends.list) return "";
   const requests = friends.incoming.length ? `<button type="button" class="note warn nudge" data-go="settings">${friends.incoming.length} friend ${friends.incoming.length === 1 ? "request" : "requests"} waiting. See ${friends.incoming.length === 1 ? "it" : "them"} →</button>` : "";
-  if (!friends.list.length) {
-    return `<section class="page friends-card empty" aria-label="Friends this week">
-      ${head()}
-      <p class="friends-empty">lol no friends added yet</p>
-      <button type="button" class="btn" data-go="settings">Add friends</button>
-      ${requests}
-    </section>`;
-  }
+  // No friends yet: nothing here but a request waiting, if there is one. Friends are added under Me.
+  if (!friends.list.length) return requests;
   const rows = [{ id: "me", name: "You", applied: myWeek }, ...friends.list].sort((a, b) => b.applied - a.applied);
   const top = Math.max(1, ...rows.map((row) => row.applied));
   return `<section class="page friends-card" aria-label="Friends this week">
@@ -121,7 +115,7 @@ export function wireFriends(root: HTMLElement) {
       if (result.status === "accepted") return "They'd already asked you, so you're friends now.";
       if (result.status === "already") return "You're already friends.";
       if (result.status === "waiting") return "Already sent. Waiting for them to accept.";
-      return result.emailed ? `Sent. ${email} got an email to accept.` : `Sent. ${email} sees it in Unnepo under Me.`;
+      return result.emailed ? `Sent. ${email} got an email inviting them to compete.` : `Sent. ${email} sees it in Unnepo under Me.`;
     });
   });
   root.querySelectorAll<HTMLButtonElement>("[data-friend-accept]").forEach((button) => button.addEventListener("click", () => void act({ action: "respond", id: button.dataset.friendAccept, accept: true }, () => "You're friends now.")));

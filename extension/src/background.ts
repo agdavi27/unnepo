@@ -1398,7 +1398,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await chrome.storage.local.set({ autoSubmit: Boolean(message.value) });
         return reply({ ok: true });
       case "fill": {
-        // Autofill is off, except from Tools' "Autofill (Beta)" button.
+        // Autofill is off, except from the Jobs tab's "Autofill (Beta)" button.
         if (!AUTOFILL_ENABLED && message.beta !== true) return reply({ ok: false, error: "Autofill is turned off." });
         const tab = await chrome.tabs.get(Number(message.tabId)).catch(() => null);
         if (tab?.url && NEVER_READ.test(new URL(tab.url).hostname)) {

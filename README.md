@@ -129,14 +129,17 @@ Subscribe to `checkout.session.completed`, `invoice.paid`, `customer.subscriptio
 
 ## OAuth
 
-Sign-in is school email and password. Google and Microsoft are only used to connect a mailbox so a student can send from their own inbox. Open `/connect` for the setup steps. Put `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `MICROSOFT_CLIENT_ID`, and `MICROSOFT_CLIENT_SECRET` in `.env.local`. The redirect URI is the origin in the browser plus the path below, which is `APP_URL` in production.
+Sign-in is school email and password, or Continue with Google on the login and signup pages (the Google account must use a school email). Continue with Google also makes the account the first time, with the email already verified, then goes to onboarding. The button shows only once `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are set: in `.env.local` locally, and in the Vercel project's environment variables in production. No rebuild is needed after adding them locally; on Vercel, redeploy.
 
-| Provider | Redirect URI |
+Set up the keys in Google Cloud Console: APIs & Services > OAuth consent screen (External, scopes `openid`, `email`, `profile`), then Credentials > Create credentials > OAuth client ID > Web application. Add these as Authorized redirect URIs:
+
+| Where | Redirect URI |
 | --- | --- |
-| Gmail send | `{APP_URL}/api/oauth/gmail/callback` |
-| Outlook send | `{APP_URL}/api/oauth/outlook/callback` |
+| Local | `http://localhost:43123/api/oauth/google/callback` |
+| Production | `https://unnepo.com/api/oauth/google/callback` |
+| Production (www) | `https://www.unnepo.com/api/oauth/google/callback` |
 
-Gmail scopes: `gmail.send` and `gmail.readonly`. Outlook scopes: `Mail.Send` and `Mail.Read`. Tokens are encrypted with `SESSION_SECRET` and are not returned to the browser. A message is marked sent only after the provider returns a message id.
+Microsoft works the same way with `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` and `/api/oauth/microsoft/callback`.
 
 Follow-ups are reminders. Unnepo does not send them automatically. A reply sync still runs when Inngest is configured.
 
