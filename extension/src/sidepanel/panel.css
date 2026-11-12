@@ -398,7 +398,10 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .heat-day.today { box-shadow: 0 0 0 1px var(--accent); }
 .heat-day.on { box-shadow: 0 0 0 1.5px var(--fg); }
 .heat-day.future { border: 1px dashed #1F1F24; background: transparent; cursor: default; }
-.heat-key { display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; }
+.heat-how > summary { cursor: pointer; font-size: 12px; color: var(--muted); width: fit-content; }
+.heat-how[open] > summary { margin-bottom: 8px; }
+.heat-how .heat-key-note { margin-top: 6px; }
+.heat-key { display: flex; align-items: flex-start; gap: 5px; flex-wrap: wrap; }
 .heat-key > .small { line-height: 12px; }
 .heat-key-step { display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .heat-key-swatch { width: 12px; height: 12px; border-radius: 3px; display: block; }

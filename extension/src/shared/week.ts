@@ -1,7 +1,7 @@
 import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
 import { escape, isAppliedJob, progressDots, progressOf, redraw, store } from "./tracker-view";
 import { friendsWeekCard } from "./friends";
-import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid } from "@/lib/apply/calendar";
+import { ACTIVITY_HEAT_FINE, ACTIVITY_MARK, activityByDay, activityGrid } from "@/lib/apply/calendar";
 import type { TrackerJob } from "./types";
 
 /**
@@ -88,7 +88,7 @@ export function weekView(now = new Date(), under = "") {
         const key = dayKey(date);
         if (key > today) return `<span class="heat-day future"></span>`;
         const count = byDay.get(key)?.length ?? 0;
-        return `<button type="button" class="heat-day${key === today ? " today" : ""}${key === pickedDay ? " on" : ""}" data-week-day="${key}" aria-pressed="${key === pickedDay}" aria-label="${escape(shortDate(date))}: ${count} ${count === 1 ? "thing" : "things"}" style="background:${ACTIVITY_HEAT[Math.min(count, 4)]}"></button>`;
+        return `<button type="button" class="heat-day${key === today ? " today" : ""}${key === pickedDay ? " on" : ""}" data-week-day="${key}" aria-pressed="${key === pickedDay}" aria-label="${escape(shortDate(date))}: ${count} ${count === 1 ? "thing" : "things"}" style="background:${ACTIVITY_HEAT_FINE[Math.min(count, 8)]}"></button>`;
       }).join("")}
     </div>`).join("");
   const letters = ["M", "T", "W", "T", "F", "S", "S"].map((letter) => `<span>${letter}</span>`).join("");
@@ -113,35 +113,41 @@ export function weekView(now = new Date(), under = "") {
       </div>
       ${weekly ? `<div class="bar" role="progressbar" aria-label="Weekly goal" aria-valuemin="0" aria-valuemax="${weekly}" aria-valuenow="${Math.min(week, weekly)}"><div style="width:${Math.min(100, Math.round((week / weekly) * 100))}%"></div></div>` : ""}
       <div class="row-between"><span class="small">${weekly ? (week >= weekly ? "Weekly goal hit." : `${weekly - week} to go this week.`) : "Set a weekly goal on unnepo.com."}</span><span class="small">${emails} ${emails === 1 ? "email" : "emails"} sent</span></div>
-      <span class="eyebrow">Every day you did something</span>
       <div class="heat" role="group" aria-label="Every day you did something, last ${WEEKS} weeks">
         <div class="heat-col heat-letters"><span class="heat-month"></span>${letters}</div>
         ${columns}
       </div>
+      ${detail}
       ${heatKey()}
-      ${detail || `<p class="small">Tap a day to see what happened.</p>`}
     </section>
     ${under}
     ${friendsWeekCard(week)}`;
 }
 
+/** Whether "How it works" under the calendar is open; kept across redraws. */
+let keyOpen = false;
 /**
  * The calendar's key: each square is a day, darker for nothing done and brighter the more happened (applying,
  * emailing someone, a follow-up, an interview, an offer or a no each count as one), plus today's ring.
  */
 function heatKey() {
-  const steps = ["0", "1", "2", "3", "4+"];
+  const steps = ["0", "1", "2", "3", "4", "5", "6", "7", "8+"];
   return `
-      <div class="heat-key" aria-label="Key: darker squares are days with less done, brighter ones more">
-        <span class="small">Less</span>
-        ${steps.map((label, index) => `<span class="heat-key-step"><span class="heat-key-swatch" style="background:${ACTIVITY_HEAT[index]}"></span><span class="heat-key-num">${label}</span></span>`).join("")}
-        <span class="small">More</span>
-        <span class="heat-key-step today-key"><span class="heat-key-swatch today"></span><span class="heat-key-num">Today</span></span>
-      </div>
-      <p class="small heat-key-note">Each square is a day. The brighter it is, the more you did: each application, email, follow-up, interview, offer or no counts as one.</p>`;
+      <details class="heat-how" id="heat-how" ${keyOpen ? "open" : ""}>
+        <summary>How it works</summary>
+        <div class="heat-key" aria-label="Key: darker squares are days with less done, brighter ones more">
+          <span class="small">Less</span>
+          ${steps.map((label, index) => `<span class="heat-key-step"><span class="heat-key-swatch" style="background:${ACTIVITY_HEAT_FINE[index]}"></span><span class="heat-key-num">${label}</span></span>`).join("")}
+          <span class="small">More</span>
+          <span class="heat-key-step today-key"><span class="heat-key-swatch today"></span><span class="heat-key-num">Today</span></span>
+        </div>
+        <p class="small heat-key-note">Each square is a day over the last ${WEEKS} weeks. The brighter it is, the more you did that day: each application, email, follow-up, interview, offer or no counts as one, up to 8 or more. Tap a day to see what happened.</p>
+      </details>`;
 }
 
 export function wireWeek(root: HTMLElement) {
+  const how = root.querySelector<HTMLDetailsElement>("#heat-how");
+  how?.addEventListener("toggle", () => { keyOpen = how.open; });
   root.querySelectorAll<HTMLButtonElement>("[data-week-day]").forEach((button) => button.addEventListener("click", () => {
     const key = button.dataset.weekDay!;
     pickedDay = key && key !== pickedDay ? key : "";

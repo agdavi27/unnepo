@@ -29,6 +29,8 @@ export const ACTIVITY_MARK: Record<ActivityKind, { glyph: string; color: string;
 
 /** Empty, then four greens, brighter for a busier day. */
 export const ACTIVITY_HEAT = ["#17171B", "#173A24", "#22603A", "#2F9A55", "#4ADE80"];
+/** A finer scale for the extension's calendar: nothing, then 1 through 8 or more things in a day. */
+export const ACTIVITY_HEAT_FINE = ["#17171B", "#122E1D", "#173A24", "#1C4A2E", "#22603A", "#287543", "#2F9A55", "#3CBC6A", "#4ADE80"];
 
 const HISTORY_KIND: Record<string, ActivityKind | undefined> = { follow_up: "follow_up", assessment: "interview", interviewing: "interview", offer: "offer", rejected: "rejected" };
 const isApplied = (job: ActivityJob) => job.status === "submitted" || job.status === "applied_manual";
