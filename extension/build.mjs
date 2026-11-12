@@ -1,6 +1,7 @@
 // Builds the Chrome extension into extension/dist: load that folder in chrome://extensions (Load unpacked).
 import { build } from "esbuild";
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,7 +19,15 @@ await build({ ...shared, format: "esm", entryPoints: { background: path.join(her
 // Page scripts are plain scripts that get injected again and again. Each copy is wrapped in its own scope;
 // without that, every re-injection reset the first copy's state (and left frozen spiders behind).
 await build({ ...shared, format: "iife", entryPoints: { "content/connect": path.join(here, "src/content/connect.ts"), "content/fill": path.join(here, "src/content/fill.ts"), "content/launcher": path.join(here, "src/content/launcher.ts") } });
-cpSync(path.join(here, "manifest.json"), path.join(out, "manifest.json"));
+// Built for the real server, the manifest drops its localhost entries: they're only for testing a local
+// copy, and the Chrome Web Store's review asks about every site an extension can reach.
+const manifest = JSON.parse(readFileSync(path.join(here, "manifest.json"), "utf8"));
+if (!/localhost/.test(api)) {
+  const real = (match) => !match.includes("localhost");
+  manifest.host_permissions = manifest.host_permissions.filter(real);
+  for (const script of manifest.content_scripts) script.matches = script.matches.filter(real);
+}
+writeFileSync(path.join(out, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 cpSync(path.join(here, "icons"), path.join(out, "icons"), { recursive: true });
 cpSync(path.join(here, "fonts"), path.join(out, "fonts"), { recursive: true });
 cpSync(path.join(here, "src/sidepanel/panel.html"), path.join(out, "sidepanel/panel.html"));
@@ -26,3 +35,18 @@ cpSync(path.join(here, "src/sidepanel/panel.css"), path.join(out, "sidepanel/pan
 cpSync(path.join(here, "src/dashboard/dashboard.html"), path.join(out, "dashboard/dashboard.html"));
 cpSync(path.join(here, "src/dashboard/dashboard.css"), path.join(out, "dashboard/dashboard.css"));
 console.log(`Built the extension into ${path.relative(root, out)} (server: ${api})`);
+
+// --zip also packs dist into unnepo-extension-<version>.zip at the project root, for the Chrome Web Store.
+if (process.argv.includes("--zip")) {
+  const zip = path.join(root, `unnepo-extension-${manifest.version_name ?? manifest.version}.zip`);
+  rmSync(zip, { force: true });
+  execFileSync("zip", ["-qr", zip, ".", "-x", ".*"], { cwd: out });
+  console.log(`Packed it into ${path.relative(root, zip)} for the Chrome Web Store`);
+  // The website's download, for installing by hand before (or instead of) the store: /extension/install.
+  if (!/localhost/.test(api)) {
+    const site = path.join(root, "public/downloads/unnepo-extension.zip");
+    mkdirSync(path.dirname(site), { recursive: true });
+    cpSync(zip, site);
+    console.log(`Copied it to ${path.relative(root, site)} for the website's download`);
+  }
+}

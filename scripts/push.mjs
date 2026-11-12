@@ -31,7 +31,9 @@ manifest.version = `${major}.${build}`;
 manifest.version_name = next;
 writeFileSync(manifestFile, `${JSON.stringify(manifest, null, 2)}\n`);
 
-git("add", versionFile, manifestFile);
+// The website's download (public/downloads) is rebuilt with the new version, so it always matches.
+execFileSync("node", [path.join(root, "extension/build.mjs"), "--zip"], { cwd: root, stdio: "inherit" });
+git("add", versionFile, manifestFile, path.join(root, "public/downloads/unnepo-extension.zip"));
 execFileSync("git", ["commit", "-m", `Version ${next}`], { cwd: root, stdio: "inherit" });
 const branch = git("rev-parse", "--abbrev-ref", "HEAD");
 execFileSync("git", ["push", "-u", "origin", branch], { cwd: root, stdio: "inherit" });

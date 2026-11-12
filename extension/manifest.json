@@ -4,7 +4,7 @@
   "short_name": "Unnepo",
   "version": "1.92",
   "version_name": "1.092",
-  "description": "Your job search in Chrome: catches the jobs you apply to, finds who to email at each company, and reminds you to follow up. You approve every submit.",
+  "description": "Track every job you apply to, autofill applications, write cover letters, and find who to email at each company.",
   "minimum_chrome_version": "116",
   "action": {
     "default_title": "Open Unnepo",
