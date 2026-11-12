@@ -281,7 +281,8 @@ async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
     account: accountPage ? (known ? "sign_in" : "new") : null,
     mentionsCv: scan.mentionsCv,
   };
-  peeks.set(tabId, { url, at: Date.now(), page });
+  // A LinkedIn job read off its card while the details pane loads has no description yet: look again next time.
+  if (!(linkedInJobId(scan.url) && !scan.description)) peeks.set(tabId, { url, at: Date.now(), page });
   void rememberSeen(tabId, scan);
   return page;
 }
@@ -302,6 +303,18 @@ const sameCompany = (a: string, b: string) => {
   const [x, y] = [word(a), word(b)];
   return Boolean(x && y) && (x.startsWith(y) || y.startsWith(x));
 };
+/** LinkedIn's id for the job a link opens (/jobs/view/<id>, or ?currentJobId=<id> on a search). "" elsewhere. */
+function linkedInJobId(href: string) {
+  try {
+    const url = new URL(href);
+    if (!/(^|\.)linkedin\.com$/.test(url.hostname)) return "";
+    return url.pathname.match(/\/jobs\/view\/(?:[^/]*?-)?(\d{6,})/)?.[1] ?? url.searchParams.get("currentJobId") ?? "";
+  } catch {
+    return "";
+  }
+}
+/** Two different LinkedIn jobs, even at the same company. */
+const otherLinkedInJob = (a: string, b: string) => Boolean(linkedInJobId(a) && linkedInJobId(b) && linkedInJobId(a) !== linkedInJobId(b));
 async function rememberSeen(tabId: number, scan: Scan) {
   if (!scan.title.trim() || !scan.company.trim()) return;
   // Only real jobs: an article or a shop with a title and a site name isn't one.
@@ -310,11 +323,12 @@ async function rememberSeen(tabId: number, scan: Scan) {
   const before = all[tabId];
   const form = scan.fields.length >= 3;
   // The company's application form knows less than the posting it came from: keep the posting's details.
-  if (before?.description && !scan.description && sameCompany(before.company, scan.company)) {
+  const other = Boolean(before && otherLinkedInJob(before.url, scan.jobUrl || scan.url));
+  if (before?.description && !scan.description && sameCompany(before.company, scan.company) && !other) {
     if (form && !before.form) { all[tabId] = { ...before, form: true }; await chrome.storage.session.set({ seen: all }); }
     return;
   }
-  const same = before && sameCompany(before.company, scan.company);
+  const same = before && sameCompany(before.company, scan.company) && !other;
   all[tabId] = { url: scan.jobUrl || scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now(), pressed: same && before?.pressed, form: form || (same && before?.form), sent: same && before?.sent };
   await chrome.storage.session.set({ seen: all });
 }

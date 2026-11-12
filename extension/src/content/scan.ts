@@ -384,6 +384,17 @@ export function linkedinJob(where: { hostname: string; pathname: string; href: s
   // headings ("Stay on top of new job openings", "Jobs you may be interested in") are LinkedIn's own boxes.
   const biggest = (selector: string) => Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(readable).sort((a, b) => size(b) - size(a))[0];
   const heading = known ?? (jobId ? biggest(`a[href*='/jobs/view/${jobId}']`) : undefined) ?? biggest("h1");
+  // Clicking another job changes the address at once but the details pane a moment later. Until it catches up,
+  // the pane still shows the job before, so the job is read off its card in the results list instead (no
+  // description yet; the next look gets it).
+  const card = linkedinCard(jobId);
+  const paneTitle = clean(known?.textContent);
+  // Two jobs can share a name ("Software Engineer Intern"): the employers have to match too.
+  const paneCompany = cleanCompanyName(clean(first([".job-details-jobs-unified-top-card__company-name", ".jobs-unified-top-card__company-name", ".topcard__org-name-link"])?.textContent));
+  const otherCompany = Boolean(card?.company && paneCompany && !sameName(paneCompany, card.company));
+  if (card && (!paneTitle || !sameName(paneTitle, card.title) || otherCompany || heading?.closest(".jobs-search-results-list, [class*='results-list'], li"))) {
+    return { title: card.title.slice(0, 200), company: card.company.slice(0, 200), description: "" };
+  }
   // The tab's own name: "Growth Intern | MealPal | LinkedIn".
   const fromTab = titleParts(document.title);
   const title = clean(heading?.textContent) || fromTab?.title || "";
@@ -408,6 +419,28 @@ export function linkedinJob(where: { hostname: string; pathname: string; href: s
   }
   const description = text.replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
   return { title: title.slice(0, 200), company: company.slice(0, 200), description };
+}
+
+/**
+ * The card for job `jobId` in LinkedIn's results list (the one you clicked): its title and company. null when
+ * the list isn't showing it (a /jobs/view/ page has no list).
+ */
+export function linkedinCard(jobId: string): { title: string; company: string } | null {
+  if (!jobId) return null;
+  const marked = document.querySelector<HTMLElement>(`[data-occludable-job-id='${jobId}'], [data-job-id='${jobId}']`);
+  // Otherwise a list item linking to the job, in a list linking to several.
+  const linked = Array.from(document.querySelectorAll<HTMLAnchorElement>(`a[href*='/jobs/view/${jobId}'], a[href*='currentJobId=${jobId}']`))
+    .map((a) => a.closest<HTMLElement>("li"))
+    .find((li) => li && li.parentElement && distinctJobLinks(li.parentElement) > 1) ?? null;
+  const box = marked ?? linked;
+  if (!box) return null;
+  const link = box.querySelector<HTMLAnchorElement>(`a[href*='/jobs/view/'], a[href*='currentJobId=']`);
+  // The link reads "Data Analyst" or "Data Analyst\nData Analyst with verification".
+  const title = clean(((link?.innerText || link?.textContent || link?.getAttribute("aria-label") || "").split("\n").find((line) => clean(line)) ?? "")).replace(/\s+with verification$/i, "");
+  if (!title || notJobTitle(title) || NOT_JOB_NAME.test(title)) return null;
+  const companyEl = box.querySelector<HTMLElement>(".artdeco-entity-lockup__subtitle, .job-card-container__primary-description, .job-card-container__company-name, [class*='company-name'], [class*='subtitle']");
+  const company = cleanCompanyName(clean((companyEl?.innerText || companyEl?.textContent || "").split("\n")[0]));
+  return { title, company: goodEmployer(company, title) ? company : "" };
 }
 
 /**
