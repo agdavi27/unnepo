@@ -426,6 +426,11 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
     return json(await friendAction(user.id, await request.json()));
   }
   if (action === "status" && method === "POST") return json(await extensionStatus(user.id, await request.json()));
+  // "Edit job info" on a job's page in the extension: its title, company and posting link, nothing else.
+  if (action === "edit-job" && method === "POST") {
+    const body = ((await request.json().catch(() => ({}))) ?? {}) as Record<string, unknown>;
+    return json(await updateJobDetails(user.id, { applicationId: body.applicationId, title: body.title, company: body.company, url: body.url }));
+  }
   if (action === "people" && method === "POST") {
     const body = await request.json();
     if (body?.action === "reveal" && !rateLimit(`reveal:${user.id}`, 40, 60 * 60 * 1000)) throw new ServiceError("That's a lot of people in an hour. Try again a bit later.", "rate_limited", 429);

@@ -165,31 +165,55 @@ const justOpened = new Map<string, boolean>();
 const drafts: Record<string, { subject: string; body: string }> = {};
 const websites: Record<string, string> = {};
 
+/** The job whose "Edit job info" form is open, and what's typed in it. */
+const editing = { jobId: "", title: "", company: "", url: "", busy: false, error: "" };
+
 export function jobPage(job: TrackerJob, focus?: string) {
   if (focus) openPeople.add(focus);
   const applied = isAppliedJob(job);
   const stage = stageOf(job as never);
   const pick = (value: string, label: string) => `<option value="${value}"${(stage === "no_response" ? "submitted" : stage) === value ? " selected" : ""}>${label}</option>`;
   const note = store.notes[job.id];
+  // The status sits small beside the job's name: a menu once applied, a small "I applied" before.
+  const status = applied
+    ? `<select class="status-mini" data-outcome="${job.id}" aria-label="Status">${pick("submitted", "Applied")}${pick("follow_up", "Follow up")}${stage === "assessment" ? pick("assessment", "Assessment") : ""}${pick("interviewing", "Interviewing")}${pick("offer", "Offer")}${pick("rejected", "Rejected")}</select>`
+    : `<button type="button" class="status-mini" data-mark-applied="${job.id}">I applied</button>`;
   return `
     <section class="page job-view" aria-label="${escape(job.title)}">
       <div>
-        <div class="job-name small-name">${escape(job.titleMissing ? "Job title missing" : job.title)}</div>
+        <div class="job-title-row">
+          <div class="job-name small-name">${escape(job.titleMissing ? "Job title missing" : job.title)}</div>
+          ${status}
+        </div>
         <div class="job-detail">${escape(job.companyMissing ? "Company missing" : job.company)}${job.location ? ` · ${escape(job.location)}` : ""}</div>
         <div class="sub">${applied ? `Applied ${when(job.submittedAt ?? job.createdAt)}${job.confirmation?.confidence === "confirmed" ? " · the site confirmed it" : ""}` : `Saved ${when(job.createdAt)}`}</div>
       </div>
       ${progressLine(job)}
-      ${applied
-        ? `<label class="question"><span class="q-label">Status</span><select class="field" data-outcome="${job.id}">${pick("submitted", "Applied")}${pick("follow_up", "Follow up")}${stage === "assessment" ? pick("assessment", "Assessment") : ""}${pick("interviewing", "Interviewing")}${pick("offer", "Offer")}${pick("rejected", "Rejected")}</select></label>`
-        : `<button type="button" class="solid" data-mark-applied="${job.id}">I applied to this</button>`}
-      ${applied ? reachPicker(job) : ""}
+      ${editing.jobId === job.id ? editForm(job) : ""}
       <div class="links">
         ${job.url ? `<a class="link" href="${escape(job.url)}" target="_blank" rel="noreferrer">Job posting ↗</a>` : ""}
+        ${editing.jobId === job.id ? "" : `<button type="button" class="link" data-edit-job="${job.id}">Edit job info</button>`}
         <button type="button" class="link" data-delete-job="${job.id}">Delete job</button>
       </div>
       ${note ? `<p class="small" role="status">${escape(note)}</p>` : ""}
     </section>
-    ${peopleCard(job)}`;
+    ${peopleCard(job)}
+    ${applied ? `<section class="page" aria-label="People you emailed">${reachPicker(job)}</section>` : ""}`;
+}
+
+/** "Edit job info": the job's title, company and posting link. */
+function editForm(job: TrackerJob) {
+  return `
+      <div class="edit-job letter-form flat" role="group" aria-label="Edit job info">
+        <label class="question"><span class="q-label">Job title</span><input class="field" data-edit="title" maxlength="200" value="${escape(editing.title)}"></label>
+        <label class="question"><span class="q-label">Company</span><input class="field" data-edit="company" maxlength="200" value="${escape(editing.company)}"></label>
+        <label class="question"><span class="q-label">Job link</span><input class="field" data-edit="url" type="url" maxlength="2000" placeholder="https://…" value="${escape(editing.url)}"></label>
+        ${editing.error ? `<p class="small" style="color: var(--warn)" role="alert">${escape(editing.error)}</p>` : ""}
+        <div class="links">
+          <button type="button" class="solid" data-edit-save="${job.id}" ${editing.busy ? "disabled" : ""}>${editing.busy ? "Saving…" : "Save"}</button>
+          <button type="button" class="link" data-edit-cancel>Cancel</button>
+        </div>
+      </div>`;
 }
 
 /** "People you emailed: None · 1 · 2 · 3+", one tap to say how many people were reached out to. */
@@ -343,6 +367,42 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     const result = await ask<{ ok: boolean; error?: string }>({ type: "job-status", applicationId: job.id, applied: true }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
     say(result.ok ? "Marked as applied." : result.error ?? "Couldn't change it.");
     void loadTracker();
+  });
+  root.querySelector<HTMLButtonElement>("[data-edit-job]")?.addEventListener("click", () => {
+    Object.assign(editing, { jobId: job.id, title: job.titleMissing ? "" : job.title, company: job.companyMissing ? "" : job.company, url: job.url ?? "", busy: false, error: "" });
+    host.redraw();
+  });
+  root.querySelectorAll<HTMLInputElement>("[data-edit]").forEach((box) => box.addEventListener("input", () => {
+    editing[box.dataset.edit as "title" | "company" | "url"] = box.value;
+  }));
+  root.querySelector<HTMLButtonElement>("[data-edit-cancel]")?.addEventListener("click", () => {
+    editing.jobId = "";
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    host.redraw();
+  });
+  root.querySelector<HTMLButtonElement>("[data-edit-save]")?.addEventListener("click", async () => {
+    const [title, company, url] = [editing.title.trim(), editing.company.trim(), editing.url.trim()];
+    if (title.length < 2) { editing.error = "Type the job title."; return host.redraw(); }
+    if (company.length < 2) { editing.error = "Type the company's name."; return host.redraw(); }
+    if (url && !/^https:\/\/\S+\.\S+/i.test(url)) { editing.error = "The link should start with https://."; return host.redraw(); }
+    editing.busy = true;
+    editing.error = "";
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    host.redraw();
+    // Only what changed is sent: a new company starts a new search for its people.
+    const changes = {
+      ...(title !== job.title || job.titleMissing ? { title } : {}),
+      ...(company !== job.company || job.companyMissing ? { company } : {}),
+      ...(url !== (job.url ?? "") ? { url } : {}),
+    };
+    const result = Object.keys(changes).length
+      ? await ask<{ ok: boolean; error?: string }>({ type: "edit-job", applicationId: job.id, ...changes }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }))
+      : { ok: true };
+    editing.busy = false;
+    if (!result.ok) { editing.error = result.error ?? "Couldn't save it."; return host.redraw(); }
+    editing.jobId = "";
+    store.notes[job.id] = Object.keys(changes).length ? "Saved." : "";
+    await loadTracker(true);
   });
   root.querySelector<HTMLButtonElement>("[data-delete-job]")?.addEventListener("click", async () => {
     if (!confirm(`Delete ${job.title} at ${job.company} from your tracker? Its people go too.`)) return;
@@ -511,7 +571,7 @@ export function wireReminders(root: HTMLElement) {
 // ---- Detected jobs ----
 
 const SURE: Record<Detected["sure"], string> = { confirmed: "Confirmed", likely: "Likely", pressed: "Pressed Apply", viewed: "Viewed" };
-let detectedOpen = true;
+let detectedOpen = false;
 const ago = (at: number) => {
   const minutes = Math.round((Date.now() - at) / 60_000);
   if (minutes < 1) return "just now";
