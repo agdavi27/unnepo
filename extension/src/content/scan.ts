@@ -357,7 +357,30 @@ export function linkedinJobId(href: string) {
  * still isn't the results list, then the employer's link and the "About the job" text. LinkedIn renames its
  * classes often, so each part has its known names first and a plain-page fallback after.
  */
-export function linkedinJob(where: { hostname: string; pathname: string; href: string } = window.location): { title: string; company: string; description: string } | null {
+type LinkedInRead = { title: string; company: string; description: string; fromCard?: boolean; waiting?: boolean };
+// The last job read off LinkedIn's details pane, and the job id the address named then.
+let linkedInRead: { id: string; title: string; company: string } | null = null;
+let linkedInIdSince = { id: "", at: 0 };
+/**
+ * The job LinkedIn has open. When the address names a new job but the details pane still shows the one read
+ * for the job before (LinkedIn swaps the pane in a moment after the address), the pane isn't this job yet:
+ * `waiting`, with nothing read, so nothing else on the page is taken for it either. After a few seconds it's
+ * believed (two listings can share a name and employer).
+ */
+export function linkedinJob(where: { hostname: string; pathname: string; href: string } = window.location): LinkedInRead | null {
+  const read = readLinkedIn(where);
+  const id = read ? linkedinJobId(where.href) : "";
+  if (!read || !id) return read;
+  if (linkedInIdSince.id !== id) linkedInIdSince = { id, at: Date.now() };
+  if (read.fromCard) return read;
+  const before = linkedInRead;
+  const stale = before && before.id !== id && sameName(before.title, read.title) && (!before.company || !read.company || sameName(before.company, read.company));
+  if (stale && Date.now() - linkedInIdSince.at < 6000) return { title: "", company: "", description: "", waiting: true };
+  linkedInRead = { id, title: read.title, company: read.company };
+  return read;
+}
+
+function readLinkedIn(where: { hostname: string; pathname: string; href: string }): LinkedInRead | null {
   if (!LINKEDIN_HOST.test(where.hostname) || !/^\/jobs\//.test(where.pathname) || !linkedinJobId(where.href)) return null;
   const first = (selectors: string[], root: ParentNode = document) => {
     for (const selector of selectors) {
@@ -393,7 +416,7 @@ export function linkedinJob(where: { hostname: string; pathname: string; href: s
   const paneCompany = cleanCompanyName(clean(first([".job-details-jobs-unified-top-card__company-name", ".jobs-unified-top-card__company-name", ".topcard__org-name-link"])?.textContent));
   const otherCompany = Boolean(card?.company && paneCompany && !sameName(paneCompany, card.company));
   if (card && (!paneTitle || !sameName(paneTitle, card.title) || otherCompany || heading?.closest(".jobs-search-results-list, [class*='results-list'], li"))) {
-    return { title: card.title.slice(0, 200), company: card.company.slice(0, 200), description: "" };
+    return { title: card.title.slice(0, 200), company: card.company.slice(0, 200), description: "", fromCard: true };
   }
   // The tab's own name: "Growth Intern | MealPal | LinkedIn".
   const fromTab = titleParts(document.title);
@@ -584,9 +607,11 @@ export function scanPage(): Scan {
   // The tab's own name is the last resort, without the site's name after it, and never a page name like "Jobs".
   // Nothing at all: the server's own "Job title missing", so the job is still caught and can be named later.
   const tabName = clean(document.title.split(/\s+[|–—-]\s+/)[0]);
-  const title = (named(posting?.title) || greenhouseTitle?.[1] || named(fromTitle?.title) || named(heading) || firstHeading || named(meta("og:title")) || named(tabName) || NO_TITLE).slice(0, 200);
+  // LinkedIn's pane still on the job before: the job isn't named yet (the next look names it).
+  const waiting = Boolean(posting && "waiting" in posting && posting.waiting);
+  const title = waiting ? NO_TITLE : (named(posting?.title) || greenhouseTitle?.[1] || named(fromTitle?.title) || named(heading) || firstHeading || named(meta("og:title")) || named(tabName) || NO_TITLE).slice(0, 200);
   const siteName = meta("og:site_name");
-  const company = (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "") || applyDialogCompany()
+  const company = waiting ? "" : (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "") || applyDialogCompany()
     || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || hostCompany(host)).slice(0, 200);
   const frame = document.querySelector<HTMLIFrameElement>("iframe#grnhse_iframe, iframe[src*='greenhouse.io/embed'], iframe[src*='jobs.lever.co'], iframe[src*='ashbyhq.com']");
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);
@@ -732,7 +757,9 @@ function findOpenedJob(given?: Element | null): OpenedJob | null {
   const address = jobLink(window.location.href);
   if (handshake?.title) return { ...handshake, url: address, from: "details pane" };
   const linkedin = linkedinJob();
-  if (linkedin?.title) return { ...linkedin, url: address, from: "details pane" };
+  // Still showing the job before: nothing on the page is this job yet.
+  if (linkedin?.waiting) return { title: "", company: "", description: "", url: address, from: "details pane" };
+  if (linkedin?.title) return { title: linkedin.title, company: linkedin.company, description: linkedin.description, url: address, from: "details pane" };
   const postings = structuredJobs();
   const buttons = pressed ? [pressed as HTMLElement] : Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button], input[type=submit]"))
     .filter((el) => visible(el) && APPLY_LABEL.test(clean(el.textContent || (el as HTMLInputElement).value || el.getAttribute("aria-label"))));

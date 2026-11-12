@@ -368,7 +368,7 @@ function toolsPage(state: PanelState, extra = "") {
  * (each with a spider beside it on the page), with one button that answers them all.
  */
 let details: { key: string; data: JobDetails | null; loading: boolean } = { key: "", data: null, loading: false };
-const detailsKey = (state: PanelState) => (state.tab ? `${state.tab.id}|${pageKey(state.tab.url)}|${state.page?.title ?? ""}` : "");
+const detailsKey = (state: PanelState) => (state.tab ? `${state.tab.id}|${pageKey(state.tab.url)}|${state.page?.title ?? ""}|${state.page?.company ?? ""}` : "");
 function loadDetails(state: PanelState) {
   const key = detailsKey(state);
   if (!state.tab || details.key === key) return;
@@ -1826,7 +1826,7 @@ chrome.tabs.onUpdated.addListener((id, info) => {
   // changes, and the job's details show a moment later. Look now, and again once they have.
   else if (info.url && id === lastState?.tab?.id) {
     void refresh();
-    setTimeout(() => void refresh(), 1500);
+    for (const wait of [1200, 3000, 6500]) setTimeout(() => void refresh(), wait);
   }
 });
 
