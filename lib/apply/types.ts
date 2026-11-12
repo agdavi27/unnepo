@@ -260,7 +260,7 @@ export type ApplicationProfile = {
   weeklyEmailGoal?: number;
   monthlyInterviewGoal?: number;
   streakGoal?: number;
-  /** Plan uses: every one ever, for Free's one-time allowance, and this month's ("2026-11"), for the paid plans' fair-use cap. */
+  /** Plan uses: this month's ("2026-11"), for Free's monthly allowance and Pro's hidden cap. */
   uses?: { total: UsageCounts; month: string; monthly: UsageCounts };
   /** "Did you apply to these?": jobs Apply was pressed on or filled that nothing confirmed. Shared by the panel and the web app. */
   maybeApplied?: MaybeApplied[];

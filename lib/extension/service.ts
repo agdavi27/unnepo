@@ -3,7 +3,7 @@ import { nameCompanyFromDescription } from "@/lib/apply/job-link";
 import { CREDIT_COST } from "@/lib/config";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
-import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, isFree, planUsage } from "@/lib/apply/limits";
+import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, hasUnlimitedCredits, isFree, planUsage } from "@/lib/apply/limits";
 import { isAdminEmail } from "@/lib/services/auth";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
@@ -28,8 +28,8 @@ import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
  * question), and records submissions.
  */
 
-/** AI mapping calls a student can make in a day before Unnepo stops calling the model for them. */
-const DAILY_AI_CALLS = Number(process.env.EXTENSION_DAILY_AI_CALLS || 60);
+// A day's AI calls from the extension: high enough for unlimited Pro (a full form's questions, many times), low enough to stop a script.
+const DAILY_AI_CALLS = Number(process.env.EXTENSION_DAILY_AI_CALLS || 150);
 /** Answers the model wrote, cached by question so the same question never costs a second call. */
 const CACHE_LIMIT = 400;
 
@@ -400,8 +400,12 @@ function pageJob(raw: unknown) {
 }
 
 export async function extensionWrite(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; question?: unknown; length?: unknown; job?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; question?: unknown; length?: unknown; job?: unknown; batch?: unknown };
   const question = String(body.question ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
+  // "All the questions on this page" is Pro's: Free answers one pasted question at a time.
+  if (body.batch === true && (await isFree(userId)) && !(await hasUnlimitedCredits(userId))) {
+    throw new ServiceError("Answering every question on a page is part of Pro. On Free, paste one question at a time.", "plan", 402);
+  }
   // The student's choice in the panel. Without one (the orange questions on a form), a short draft.
   const length = body.length === "paragraph" || body.length === "long" ? body.length : null;
   if (!question) throw new ServiceError("Which question should Unnepo write?", "question", 400);

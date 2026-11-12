@@ -98,15 +98,15 @@ describe("checkout", () => {
     expect(session.success_url).toBe(`${ORIGIN}/home?billing=success`);
     expect(session.cancel_url).toBe(`${ORIGIN}/home?billing=cancelled`);
     expect(session.line_items[0].price_data).toMatchObject({ unit_amount: 2500, recurring: { interval: "month", interval_count: 1 } });
-    expect(session.subscription_data.metadata).toMatchObject({ userId: user.id, kind: "pro", plan: "pro", credits: "25" });
+    expect(session.subscription_data.metadata).toMatchObject({ userId: user.id, kind: "pro", plan: "pro", credits: "20" });
   });
 
-  it("bills a semester every four months with four months of credits", async () => {
+  it("bills a semester every four months with a semester of credits", async () => {
     const user = await student();
     await createStripeCheckout(user, "pro_semester", ORIGIN);
     const [pro] = api.checkout.mock.calls.map((call) => call[0]);
     expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 7500, recurring: { interval: "month", interval_count: 4 } });
-    expect(pro.metadata.credits).toBe("100");
+    expect(pro.metadata.credits).toBe("70");
   });
 
   it("won't charge a price that differs from the page", async () => {
@@ -170,7 +170,7 @@ describe("subscription webhooks", () => {
     await applyVerifiedStripeEvent({
       id: "evt_old",
       type: "invoice.paid",
-      data: { object: { id: "in_old", billing_reason: "subscription_create", subscription: "sub_old", payment_intent: "pi_old", customer: "cus_old", amount_paid: 1500, subscription_details: { metadata: { userId: user.id, plan: "pro", credits: "25" } } } },
+      data: { object: { id: "in_old", billing_reason: "subscription_create", subscription: "sub_old", payment_intent: "pi_old", customer: "cus_old", amount_paid: 1500, subscription_details: { metadata: { userId: user.id, plan: "pro", credits: "20" } } } },
     });
     expect(await repo.listSubscriptions()).toMatchObject([{ stripeSubscriptionId: "sub_old", stripeCustomerId: "cus_old" }]);
     expect((await repo.listPayments(user.id))[0].stripePaymentIntent).toBe("pi_old");

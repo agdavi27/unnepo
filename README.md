@@ -107,17 +107,18 @@ This environment cannot attach the repository to your Vercel team. After you imp
 
 | Action | Credits |
 | --- | --- |
-| Verified school email | 25 once, unless `SIGNUP_CREDITS` overrides it |
+| Verified school email | 3 once (the trial's people), unless `SIGNUP_CREDITS` overrides it |
 | Search that returns people | 1, up to 20 people, once per filter set |
 | Empty or failed search | 0 |
 | Successful work-email unlock | 1 |
 | Failed or duplicate unlock | 0 |
-| AI email, follow-up draft, cover letter | Pro 150/month, Premium 300/month, free 0 |
+| Cover letters, answers, autofill | Free 3 letters, 5 answers, 10 AI autofills a month; Pro unlimited (hidden 1,000/month guard) |
 | Sending | 0 contact credits, and only after you approve |
 | Qualified referral | 25 promotional credits to the referrer |
-| Pro | $15/month or $45/semester, people at 25 companies a month. New purchases. |
+| Pro | $25/month or $75/semester, people at 20 companies a month or 70 a semester. New purchases. |
 | Premium | $39/month or $117/semester, people at 75 companies a month. New purchases. |
-| Legacy Grind and credit pack | Kept for accounts that already bought them |
+| Company pack | $15 for people at 15 more companies (`PACK_CREDITS`) |
+| Legacy Grind | Kept for accounts that already bought it |
 
 Purchased credits stay in a separate balance from signup, referral, and subscription allowance. Stripe retries use the event id and a ledger idempotency key, so they cannot grant credits twice. Refunds claw back unused purchased credits.
 

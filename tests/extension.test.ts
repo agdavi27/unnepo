@@ -485,9 +485,9 @@ describe("CV generator", () => {
     expect(first.text).not.toContain("300%");
     expect(Buffer.from(first.pdfBase64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
     expect((await repo.getAccount(userId))!.balance).toBe(startCredits);
-    expect(first.usesLeft).toBe(4);
+    expect(first.usesLeft).toBe(2);
 
-    for (let index = 0; index < 4; index += 1) await call("POST", "cv", token, {});
+    for (let index = 0; index < 2; index += 1) await call("POST", "cv", token, {});
     const calls = model.calls;
     const response = await call("POST", "cv", token, {});
     expect(response.status).toBe(402);
@@ -501,13 +501,13 @@ describe("plan limits", () => {
     await repo.setAccountForTests(userId, { balance: 5 });
     const { token } = await issueExtensionToken(userId);
     const { usage } = await (await call("GET", "me", token)).json();
-    expect(usage.credits).toBe(45);
+    expect(usage.credits).toBe(36);
     // Free's autofill is the basic fields, with no limit to count down.
     expect(usage.autofills).toMatchObject({ basic: true, note: "" });
     expect(usage.people).toMatchObject({ left: 5, note: "" });
     await repo.setAccountForTests(userId, { balance: 1 });
     const low = (await (await call("GET", "me", token)).json()).usage;
-    expect(low.credits).toBe(25);
+    expect(low.credits).toBe(16);
     expect(low.people.note).toBe("Only 1 people search left");
   });
 
@@ -527,17 +527,17 @@ describe("plan limits", () => {
     expect(await answer("long")).toBe(long);
   });
 
-  it("stops Free at 10 chat answers", async () => {
+  it("stops Free at 5 question answers a month", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
-    for (let index = 0; index < 10; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
       model.replies.push("I led the Colby Data Club.");
       expect((await call("POST", "write", token, { question: "Describe a time you led a team" })).status).toBe(200);
     }
     const blocked = await call("POST", "write", token, { question: "Describe a time you led a team" });
     expect(blocked.status).toBe(402);
-    expect((await blocked.json()).error).toBe("No chat answers left. Pro has no limit.");
+    expect((await blocked.json()).error).toBe("No question answers left this month. Pro has no limit.");
   });
 
   it("counts a job's autofill once it worked, and has no limit on Free's basic fill", async () => {
@@ -787,21 +787,21 @@ describe("quick answers before the first fill", () => {
 });
 
 describe("Free's cover letter limit", () => {
-  it("writes 5 a month on Free, then stops; the student's own edits and a reused letter don't count", async () => {
+  it("writes 3 a month on Free, then stops; the student's own edits and a reused letter don't count", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
     const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/78", title: "Data Intern", company: "Globex" })).json();
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 3; index += 1) {
       model.replies.push(`Dear Hiring Team,\n\nLetter ${index}. I am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students.\n\nI would bring the same care to Globex's data team.\n\nSincerely,\nPat Doe`);
       expect((await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" })).status).toBe(200);
     }
     const blocked = await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" });
     expect(blocked.status).toBe(402);
-    expect((await blocked.json()).error).toBe("No cover letters left. Pro has no limit.");
-    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 4.");
+    expect((await blocked.json()).error).toBe("No cover letters left this month. Pro has no limit.");
+    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 2.");
     expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id, text: "My own letter." })).json()).text).toBe("My own letter.");
-    expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 5, left: 0 });
+    expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 3, left: 0 });
   });
 });
 
