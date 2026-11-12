@@ -16,7 +16,7 @@ import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
 import { jobLink, titleParts } from "@/extension/src/content/scan";
 import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
-import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
+import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromDescription } from "@/lib/apply/extract";
 import { fillFromLink } from "@/lib/apply/job-link";
 import { appliedSince, bySite, secondsToApply } from "@/lib/apply/activity-stats";
@@ -249,6 +249,13 @@ describe("status lines aren't job titles", () => {
   it("knows Applied on a date and similar lines from real titles", () => {
     for (const line of ["Applied on November 2, 2026", "Applied", "✓ Applied 2 days ago", "Applied Nov 2", "Application submitted", "You've applied", "Posted 3 days ago", "Nov 2, 2026", "Saved"]) expect(notJobTitle(line)).toBe(true);
     for (const title of ["Applied Scientist Intern", "Application Engineer", "Growth Intern", "Savings Analyst", "Postdoctoral Fellow"]) expect(notJobTitle(title)).toBe(false);
+    // Handshake's apply pop-up headings name the employer, never the job.
+    for (const line of ["Apply to Software Galaxy Systems", "Applying to Runway Services", "Details from The Black Sheep", "Questions from Odyssey Search Partners"]) expect(notJobTitle(line)).toBe(true);
+    for (const title of ["Application Developer", "Details Coordinator", "Applied AI Engineer"]) expect(notJobTitle(title)).toBe(false);
+    expect(cleanCompanyName("Details from The Black Sheep")).toBe("The Black Sheep");
+    expect(cleanCompanyName("Apply to Runway Services")).toBe("Runway Services");
+    expect(companyFromApplyHeading("Apply to Odyssey Search Partners")).toBe("Odyssey Search Partners");
+    expect(companyFromApplyHeading("Growth Intern")).toBe("");
   });
 
   it("never saves one as the title, lists the job as missing its title, and fills it in from the link or by hand", async () => {

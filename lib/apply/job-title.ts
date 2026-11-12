@@ -1,7 +1,8 @@
 /**
  * Lines a job's page shows about the student's application or the posting, which are never the job's name:
- * "Applied on November 2, 2026", "Application submitted", "Posted 3 days ago". A real title that starts the same
- * way ("Applied Scientist", "Application Engineer") still counts. No server imports, so the extension uses it too.
+ * "Applied on November 2, 2026", "Application submitted", "Posted 3 days ago", and an apply pop-up's headings
+ * ("Apply to Runway Services", "Details from Runway Services"). A real title that starts the same way ("Applied
+ * Scientist", "Application Engineer") still counts. No server imports, so the extension uses it too.
  */
 
 const MONTH = "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?";
@@ -12,6 +13,8 @@ const STATUS = new RegExp(
   + `|you(?:'|’| ha)ve applied.*|you applied.*|already applied.*|application (sent|submitted|received|complete|completed|viewed|in progress)\\b.*`
   + `|your application (was |has been )?(sent|submitted|received).*|(saved|viewed|submitted|withdrawn|archived|not interested)${WHEN}?`
   + `|(posted|updated|reposted|closes|closing|deadline)\\b.*|no longer accepting.*|this job (has )?(expired|closed).*`
+  // An apply pop-up's own headings (Handshake): "Apply to The Black Sheep", "Details from The Black Sheep".
+  + `|(apply|applying) (to|for|at) .+|(details|questions|documents|attachments|information|info) (from|for) .+`
   + `)$`,
   "i",
 );
@@ -29,6 +32,9 @@ const COMPANY_BEFORE = [
   /^(more|other|all|open|similar)? ?(jobs|openings|roles|positions|careers|opportunities|internships) (at|from|with|by)\s+/i,
   /^(learn more about|more about|about|visit|follow|following|followed|work at|working at|life at|careers at|go to|company:|employer:|posted by|hiring company:?)\s+/i,
   /^(company |employer )?(logo|image|avatar|picture)( of| for)?\s+/i,
+  // An apply pop-up's headings: "Details from Runway Services", "Apply to Runway Services".
+  /^(details|questions|documents|attachments|information|info) from\s+/i,
+  /^(apply|applying) (to|at)\s+/i,
 ];
 const COMPANY_AFTER = [
   /\s*[·|•–—-]\s*(follow|following|view profile|\d[\d.,]*\s*(reviews?|followers?|employees|ratings?|jobs?)).*$/i,
@@ -53,4 +59,9 @@ export function cleanCompanyName(raw: string) {
     if (name === before) break;
   }
   return name;
+}
+
+/** The employer an apply pop-up names in its heading: "Apply to Runway Services" is "Runway Services". */
+export function companyFromApplyHeading(text: string) {
+  return text.replace(/\s+/g, " ").trim().match(/^(?:apply|applying) (?:to|at) (.{2,80})$/i)?.[1].trim() ?? "";
 }
