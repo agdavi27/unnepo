@@ -1822,6 +1822,12 @@ chrome.tabs.onUpdated.addListener((id, info) => {
   const job = lastState?.job;
   if (info.status === "loading" && id === lastState?.tab?.id && job?.error && !job.running) void ask({ type: "clear-error", tabId: id });
   if (info.status === "complete") void refresh();
+  // Job boards open another job without loading a page (LinkedIn's search, Handshake): only the address
+  // changes, and the job's details show a moment later. Look now, and again once they have.
+  else if (info.url && id === lastState?.tab?.id) {
+    void refresh();
+    setTimeout(() => void refresh(), 1500);
+  }
 });
 
 /** Tells the extension this panel is open, so the spider hanging on the page hides while it is. */
