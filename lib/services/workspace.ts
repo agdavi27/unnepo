@@ -18,6 +18,7 @@ import { assertUseAllowed, countUse } from "@/lib/apply/limits";
 import { student } from "@/lib/apply/service";
 import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
 import { profileState, saveStudentProfile } from "@/lib/profile/service";
+import { isAdminEmail } from "@/lib/services/auth";
 
 function asForm(value: unknown): FormProfile {
   const body = (value ?? {}) as Partial<FormProfile>;
@@ -428,6 +429,8 @@ export async function workspaceState(userId: string) {
   const studentFacts = document ? profileIntelligence.approvedForOutreach(document.facts, document.form.excludedTopics) : [];
   return {
     user: { name: user?.name ?? "", email: user?.email ?? "" },
+    // Admins switch plans here without paying, to see what students on each plan see.
+    admin: user ? await isAdminEmail(user) : false,
     credits: { balance: credits?.balance ?? 0, plan: credits?.plan ?? "free", includedAllowance: credits?.includedAllowance ?? 0, unlimited: await hasUnlimitedCredits(userId), coverLetters: await coverLettersLeft(userId), usage: await planUsage(userId) },
     profile: document,
     ready: student.ready,

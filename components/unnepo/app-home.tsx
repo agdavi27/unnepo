@@ -18,6 +18,7 @@ type PlanUsage = Awaited<ReturnType<typeof planUsage>>;
 type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
   user: { name: string; email: string };
+  admin?: boolean;
   credits: { balance: number; plan: string; includedAllowance: number; unlimited?: boolean; coverLetters?: { used: number; left: number | null }; usage?: PlanUsage };
   profile: { ready: boolean; form: Profile; organizedProfile: unknown | null } | null;
   /** The resume-first profile is confirmed (or the student finished the old onboarding). */
@@ -161,11 +162,31 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
     setBillingBusy(false);
   }
 
+  /** Admins: work as Free or Pro (null: the real plan) without going to Stripe. */
+  async function switchPlanView(plan: "free" | "pro" | null) {
+    setBillingBusy(true);
+    try {
+      const response = await fetch("/api/me/plan-preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) setNotice(payload.error || "Couldn't switch plans.");
+      else {
+        setNotice(plan ? `Viewing Unnepo as ${plan === "pro" ? "Pro" : "Free"}. Nothing was charged.` : "Back to your real plan.");
+        await load();
+      }
+    } catch {
+      setNotice("Couldn't switch plans.");
+    }
+    setBillingBusy(false);
+  }
+
   const showOnboarding = !data?.ready || editing;
 
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
 
-  const currentPlan = data?.credits.plan ?? "free";
+  const admin = Boolean(data?.admin);
+  const planView = data?.credits.usage?.preview ?? null;
+  // An admin viewing as Free or Pro sees that plan as theirs.
+  const currentPlan = planView ?? data?.credits.plan ?? "free";
   const subscribed = currentPlan === "pro" || currentPlan === "premium" || currentPlan === "grind";
   const usage = data?.credits.usage;
   const creditsLeft = usage?.credits ?? (data?.credits.balance ?? 0) * CREDIT_COST.people;
@@ -282,6 +303,15 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
                 </div>
                 <p className="text-xs text-faint">{CREDIT_COST.people} credits = up to 5 people at one company</p>
               </div>
+              {admin && (
+                <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-[#3D8BFF] bg-panel p-4 text-sm">
+                  <span className="mr-auto text-muted">Admin: {planView ? <>viewing as <strong className="text-white">{planView === "pro" ? "Pro" : "Free"}</strong>. Billing isn&apos;t touched.</> : <>the plan buttons switch your view, no Stripe.</>}</span>
+                  {(["free", "pro"] as const).map((plan) => (
+                    <button key={plan} type="button" disabled={billingBusy || planView === plan} onClick={() => void switchPlanView(plan)} className="rounded-xl border border-line px-3 py-1.5 hover:bg-white/5 disabled:opacity-50">View as {plan === "pro" ? "Pro" : "Free"}</button>
+                  ))}
+                  {planView && <button type="button" disabled={billingBusy} onClick={() => void switchPlanView(null)} className="rounded-xl border border-line px-3 py-1.5 hover:bg-white/5 disabled:opacity-50">My real plan</button>}
+                </div>
+              )}
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {PUBLIC_PLANS.map((plan) => {
                   const current = plan.id === currentPlan;
@@ -303,7 +333,11 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
                       <p className="mt-4 text-sm font-medium">{plan.applicationsLabel}</p>
                       <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-sm text-muted">{plan.features.map((feature) => <li key={feature}>{feature}</li>)}</ul>
                       <div className="mt-auto pt-5">
-                        {current ? (
+                        {admin && (plan.id === "free" || plan.id === "pro") ? (
+                          current ? <p className="text-center text-sm text-muted">Viewing as {plan.name}</p> : (
+                            <button type="button" disabled={billingBusy} onClick={() => void switchPlanView(plan.id === "free" || plan.id === "pro" ? plan.id : null)} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">Switch to {plan.name} (admin, free)</button>
+                          )
+                        ) : current ? (
                           plan.monthly ? (
                             <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="w-full rounded-xl border border-line px-4 py-2 text-sm font-semibold hover:bg-white/5 disabled:opacity-50">Manage subscription</button>
                           ) : (
