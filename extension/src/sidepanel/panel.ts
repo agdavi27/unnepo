@@ -149,6 +149,7 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
     const applying = state.applying;
     if (applying) {
       const open = applying.questions.filter((question) => !question.answered && !applying.answers?.[question.id]?.put).length;
+      if (applying.questionsOnly) return { lines: [open ? `${open} ${open === 1 ? "question" : "questions"} to answer. I'm sitting next to ${open === 1 ? "it" : "them"}.` : "Every question here has an answer.", goalLine(state)] };
       return { lines: [applying.uploaded.length ? "Resume's in." : applying.resumeBox ? "Couldn't upload your resume here. Add it yourself." : "No resume upload on this page yet.", open ? `${open} complex ${open === 1 ? "question" : "questions"}. I'm sitting next to ${open === 1 ? "it" : "them"}.` : "No complex questions left on this page.", goalLine(state)] };
     }
     return { lines: [`${page.company || page.site} job. It's under Detected jobs on Jobs.`, goalLine(state)] };
@@ -483,6 +484,7 @@ function wireJobBox(state: PanelState) {
     if (result.ok) delete complex.drafts[id];
     complex.note = result.ok ? "Put in the box." : result.reason ?? "Couldn't put it in.";
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    await refresh();
     void render();
   }));
   app.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) => button.addEventListener("click", () => {
@@ -815,10 +817,23 @@ const pasteButton = () => {
   return { label: typed ? "Next" : "Write generic one", disabled: typed > 0 && typed < 80 };
 };
 
-/** "Answer a question": an answer to a pasted question, for the job on this tab when Unnepo knows it. */
-const answering = { question: "", length: "paragraph", answer: "", busy: false, note: "" };
-function answerPopup() {
+/**
+ * "Answer a question": first a choice. One question: paste it, pick a length, get the answer to copy. All on this
+ * page: Unnepo finds the complex questions on the form (written ones a profile can't answer), writes every answer,
+ * and shows each question with its answer here, to edit, copy, or put in its box.
+ */
+const answering = { mode: "" as "" | "one" | "all", question: "", length: "paragraph", answer: "", busy: false, finding: false, note: "" };
+function answerPopup(state: PanelState) {
   const note = answering.note ? `<p class="small" role="status">${escape(answering.note)}</p>` : "";
+  if (popup!.step === 0) {
+    answering.mode = "";
+    const choose = (value: string, label: string, hint: string) => `<button type="button" class="opt" data-answer-mode="${value}">${label}<small>${hint}</small></button>`;
+    return popupShell("Answer a question", `<div class="stack tight">
+      ${choose("one", "One question", "Paste a question and get an answer to copy")}
+      ${choose("all", "All the questions on this page", "Finds the written questions on this application and answers each one")}
+    </div>${note}`);
+  }
+  if (answering.mode === "all") return allQuestionsPopup(state, note);
   if (answering.busy) return popupShell("Writing your answer", `<div class="letter-writing" role="status">${typingSpiderSvg(120, spiderLook)}<span class="small">Writing your answer…</span></div>`);
   if (answering.answer) {
     return popupShell("Your answer", `
@@ -828,15 +843,54 @@ function answerPopup() {
         <div class="links"><button type="button" class="solid" id="answer-copy">Copy</button><button type="button" class="link" id="answer-again">Answer another</button></div>
       </section>${note}`);
   }
-  const step = Math.min(popup!.step, 1);
   const pick = (value: string, label: string, hint: string) => option("answer-length", value, label, hint, answering.length === value);
-  if (step === 0) return popupShell("Paste the question", `<div class="letter-form flat"><textarea class="field letter-input" id="answer-q" rows="5" maxlength="600" aria-label="The question from the form" placeholder="e.g. Describe a time you led a team">${escape(answering.question)}</textarea><button type="button" class="btn primary big" id="popup-next" ${answering.question.trim() ? "" : "disabled"}>Next</button></div>${note}`, 0, 2);
-  return popupShell("How long should it be?", `<div class="stack tight">${pick("short", "A few sentences", "For short boxes on a form")}${pick("paragraph", "A paragraph", "The usual length")}${pick("long", "Longer", "For essay questions")}</div><button type="button" class="btn primary big" id="answer-write">${SPARK_SMALL}${withCost("Answer question", "answers")}</button>${usesLine(usesNow?.answers.note)}${note}`, 1, 2);
+  if (popup!.step === 1) return popupShell("Paste the question", `<div class="letter-form flat"><textarea class="field letter-input" id="answer-q" rows="5" maxlength="600" aria-label="The question from the form" placeholder="e.g. Describe a time you led a team">${escape(answering.question)}</textarea><button type="button" class="btn primary big" id="popup-next" ${answering.question.trim() ? "" : "disabled"}>Next</button></div>${note}`, 1, 3);
+  return popupShell("How long should it be?", `<div class="stack tight">${pick("short", "A few sentences", "For short boxes on a form")}${pick("paragraph", "A paragraph", "The usual length")}${pick("long", "Longer", "For essay questions")}</div><button type="button" class="btn primary big" id="answer-write">${SPARK_SMALL}${withCost("Answer question", "answers")}</button>${usesLine(usesNow?.answers.note)}${note}`, 2, 3);
+}
+
+/** Every complex question on the page, each with its answer once written. */
+function allQuestionsPopup(state: PanelState, note: string) {
+  const title = "Questions on this page";
+  if (answering.finding) return popupShell(title, `<div class="letter-writing" role="status">${typingSpiderSvg(110, spiderLook)}<span class="small">Looking for questions…</span></div>`, 1, 0);
+  const applying = state.applying;
+  const questions = applying?.questions ?? [];
+  if (!questions.length) {
+    return popupShell(title, `<p class="note">No written questions on this page. Open the application's questions, then look again.</p>
+      <button type="button" class="btn primary big" id="find-questions">Look again</button>${note}`, 1, 0);
+  }
+  const answers = applying!.answers ?? {};
+  const unanswered = questions.filter((question) => !question.answered && !answers[question.id]?.text);
+  const notPut = questions.filter((question) => answers[question.id]?.text && !answers[question.id]?.put);
+  const row = (question: (typeof questions)[number], index: number) => {
+    const answer = answers[question.id];
+    const draft = complex.drafts[question.id] ?? answer?.text ?? "";
+    const status = answer?.put ? `<span class="status done">In the box ✓</span>` : question.answered ? `<span class="status done">Already answered</span>` : "";
+    return `<li class="q-row all${answer?.put ? " done" : ""}">
+      <div class="q-body">
+        <div class="row-between"><span class="mono">Q${index + 1}</span>${status}</div>
+        <button type="button" class="q-label-link" data-show-question="${escape(question.id)}" title="Show it on the page">${escape(short(question.label, 220))}${question.required ? " <span class=\"req\">*</span>" : ""}</button>
+        ${answer?.error ? `<span class="small" style="color: var(--warn)">${escape(answer.error)}</span>` : ""}
+        ${answer?.text ? `<div class="letter-form flat"><textarea class="field letter-input" rows="5" data-draft="${escape(question.id)}" aria-label="Answer to ${escape(short(question.label, 60))}">${escape(draft)}</textarea>
+          <div class="links"><button type="button" class="link" data-put="${escape(question.id)}">${answer.put ? "Put it in again" : "Put it in the box"}</button><button type="button" class="link" data-copy="${escape(question.id)}">Copy</button></div></div>`
+          : question.answered ? "" : `<span class="small">Not answered yet.</span>`}
+      </div>
+    </li>`;
+  };
+  const action = complex.busy
+    ? `<div class="letter-writing" role="status">${typingSpiderSvg(90, spiderLook)}<span class="small">Answering ${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}…</span></div>`
+    : unanswered.length ? `<button type="button" class="btn primary big" id="answer-all">${SPARK_SMALL}Answer ${unanswered.length === questions.length ? "all " : ""}${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}${answersCost(unanswered.length)}</button>${usesLine(usesNow?.answers.note)}`
+    : notPut.length > 1 ? `<button type="button" class="btn primary big" id="put-all">Put all ${notPut.length} in their boxes</button>` : "";
+  return popupShell(title, `
+    <div class="q-head"><span class="heading">${questions.length} ${questions.length === 1 ? "question" : "questions"}</span><button type="button" class="quiet-link tight" id="find-questions">Look again</button></div>
+    ${action}
+    <ul class="q-list">${questions.map(row).join("")}</ul>
+    <span class="sub">Written from your resume and profile. Read each one before you submit. Tap a question to see it on the page.</span>
+    ${complex.note ? `<p class="small" role="status">${escape(complex.note)}</p>` : ""}${note}`, 1, 0);
 }
 
 function popupView(state: PanelState) {
   if (!popup || !state.connected || isRunning(state)) return "";
-  return popup.kind === "cover" ? coverPopup(state) : answerPopup();
+  return popup.kind === "cover" ? coverPopup(state) : answerPopup(state);
 }
 /** Closes the popup, letting go of a box so what's behind it can be drawn. */
 function closePopup() {
@@ -875,7 +929,54 @@ function wirePopup() {
   document.getElementById("popup-back")?.addEventListener("click", move(-1));
 }
 
+/** Finds the complex questions on the page (no resume upload), for "All the questions on this page". */
+async function findQuestions(tabId: number) {
+  answering.finding = true;
+  answering.note = "";
+  complex.note = "";
+  void render();
+  const result = await ask<{ ok: boolean; error?: string }>({ type: "begin-applying", tabId, questionsOnly: true }).catch(() => ({ ok: false, error: "Couldn't reach the page. Reload it and try again." }));
+  answering.finding = false;
+  if (!result.ok) answering.note = result.error ?? "Couldn't read the page.";
+  await refresh();
+  void render();
+}
+
 function wireAnswer(tabId: number) {
+  app.querySelectorAll<HTMLButtonElement>("[data-answer-mode]").forEach((button) => button.addEventListener("click", () => {
+    answering.mode = button.dataset.answerMode as "one" | "all";
+    answering.note = "";
+    if (popup) popup.step = 1;
+    if (answering.mode === "all") void findQuestions(tabId);
+    else void render();
+  }));
+  document.getElementById("find-questions")?.addEventListener("click", () => void findQuestions(tabId));
+  document.getElementById("answer-all")?.addEventListener("click", async () => {
+    complex.busy = true;
+    complex.note = "";
+    void render();
+    type Done = { ok: boolean; written?: number; stopped?: string; error?: string };
+    const result = await ask<Done>({ type: "answer-complex", tabId, job: lastState ? pageJob(lastState) : null, put: false }).catch((): Done => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    complex.busy = false;
+    complex.note = !result.ok ? result.error ?? "Couldn't answer them." : result.stopped ? result.stopped : result.written ? `Answered ${result.written}. Read each one, then put it in its box or copy it.` : "Couldn't write any of these. Answer them yourself.";
+    await refresh();
+    void render();
+  });
+  document.getElementById("put-all")?.addEventListener("click", async () => {
+    const applying = lastState?.applying;
+    if (!applying) return;
+    let put = 0;
+    for (const question of applying.questions) {
+      const answer = applying.answers?.[question.id];
+      if (!answer?.text || answer.put) continue;
+      const text = complex.drafts[question.id] ?? answer.text;
+      const result = await ask<{ ok: boolean }>({ type: "put-answer", tabId, id: question.id, text }).catch(() => ({ ok: false }));
+      if (result.ok) { put += 1; delete complex.drafts[question.id]; }
+    }
+    complex.note = put ? `Put ${put} in their boxes. Check them on the page.` : "Couldn't put them in. Copy each one instead.";
+    await refresh();
+    void render();
+  });
   const box = document.getElementById("answer-q") as HTMLTextAreaElement | null;
   box?.addEventListener("input", () => {
     answering.question = box.value;
@@ -904,7 +1005,7 @@ function wireAnswer(tabId: number) {
   });
   document.getElementById("answer-again")?.addEventListener("click", () => {
     Object.assign(answering, { question: "", answer: "", note: "" });
-    if (popup) popup.step = 0;
+    if (popup) popup.step = 1;
     void render();
   });
 }
@@ -1107,7 +1208,24 @@ function resumeLine(state: PanelState) {
       ${resume?.file ? `<button type="button" class="resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
       <button type="button" class="tool-change" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Change" : "Upload"}</button>
     </div>
+    ${resume?.file ? `<button type="button" class="btn attach-btn" id="attach-resume" ${resumeAttach.busy ? "disabled" : ""}>${resumeAttach.busy ? "Attaching…" : "Attach resume to this application"}</button>` : ""}
+    ${resumeAttach.note ? `<p class="small tool-note" role="status">${escape(resumeAttach.note)}</p>` : ""}
     ${note ? `<p class="small tool-note" role="status">${escape(note)}</p>` : ""}`;
+}
+
+/** "Attach resume to this application": the resume file into the page's resume upload box. */
+const resumeAttach = { busy: false, note: "" };
+async function attachResume() {
+  const tabId = lastState?.tab?.id;
+  if (tabId === undefined || resumeAttach.busy) return;
+  resumeAttach.busy = true;
+  resumeAttach.note = "";
+  void render();
+  type Attached = { ok: boolean; attached?: string[]; error?: string };
+  const result = await ask<Attached>({ type: "attach-resume", tabId }).catch((): Attached => ({ ok: false, error: "Couldn't reach the page. Reload it and try again." }));
+  resumeAttach.busy = false;
+  resumeAttach.note = result.ok && result.attached?.length ? `✓ Attached to “${short(result.attached[0], 40)}”. Check it on the page.` : result.error ?? "Couldn't attach it.";
+  void render();
 }
 
 /** Once a cover letter is written: its PDF beside the resume, with Attach to put it in the application's upload box. */
@@ -1453,7 +1571,6 @@ function jobsView(state: PanelState) {
       ${detectedMenu()}
     </div>
     <div class="section-divider" role="separator"><span>Tools</span></div>
-    ${!AUTOFILL_ENABLED && state.applying ? applyingBox(state) : ""}
     ${toolsPage(state)}`;
 }
 
@@ -1764,6 +1881,7 @@ function draw(state: PanelState): boolean {
   wireJobBox(state);
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
+  document.getElementById("attach-resume")?.addEventListener("click", () => void attachResume());
   document.querySelectorAll<HTMLButtonElement>("[data-attach-letter]").forEach((button) => button.addEventListener("click", () => void attachLetter()));
   document.getElementById("start-resume")?.addEventListener("click", () => resumeInput.click());
   wireIssues();

@@ -230,15 +230,29 @@ async function readJobDetails(tabId: number): Promise<JobDetails | null> {
   return details;
 }
 
+/** Sends an attach message to the page and each of its form frames; the upload boxes filled, from all of them. */
+async function attachEverywhere(tabId: number, message: { type: string; file: FileData }) {
+  await look(tabId);
+  const frames = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) ?? [{ frameId: 0, url: "" }];
+  const attached: string[] = [];
+  for (const frame of frames.filter((item) => item.frameId === 0 || (/^https:\/\//.test(item.url) && !SKIP_FRAME.test(item.url)))) {
+    const result = await send<{ attached: string[] }>(tabId, message, frame.frameId).catch(() => null);
+    attached.push(...(result?.attached ?? []));
+  }
+  return attached;
+}
+
 /** Puts the resume in the upload boxes and marks the complex questions, in the frame with the form. */
-async function beginApplying(tabId: number): Promise<Applying> {
-  const resume = await readyResume();
+async function beginApplying(tabId: number, questionsOnly?: boolean): Promise<Applying> {
+  const before = (await applyingAll())[tabId];
+  // Finding the questions to answer (not Begin applying) leaves the upload boxes alone, on later steps too.
+  const onlyQuestions = questionsOnly ?? Boolean(before?.questionsOnly);
+  const resume = onlyQuestions ? { file: null, error: null } : await readyResume();
   await look(tabId);
   const tab = await chrome.tabs.get(tabId).catch(() => null);
   const result = await send<BeginResult>(tabId, { type: "begin-applying", resume: resume.file });
-  const before = (await applyingAll())[tabId];
   // Answers already written on this application stay with it across its steps.
-  const applying: Applying = { ...result, uploaded: [...new Set([...(before?.uploaded ?? []), ...result.uploaded])], url: tab?.url ?? "", resumeError: resume.file ? null : resume.error, answers: before?.answers ?? {} };
+  const applying: Applying = { ...result, uploaded: [...new Set([...(before?.uploaded ?? []), ...result.uploaded])], url: tab?.url ?? "", resumeError: resume.file || onlyQuestions ? null : resume.error, answers: before?.answers ?? {}, questionsOnly: onlyQuestions };
   await saveApplying(tabId, applying);
   void log(`Began applying${result.uploaded.length ? `: resume uploaded to "${result.uploaded[0].slice(0, 40)}"` : ""}. ${result.questions.length} complex ${result.questions.length === 1 ? "question" : "questions"} found.`);
   return applying;
@@ -1528,24 +1542,27 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       // "Attach" on the cover letter: into the cover letter box on the tab's page or any of its form frames.
       case "attach-letter": {
         if (sender.tab) return reply({ ok: false });
-        const target = Number(message.tabId);
         const file = message.file as FileData | undefined;
         if (!file?.base64) return reply({ ok: false, error: "Write the cover letter first." });
-        await look(target);
-        const frames = (await chrome.webNavigation.getAllFrames({ tabId: target }).catch(() => null)) ?? [{ frameId: 0, url: "" }];
-        const attached: string[] = [];
-        for (const frame of frames.filter((item) => item.frameId === 0 || (/^https:\/\//.test(item.url) && !SKIP_FRAME.test(item.url)))) {
-          const result = await send<{ attached: string[] }>(target, { type: "attach-letter", file }, frame.frameId).catch(() => null);
-          attached.push(...(result?.attached ?? []));
-        }
+        const attached = await attachEverywhere(Number(message.tabId), { type: "attach-letter", file });
         if (!attached.length) return reply({ ok: false, error: "No cover letter upload box on this page yet. Open the application, then press Attach." });
         void log(`Attached your cover letter to "${attached[0].slice(0, 40)}".`);
+        return reply({ ok: true, attached });
+      }
+      // "Attach" beside the resume: the resume file into the application's resume box.
+      case "attach-resume": {
+        if (sender.tab) return reply({ ok: false });
+        const resume = await readyResume();
+        if (!resume.file) return reply({ ok: false, error: resume.error ?? "Upload your resume first." });
+        const attached = await attachEverywhere(Number(message.tabId), { type: "attach-resume", file: resume.file });
+        if (!attached.length) return reply({ ok: false, error: "No empty resume upload box on this page. Open the application, then press Attach." });
+        void log(`Attached your resume to "${attached[0].slice(0, 40)}".`);
         return reply({ ok: true, attached });
       }
       case "begin-applying": {
         if (sender.tab) return reply({ ok: false });
         try {
-          return reply({ ok: true, applying: await beginApplying(Number(message.tabId)) });
+          return reply({ ok: true, applying: await beginApplying(Number(message.tabId), message.questionsOnly === true ? true : undefined) });
         } catch {
           return reply({ ok: false, error: "Couldn't reach the page. Reload it and press Begin applying again." });
         }
@@ -1576,7 +1593,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const tracked = (await jobs())[id];
         const context = tracked?.applicationId ? { applicationId: tracked.applicationId } : given?.title ? { job: { title: given.title, company: given.company || given.site, description: given.description } } : {};
         const answers = { ...(applying.answers ?? {}) };
-        const todo = applying.questions.filter((question) => !question.answered && !answers[question.id]?.put);
+        const todo = applying.questions.filter((question) => !question.answered && !answers[question.id]?.put && !(message.put === false && answers[question.id]?.text));
         // A few at a time: quick, without asking Unnepo for everything at once.
         let next = 0;
         let stopped = "";
@@ -1586,8 +1603,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             try {
               const long = question.label.length > 60 || /describe|tell us|explain|why/i.test(question.label);
               const written = await api<{ answer: string }>("POST", "write", { question: question.label, ...(long ? { length: "paragraph" } : {}), ...context });
-              const put = await send<{ ok: boolean; reason?: string }>(id, { type: "put-answer", id: question.id, text: written.answer }).catch(() => ({ ok: false, reason: "Couldn't reach the page." }));
-              answers[question.id] = { text: written.answer, put: put.ok, ...(put.ok ? {} : { error: put.reason }) };
+              // Shown in the panel first, when asked: the student puts each one in its box.
+              const put = message.put === false ? { ok: false, reason: "" } : await send<{ ok: boolean; reason?: string }>(id, { type: "put-answer", id: question.id, text: written.answer }).catch(() => ({ ok: false, reason: "Couldn't reach the page." }));
+              answers[question.id] = { text: written.answer, put: put.ok, ...(put.ok || !put.reason ? {} : { error: put.reason }) };
             } catch (error) {
               const why = error instanceof Error ? error.message : "Couldn't write this one.";
               answers[question.id] = { text: "", put: false, error: why };
