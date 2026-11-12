@@ -1,4 +1,5 @@
 import type { SpiderLook } from "@/lib/spiders";
+import { notJobTitle } from "@/lib/apply/job-title";
 import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
@@ -410,7 +411,8 @@ function jobBox(state: PanelState) {
   if (state.applying) return applyingBox(state);
   loadDetails(state);
   const job = details.key === detailsKey(state) ? details.data : null;
-  const title = job?.title || state.page?.title || state.tab?.title || "This job";
+  // Never a status line or a site's page name ("Jobs") as the job's name.
+  const title = [job?.title, state.page?.title, state.tab?.title?.split(/\s+[|–—-]\s+/)[0]].find((text) => text && !notJobTitle(text) && !/^job title missing$/i.test(text)) || "This job";
   const company = job?.company || state.page?.company || "";
   const facts = [
     job?.location, job?.remote, job?.pay, job?.type, job?.posted ? `Posted ${job.posted}` : "",
