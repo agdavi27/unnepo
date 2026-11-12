@@ -9,7 +9,7 @@
 <body>
   <header class="top">
     <div class="top-text">
-      <div class="logo">unnepo<span class="dot">.</span></div>
+      <div class="logo-row"><div class="logo">unnepo<span class="dot">.</span></div><span id="plan-badge"></span></div>
       <p class="ticker mono" id="ticker-line"><span id="typed" aria-hidden="true"></span><span id="said" class="sr-only" aria-live="polite"></span></p>
     </div>
     <button type="button" class="spider" id="spider" aria-label="Poke the spider"><span class="thread"></span></button>
@@ -20,10 +20,11 @@
 
   <section id="password" class="password" aria-label="Job-site password" hidden></section>
 
-  <!-- The menu, along the bottom: Jobs (the week and every job), Tools (logging jobs and the tools) and Me. -->
+  <!-- The menu, along the bottom: Jobs (the week and every job), Tools (logging jobs and the tools), Get Pro (Free only) and Me. -->
   <nav id="tabs" class="tabs" aria-label="Sections" hidden>
     <button type="button" class="tab" data-tab="home"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>Jobs</button>
     <button type="button" class="tab" data-tab="jobs"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.1L3 17.7V21h3.3l6.3-6.3a4 4 0 0 0 5.1-5.4l-2.5 2.5-2.6-.6-.6-2.6z"/></svg><span class="tab-count" id="jobs-count" hidden></span>Tools</button>
+    <button type="button" class="tab" data-tab="pro" id="pro-tab" hidden><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/></svg>Get Pro</button>
     <button type="button" class="tab" data-tab="settings"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg><span class="tab-count" id="me-count" hidden></span>Me</button>
   </nav>
 
