@@ -510,8 +510,8 @@ export function wireReminders(root: HTMLElement) {
 
 // ---- Detected jobs ----
 
-const SURE: Record<Detected["sure"], string> = { confirmed: "Confirmed", likely: "Likely", pressed: "Pressed Apply" };
-let detectedOpen = false;
+const SURE: Record<Detected["sure"], string> = { confirmed: "Confirmed", likely: "Likely", pressed: "Pressed Apply", viewed: "Viewed" };
+let detectedOpen = true;
 const ago = (at: number) => {
   const minutes = Math.round((Date.now() - at) / 60_000);
   if (minutes < 1) return "just now";
@@ -531,13 +531,24 @@ export function detectedMenu() {
       ? `<button type="button" class="solid" data-detected-yes="${item.id}">✓ I applied</button><button type="button" class="quiet-link" data-detected-no="${item.id}">✗ No</button>`
       : item.state === "saved" ? `<span class="status done">Saved ✓</span><button type="button" class="quiet-link" data-detected-undo="${item.id}">Undo</button>`
       : item.state === "yes" ? `<span class="status done">Added ✓</span><button type="button" class="quiet-link" data-detected-undo="${item.id}">Undo</button>`
+      : item.state === "seen" ? `<button type="button" class="solid" data-detected-yes="${item.id}">✓ I applied</button>`
       : item.state === "undone" ? `<span class="status">Undone</span>` : `<span class="status">Not applied</span>`;
+    // What the page showed about it: the hiring person, the description, and a link back.
+    const description = (item.description ?? "").trim();
+    const info = description || item.poster || item.url ? `
+          <details class="detected-info">
+            <summary>Job details</summary>
+            ${item.poster ? `<p class="small">Hiring: ${escape(item.poster.name)}${item.poster.title ? ` · ${escape(short(item.poster.title, 80))}` : ""}</p>` : ""}
+            ${description ? `<p class="detected-desc">${escape(description.slice(0, 1500))}${description.length > 1500 ? "…" : ""}</p>` : ""}
+            ${/^https:\/\//.test(item.url) ? `<a class="quiet-link" href="${escape(item.url)}" target="_blank" rel="noreferrer">Open the job ↗</a>` : ""}
+          </details>` : "";
     return `
       <li class="detected${answered ? " answered" : ""}">
         <div class="detected-text">
           ${item.applicationId ? `<button type="button" class="detected-title" data-open-job="${item.applicationId}">${escape(short(item.title, 70))}</button>` : `<span class="detected-title">${escape(short(item.title, 70))}</span>`}
           <span class="sub">${escape([item.company, item.site, ago(item.at), SURE[item.sure]].filter(Boolean).join(" · "))}</span>
           ${item.error ? `<span class="small" style="color: var(--warn)">${escape(item.error)}</span>` : ""}
+          ${info}
         </div>
         <div class="detected-actions">${actions}</div>
       </li>`;
@@ -545,7 +556,7 @@ export function detectedMenu() {
   return `
     <details class="detected-menu" id="detected-menu" ${detectedOpen ? "open" : ""}>
       <summary><span>Detected jobs${asking ? ` <span class="count">${asking}</span>` : ""}</span><span class="mono">LAST ${Math.min(5, list.length) || 5}</span></summary>
-      ${list.length ? `<ul class="detected-list">${list.slice(0, 5).map(row).join("")}</ul><button type="button" class="quiet-link" id="detected-clear">Clear list</button>` : `<p class="note">When you apply somewhere, the job shows up here. Ones the site confirms are saved by themselves.</p>`}
+      ${list.length ? `<ul class="detected-list">${list.slice(0, 5).map(row).join("")}</ul><button type="button" class="quiet-link" id="detected-clear">Clear list</button>` : `<p class="note">Jobs you open or apply to show up here, with their details. Ones the site confirms are saved by themselves.</p>`}
     </details>`;
 }
 
