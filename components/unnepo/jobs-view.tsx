@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
+import { PeoplePanel } from "@/components/unnepo/people-panel";
 import { H, ON_DARK, W, spiderRects } from "@/extension/src/shared/sprite";
 import { STEPS, STEP_LABEL, progressOf, type Progress } from "@/lib/apply/progress";
 import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
@@ -12,10 +13,11 @@ import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid, activityOf, 
 /**
  * The website's Jobs tab: a calendar of every day the student did something (applied, emailed someone, heard
  * back), then every job with where it is (Applied → Reach out → Waiting → Follow up → Interview). A job's More
- * info opens its details over the page. Jobs can be added by hand and deleted here; the extension does the rest.
+ * info opens its details over the page, with the people at the company: find them, write each an email and send it
+ * in Gmail. Jobs can be added by hand and deleted here; the extension does the rest.
  */
 
-type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free?: boolean };
+type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free?: boolean; peopleBadge?: string; peopleNote?: string };
 type Row = { job: TrackerJob; progress: Progress };
 type Filter = "all" | "reach" | "waiting" | "follow" | "interview";
 const FILTERS: Array<[Filter, string]> = [["all", "All"], ["reach", "Reach out"], ["waiting", "Waiting"], ["follow", "Follow up"], ["interview", "Interview"]];
@@ -37,65 +39,6 @@ const TILE = ["#3D8BFF", "#8B5CF6", "#EC4899", "#14B8A6", "#F59E0B", "#22C55E", 
 const tileColor = (name: string) => TILE[[...name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % TILE.length];
 const HEAT = ACTIVITY_HEAT;
 const WEEKS = 12;
-const PERSON_STATUS: Record<string, string> = { emailed: "Emailed", replied: "Replied", no_response: "No reply" };
-const ROLE_LABEL: Record<string, string> = { job_poster: "Posted the job", poster: "Posted the job", recruiter: "Recruiter", alumni: "Alum", team_member: "Team", department: "Team" };
-
-/** A blank profile photo. */
-function Avatar() {
-  return (
-    <span aria-hidden className="grid h-9 w-9 flex-none place-items-end overflow-hidden rounded-full bg-[#26262C]">
-      <svg viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 text-[#8B8B94]"><circle cx="12" cy="9" r="4.2" /><path d="M3.5 24c.8-5 4.2-8 8.5-8s7.7 3 8.5 8z" /></svg>
-    </span>
-  );
-}
-
-/**
- * The people at the company, in a job's popup: everyone the extension found, with their email and LinkedIn.
- * On Free, people not shown yet (and Free's preview, which has titles only) have a blank photo, a Pro tag and
- * Show person, which opens Upgrade to Pro.
- */
-function PeopleAt({ job, free }: { job: TrackerJob; free: boolean }) {
-  const company = job.companyMissing ? "this company" : job.company;
-  const preview = !job.contacts.length ? job.fillReport?.peoplePreview?.rows ?? [] : [];
-  const head = <p className="m-0 font-mono text-[11px] uppercase tracking-[1.4px] text-[#8B8B94]">People at {company}{job.contacts.length ? ` · ${job.contacts.length}` : ""}</p>;
-  const locked = (key: string, main: string, sub: string) => (
-    <li key={key} className="flex items-center gap-3 rounded-xl border border-[#1F1F24] px-3 py-2">
-      <Avatar />
-      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{main}</span><span className="block truncate text-xs text-[#8B8B94]">{sub}</span></span>
-      <span className="flex-none rounded-[5px] border border-[#3D8BFF] px-1.5 font-mono text-[10px] font-semibold uppercase tracking-[.6px] text-[#3D8BFF]">Pro</span>
-      <a href="/home?tab=pro" className="flex-none rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200">Show person</a>
-    </li>
-  );
-  if (!isApplied(job)) return <div className="flex flex-col gap-2">{head}<p className="m-0 text-sm text-muted">Once you apply, Unnepo finds who to email here: recruiters, the hiring manager, and the team.</p></div>;
-  if (!job.contacts.length && !preview.length) {
-    const searching = job.contactsStatus === "finding" || job.contactsStatus === "writing";
-    return <div className="flex flex-col gap-2">{head}<p className="m-0 text-sm text-muted">{searching ? `Searching for people at ${company}…` : job.contactsStatus === "idle" ? "Press Find people on this job in the extension." : `No one found at ${company} yet.`}</p></div>;
-  }
-  return (
-    <div className="flex flex-col gap-2">
-      {head}
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">
-        {preview.map((row, index) => locked(`preview-${index}`, row.title || ROLE_LABEL[row.role] || "Someone", [row.title ? ROLE_LABEL[row.role] : "", "Name hidden"].filter(Boolean).join(" · ")))}
-        {job.contacts.map((person) => {
-          const hidden = !person.email && job.hidden.includes(person.name.toLowerCase());
-          if (free && hidden) return locked(person.id, person.name, person.title || ROLE_LABEL[person.role] || "");
-          return (
-            <li key={person.id} className="flex items-center gap-3 rounded-xl border border-[#1F1F24] px-3 py-2">
-              <Avatar />
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-semibold">{person.name} <span className="ml-1 rounded-full border border-[#26262C] px-1.5 font-mono text-[10px] font-normal text-[#B4B4BC]">{ROLE_LABEL[person.role] ?? person.role}</span></span>
-                <span className="block truncate text-xs text-[#8B8B94]">{person.title}</span>
-                {person.email && <a href={`mailto:${person.email}`} className="block truncate text-xs text-[#B4B4BC] underline underline-offset-2 hover:text-white">{person.email}</a>}
-              </span>
-              {PERSON_STATUS[person.outreachStatus] && <span className={`flex-none font-mono text-[10.5px] uppercase ${person.outreachStatus === "replied" ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{PERSON_STATUS[person.outreachStatus]}</span>}
-              {person.linkedinUrl && <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="flex-none text-xs underline underline-offset-4">LinkedIn ↗</a>}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
-  );
-}
 
 const short = (date: Date) => date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const companyOf = (job: TrackerJob) => (job.companyMissing ? "Company missing" : job.company);
@@ -237,11 +180,11 @@ function Popup({ label, onClose, children, width = "max-w-lg" }: { label: string
 
 /* ───────────── Popups ───────────── */
 
-function InfoPopup({ row, now, free, onClose, onDelete, onChanged }: { row: Row; now: Date; free: boolean; onClose: () => void; onDelete: () => void; onChanged: (note: string) => void }) {
+function InfoPopup({ row, now, tracker, onClose, onDelete, onChanged, reload, say }: { row: Row; now: Date; tracker: Tracker; onClose: () => void; onDelete: () => void; onChanged: (note: string) => void; reload: () => Promise<void>; say: (message: string) => void }) {
   const { job, progress } = row;
   const events = eventsOf(job);
   return (
-    <Popup label={`${companyOf(job)}, ${titleOf(job)}`} onClose={onClose}>
+    <Popup label={`${companyOf(job)}, ${titleOf(job)}`} onClose={onClose} width="max-w-2xl">
       <div className="flex flex-col gap-5">
         <div className="flex items-center gap-3 pr-8">
           <Tile name={companyOf(job)} size={40} />
@@ -267,8 +210,7 @@ function InfoPopup({ row, now, free, onClose, onDelete, onChanged }: { row: Row;
             </ol>
           </div>
         )}
-        <PeopleAt job={job} free={free} />
-        <p className="m-0 text-[13px] text-[#8B8B94]">Email people from the extension.</p>
+        <PeoplePanel job={job} free={Boolean(tracker.free)} badge={tracker.peopleBadge} note={tracker.peopleNote} reload={reload} say={say} />
         <div className="flex flex-wrap items-center gap-3 border-t border-[#1F1F24] pt-4">
           {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-4">Job posting ↗</a>}
           <button type="button" onClick={onDelete} className="ml-auto h-9 rounded-xl border border-[#3A2020] px-3 text-sm text-[#F87171] hover:bg-[#2A1A1A]">Delete job</button>
@@ -381,13 +323,14 @@ function AddPopup({ onCancel, onAdded }: { onCancel: () => void; onAdded: (compa
 
 type Open = { kind: "info" | "delete"; id: string } | { kind: "add" } | null;
 
-export function JobsView() {
+export function JobsView({ openJob }: { openJob?: string | null } = {}) {
   const [tracker, setTracker] = useState<Tracker | null>(null);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [query, setQuery] = useState("");
   const [day, setDay] = useState<string | null>(null);
-  const [open, setOpen] = useState<Open>(null);
+  // Home's "Email someone" opens a job's popup straight away.
+  const [open, setOpen] = useState<Open>(openJob ? { kind: "info", id: openJob } : null);
   const [toast, setToast] = useState("");
   const [now] = useState(() => new Date());
 
@@ -428,6 +371,11 @@ export function JobsView() {
       interview: rows.filter((row) => matches(row, "interview")).length,
     };
   }, [rows, now]);
+
+  /** Reads the list again, for the people on an open job (it stays open). */
+  const reload = useCallback(async () => {
+    try { setTracker(await load()); } catch { /* the list stays as it was */ }
+  }, [load]);
 
   const refresh = async (message: string) => {
     setOpen(null);
@@ -561,7 +509,7 @@ export function JobsView() {
       )}
 
       {open?.kind === "add" && <AddPopup onCancel={() => setOpen(null)} onAdded={(company) => { setDay(null); void refresh(`Added ${company}.`); }} />}
-      {open?.kind === "info" && current && <InfoPopup row={current} now={now} free={Boolean(tracker?.free)} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} onChanged={(note) => { void load().then(setTracker, () => undefined); setToast(note); }} />}
+      {open?.kind === "info" && current && <InfoPopup row={current} now={now} tracker={tracker} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} onChanged={(note) => { void load().then(setTracker, () => undefined); setToast(note); }} reload={reload} say={setToast} />}
       {open?.kind === "delete" && current && (
         <DeletePopup job={current.job} onCancel={() => setOpen(null)} onDeleted={() => {
           setTracker((list) => (list ? { ...list, jobs: list.jobs.filter((job) => job.id !== current.job.id) } : list));
@@ -569,7 +517,52 @@ export function JobsView() {
           setToast(`Deleted ${companyOf(current.job)}.`);
         }} />
       )}
-      {toast && <div role="status" className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-full border border-line bg-[#141416] px-4 py-2 text-sm shadow-xl">{toast}</div>}
+      {toast && <div role="status" className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full border border-line bg-[#141416] px-4 py-2 text-sm shadow-xl">{toast}</div>}
     </section>
+  );
+}
+
+/**
+ * Home's "Email someone": applied jobs where nobody's been emailed yet, or a follow-up is due, each with the button
+ * that opens the job's people on the Jobs tab.
+ */
+export function ReachOut({ onOpen }: { onOpen: (jobId: string) => void }) {
+  const [rows, setRows] = useState<Row[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/app/tracker").then((response) => (response.ok ? response.json() : null)).then((body: Tracker | null) => {
+      if (!cancelled) setRows((body?.jobs ?? []).map((job) => ({ job, progress: progressOf(job) })));
+    }).catch(() => { if (!cancelled) setRows([]); });
+    return () => { cancelled = true; };
+  }, []);
+  if (!rows) return null;
+  const due = rows.filter((row) => matches(row, "follow"));
+  const reach = rows.filter((row) => matches(row, "reach"));
+  const list = [...due, ...reach].slice(0, 6);
+  const action = ({ job, progress }: Row) => (progress.due ? "Follow up" : job.contacts.some((person) => person.email) ? "Email people" : job.contactsStatus === "finding" || job.contactsStatus === "writing" ? "See people" : "Find people");
+  return (
+    <div className="rounded-2xl border border-line bg-panel p-5 sm:p-6">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="m-0 text-lg font-semibold tracking-tight">Email someone</h2>
+        {list.length > 0 && <span className="font-mono text-[11px] uppercase tracking-[1.4px] text-[#8B8B94]">{due.length + reach.length} to do</span>}
+      </div>
+      <p className="m-0 mt-1 text-sm text-muted">An email to a recruiter or someone on the team is the fastest way to get noticed. Unnepo finds them, writes it, and opens it in Gmail.</p>
+      {list.length ? (
+        <ul className="m-0 mt-4 flex list-none flex-col gap-2 p-0">
+          {list.map((row) => (
+            <li key={row.job.id} className="flex items-center gap-3 rounded-xl border border-[#1F1F24] bg-[#0C0C0E] px-3 py-2.5">
+              <Tile name={companyOf(row.job)} size={30} />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium">{companyOf(row.job)}</span>
+                <span className="block truncate text-xs text-[#8B8B94]">{titleOf(row.job)}{row.progress.due ? " · follow-up due" : ""}</span>
+              </span>
+              <button type="button" onClick={() => onOpen(row.job.id)} className={`h-8 flex-none rounded-lg px-3 text-[13px] font-semibold ${row.progress.due ? "border border-[#F5A524]/60 text-[#F5A524] hover:bg-[#F5A524]/10" : "bg-white text-black hover:bg-zinc-200"}`}>{action(row)}</button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="m-0 mt-4 text-sm text-[#8B8B94]">{rows.some(({ job }) => isApplied(job)) ? "You're caught up. Nobody to email right now." : "Once you apply to a job, the people to email there show up here."}</p>
+      )}
+    </div>
   );
 }

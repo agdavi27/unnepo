@@ -249,6 +249,13 @@ async function handle(request: Request, slug: string[]) {
   }
   // The website's Jobs tab: every job applied to, as the extension's tracker sends it.
   if (root === "app" && action === "tracker" && request.method === "GET") return json(await extensionTracker(user.id));
+  // A job's people on the website, the same as the extension's People card: find, show person, write, status, bounced.
+  if (root === "app" && action === "people" && request.method === "POST") {
+    const body = await request.json();
+    if (body?.action === "reveal" && !rateLimit(`reveal:${user.id}`, 40, 60 * 60 * 1000)) throw new ServiceError("That's a lot of people in an hour. Try again a bit later.", "rate_limited", 429);
+    if (body?.action === "write" && body?.body === undefined && !rateLimit(`extension-write:${user.id}`, 40, 60 * 60 * 1000)) throw new ServiceError("That's a lot of emails in an hour. Try again later.", "rate_limited", 429);
+    return json(await extensionPeople(user.id, body));
+  }
   if (root === "app" && action === "jobs" && request.method === "GET") {
     return json(await listRecommendedJobs(user.id, { refresh: new URL(request.url).searchParams.get("refresh") === "1" }));
   }
