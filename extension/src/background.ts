@@ -1602,7 +1602,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             const question = todo[next++];
             try {
               const long = question.label.length > 60 || /describe|tell us|explain|why/i.test(question.label);
-              const written = await api<{ answer: string }>("POST", "write", { question: question.label, ...(long ? { length: "paragraph" } : {}), ...context });
+              const written = await api<{ answer: string }>("POST", "write", { question: question.label, batch: true, ...(long ? { length: "paragraph" } : {}), ...context });
               // Shown in the panel first, when asked: the student puts each one in its box.
               const put = message.put === false ? { ok: false, reason: "" } : await send<{ ok: boolean; reason?: string }>(id, { type: "put-answer", id: question.id, text: written.answer }).catch(() => ({ ok: false, reason: "Couldn't reach the page." }));
               answers[question.id] = { text: written.answer, put: put.ok, ...(put.ok || !put.reason ? {} : { error: put.reason }) };

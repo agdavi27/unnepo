@@ -878,6 +878,7 @@ function allQuestionsPopup(state: PanelState, note: string) {
   };
   const action = complex.busy
     ? `<div class="letter-writing" role="status">${typingSpiderSvg(90, spiderLook)}<span class="small">Answering ${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}…</span></div>`
+    : unanswered.length && state.me?.usage?.free && !state.me?.unlimitedCredits ? `<p class="note">Answering every question on a page at once is part of Pro. On Free, copy one question into “One question”. <a href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Get Pro</a></p>`
     : unanswered.length ? `<button type="button" class="btn primary big" id="answer-all">${SPARK_SMALL}Answer ${unanswered.length === questions.length ? "all " : ""}${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}${answersCost(unanswered.length)}</button>${usesLine(usesNow?.answers.note)}`
     : notPut.length > 1 ? `<button type="button" class="btn primary big" id="put-all">Put all ${notPut.length} in their boxes</button>` : "";
   return popupShell(title, `

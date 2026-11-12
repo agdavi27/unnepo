@@ -6,7 +6,8 @@ import { effectivePlan, trialEndedAt, trialFor, type StoredPlan } from "@/lib/pl
 import { isAdminEmail } from "@/lib/services/auth";
 
 /**
- * Plan limits beyond people searches. Free has a one-time allowance of each; paid plans have a monthly fair-use cap.
+ * Plan limits beyond people searches. Free has a small allowance of each every month; Pro has no limit, only a hidden
+ * monthly fair-use guard (PRO_AI_LIMIT) against scripts.
  * Accounts listed in UNLIMITED_CREDIT_EMAILS (comma-separated, set in Vercel) never run out of credits and
  * aren't charged them, but keep their plan, so a Free account still sees every Free limit.
  */
@@ -56,7 +57,7 @@ const thisMonth = () => new Date().toISOString().slice(0, 7);
 
 const NAMES: Record<UsageKind | "people", [string, string]> = {
   letters: ["cover letter", "cover letters"],
-  answers: ["chat answer", "chat answers"],
+  answers: ["question answer", "question answers"],
   autofills: ["autofill", "autofills"],
   people: ["people search", "people searches"],
 };
@@ -65,11 +66,14 @@ const NAMES: Record<UsageKind | "people", [string, string]> = {
 function usesNote(kind: UsageKind | "people", left: number, free: boolean, cap: number) {
   const [one, many] = NAMES[kind];
   if (left <= 0) {
-    if (kind === "people") return free ? `Free shows who works there. Pro shows their names and emails, ${PUBLIC_PLANS[1].credits} companies a month.` : `No ${many} left until your plan renews.`;
-    return free ? `No ${many} left. Pro has no limit.` : `You've used this month's ${cap} ${many}. More next month.`;
+    if (kind === "people") return free ? `Free shows who works there. Pro shows their names and emails, ${PUBLIC_PLANS[1].credits} companies a month.` : `No ${many} left until your plan renews. Add more under Settings and plans.`;
+    // Pro's writing is unlimited: only the hidden fair-use guard ends it, which a real student never meets.
+    return free ? `No ${many} left this month. Pro has no limit.` : `That's a lot of ${many} this month (${cap}). More on the 1st, or write to us if you need more sooner.`;
   }
-  const low = kind === "people" ? (free ? 2 : 5) : free ? (kind === "letters" ? 2 : 3) : 20;
-  return left <= low ? `Only ${left} ${left === 1 ? one : many} left` : "";
+  // Pro never sees a count for writing or autofill: it has no limit.
+  if (!free && kind !== "people") return "";
+  const low = kind === "people" ? (free ? 2 : 5) : kind === "letters" ? 1 : 2;
+  return left <= low ? `Only ${left} ${left === 1 ? one : many} left${free && kind !== "people" ? " this month" : ""}` : "";
 }
 
 /** What the student has left on their plan, in uses and in credits, and the line to show for anything running low. */
@@ -81,7 +85,8 @@ export async function planUsage(userId: string) {
   const config = serverConfig();
   const fairUse = state.plan === "premium" ? config.premiumAiLimit : config.proAiLimit;
   const uses = stored?.uses;
-  const count = (kind: UsageKind) => (free ? uses?.total?.[kind] : uses?.month === thisMonth() ? uses.monthly?.[kind] : 0) ?? 0;
+  // Every plan counts by the month now: Free's allowance comes back on the 1st, Pro's fair-use guard too.
+  const count = (kind: UsageKind) => (uses?.month === thisMonth() ? uses.monthly?.[kind] : 0) ?? 0;
   const one = (kind: UsageKind) => {
     const limit = free ? FREE_LIMITS[kind] : fairUse;
     const left = Math.max(0, limit - count(kind));

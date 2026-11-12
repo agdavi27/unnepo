@@ -284,11 +284,11 @@ type CheckoutKind = "grind" | "pack" | "pro" | "premium" | "pro_semester" | "pre
 /** A semester plan bills every SEMESTER_MONTHS months and grants that many months of credits each time. */
 function checkoutOffer(kind: CheckoutKind, config: ReturnType<typeof serverConfig>) {
   if (kind === "premium_semester") return { credits: config.premiumMonthlyCredits * SEMESTER_MONTHS, amount: config.premiumSemesterPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium (semester)", priceId: process.env.STRIPE_PRICE_PREMIUM_SEMESTER, recurring: true, months: SEMESTER_MONTHS };
-  if (kind === "pro_semester") return { credits: config.proMonthlyCredits * SEMESTER_MONTHS, amount: config.proSemesterPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro (semester)", priceId: process.env.STRIPE_PRICE_PRO_SEMESTER, recurring: true, months: SEMESTER_MONTHS };
+  if (kind === "pro_semester") return { credits: config.proSemesterCredits, amount: config.proSemesterPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro (semester)", priceId: process.env.STRIPE_PRICE_PRO_SEMESTER, recurring: true, months: SEMESTER_MONTHS };
   if (kind === "premium") return { credits: config.premiumMonthlyCredits, amount: config.premiumPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium", priceId: process.env.STRIPE_PRICE_PREMIUM, recurring: true };
   if (kind === "pro") return { credits: config.proMonthlyCredits, amount: config.proPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro", priceId: process.env.STRIPE_PRICE_PRO, recurring: true };
   if (kind === "grind") return { credits: config.grindMonthlyCredits, amount: config.grindPriceCents, bucket: "allowance" as const, plan: "grind" as const, name: "Unnepo The Grind", priceId: process.env.STRIPE_PRICE_GRIND, recurring: true };
-  return { credits: config.packCredits, amount: config.packPriceCents, bucket: "purchased" as const, plan: "pack" as const, name: `Unnepo ${config.packCredits} credits`, priceId: process.env.STRIPE_PRICE_PACK, recurring: false };
+  return { credits: config.packCredits, amount: config.packPriceCents, bucket: "purchased" as const, plan: "pack" as const, name: `Unnepo: people at ${config.packCredits} more companies`, priceId: process.env.STRIPE_PRICE_PACK, recurring: false };
 }
 
 /**
