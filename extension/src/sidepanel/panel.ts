@@ -151,7 +151,7 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
       const open = applying.questions.filter((question) => !question.answered && !applying.answers?.[question.id]?.put).length;
       return { lines: [applying.uploaded.length ? "Resume's in." : applying.resumeBox ? "Couldn't upload your resume here. Add it yourself." : "No resume upload on this page yet.", open ? `${open} complex ${open === 1 ? "question" : "questions"}. I'm sitting next to ${open === 1 ? "it" : "them"}.` : "No complex questions left on this page.", goalLine(state)] };
     }
-    return { lines: [found, "Press Begin applying. I'll upload your resume and find the hard questions.", goalLine(state)] };
+    return { lines: [`${page.company || page.site} job. It's under Detected jobs on Jobs.`, goalLine(state)] };
   }
   if (page.posting) return { lines: [found, "Press Autofill. I'll press Apply and crawl it for you.", goalLine(state)] };
   const extra = page.account === "new" ? ", and one new account to make" : page.account === "sign_in" ? ", and I'll sign you in" : "";
@@ -391,49 +391,6 @@ const MINI_SPIDER = `<svg class="mini-spider" viewBox="0 0 ${SPRITE_W} ${SPRITE_
 
 /** Answering every complex question: what's going on, and edits to answers not yet put back on the page. */
 const complex = { busy: false, note: "", drafts: {} as Record<string, string>, open: new Set<string>() };
-
-function jobBox(state: PanelState) {
-  const how = dismissal(state);
-  if (how && !state.applying) {
-    return `<section class="job-box empty" aria-label="Job on this tab">
-      <span class="eyebrow">No job found yet</span>
-      <div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>
-    </section>`;
-  }
-  if (!jobFound(state) && !state.applying) {
-    return `<section class="job-box empty" aria-label="Job on this tab">
-      <span class="eyebrow">No job found yet</span>
-      <p class="note">Open a job posting or an application, and what it says shows up here.</p>
-    </section>`;
-  }
-  if (state.applying) return applyingBox(state);
-  loadDetails(state);
-  const job = details.key === detailsKey(state) ? details.data : null;
-  // Never a status line or a site's page name ("Jobs") as the job's name.
-  const title = [job?.title, state.page?.title, state.tab?.title?.split(/\s+[|–—-]\s+/)[0]].find((text) => text && !notJobTitle(text) && !/^job title missing$/i.test(text)) || "This job";
-  const company = job?.company || state.page?.company || "";
-  const facts = [
-    job?.location, job?.remote, job?.pay, job?.type, job?.posted ? `Posted ${job.posted}` : "",
-    job?.questions ? `${job.questions} ${job.questions === 1 ? "question" : "questions"}` : state.page?.posting ? "Job posting" : "",
-    job?.resumeBox ? "Resume upload" : "",
-  ].filter(Boolean) as string[];
-  const description = job?.description?.trim() ?? "";
-  // Kept small: the name and company beside Begin applying; the details and description tucked into one line.
-  const more = [...new Set(facts.filter((fact) => fact !== "Job posting").map((fact) => fact.replace(/^\w/, (letter) => letter.toUpperCase())))].join(" · ");
-  return `
-    <section class="job-box compact" aria-label="Job on this tab">
-      <div class="job-line">
-        <div>
-          <div class="job-name" title="${escape(title)}">${escape(title)}</div>
-          <div class="job-detail">${escape([company, details.loading && !job ? "Reading the job…" : ""].filter(Boolean).join(" · ") || job?.site || state.page?.site || "")}</div>
-        </div>
-        <button type="button" class="solid" id="begin-applying" ${state.me!.profileReady ? "" : "disabled"}>Begin applying</button>
-      </div>
-      ${description ? `<details class="desc"><summary>Job details${more ? ` <span class="mono">${escape(more)}</span>` : ""}</summary><p>${escape(description.slice(0, 4000))}${description.length > 4000 ? "…" : ""}</p></details>` : ""}
-      <div class="row-between"><button type="button" class="quiet-link" id="skip-job">Skip</button><button type="button" class="quiet-link" id="not-job">Not a job</button></div>
-      ${trialLine(state)}
-    </section>`;
-}
 
 /** The complex questions' cost on Free, where each answer uses credits. */
 function answersCost(count: number) {
@@ -1452,8 +1409,7 @@ function wireManualJob(state: PanelState) {
 
 /**
  * The Jobs tab. Logging jobs first: adding one by hand, "I already applied" for the job on the tab, and the jobs
- * the extension caught. The list of every job is on Week. Below a divider, the job on the tab (Begin applying)
- * and the tools: Autofill, a cover letter, answering a question, the resume and password.
+ * the extension caught (the last 5 opened or applied to, each with its details). Below a divider, the tools: Autofill, a cover letter, answering a question, the resume and password.
  */
 function jobsView(state: PanelState) {
   ensureTracker();
@@ -1465,7 +1421,7 @@ function jobsView(state: PanelState) {
       ${detectedMenu()}
     </div>
     <div class="section-divider" role="separator"><span>Tools</span></div>
-    ${!AUTOFILL_ENABLED && (jobFound(state) || state.applying) ? jobBox(state) : ""}
+    ${!AUTOFILL_ENABLED && state.applying ? applyingBox(state) : ""}
     ${toolsPage(state)}`;
 }
 

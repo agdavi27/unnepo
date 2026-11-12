@@ -291,6 +291,11 @@ details.part .view { padding: 12px 0 0; }
 .detected-title { all: unset; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
 button.detected-title { cursor: pointer; }
 button.detected-title:hover { text-decoration: underline; text-underline-offset: 4px; }
+.detected-info { margin-top: 4px; font-size: 12px; }
+.detected-info > summary { cursor: pointer; color: var(--muted); width: fit-content; }
+.detected-info[open] > summary { margin-bottom: 6px; }
+.detected-info .small { margin: 0 0 6px; }
+.detected-desc { margin: 0 0 6px; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2, inherit); line-height: 1.45; }
 .detected-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .detected-actions .solid { height: 32px; padding: 0 12px; }
 .detected-actions .quiet-link { min-height: 32px; }

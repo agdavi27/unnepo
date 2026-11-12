@@ -4,6 +4,7 @@ import { AUTOFILL_ENABLED, LINKEDIN, type Answer, type Applying, type BeginResul
 import { QUICK_BOARDS } from "./content/quick-apply";
 import { isJobPage, sendsApplication } from "./shared/job-page";
 import { dueCount, reminders } from "./shared/reminders";
+import { notJobTitle } from "@/lib/apply/job-title";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -331,6 +332,8 @@ async function rememberSeen(tabId: number, scan: Scan) {
   const same = before && sameCompany(before.company, scan.company) && !other;
   all[tabId] = { url: scan.jobUrl || scan.url, title: scan.title, company: scan.company, description: scan.description, poster: scan.poster, at: Date.now(), pressed: same && before?.pressed, form: form || (same && before?.form), sent: same && before?.sent };
   await chrome.storage.session.set({ seen: all });
+  // A posting (not an application form, not a nameless page) goes on Detected jobs as opened.
+  if (!form && !/^job title missing$/i.test(scan.title) && !notJobTitle(scan.title)) await noteViewed(all[tabId]).catch(() => undefined);
 }
 chrome.tabs.onCreated.addListener((tab) => {
   if (tab.id === undefined || tab.openerTabId === undefined) return;
@@ -376,7 +379,13 @@ async function detectedList(): Promise<Detected[]> {
   return ((await chrome.storage.local.get("detected")).detected as Detected[] | undefined) ?? [];
 }
 async function saveDetectedList(list: Detected[]) {
-  await chrome.storage.local.set({ detected: list.slice(0, DETECTED_KEPT) });
+  // Over 5, a job only opened goes first: one waiting for ✓ or ✗ (or just saved) stays.
+  const kept = [...list];
+  while (kept.length > DETECTED_KEPT) {
+    const viewed = kept.map((item) => item.state).lastIndexOf("seen");
+    kept.splice(viewed >= 0 ? viewed : kept.length - 1, 1);
+  }
+  await chrome.storage.local.set({ detected: kept });
   void updateBadge();
   void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
 }
@@ -396,6 +405,24 @@ async function noteDetected(item: Omit<Detected, "id" | "at" | "site">) {
   if (index >= 0) list.splice(index, 1);
   await saveDetectedList([next, ...list]);
   return next;
+}
+
+/**
+ * A job opened (not applied to): on the Detected jobs menu with what the page showed, newest first. A job
+ * already there from applying keeps its place and answer. Saved only when something changed, since the
+ * panel reads the page every few seconds.
+ */
+async function noteViewed(seen: { url: string; title: string; company: string; description?: string; poster?: Detected["poster"] }) {
+  const list = await detectedList();
+  const index = list.findIndex((other) => (other.url && seen.url && sameJobPage(other.url, seen.url) && sameJobTitle(other, seen)) || sameJobTitle(other, seen));
+  const before = index >= 0 ? list[index] : null;
+  if (before && before.state !== "seen") return;
+  const description = seen.description || before?.description;
+  const poster = seen.poster ?? before?.poster;
+  if (before && index === 0 && before.title === seen.title && before.company === seen.company && before.description === description && JSON.stringify(before.poster) === JSON.stringify(poster)) return;
+  const next: Detected = { id: before?.id ?? crypto.randomUUID(), url: seen.url, title: seen.title, company: seen.company, description, poster, site: siteName(seen.url), at: Date.now(), sure: "viewed", state: "seen" };
+  if (index >= 0) list.splice(index, 1);
+  await saveDetectedList([next, ...list]);
 }
 
 // What a job board or a page calls itself, which isn't the employer.

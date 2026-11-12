@@ -157,8 +157,9 @@ export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boo
 export type Detected = {
   id: string; url: string; title: string; company: string; site: string; at: number;
   description?: string; poster?: { name: string; title: string; profileUrl: string };
-  sure: "confirmed" | "likely" | "pressed";
-  state: "saved" | "ask" | "yes" | "no" | "undone";
+  /** `viewed`: only opened, nothing says it was applied to (state "seen"). */
+  sure: "confirmed" | "likely" | "pressed" | "viewed";
+  state: "saved" | "ask" | "yes" | "no" | "undone" | "seen";
   applicationId?: string; error?: string;
 };
 
