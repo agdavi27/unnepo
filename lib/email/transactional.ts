@@ -37,7 +37,7 @@ export function appOrigin(origin?: string) {
 }
 
 /**
- * A friend request, sent from contact@unnepo.com as an invitation to compete: who added them, how many jobs that
+ * A friend request, sent from RESEND_FROM (contact@unnepo.com by default) as an invitation to compete: who added them, how many jobs that
  * person applied to this week, and a button to sign up (or log in, when they already have an account).
  * False when email isn't set up or it failed.
  */
@@ -68,7 +68,7 @@ export async function sendFriendInviteEmail(input: { to: string; fromName: strin
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: `Unnepo <${CONTACT_EMAIL}>`,
+      from: process.env.RESEND_FROM || `Unnepo <${CONTACT_EMAIL}>`,
       to: [input.to],
       subject: `${name} wants to compete with you on Unnepo`,
       reply_to: CONTACT_EMAIL,
