@@ -96,7 +96,8 @@ export type ComplexQuestion = { id: string; label: string; required: boolean; an
 export type BeginResult = { uploaded: string[]; questions: ComplexQuestion[]; resumeBox: boolean };
 
 /** "Begin applying" on a tab: what it found, and answers written for the complex questions. */
-export type Applying = BeginResult & { url: string; resumeError?: string | null; answers?: Record<string, { text: string; put: boolean; error?: string }> };
+/** `questionsOnly`: started from "Answer a question" → all on this page, so it only finds questions (no resume upload). */
+export type Applying = BeginResult & { url: string; resumeError?: string | null; answers?: Record<string, { text: string; put: boolean; error?: string }>; questionsOnly?: boolean };
 
 export type UsageLine = { used: number; limit: number; left: number; note: string };
 

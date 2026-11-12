@@ -1,7 +1,7 @@
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
 import { buttonUnder, findAction, findApply, pageNotes, pressAction, SUBMIT, workdayStep } from "./actions";
 import { leave, press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
-import { fillGeneric, uploadCoverLetterNow } from "./generic";
+import { fillGeneric, uploadCoverLetterNow, uploadResumeNow } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, openedJob, scanFields, scanPage } from "./scan";
 import { watchEdits } from "./edits";
@@ -208,6 +208,11 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
     // "Attach" on the cover letter: its PDF into this frame's cover letter box, if it has one.
     if (message?.type === "attach-letter") {
       reply({ attached: uploadCoverLetterNow(scanFields(), message.file as FileData) });
+      return false;
+    }
+    // "Attach" beside the resume: into this frame's resume box, if it has an empty one.
+    if (message?.type === "attach-resume") {
+      reply({ attached: uploadResumeNow(scanFields(), message.file as FileData) });
       return false;
     }
     if (message?.type === "put-answer") {
