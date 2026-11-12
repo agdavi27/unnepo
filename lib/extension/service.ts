@@ -3,7 +3,7 @@ import { nameCompanyFromDescription } from "@/lib/apply/job-link";
 import { CREDIT_COST } from "@/lib/config";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
-import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, hasUnlimitedCredits, isFree, planUsage } from "@/lib/apply/limits";
+import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, isFree, planUsage } from "@/lib/apply/limits";
 import { isAdminEmail } from "@/lib/services/auth";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
@@ -252,6 +252,7 @@ export async function extensionTracker(userId: string) {
     weeklyGoal: stored?.weeklyGoal ?? null,
     free: usage.free,
     peopleNote: usage.people.note,
+    peopleBadge: usage.people.badge,
   };
 }
 
@@ -318,7 +319,7 @@ async function withContacts(userId: string, apps: JobApplication[]) {
 
 /**
  * Paid plans: the cover letter is written as soon as a job is opened, so it's ready when the form asks or the
- * student presses Write. Free writes one only when asked, since it has a monthly number.
+ * student presses Write. Free writes one only when asked, since it has a daily number.
  */
 async function preWriteLetter(userId: string, applicationId: string) {
   const [free, app] = await Promise.all([isFree(userId), applications.get(userId, applicationId)]);
@@ -402,10 +403,6 @@ function pageJob(raw: unknown) {
 export async function extensionWrite(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { applicationId?: unknown; question?: unknown; length?: unknown; job?: unknown; batch?: unknown };
   const question = String(body.question ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
-  // "All the questions on this page" is Pro's: Free answers one pasted question at a time.
-  if (body.batch === true && (await isFree(userId)) && !(await hasUnlimitedCredits(userId))) {
-    throw new ServiceError("Answering every question on a page is part of Pro. On Free, paste one question at a time.", "plan", 402);
-  }
   // The student's choice in the panel. Without one (the orange questions on a form), a short draft.
   const length = body.length === "paragraph" || body.length === "long" ? body.length : null;
   if (!question) throw new ServiceError("Which question should Unnepo write?", "question", 400);
@@ -444,8 +441,9 @@ export async function extensionMap(userId: string, raw: unknown) {
   const app = await requireApp(userId, body.applicationId);
   // Filling a job again is free once it has counted; a new one needs a use left.
   if (!app.fillReport?.autofillCounted) await assertUseAllowed(userId, "autofills");
-  // Free fills the basic fields from the student's own details; the AI answers to the questions are for Pro.
-  const free = await isFree(userId);
+  // Free's full autofills answer the questions too, a few a day; after those (or for a job already counted
+  // today, still full) it fills the basic fields from the student's own details.
+  const free = !app.fillReport?.autofillCounted && (await planUsage(userId)).autofills.basic;
   const fields = Array.isArray(body.fields) ? (body.fields as PageField[]) : [];
   // ai: false answers only from the student's data and saved answers, with no model call, so the extension can
   // start filling at once; it asks again for what's left.
@@ -619,7 +617,7 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   if (typeof body.text === "string" && !own) throw new ServiceError("The cover letter is empty.", "text", 400);
   // A letter written during the trial (tailored) is still the job's letter after it.
   const reused = !own && !asked ? app?.fillReport?.coverLetter ?? "" : "";
-  // A new letter from AI counts toward Free's monthly number; the student's own edits and a reused letter don't.
+  // A new letter from AI counts toward Free's daily number; the student's own edits and a reused letter don't.
   const fresh = !own && !reused;
   if (fresh) await assertCoverLetterAllowed(userId);
   const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, style));

@@ -485,9 +485,9 @@ describe("CV generator", () => {
     expect(first.text).not.toContain("300%");
     expect(Buffer.from(first.pdfBase64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
     expect((await repo.getAccount(userId))!.balance).toBe(startCredits);
-    expect(first.usesLeft).toBe(2);
+    expect(first.usesLeft).toBe(4);
 
-    for (let index = 0; index < 2; index += 1) await call("POST", "cv", token, {});
+    for (let index = 0; index < 4; index += 1) await call("POST", "cv", token, {});
     const calls = model.calls;
     const response = await call("POST", "cv", token, {});
     expect(response.status).toBe(402);
@@ -501,14 +501,16 @@ describe("plan limits", () => {
     await repo.setAccountForTests(userId, { balance: 5 });
     const { token } = await issueExtensionToken(userId);
     const { usage } = await (await call("GET", "me", token)).json();
-    expect(usage.credits).toBe(36);
-    // Free's autofill is the basic fields, with no limit to count down.
-    expect(usage.autofills).toMatchObject({ basic: true, note: "" });
-    expect(usage.people).toMatchObject({ left: 5, note: "" });
-    await repo.setAccountForTests(userId, { balance: 1 });
+    // 5 letters (2 credits each), 5 answers (1 each), and this week's company plus 5 left from the trial (5 each).
+    expect(usage.credits).toBe(45);
+    // Each tool's box shows what's left today in its corner.
+    expect(usage.letters).toMatchObject({ left: 5, badge: "5 left today", note: "" });
+    expect(usage.autofills).toMatchObject({ left: 5, basic: false, badge: "5 left today" });
+    expect(usage.people).toMatchObject({ left: 6, note: "", badge: "6 left" });
+    await repo.setAccountForTests(userId, { balance: 0 });
     const low = (await (await call("GET", "me", token)).json()).usage;
-    expect(low.credits).toBe(16);
-    expect(low.people.note).toBe("Only 1 people search left");
+    expect(low.credits).toBe(20);
+    expect(low.people).toMatchObject({ left: 1, badge: "1 left this week" });
   });
 
   it("keeps a short answer to two sentences unless the student asks for a longer one", async () => {
@@ -527,7 +529,7 @@ describe("plan limits", () => {
     expect(await answer("long")).toBe(long);
   });
 
-  it("stops Free at 5 question answers a month", async () => {
+  it("stops Free at 5 question answers a day", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
@@ -537,7 +539,7 @@ describe("plan limits", () => {
     }
     const blocked = await call("POST", "write", token, { question: "Describe a time you led a team" });
     expect(blocked.status).toBe(402);
-    expect((await blocked.json()).error).toBe("No question answers left this month. Pro has no limit.");
+    expect((await blocked.json()).error).toBe("No question answers left today. More tomorrow, or Pro has no limit.");
   });
 
   it("counts a job's autofill once it worked, and has no limit on Free's basic fill", async () => {
@@ -573,34 +575,33 @@ describe("Free and the Pro trial", () => {
     { id: "f4", label: "Resume", type: "file", required: true },
   ];
 
-  it("fills only the basic fields on Free, says which questions Pro would answer, and answers them on the trial", async () => {
+  it("answers the questions in Free's 5 full autofills a day, then fills only the basic fields and says which questions Pro would answer", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
-    const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/5", title: "Data Intern", company: "Globex" })).json();
-
-    const free = await (await call("POST", "map", token, { applicationId: job.application.id, fields })).json();
-    expect(model.calls).toBe(0);
-    expect(free.answers.find((item: { id: string }) => item.id === "f1").values).toEqual(["Pat"]);
-    expect(free.locked.map((item: { id: string }) => item.id)).toEqual(["f2", "f3"]);
-    expect(free.aiAvailable).toBe(false);
     const me = await (await call("GET", "me", token)).json();
     expect(me).toMatchObject({ trial: null, effectivePlan: "free", usage: { free: true } });
+    const job = async (n: number) => (await (await call("POST", "jobs", token, { url: `https://careers.globex.example/apply/${n}`, title: "Data Intern", company: "Globex" })).json()).application.id as string;
 
-    // Signed up today, with the trial on: Pro, so the questions are answered.
-    process.env.TRIAL_DAYS = "7";
+    // A full autofill on Free: the written questions are answered too.
+    const first = await job(5);
     model.replies.push(JSON.stringify({ answers: [{ id: "f2", value: "I led the Colby Data Club and built dashboards for 40 students.", source: "resume", evidence: "I led the Colby Data Club and built dashboards for 40 students." }] }));
-    const trial = await (await call("POST", "map", token, { applicationId: job.application.id, fields })).json();
+    const full = await (await call("POST", "map", token, { applicationId: first, fields })).json();
     expect(model.calls).toBe(1);
-    expect(trial.locked).toEqual([]);
-    expect(trial.answers.find((item: { id: string }) => item.id === "f2").source).toBe("ai");
-    const onTrial = await (await call("GET", "me", token)).json();
-    expect(onTrial).toMatchObject({ plan: "free", effectivePlan: "pro", trial: { daysLeft: 7 }, usage: { free: false } });
+    expect(full.locked).toEqual([]);
+    expect(full.answers.find((item: { id: string }) => item.id === "f2").source).toBe("ai");
 
-    // Its answer stays cached, but Free doesn't get it back after the trial.
-    process.env.TRIAL_DAYS = "0";
-    const after = await (await call("POST", "map", token, { applicationId: job.application.id, fields })).json();
-    expect(after.answers.find((item: { id: string }) => item.id === "f2").values).toEqual([]);
+    // Today's 5 used: the basic fields from the student's details, and the questions Pro would answer.
+    const ok = [{ site: "example.com", label: "First name", type: "text", answer: "Pat", method: "value", ok: true }];
+    for (let n = 10; n < 15; n += 1) await call("POST", "attempts", token, { applicationId: await job(n), attempts: ok });
+    const out = (await (await call("GET", "me", token)).json()).usage.autofills;
+    expect(out).toMatchObject({ left: 0, basic: true, badge: "Basic only today" });
+    const calls = model.calls;
+    const basic = await (await call("POST", "map", token, { applicationId: await job(20), fields })).json();
+    expect(model.calls).toBe(calls);
+    expect(basic.answers.find((item: { id: string }) => item.id === "f1").values).toEqual(["Pat"]);
+    expect(basic.locked.map((item: { id: string }) => item.id)).toEqual(["f2", "f3"]);
+    expect(basic.aiAvailable).toBe(false);
   });
 
   const letterText = "Dear Hiring Team,\n\nI am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students. I would bring the same care and steady habits to the team at Northwind.\n\nSincerely,\nPat Doe";
@@ -787,21 +788,21 @@ describe("quick answers before the first fill", () => {
 });
 
 describe("Free's cover letter limit", () => {
-  it("writes 3 a month on Free, then stops; the student's own edits and a reused letter don't count", async () => {
+  it("writes 5 a day on Free, then stops; the student's own edits and a reused letter don't count", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
     const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/78", title: "Data Intern", company: "Globex" })).json();
-    for (let index = 0; index < 3; index += 1) {
+    for (let index = 0; index < 5; index += 1) {
       model.replies.push(`Dear Hiring Team,\n\nLetter ${index}. I am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students.\n\nI would bring the same care to Globex's data team.\n\nSincerely,\nPat Doe`);
       expect((await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" })).status).toBe(200);
     }
     const blocked = await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" });
     expect(blocked.status).toBe(402);
-    expect((await blocked.json()).error).toBe("No cover letters left this month. Pro has no limit.");
-    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 2.");
+    expect((await blocked.json()).error).toBe("No cover letters left today. More tomorrow, or Pro has no limit.");
+    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 4.");
     expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id, text: "My own letter." })).json()).text).toBe("My own letter.");
-    expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 3, left: 0 });
+    expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 5, left: 0 });
   });
 });
 

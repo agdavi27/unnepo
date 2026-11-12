@@ -99,11 +99,12 @@ export type BeginResult = { uploaded: string[]; questions: ComplexQuestion[]; re
 /** `questionsOnly`: started from "Answer a question" → all on this page, so it only finds questions (no resume upload). */
 export type Applying = BeginResult & { url: string; resumeError?: string | null; answers?: Record<string, { text: string; put: boolean; error?: string }>; questionsOnly?: boolean };
 
-export type UsageLine = { used: number; limit: number; left: number; note: string };
+/** One tool's count. `badge`: what its box shows in the corner ("4 left today", "Unlimited"). */
+export type UsageLine = { used: number; limit: number; left: number; note: string; badge?: string };
 
 export type PanelState = {
   connected: boolean;
-  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; effectivePlan?: string; /** Admins can work as Free or Pro to see both. */ admin?: boolean; planPreview?: "free" | "pro" | null; trial?: { endsAt: string; daysLeft: number; hoursLeft: number } | null; trialEnded?: string | null; highlights?: string[]; creditCost?: { letters: number; answers: number }; coverLetters?: { used: number; left: number | null }; usage?: { free: boolean; unlimited: boolean; credits: number | null; letters: UsageLine; answers: UsageLine; autofills: UsageLine; people: { left: number; note: string } }; setup?: Setup; maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>; session?: { startedAt: string; lastAt: string; active: boolean } | null; profileReady: boolean; completeness: number; missing?: string[]; goal?: { weekly: number | null; appliedAt: string[] }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
+  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; effectivePlan?: string; /** Admins can work as Free or Pro to see both. */ admin?: boolean; planPreview?: "free" | "pro" | null; trial?: { endsAt: string; daysLeft: number; hoursLeft: number } | null; trialEnded?: string | null; highlights?: string[]; creditCost?: { letters: number; answers: number }; coverLetters?: { used: number; left: number | null }; usage?: { free: boolean; unlimited: boolean; credits: number | null; letters: UsageLine; answers: UsageLine; autofills: UsageLine & { basic?: boolean }; people: { left: number; note: string; badge?: string } }; setup?: Setup; maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>; session?: { startedAt: string; lastAt: string; active: boolean } | null; profileReady: boolean; completeness: number; missing?: string[]; goal?: { weekly: number | null; appliedAt: string[] }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
   /** What's on the tab before Fill is pressed: the job, how many fields, and whether there's an account to make. */
   page: { site: string; title: string; company: string; fields: number; posting: boolean; account: "new" | "sign_in" | null; mentionsCv: boolean } | null;
   tab: { id: number; url: string; title: string } | null;
@@ -149,7 +150,7 @@ export type TrackerJob = {
   contacts: TrackerContact[];
 };
 
-export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boolean; peopleNote: string };
+export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boolean; peopleNote: string; /** The People box's corner: "1 left this week", "Unlimited". */ peopleBadge?: string };
 
 /**
  * A job the extension caught being applied to, for Home's "Detected jobs" menu (the last 5, newest first).

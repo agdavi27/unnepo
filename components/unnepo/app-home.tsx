@@ -45,11 +45,11 @@ const VIEWS: { id: View; label: string }[] = [
 const PRO_REASONS: Array<[string, string]> = [
   ["See who to email at every company", "Names, titles and checked emails for recruiters, hiring managers and the team, not just how many there are."],
   ["Show person on every job", "Reveal the people on a job's list, with their LinkedIn and email."],
-  ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 3 general ones a month."],
-  ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile, every question on a page at once."],
-  ["Unlimited autofill that answers the questions too", "Free fills your basic details; Pro fills the written questions as well."],
+  ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 5 general ones a day."],
+  ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 5 a day."],
+  ["Unlimited autofill that answers the questions too", "Free has 5 full autofills a day, then fills your basic details."],
   ["Follow-up emails written for you", "A short note to each person, ready to send from Gmail or Outlook."],
-  ["Names and emails at 20 companies a month, or 70 a semester", "Plus 15 more companies for $15 whenever you need them."],
+  ["Names and emails at every company you apply to", "Free shows them at 1 company a week."],
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 
@@ -205,10 +205,10 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
   const subscribed = currentPlan === "pro" || currentPlan === "premium" || currentPlan === "grind";
   const usage = data?.credits.usage;
   const creditsLeft = usage?.credits ?? (data?.credits.balance ?? 0) * CREDIT_COST.people;
-  const creditsLabel = data?.credits.unlimited ? "Unlimited credits" : `${creditsLeft} ${creditsLeft === 1 ? "credit" : "credits"} left`;
+  const creditsLabel = data?.credits.unlimited || usage?.unlimited ? "Unlimited" : usage?.free ? "Resets every day" : `${creditsLeft} ${creditsLeft === 1 ? "credit" : "credits"} left`;
   const usesLeft = usage ? [
-    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"}`, `${usage.answers.left} ${usage.answers.left === 1 ? "question answer" : "question answers"}`] : []),
-    ...(usage.unlimited ? [] : [`${usage.people.left} ${usage.people.left === 1 ? "people search" : "people searches"}`]),
+    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"} today`, `${usage.answers.left} ${usage.answers.left === 1 ? "answer" : "answers"} today`, `${usage.autofills.left} ${usage.autofills.left === 1 ? "autofill" : "autofills"} today`] : []),
+    ...(usage.unlimited ? [] : [`people: ${usage.people.badge}`]),
   ] : [];
   const initials = (data?.user.name || data?.user.email || "").split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
   return (
@@ -386,7 +386,6 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
               </div>
               {currentPlan !== "free" && (
                 <div className="flex flex-wrap gap-3">
-                  <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: "pack" })} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Add 15 more companies for $15</button>
                   {(currentPlan === "grind" || currentPlan === "premium") && <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Manage subscription</button>}
                 </div>
               )}
