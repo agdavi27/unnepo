@@ -3,7 +3,7 @@ import { notJobTitle } from "@/lib/apply/job-title";
 import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
-import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, NEVER_READ, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
+import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
 import { detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { friendRequests, friendsSettingsCard, wireFriends } from "../shared/friends";
@@ -13,7 +13,7 @@ import { dueCount } from "../shared/reminders";
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
  * while it fills, just the spider typing on his laptop; when it's applied, went wrong, or there's no job, two big
  * buttons that open a popup asking one question at a time, with the resume and password small under them. The menu
- * runs along the bottom: Week, Jobs (with the tools on top) and Me.
+ * runs along the bottom: Jobs (the week and every job), Tools and Me.
  */
 
 const app = document.getElementById("app")!;
@@ -23,7 +23,7 @@ const jobsBadge = document.getElementById("jobs-count")!;
 const meBadge = document.getElementById("me-count")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-/** The three tabs along the bottom (home = Week, jobs = Jobs and the tools, settings = Me), and the pages opened from them. */
+/** The three tabs along the bottom (home = Jobs, jobs = Tools, settings = Me; shown under those names), and the pages opened from them. */
 type View = "home" | "jobs" | "feedback" | "settings" | "job";
 const TABS: View[] = ["home", "jobs", "settings"];
 let view: View = "home";
@@ -138,7 +138,6 @@ function lines(state: PanelState): { lines: string[]; alert?: boolean } {
   if (job?.error) return { lines: [job.error], alert: true };
   if (job?.step && (job.running || job.submission || job.report)) return { lines: [job.step] };
   if (!me!.profileReady) return { lines: [me!.resume ? "Almost there. Finish your profile and I'm ready." : "Hi! Upload your resume and I'll set up your profile."] };
-  if (onLinkedIn(state)) return { lines: ["I don't read LinkedIn pages.", "Applied with Easy Apply? Add it below.", goalLine(state)] };
   if (!jobFound(state) || !page) {
     const due = store.tracker ? dueCount(todayList().items) : 0;
     return { lines: [goalLine(state), due ? `${due} ${due === 1 ? "thing" : "things"} on your list today.` : "Open an application, I'll wait.", "Need a cover letter? Tap Write a cover letter."] };
@@ -179,14 +178,10 @@ function onUnnepo(state: PanelState) {
   try { return Boolean(state.tab && new URL(state.tab.url).origin === new URL(state.apiBase).origin); } catch { return false; }
 }
 
-function onLinkedIn(state: PanelState) {
-  try { return Boolean(state.tab && NEVER_READ.test(new URL(state.tab.url).hostname)); } catch { return false; }
-}
-
 /** A job is on the tab: a posting, an application form, or one Unnepo is working on. */
 function jobFound(state: PanelState) {
   const { job, page, tab } = state;
-  const onWeb = Boolean(tab && /^https:\/\//.test(tab.url)) && !onLinkedIn(state) && !onUnnepo(state);
+  const onWeb = Boolean(tab && /^https:\/\//.test(tab.url)) && !onUnnepo(state);
   if (dismissal(state) && !job?.running && !job?.submission) return false;
   return onWeb && Boolean(job?.applicationId || job?.running || job?.report || page?.fields || page?.posting);
 }
@@ -547,7 +542,6 @@ function homeView(state: PanelState) {
   if (isRunning(state)) return fillingView();
   ensureTracker();
   const note = here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : "";
-  if (onLinkedIn(state)) return linkedInCard(state) + homeLists(state);
   const card = openedCard(state);
   if (state.job?.submission || state.job?.error) return card + homeLists(state);
   if (card) return here.step === "check" ? card : card + homeLists(state);
@@ -599,78 +593,6 @@ const part = (id: string, title: string, body: () => string) => `
     ${openParts.has(id) ? body() : ""}
   </details>`;
 
-
-/**
- * LinkedIn, which Unnepo never reads: after applying there (Easy Apply), the student adds the job to their
- * tracker themselves. The title and company start from the tab's name ("Growth Intern | MealPal | LinkedIn").
- */
-const linkedInJob = { key: "", title: "", company: "", description: "", note: "", saving: false };
-function linkedInCard(state: PanelState) {
-  const key = state.tab?.url ?? "";
-  if (linkedInJob.key !== key) {
-    const parts = (state.tab?.title ?? "").replace(/^\(\d+\)\s*/, "").split(" | ").map((part) => part.trim());
-    const named = parts.length >= 3 && /linkedin/i.test(parts.at(-1)!);
-    Object.assign(linkedInJob, { key, title: named ? parts[0] : "", company: named ? parts[1] : "", description: "", note: "", saving: false });
-  }
-  const ready = linkedInJob.title.trim() && linkedInJob.company.trim();
-  // Easy Apply was noticed and saved: say so, with a way to take it back.
-  const jobIdOf = (raw: string) => {
-    try {
-      const address = new URL(raw);
-      return address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId") ?? "";
-    } catch {
-      return "";
-    }
-  };
-  const savedUrl = (state.job as { url?: string } | null)?.url ?? "";
-  const thisJob = jobIdOf(key);
-  if (state.job?.submission && state.job.applicationId && (!thisJob || jobIdOf(savedUrl) === thisJob)) {
-    return `
-    <section class="page" aria-label="LinkedIn job saved">
-      <span class="eyebrow">Applied on LinkedIn</span>
-      <p class="note ok">${escape(state.job.step || "Saved to your tracker.")}</p>
-    </section>`;
-  }
-  return `
-    <section class="page" aria-label="Add a LinkedIn job">
-      <span class="eyebrow">Applied on LinkedIn?</span>
-      <p class="note">Unnepo doesn't read LinkedIn pages. If you applied, add the job here: the title and company come from the tab.</p>
-      <div class="letter-form">
-        <label class="question"><span class="q-label">Job title</span><input class="field" id="li-title" value="${escape(linkedInJob.title)}" maxlength="200" placeholder="Growth Marketing Intern"></label>
-        <label class="question"><span class="q-label">Company</span><input class="field" id="li-company" value="${escape(linkedInJob.company)}" maxlength="200" placeholder="MealPal"></label>
-        <label class="question"><span class="q-label">Job description (optional)</span><textarea class="field letter-input" id="li-description" rows="3" maxlength="8000" placeholder="Paste it to keep it with the job, for cover letters and finding people">${escape(linkedInJob.description)}</textarea></label>
-        <button type="button" class="solid" id="li-save" ${ready && !linkedInJob.saving ? "" : "disabled"}>${linkedInJob.saving ? "Adding…" : "I applied: add to tracker"}</button>
-      </div>
-      ${linkedInJob.note ? `<p class="small" role="status">${escape(linkedInJob.note)}</p>` : ""}
-    </section>`;
-}
-
-function wireLinkedIn(tabId: number) {
-  const input = (id: string, key: "title" | "company" | "description") => {
-    const box = document.getElementById(id) as HTMLInputElement | HTMLTextAreaElement | null;
-    box?.addEventListener("input", () => {
-      linkedInJob[key] = box.value;
-      const save = document.getElementById("li-save") as HTMLButtonElement | null;
-      if (save) save.disabled = !linkedInJob.title.trim() || !linkedInJob.company.trim() || linkedInJob.saving;
-    });
-  };
-  input("li-title", "title");
-  input("li-company", "company");
-  input("li-description", "description");
-  document.getElementById("li-save")?.addEventListener("click", async () => {
-    linkedInJob.saving = true;
-    linkedInJob.note = "";
-    void render();
-    type Tracked = { ok: boolean; error?: string; title?: string; company?: string };
-    const result = await ask<Tracked>({ type: "track-linkedin", tabId, title: linkedInJob.title, company: linkedInJob.company, description: linkedInJob.description })
-      .catch((): Tracked => ({ ok: false, error: "Couldn't reach Unnepo." }));
-    linkedInJob.saving = false;
-    linkedInJob.note = result.ok ? `Added: ${result.title} at ${result.company}. It's in your Applied jobs.` : result.error ?? "Couldn't add it.";
-    if (result.ok) void loadTracker(true);
-    if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
-    void render();
-  });
-}
 
 /**
  * Before the first fill: the questions that hold up most forms, asked once, on one card. Skipping is fine;
@@ -751,7 +673,7 @@ function wireSetup(state: PanelState) {
  */
 /**
  * "Fill in the job information", next to a job link: reads the link (Unnepo reads company sites; job boards are
- * read in a background tab, never LinkedIn) and fills in the title, company and description. A box the student
+ * read in a background tab, LinkedIn too) and fills in the title, company and description. A box the student
  * already typed in is kept, unless it holds a job board's name or a status line instead of the job.
  */
 let linkReading = false;
@@ -778,7 +700,7 @@ function openedCard(state: PanelState) {
   if (here.step === "saved") {
     return `<section class="page" aria-label="Saved"><p class="note ok" role="status">${escape(here.note)}</p>${here.savedUrl ? `<div class="links"><button type="button" class="link" data-open-saved="${escape(here.savedUrl)}">See it and the people there</button></div>` : ""}</section>`;
   }
-  if (!state.tab || !/^https:\/\//.test(state.tab.url) || onLinkedIn(state) || onUnnepo(state) || state.job?.running || state.job?.submission) return "";
+  if (!state.tab || !/^https:\/\//.test(state.tab.url) || onUnnepo(state) || state.job?.running || state.job?.submission) return "";
   if (here.step === "check" || (here.step === "saving" && !here.auto)) {
     const job = here.job!;
     const ready = job.title.trim().length >= 2 && job.company.trim().length >= 2 && here.step !== "saving";
@@ -1267,11 +1189,34 @@ function profileCard(state: PanelState) {
         <span class="account-text"><span class="account-name">${escape(name)}</span>${me.user.name ? `<span class="sub">${escape(me.user.email)}</span>` : ""}</span>
       </div>
       <div class="account-plan"><span><strong>${escape(plan)}</strong> · ${credits}</span><a class="link" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Plans ↗</a></div>
+      ${me.admin ? adminPlanSwitch(me.planPreview ?? null) : ""}
       ${me.usage?.free ? `<span class="small">Left this month: ${me.usage.letters.left} cover letters · ${me.usage.answers.left} answers${me.usage.unlimited ? "" : ` · ${me.usage.people.left} people searches`}</span>` : ""}
       ${me.completeness < 100 ? `<div class="row-between"><span class="small"${!me.profileReady ? ' style="color: var(--warn)"' : ""}>Profile ${me.completeness}% done${missing.length ? `: ${missing.map(escape).join(", ")}` : ""}</span></div>
       <div class="bar" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}"><div style="width:${me.completeness}%"></div></div>` : ""}
       <a class="link" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">${me.completeness < 100 ? "Finish my profile" : "Edit my profile"} ↗</a>
     </section>`;
+}
+
+/** Admins only: see the product as a Free or a Pro student does. Billing never changes. */
+let planSwitching = false;
+function adminPlanSwitch(preview: "free" | "pro" | null) {
+  const chip = (value: "real" | "free" | "pro", label: string) => {
+    const on = (preview ?? "real") === value;
+    return `<button type="button" class="chip${on ? " on" : ""}" data-plan-preview="${value}" aria-pressed="${on}" ${planSwitching ? "disabled" : ""}>${label}</button>`;
+  };
+  return `<div class="row-between"><span class="small">Admin · view as</span><div class="chips" role="group" aria-label="View Unnepo as">${chip("real", "My plan")}${chip("free", "Free")}${chip("pro", "Pro")}</div></div>`;
+}
+function wirePlanSwitch() {
+  document.querySelectorAll<HTMLButtonElement>("[data-plan-preview]").forEach((button) => button.addEventListener("click", async () => {
+    const value = button.dataset.planPreview;
+    planSwitching = true;
+    void render();
+    const result = await ask<{ ok: boolean; error?: string }>({ type: "plan-preview", plan: value === "real" ? null : value }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    planSwitching = false;
+    if (!result.ok) alert(result.error ?? "Couldn't switch plans.");
+    void loadTracker(true);
+    void render();
+  }));
 }
 
 /** The running issues list in Profile: loaded from the background worker, newest first. */
@@ -1814,8 +1759,8 @@ function draw(state: PanelState): boolean {
   wirePopup();
   wireLetter(state.tab?.id ?? 0, !jobFound(state));
   wireAnswer(state.tab?.id ?? 0);
-  if (state.tab && onLinkedIn(state)) wireLinkedIn(state.tab.id);
   wireSetup(state);
+  wirePlanSwitch();
   wireOpened(state);
   wireJobBox(state);
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());

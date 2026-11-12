@@ -2,7 +2,7 @@ import { serverConfig } from "@/lib/config";
 import { repo } from "@/lib/db/file-store";
 import type { CreditAccount } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
-import { effectivePlan } from "@/lib/plan";
+import { planState } from "@/lib/apply/limits";
 
 const PAID = new Set(["pro", "premium", "grind", "pack"]);
 
@@ -14,9 +14,8 @@ export function aiMonthlyLimit(plan: CreditAccount["plan"] | string | undefined)
 }
 
 export async function assertAiAllowed(userId: string, purpose: string) {
-  const [account, user] = await Promise.all([repo.getAccount(userId), repo.getUserById(userId)]);
-  // The Pro trial counts as Pro.
-  const plan = effectivePlan(account?.plan, user?.createdAt);
+  // The Pro trial counts as Pro, and an admin's preview as the plan it shows.
+  const { plan } = await planState(userId);
   const limit = aiMonthlyLimit(plan);
   if (limit <= 0) {
     throw new ServiceError("AI writing is included with Pro. You can still write and send the email yourself.", "plan", 402);

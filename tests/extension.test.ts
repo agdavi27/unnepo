@@ -358,11 +358,11 @@ describe("filling in a job from its link", () => {
     expect(again.application.company).toBe("Initech");
   });
 
-  it("reads company sites on the server, and sends job boards to the extension and LinkedIn nowhere", async () => {
+  it("reads company sites on the server, and sends job boards and LinkedIn to the extension", async () => {
     const userId = await readyStudent();
     const { token } = await issueExtensionToken(userId);
     const linkedin = await call("POST", "read-link", token, { url: "https://www.linkedin.com/jobs/view/123/" });
-    expect([linkedin.status, (await linkedin.json()).code]).toEqual([422, "linkedin"]);
+    expect([linkedin.status, (await linkedin.json()).code]).toEqual([422, "in_browser"]);
     const board = await call("POST", "read-link", token, { url: "https://www.ziprecruiter.com/c/MealPal/Job/Intern?jid=1a2b" });
     expect([board.status, (await board.json()).code]).toEqual([422, "in_browser"]);
     setJobPageFetcherForTests(async () => new Response(`<html><head><script type="application/ld+json">{"@type":"JobPosting","title":"Data Intern","hiringOrganization":{"name":"Globex"},"jobLocation":{"address":{"addressLocality":"Austin","addressRegion":"TX"}},"description":"<p>Globex data team.</p>"}</script></head><body></body></html>`, { status: 200, headers: { "content-type": "text/html" } }));
@@ -838,6 +838,12 @@ describe("one link per job", () => {
     expect(jobLink("https://www.indeed.com/jobs?q=intern&l=Boston&vjk=9f8e7d6c5b4a3210")).toBe("https://www.indeed.com/viewjob?jk=9f8e7d6c5b4a3210");
     expect(jobLink("https://www.indeed.com/viewjob?jk=abc123&from=serp")).toBe("https://www.indeed.com/viewjob?jk=abc123");
     expect(jobLink("https://www.ziprecruiter.com/c/MealPal/Job/Intern?jid=1a2b")).toBe("https://www.ziprecruiter.com/c/MealPal/Job/Intern?jid=1a2b");
+    // LinkedIn: the search's open job and the job's own page are one address.
+    expect(jobLink("https://www.linkedin.com/jobs/search/?currentJobId=4012345678&keywords=intern")).toBe("https://www.linkedin.com/jobs/view/4012345678/");
+    expect(jobLink("https://www.linkedin.com/jobs/collections/recommended/?currentJobId=4012345678")).toBe("https://www.linkedin.com/jobs/view/4012345678/");
+    expect(jobLink("https://www.linkedin.com/jobs/view/growth-intern-at-mealpal-4012345678/?trk=abc")).toBe("https://www.linkedin.com/jobs/view/4012345678/");
+    expect(jobLink("https://www.linkedin.com/feed/")).toBe("https://www.linkedin.com/feed/");
+    expect(titleParts("Growth Intern | MealPal | LinkedIn")).toEqual({ title: "Growth Intern", company: "MealPal" });
   });
 });
 

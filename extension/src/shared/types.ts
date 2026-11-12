@@ -69,8 +69,8 @@ export type FillReport = {
  */
 export type Issue = { id: string; at: string; kind: "fill" | "site" | "stopped" | "note"; site: string; page: string; question?: string; what: string };
 
-/** Sites Unnepo never reads or fills, whatever is open in the panel: LinkedIn. */
-export const NEVER_READ = /(^|\.)linkedin\.com$/i;
+/** LinkedIn: read like any job board (its job pane, Easy Apply), but never filled. */
+export const LINKEDIN = /(^|\.)linkedin\.com$/i;
 
 /** The quick questions asked once before the first fill. Null or "": not answered yet. */
 export type Setup = { salaryExpectation: string; earliestStart: string; willingToRelocate: boolean | null; inPerson: boolean | null; authorizedUS: boolean | null; needsSponsorship: boolean | null; classYear: string; hasSchool: boolean };
@@ -102,7 +102,7 @@ export type UsageLine = { used: number; limit: number; left: number; note: strin
 
 export type PanelState = {
   connected: boolean;
-  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; effectivePlan?: string; trial?: { endsAt: string; daysLeft: number; hoursLeft: number } | null; trialEnded?: string | null; highlights?: string[]; creditCost?: { letters: number; answers: number }; coverLetters?: { used: number; left: number | null }; usage?: { free: boolean; unlimited: boolean; credits: number | null; letters: UsageLine; answers: UsageLine; autofills: UsageLine; people: { left: number; note: string } }; setup?: Setup; maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>; session?: { startedAt: string; lastAt: string; active: boolean } | null; profileReady: boolean; completeness: number; missing?: string[]; goal?: { weekly: number | null; appliedAt: string[] }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
+  me: { user: { name: string; email: string }; credits: number; unlimitedCredits?: boolean; plan?: string; effectivePlan?: string; /** Admins can work as Free or Pro to see both. */ admin?: boolean; planPreview?: "free" | "pro" | null; trial?: { endsAt: string; daysLeft: number; hoursLeft: number } | null; trialEnded?: string | null; highlights?: string[]; creditCost?: { letters: number; answers: number }; coverLetters?: { used: number; left: number | null }; usage?: { free: boolean; unlimited: boolean; credits: number | null; letters: UsageLine; answers: UsageLine; autofills: UsageLine; people: { left: number; note: string } }; setup?: Setup; maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>; session?: { startedAt: string; lastAt: string; active: boolean } | null; profileReady: boolean; completeness: number; missing?: string[]; goal?: { weekly: number | null; appliedAt: string[] }; resume?: { fileName: string; uploadedAt: string; file: boolean } | null; spider?: SpiderLook } | null;
   /** What's on the tab before Fill is pressed: the job, how many fields, and whether there's an account to make. */
   page: { site: string; title: string; company: string; fields: number; posting: boolean; account: "new" | "sign_in" | null; mentionsCv: boolean } | null;
   tab: { id: number; url: string; title: string } | null;

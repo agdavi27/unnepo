@@ -1,6 +1,6 @@
 import { stepText, wentBack, type Step } from "./shared/steps";
 import { generatePassword, unmetRules } from "./shared/password";
-import { AUTOFILL_ENABLED, NEVER_READ, type Answer, type Applying, type BeginResult, type Detected, type JobDetails, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type OpenedEmails, type PanelState, type ReminderMarks, type Scan, type Tracker } from "./shared/types";
+import { AUTOFILL_ENABLED, LINKEDIN, type Answer, type Applying, type BeginResult, type Detected, type JobDetails, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type OpenedEmails, type PanelState, type ReminderMarks, type Scan, type Tracker } from "./shared/types";
 import { QUICK_BOARDS } from "./content/quick-apply";
 import { isJobPage, sendsApplication } from "./shared/job-page";
 import { dueCount, reminders } from "./shared/reminders";
@@ -352,7 +352,7 @@ async function addMaybe(item: { url: string; title: string; company: string; des
  */
 const DETECTED_KEPT = 5;
 /** How Unnepo knew, when that's strong enough to save without asking. */
-const SURE_HOWS = new Set<AppliedHow>(["site_confirmed", "board_saved"]);
+const SURE_HOWS = new Set<AppliedHow>(["site_confirmed", "board_saved", "linkedin_easy_apply"]);
 async function detectedList(): Promise<Detected[]> {
   return ((await chrome.storage.local.get("detected")).detected as Detected[] | undefined) ?? [];
 }
@@ -577,11 +577,10 @@ function accountKey(url: string) {
  */
 async function look(tabId: number): Promise<Scan | null> {
   try {
-    // LinkedIn is never read, not even to preview it in the panel.
     const tab = await chrome.tabs.get(tabId);
-    if (!tab.url || NEVER_READ.test(new URL(tab.url).hostname)) return null;
+    if (!tab.url) return null;
     const frames = (await chrome.webNavigation.getAllFrames({ tabId }).catch(() => null)) ?? [{ frameId: 0, url: "" }];
-    const frameIds = frames.filter((frame) => frame.frameId === 0 || (/^https:\/\//.test(frame.url) && !SKIP_FRAME.test(frame.url) && !NEVER_READ.test(new URL(frame.url).hostname))).map((frame) => frame.frameId);
+    const frameIds = frames.filter((frame) => frame.frameId === 0 || (/^https:\/\//.test(frame.url) && !SKIP_FRAME.test(frame.url))).map((frame) => frame.frameId);
     await chrome.scripting.executeScript({ target: { tabId, frameIds }, files: ["content/fill.js"] }).catch(() => undefined);
     const scans = await chrome.scripting.executeScript({
       target: { tabId, frameIds },
@@ -1035,13 +1034,13 @@ type LinkInfo = { title: string; company: string; location: string; description:
 
 /**
  * Reads a job board link in the student's own browser: opens it in a background tab (signed in as they are, so
- * Handshake shows the job), waits for the page to draw, reads the job that's open, and closes the tab. LinkedIn
- * is never opened. Null when the page didn't show a job.
+ * Handshake and LinkedIn show the job), waits for the page to draw, reads the job that's open, and closes the tab.
+ * Null when the page didn't show a job.
  */
 async function readLinkInTab(url: string): Promise<LinkInfo | null> {
   let host = "";
   try { host = new URL(url).hostname; } catch { return null; }
-  if (!/^https:\/\//.test(url) || NEVER_READ.test(host)) return null;
+  if (!/^https:\/\//.test(url) || !host) return null;
   const tab = await chrome.tabs.create({ url, active: false }).catch(() => null);
   if (!tab?.id) return null;
   const tabId = tab.id;
@@ -1144,14 +1143,16 @@ async function saveSubmission(body: Record<string, unknown>) {
 const SUBMIT_REQUEST = /(application|apply|submit|candidate|jobs\/\d+)/i;
 const NOT_SUBMIT = /(analytics|collect|track|log|metrics|beacon|sentry|segment|recaptcha|hcaptcha|captcha)/i;
 /**
- * LinkedIn Easy Apply, which Unnepo never reads: only the address of the request LinkedIn's own page sends when
- * the student submits (never what's in it, or the page). It's only noted in the Activity log; the student adds
- * the job with the LinkedIn card.
+ * LinkedIn Easy Apply: the request LinkedIn's own page sends when the student submits (only its address, never
+ * what's in it). The job is the one open in that tab, read from LinkedIn's details pane, saved like a job board's.
  */
 const LINKEDIN_APPLY = /\/voyager\/api\/[^?]*(onsiteapply|easyapply|jobapplication|applyapplication)|[?&]action=(submit|apply)[a-z]*application|\/jobs-apply\/|\/apply\/submit/i;
-async function recordLinkedIn() {
-  // Unnepo never reads LinkedIn pages, so it can't tell which job: the student adds it with the LinkedIn card.
-  void log("Saw an Easy Apply on LinkedIn. Add the job with the panel's LinkedIn card if you applied.");
+async function recordLinkedIn(tabId: number) {
+  if (tabId < 0) return void log("Saw an Easy Apply on LinkedIn, but not which tab it was in.");
+  // The job open now, read fresh: a search page shows one job after another in the same tab.
+  const scan = await look(tabId).catch(() => null);
+  if (scan?.description) await rememberSeen(tabId, scan);
+  await recordSeen(tabId, "LinkedIn Easy Apply sent your application.", "linkedin_easy_apply");
 }
 
 /** Tabs where a job board's 1-Click Apply or Submit was just pressed, and when. */
@@ -1162,8 +1163,8 @@ const BOARD_NOT_APPLY = /(view|impression|track|analytics|log|metric|beacon|even
 chrome.webRequest.onCompleted.addListener((details) => {
   if (details.method !== "POST" || details.tabId < 0 || details.statusCode < 200 || details.statusCode >= 300) return;
   try {
-    if (NEVER_READ.test(new URL(details.url).hostname) && LINKEDIN_APPLY.test(details.url)) {
-      void recordLinkedIn().catch(() => undefined);
+    if (LINKEDIN.test(new URL(details.url).hostname) && LINKEDIN_APPLY.test(details.url)) {
+      void recordLinkedIn(details.tabId).catch(() => undefined);
       return;
     }
   } catch {
@@ -1401,7 +1402,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         // Autofill is off, except from the Jobs tab's "Autofill (Beta)" button.
         if (!AUTOFILL_ENABLED && message.beta !== true) return reply({ ok: false, error: "Autofill is turned off." });
         const tab = await chrome.tabs.get(Number(message.tabId)).catch(() => null);
-        if (tab?.url && NEVER_READ.test(new URL(tab.url).hostname)) {
+        if (tab?.url && LINKEDIN.test(new URL(tab.url).hostname)) {
           await saveJob(Number(message.tabId), { error: "Unnepo doesn't fill LinkedIn. Open the job's own application (Apply on the company's site), then press Fill.", step: "Stopped." });
           return reply({ ok: false });
         }
@@ -1560,11 +1561,23 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         await look(tab).catch(() => null);
         const page = await send<{ path: string; title: string; headings: string[]; buttons: string[]; postingData: boolean; job: { title: string; company: string } }>(tab, { type: "page-report" }, 0).catch(() => null);
         const url = (await chrome.tabs.get(tab).catch(() => null))?.url ?? "";
-        if (!page) return reply({ ok: false, error: "Couldn't read this page. Unnepo never reads LinkedIn; add LinkedIn jobs with the form instead." });
+        if (!page) return reply({ ok: false, error: "Couldn't read this page. Reload it and try again." });
         const recent = (((await chrome.storage.local.get("activityLog")).activityLog as Array<{ at: number; text: string }> | undefined) ?? []).filter((item) => Date.now() - item.at < 30 * 60 * 1000).slice(0, 5).map((item) => item.text);
         await addIssues(url, [{ kind: "note", what: `Missed an application. Page "${page.title}" (${page.path}). Job read as "${page.job.title}" at "${page.job.company}"${page.postingData ? ", with posting data" : ", no posting data"}. Buttons: ${page.buttons.join(" | ") || "none"}. Headings: ${page.headings.join(" | ") || "none"}. Recent: ${recent.join(" / ") || "nothing seen"}.` }]);
         void log("Saved a report of this page to your issues list (Profile).");
         return reply({ ok: true });
+      }
+      // Admins: work as Free or Pro (or the real plan) to see what students on it see.
+      case "plan-preview": {
+        if (sender.tab) return reply({ ok: false });
+        try {
+          await api("POST", "plan-preview", { plan: message.plan === "free" || message.plan === "pro" ? message.plan : null });
+          const { token } = await settings();
+          if (token) await readMe(token).catch(() => undefined);
+          return reply({ ok: true });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't switch plans." });
+        }
       }
       // "Did you apply to these?": ✓ saves it as applied, ✕ drops it.
       case "maybe-answer": {
@@ -1593,7 +1606,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           // A LinkedIn search page holds the job in its address; keep one address per job.
           try {
             const address = new URL(url);
-            const jobId = NEVER_READ.test(address.hostname) ? address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId") : null;
+            const jobId = LINKEDIN.test(address.hostname) ? address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId") : null;
             if (jobId) url = `https://www.linkedin.com/jobs/view/${jobId}/`;
           } catch {
             url = "";
@@ -1643,7 +1656,6 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         const tab = await chrome.tabs.get(Number(message.tabId)).catch(() => null);
         if (!tab?.id || !tab.url || !/^https:/.test(tab.url)) return reply({ ok: false, error: "Open the job's page first." });
-        if (NEVER_READ.test(new URL(tab.url).hostname)) return reply({ ok: false, error: "Unnepo doesn't read LinkedIn." });
         await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ["content/fill.js"] }).catch(() => undefined);
         const job = await send<{ title: string; company: string; description: string; url: string; from: string }>(tab.id, { type: "opened-job" }, 0).catch(() => null);
         if (!job) return reply({ ok: false, error: "Couldn't read this page. Reload it and try again." });
@@ -1697,24 +1709,6 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ ok: true, id: added.application.id, title, company, companyMissing: Boolean(added.application.companyMissing) });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't save it." });
-        }
-      }
-      // LinkedIn, never read: the student says they applied and names the job; only the tab's address is used.
-      case "track-linkedin": {
-        if (sender.tab) return reply({ ok: false });
-        try {
-          const tab = await chrome.tabs.get(Number(message.tabId));
-          const address = new URL(tab.url ?? "");
-          if (!NEVER_READ.test(address.hostname)) return reply({ ok: false, error: "This isn't a LinkedIn page." });
-          // One address per job: /jobs/view/<id>, from the page or the search's selected job.
-          const jobId = address.pathname.match(/\/jobs\/view\/(\d+)/)?.[1] ?? address.searchParams.get("currentJobId");
-          const url = jobId ? `https://www.linkedin.com/jobs/view/${jobId}/` : `${address.origin}${address.pathname}`;
-          const saved = await api<{ application: { id: string; title: string; company: string } }>("POST", "submissions", {
-            url, title: String(message.title ?? "").trim(), company: String(message.company ?? "").trim(), description: String(message.description ?? "").trim() || undefined, confidence: "likely", text: "Applied on LinkedIn (added from the Unnepo panel).",
-          });
-          return reply({ ok: true, title: saved.application.title, company: saved.application.company });
-        } catch (error) {
-          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't add it." });
         }
       }
       // A job board's Apply button was pressed (Handshake, ZipRecruiter): the job on the page is the one being

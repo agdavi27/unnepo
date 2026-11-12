@@ -253,6 +253,9 @@ function peopleCard(job: TrackerJob) {
     </section>`;
 }
 
+/** On Free, beside "Show person": Pro shows everyone's name and email. */
+const upgradeLink = () => (store.tracker?.free && host.upgradeUrl() ? `<a class="link upgrade-link" href="${escape(host.upgradeUrl())}" target="_blank" rel="noreferrer">Upgrade to Pro ↗</a>` : "");
+
 function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
   const key = person.name.toLowerCase();
   const hidden = job.hidden.includes(key);
@@ -271,7 +274,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
       ? `<a class="email-link" href="${escape(link.url)}" ${link.url.startsWith("mailto:") ? "" : 'target="_blank" rel="noreferrer"'} data-email-link="${person.id}" data-cut="${link.cut}" title="Open this email in ${MAILER_NAME[store.mailer]}">${escape(person.email)} ↗</a>`
       : `<button type="button" class="email-link" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""} title="Write the email, then open it in ${MAILER_NAME[store.mailer]}">${busy("write") ? "Writing your email…" : `${escape(person.email)} ↗`}</button>`
     : hidden
-      ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>` : `<span class="small">You've shown 3 people for this job.</span>`
+      ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>${upgradeLink()}` : `<span class="small">You've shown 3 people for this job.</span>${upgradeLink()}`
       : `<span class="small">No email found</span>`;
   return `
     <li class="person${first ? " first" : ""}">

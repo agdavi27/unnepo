@@ -278,12 +278,34 @@ const fullName = (name: string) => /^\S{2,}( \S+)* [^\s*.]{2,}$/.test(name.trim(
 export type StudentFacts = { school?: string; pastEmployers?: string[]; city?: string };
 
 /**
- * Who's most worth emailing first: the person the posting names, a school connection, recruiters (campus first),
- * a manager on the job's team, then the team; executives last. `bonus` adds what was found about this person.
+ * Who's most worth emailing first: the person the posting names, then recruiters and HR (campus first), then a
+ * hiring manager (a manager on the job's team), then a school connection, then the team; executives last. An alum
+ * who recruits or manages counts nearly as much as a recruiter. `bonus` adds what was found about this person.
  */
 export function relevance(person: Pick<FoundPerson, "role" | "title">, bonus = 0) {
-  const base = person.role === "job_poster" ? 100 : person.role === "alumni" ? 80 : person.role === "recruiter" ? 60 + (CAMPUS.test(person.title) ? 10 : 0) : 40 + (MANAGES.test(person.title) ? 8 : 0);
+  const manages = MANAGES.test(person.title);
+  const base = person.role === "job_poster" ? 100
+    : person.role === "recruiter" ? 80 + (CAMPUS.test(person.title) ? 10 : 0)
+    : person.role === "alumni" ? 60 + (RECRUITING.test(person.title) ? 25 : manages ? 10 : 0)
+    : 45 + (manages ? 25 : 0);
   return base + bonus - (TOO_SENIOR.test(person.title) ? 30 : 0);
+}
+
+// Words in a job's title that say nothing about the kind of work.
+const GENERIC_TITLE_WORDS = new Set(["intern", "internship", "assistant", "associate", "specialist", "coordinator", "manager", "senior", "junior", "entry", "level", "summer", "fall", "spring", "winter", "part", "time", "full", "remote", "hybrid", "temporary", "contract"]);
+
+/**
+ * Whether someone's title is about this job: recruiting, HR or hiring, the job's department, or a word from the
+ * job's own title ("Data Analyst Intern" fits a "Senior Data Scientist"; an "Office Coordinator" doesn't).
+ */
+export function relatedToJob(title: string, app: Pick<JobApplication, "department" | "title">) {
+  if (!title.trim()) return false;
+  if (RECRUITING.test(title) || /\bhiring\b/i.test(title)) return true;
+  const team = departmentOf(app);
+  const pattern = DEPARTMENTS.find(([, name]) => name.toLowerCase() === team.toLowerCase())?.[0];
+  if (pattern?.test(title)) return true;
+  const lower = title.toLowerCase();
+  return coreTitle(app.title).toLowerCase().split(/[^a-z]+/).filter((word) => word.length >= 4 && !GENERIC_TITLE_WORDS.has(word)).some((word) => lower.includes(word));
 }
 
 /** What a person's place adds: near the job helps, and a recruiter on another continent doesn't hire for it. */
@@ -406,7 +428,9 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
           continue;
         }
         const pickedRole = role ?? roleForTitle(source.title);
-        seen.set(source.id, { person: found(source, pickedRole, ""), source, bonus: bonus + (maybe ? (role === "alumni" ? 0 : 15) : 0) + placeBonus(source.location, app.location), maybe: maybe ? [maybe] : [], base: base(source) });
+        // Someone whose work has nothing to do with this job goes below everyone who does.
+        const offTopic = pickedRole === "team_member" && role !== "team_member" && !relatedToJob(source.title, app) ? -25 : 0;
+        seen.set(source.id, { person: found(source, pickedRole, ""), source, bonus: bonus + offTopic + (maybe ? (role === "alumni" ? 0 : 15) : 0) + placeBonus(source.location, app.location), maybe: maybe ? [maybe] : [], base: base(source) });
       }
     };
     const worksThere = (person: Contact) => `${person.title || "Works"} at ${trimmedCompany}.`;
@@ -415,8 +439,13 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
     take(await look("Recruiters", domain, { person_titles: RECRUITER_TITLES }), "recruiter", (person) => recruiterWhy(app, person), 0);
     if (titles.length) take(await look(team ? `${team} department` : `${core} roles`, domain, { person_titles: titles }), "team_member", (person) => `${person.title || "Works"} in ${team || "the same kind of role"}, the team this job is in.`, 0);
     // Not enough yet: wider, still free, and worth less on the list.
-    if (seen.size < LIST_SIZE && !over()) take(await look("HR and people teams", domain, { person_titles: HR_TITLES }), "recruiter", worksThere, -15);
-    if (seen.size < LIST_SIZE && !over()) take(await look("Anyone at the company", domain, { person_seniorities: WORKING_LEVELS }), null, worksThere, -20);
+    if (seen.size < LIST_SIZE && !over()) take(await look("HR and people teams", domain, { person_titles: HR_TITLES }), "recruiter", worksThere, -5);
+    if (seen.size < LIST_SIZE && !over()) {
+      // Only people whose work is about this job, unless nobody at all has turned up.
+      const anyone = await look("Anyone at the company", domain, { person_seniorities: WORKING_LEVELS });
+      const fitting = anyone.filter((person) => relatedToJob(person.title, app));
+      take(fitting.length || seen.size ? fitting : anyone, null, worksThere, -20);
+    }
     return [...seen.values()];
   };
 
@@ -432,7 +461,7 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   // No website worked: the company's name, keeping only people Apollo says work there.
   if (!pool.length && !over()) {
     const byName = (await look("By company name", "", { q_keywords: trimmedCompany })).filter((person) => person.company && sameCompany(person.company, app.company));
-    pool = byName.map((source) => ({ person: found(source, roleForTitle(source.title), ""), source, bonus: -10 + placeBonus(source.location, app.location), maybe: [], base: `${source.title || "Works"} at ${trimmedCompany}.` }));
+    pool = byName.map((source) => ({ person: found(source, roleForTitle(source.title), ""), source, bonus: -10 + (relatedToJob(source.title, app) ? 0 : -25) + placeBonus(source.location, app.location), maybe: [], base: `${source.title || "Works"} at ${trimmedCompany}.` }));
     const site = byName.map((person) => person.companyDomain).find(Boolean);
     if (site) winner = site;
   }

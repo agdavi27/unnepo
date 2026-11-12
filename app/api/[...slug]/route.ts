@@ -1,4 +1,5 @@
 import { setSession } from "@/lib/apply/activity";
+import { setPlanPreview } from "@/lib/apply/limits";
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { persistenceMode, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file-store";
@@ -171,6 +172,9 @@ async function handle(request: Request, slug: string[]) {
   }
 
   const user = await requireUser();
+
+  // Admins: work as Free or Pro ({ plan: null } goes back to the real plan).
+  if (root === "me" && action === "plan-preview" && request.method === "POST") return json(await setPlanPreview(user.id, await request.json()));
 
   if (root === "me" && request.method === "GET") {
     const [profile, credits, resume] = await Promise.all([repo.getProfile(user.id), repo.getAccount(user.id), repo.getLatestResume(user.id)]);
@@ -388,6 +392,7 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
     return json({ ok: true });
   }
   if (action === "me" && method === "GET") return json(await extensionMe(user.id));
+  if (action === "plan-preview" && method === "POST") return json(await setPlanPreview(user.id, await request.json()));
   if (action === "setup" && method === "POST") return json(await extensionSetup(user.id, await request.json()));
   if (action === "activity" && method === "POST") return json(await extensionActivity(user.id, await request.json()));
   if (action === "maybe" && method === "POST") return json(await extensionMaybe(user.id, await request.json()));
