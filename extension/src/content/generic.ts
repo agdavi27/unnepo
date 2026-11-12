@@ -360,3 +360,30 @@ export function uploadResumeNow(fields: PageField[], resume: FileData) {
   }
   return done;
 }
+
+// A box for any extra file, when there's none for a cover letter by name.
+const EXTRA_DOCUMENT = /additional (documents?|files?|attachments?|information)|supporting documents?|other (documents?|files?|attachments?)|attachments?$|optional (documents?|files?)/i;
+
+/**
+ * "Attach" beside the cover letter in the panel: the letter's PDF into the box that asks for a cover letter, or
+ * (with none) one for extra documents. Never a resume box, and never a box that already holds a file. The
+ * labels it filled; none when the page has no such box.
+ */
+export function uploadCoverLetterNow(fields: PageField[], letter: FileData) {
+  const boxes = fields.filter((field) => field.type === "file" && !alreadyUploaded(field));
+  const named = boxes.filter((field) => COVER_LETTER.test(`${field.label} ${field.section}`));
+  const extra = boxes.find((field) => EXTRA_DOCUMENT.test(`${field.label} ${field.section}`) && !RESUME.test(field.label));
+  const done: string[] = [];
+  for (const field of named.length ? named : extra ? [extra] : []) {
+    const el = findMarked(field.id);
+    if (!(el instanceof HTMLInputElement)) continue;
+    try {
+      attachFile(el, letter);
+      uploadedHere.add(`${location.pathname}|${field.label}`);
+      done.push(field.label);
+    } catch {
+      // A site that blocks setting files: the student uploads it themselves.
+    }
+  }
+  return done;
+}

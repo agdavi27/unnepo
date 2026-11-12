@@ -1,7 +1,7 @@
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
 import { buttonUnder, findAction, findApply, pageNotes, pressAction, SUBMIT, workdayStep } from "./actions";
 import { leave, press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
-import { fillGeneric } from "./generic";
+import { fillGeneric, uploadCoverLetterNow } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, openedJob, scanFields, scanPage } from "./scan";
 import { watchEdits } from "./edits";
@@ -203,6 +203,11 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
     // steps of the form get the same by themselves, and the panel hears about them.
     if (message?.type === "begin-applying") {
       reply(beginApplying((message.resume as FileData | null) ?? null, (result) => tell({ type: "applying-changed", result })));
+      return false;
+    }
+    // "Attach" on the cover letter: its PDF into this frame's cover letter box, if it has one.
+    if (message?.type === "attach-letter") {
+      reply({ attached: uploadCoverLetterNow(scanFields(), message.file as FileData) });
       return false;
     }
     if (message?.type === "put-answer") {

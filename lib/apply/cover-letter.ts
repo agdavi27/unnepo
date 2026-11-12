@@ -13,6 +13,16 @@ export const LETTER_VOICE = `Accuracy comes first:
 - Get the facts right: a role that has ended is past tense, one still going (no end date, or "Present") is present tense. Use the student's real school, class year and major only as given.
 - Name the company and role exactly as the posting does. Say something specific about the team or work only when the posting says it.
 
+What makes a letter work (from hiring research; see docs/cover-letter-formats.md):
+- Tailoring is the one thing measured to raise callbacks (a field test of about 7,300 applications: 16.4% for a letter tailored to the posting, 12.5% for a generic one). Every paragraph should be about this job: its stated duties, requirements and team, met with the student's real evidence. A letter that could be sent to any employer has failed.
+- Readers skim in seconds. The first two sentences must carry the role's exact name and the student's single strongest, most relevant match. The first sentence of every paragraph states that paragraph's point, so a skimmer gets the whole case from those sentences alone.
+- Evidence beats enthusiasm. Interest is shown by specifics (a named project, a tool the posting asks for and the student has used, a result with a number when the resume gives one), not by saying they are excited. For each claim, ask "how does the resume prove this?" and say that instead.
+- Write about what the student would do for the employer, not what the job would do for the student. Don't say the role would help them grow, learn or launch their career.
+- Hiring managers flag letters as AI-written by impersonal, polished-but-empty phrasing and by not engaging with the actual posting. Use the student's concrete nouns (course names, project names, organizations, tools, numbers) and the posting's own key terms where they truly apply, in plain words, without copying its sentences.
+- For students, classes, projects, clubs, research, part-time jobs and volunteering all count as experience. Describe them as real work: what the student was responsible for, what they did, and what came of it. Never apologize for little experience or point out what's missing.
+- If the student or posting names a referral, a person, or a connection to the company, use it early, in one sentence, only as given.
+- Close with one confident, specific sentence on what they'd bring to this team, and a plain request to talk. No begging, no "thank you for your time and consideration" filler, no restating the whole letter.
+
 How it should sound:
 - Like a capable student wrote it themselves: clear, specific and warm, but professional. No slang, no exclamation marks, contractions only now and then.
 - Show, don't claim: describe what the student actually did and what came of it ("built the intake form 40 volunteers now use") instead of adjectives about themselves ("hardworking", "detail-oriented", "passionate").

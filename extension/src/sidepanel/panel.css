@@ -395,6 +395,14 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .heat-day.today { box-shadow: 0 0 0 1px var(--accent); }
 .heat-day.on { box-shadow: 0 0 0 1.5px var(--fg); }
 .heat-day.future { border: 1px dashed #1F1F24; background: transparent; cursor: default; }
+.heat-key { display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; }
+.heat-key > .small { line-height: 12px; }
+.heat-key-step { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.heat-key-swatch { width: 12px; height: 12px; border-radius: 3px; display: block; }
+.heat-key-swatch.today { background: #17171B; box-shadow: 0 0 0 1px var(--accent); }
+.heat-key-num { font: 9px var(--mono); color: var(--muted-2); }
+.heat-key .today-key { margin-left: auto; }
+.heat-key-note { margin: 0; color: var(--muted); }
 .heat-detail { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line-2); }
 .heat-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .heat-event { width: 100%; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 0; border: 0; background: transparent; color: var(--fg); font: 13px Geist, sans-serif; text-align: left; cursor: pointer; }

@@ -354,10 +354,10 @@ function autofillTool(state: PanelState) {
 function toolsPage(state: PanelState, extra = "") {
   return `
     <div class="tools">
-      ${autofillTool(state)}
       <button type="button" class="big-tool" data-popup="cover">${SPARK}Write a cover letter</button>
       <button type="button" class="big-tool" data-popup="answer">${SPARK}Answer a question</button>
-      <div class="tool-lines">${resumeLine(state)}<div id="password-slot"></div></div>
+      ${autofillTool(state)}
+      <div class="tool-lines">${resumeLine(state)}${letterLine()}<div id="password-slot"></div></div>
       ${extra}
     </div>`;
 }
@@ -948,7 +948,9 @@ function writtenLetter(busy: boolean, forJob: boolean) {
         <button type="button" class="link" id="letter-copy">Copy</button>
         <button type="button" class="link" id="letter-download">Download PDF</button>
         <button type="button" class="link" id="letter-open">Open PDF</button>
+        ${forJob ? `<button type="button" class="link" data-attach-letter ${attachBusy ? "disabled" : ""}>${attachBusy ? "Attaching…" : "Attach to application"}</button>` : ""}
       </div>
+      ${forJob && attachNote ? `<p class="small" role="status">${escape(attachNote)}</p>` : ""}
       <label class="question"><span class="q-label">Any edits you'd like to make?</span>
         <textarea class="field letter-input" id="letter-edit" rows="2" maxlength="600" placeholder="Shorter, mention my internship, sound more excited…">${escape(letterChoices.edit)}</textarea>
       </label>
@@ -1106,6 +1108,36 @@ function resumeLine(state: PanelState) {
       <button type="button" class="tool-change" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Change" : "Upload"}</button>
     </div>
     ${note ? `<p class="small tool-note" role="status">${escape(note)}</p>` : ""}`;
+}
+
+/** Once a cover letter is written: its PDF beside the resume, with Attach to put it in the application's upload box. */
+let attachNote = "";
+let attachBusy = false;
+function letterLine() {
+  if (!letter?.pdfBase64) return "";
+  return `
+    <div class="tool-line">
+      <span class="tool-what">Cover letter</span>
+      <span class="tool-value">${escape(letter.fileName)}</span>
+      <button type="button" class="tool-change" data-attach-letter ${attachBusy ? "disabled" : ""}>${attachBusy ? "Attaching…" : "Attach"}</button>
+    </div>
+    ${attachNote ? `<p class="small tool-note" role="status">${escape(attachNote)}</p>` : ""}`;
+}
+async function attachLetter() {
+  const tabId = lastState?.tab?.id;
+  if (!letter?.pdfBase64 || tabId === undefined || attachBusy) return;
+  if (letterEdited) {
+    attachNote = "Save your edits to the letter first, so the PDF has them.";
+    return void render();
+  }
+  attachBusy = true;
+  attachNote = "";
+  void render();
+  type Attached = { ok: boolean; attached?: string[]; error?: string };
+  const result = await ask<Attached>({ type: "attach-letter", tabId, file: { name: letter.fileName, mime: "application/pdf", base64: letter.pdfBase64 } }).catch((): Attached => ({ ok: false, error: "Couldn't reach the page. Reload it and try again." }));
+  attachBusy = false;
+  attachNote = result.ok && result.attached?.length ? `✓ Attached to “${short(result.attached[0], 40)}”. Check it on the page.` : result.error ?? "Couldn't attach it.";
+  void render();
 }
 
 async function seeResume() {
@@ -1732,6 +1764,7 @@ function draw(state: PanelState): boolean {
   wireJobBox(state);
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
+  document.querySelectorAll<HTMLButtonElement>("[data-attach-letter]").forEach((button) => button.addEventListener("click", () => void attachLetter()));
   document.getElementById("start-resume")?.addEventListener("click", () => resumeInput.click());
   wireIssues();
   wireManualJob(state);
