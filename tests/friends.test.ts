@@ -67,9 +67,10 @@ describe("friends", () => {
     expect(result.emailed).toBe(true);
     expect(sent).toHaveLength(1);
     expect(sent[0].from).toBe("Unnepo <contact@unnepo.com>");
-    expect(sent[0].subject).toBe("Pat Doe wants to compete with you on Unnepo");
+    expect(sent[0].subject).toBe("Pat Doe challenged you to a job hunt");
     expect(String(sent[0].text)).toContain("Pat has applied to 1 job this week");
     expect(String(sent[0].html)).toContain("/signup?email=lee.kay%40colby.edu");
+    expect(String(sent[0].html)).toContain("/email/spider-angry.gif");
   });
 
   it("tries the email again when a request is re-added after email wasn't set up", async () => {
