@@ -8,8 +8,8 @@
 
 export type StoredPlan = "free" | "grind" | "pack" | "pro" | "premium";
 
-/** Where "Get Pro" goes in the web app: the plans in Settings. */
-export const UPGRADE_URL = "/home?tab=settings#plans";
+/** Where "Get Pro" goes in the web app: the Upgrade to Pro page, beside Settings (Settings and plans once on Pro). */
+export const UPGRADE_URL = "/home?tab=pro";
 
 /** Days of Pro a new account gets. TRIAL_DAYS=0 turns the trial off. */
 export const trialDays = () => {

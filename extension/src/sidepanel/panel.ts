@@ -8,7 +8,7 @@ import { detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTra
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { friendRequests, friendsSettingsCard, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
-import { PUBLIC_PLANS } from "@/lib/config";
+import { UPGRADE_URL } from "@/lib/plan";
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
@@ -23,12 +23,11 @@ const tabBar = document.getElementById("tabs")!;
 const jobsBadge = document.getElementById("jobs-count")!;
 const meBadge = document.getElementById("me-count")!;
 const planBadge = document.getElementById("plan-badge")!;
-const proTab = document.getElementById("pro-tab")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
 /** The three tabs along the bottom (home = Jobs, jobs = Tools, settings = Me; shown under those names), and the pages opened from them. */
-type View = "home" | "jobs" | "feedback" | "settings" | "job" | "pro";
-const TABS: View[] = ["home", "jobs", "pro", "settings"];
+type View = "home" | "jobs" | "feedback" | "settings" | "job";
+const TABS: View[] = ["home", "jobs", "settings"];
 let view: View = "home";
 /** The job open on the "job" page, and the person to show on it. */
 let openedJob = { id: "", contact: "" };
@@ -281,8 +280,8 @@ function jobFillPage(state: PanelState) {
     </div>`;
 }
 
-/** Where "Get Pro" goes: the plans in the web app. */
-const upgradeUrl = (state: PanelState) => `${state.apiBase}/home?tab=settings#plans`;
+/** Where "Get Pro" goes: the Upgrade to Pro page on the website. */
+const upgradeUrl = (state: PanelState) => `${state.apiBase}${UPGRADE_URL}`;
 
 /** Free, after a fill: "Pro would answer these 4 questions for you." */
 function lockedLine(state: PanelState) {
@@ -575,7 +574,6 @@ function pageView(state: PanelState) {
   const pages: Record<Exclude<View, "home">, () => string> = {
     job: jobView,
     jobs: () => jobsView(state),
-    pro: () => proView(state),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     // Me: who you are and your plan, friends, how Unnepo behaves, then help. Sign out and the version last.
     settings: () => `${profileCard(state)}
@@ -592,28 +590,6 @@ function pageView(state: PanelState) {
 }
 /** On Free: the account works as Free (the trial over, no paid plan). */
 const onFree = (state: PanelState | null) => Boolean(state?.connected && state.me?.usage?.free);
-
-/** Get Pro, on Free only: what Pro does that Free doesn't, then the button to the plans. */
-function proView(state: PanelState) {
-  const pro = PUBLIC_PLANS.find((plan) => plan.id === "pro")!;
-  const reasons: Array<[string, string]> = [
-    ["See who to email at every company", "Names, titles and checked emails for recruiters, hiring managers and the team, not just how many there are."],
-    ["Show person on every job", "Reveal the people on a job's list, with their LinkedIn and email."],
-    ["Cover letters written for each job", "Tailored to the posting and your resume."],
-    ["The hard questions answered for you", "\"Why do you want to work here?\" and every other written question, drafted from your profile."],
-    ["Follow-up emails written for you", "A short note to each person, ready to send from Gmail or Outlook."],
-    [pro.features.find((feature) => /^People at/.test(feature)) ?? "People at more companies", "Plus 50 more companies for $15 whenever you need them."],
-  ];
-  return `
-    <section class="page pro-page" aria-label="Get Pro">
-      <span class="eyebrow">Unnepo Pro</span>
-      <div><div class="pro-price">${escape(pro.priceLabel)}<small> a month${pro.semesterLabel ? `, ${escape(pro.semesterLabel)}` : ""}</small></div>
-        <p class="note">You're on Free. Pro is everything Free does, plus the part that gets you replies.</p></div>
-      <ul class="pro-reasons">${reasons.map(([title, why]) => `<li><div><strong>${escape(title)}</strong><span>${escape(why)}</span></div></li>`).join("")}</ul>
-      <a class="btn primary big" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade to Pro ↗</a>
-      <p class="small">Cancel any time. Billing is on the Unnepo website.</p>
-    </section>`;
-}
 
 /** Saved between redraws: which parts of Me are open. */
 const openParts = new Set<string>();
@@ -1218,7 +1194,7 @@ function profileCard(state: PanelState) {
         <span class="account-av" aria-hidden="true">${escape(initials || "?")}</span>
         <span class="account-text"><span class="account-name">${escape(name)}</span>${me.user.name ? `<span class="sub">${escape(me.user.email)}</span>` : ""}</span>
       </div>
-      <div class="account-plan"><span><strong>${escape(plan)}</strong> · ${credits}</span><a class="link" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Plans ↗</a></div>
+      <div class="account-plan"><span><strong>${escape(plan)}</strong> · ${credits}</span><a class="link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a></div>
       ${me.admin ? adminPlanSwitch(me.planPreview ?? null) : ""}
       ${me.usage?.free ? `<span class="small">Left this month: ${me.usage.letters.left} cover letters · ${me.usage.answers.left} answers${me.usage.unlimited ? "" : ` · ${me.usage.people.left} people searches`}</span>` : ""}
       ${me.completeness < 100 ? `<div class="row-between"><span class="small"${!me.profileReady ? ' style="color: var(--warn)"' : ""}>Profile ${me.completeness}% done${missing.length ? `: ${missing.map(escape).join(", ")}` : ""}</span></div>
@@ -1686,13 +1662,10 @@ function draw(state: PanelState): boolean {
   if (!state.connected) view = "home";
   if (state.job?.running && fillPending === state.tab?.id) fillPending = null;
   tabBar.hidden = !state.connected;
-  // Beside the logo: Upgrade to Pro on Free, a Pro tag otherwise. Get Pro is a tab only on Free.
-  const free = onFree(state);
-  planBadge.innerHTML = !state.connected || !state.me ? "" : free
-    ? `<button type="button" class="plan-badge" id="plan-upgrade">Upgrade to Pro</button>`
+  // Beside the logo: Upgrade to Pro on Free (the Upgrade to Pro page on the website), a Pro tag otherwise.
+  planBadge.innerHTML = !state.connected || !state.me ? "" : onFree(state)
+    ? `<a class="plan-badge" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade to Pro</a>`
     : `<span class="plan-badge pro">${state.me.trial ? "Pro trial" : "Pro"}</span>`;
-  proTab.hidden = !free;
-  if (!free && view === "pro") view = "settings";
   const tabNow = view === "job" ? jobFrom : view === "feedback" ? "settings" : view;
   // Me: friend requests.
   const badge = (element: HTMLElement, count: number) => { element.textContent = count ? String(count) : ""; element.hidden = !count; };
@@ -1823,7 +1796,7 @@ function addDetected(item: Detected) {
   go("jobs");
 }
 
-setHost({ redraw: () => void render(), openJob, upgradeUrl: () => (lastState ? upgradeUrl(lastState) : ""), addJob: addDetected, openUpgrade: () => go("pro") });
+setHost({ redraw: () => void render(), openJob, upgradeUrl: () => (lastState ? upgradeUrl(lastState) : ""), addJob: addDetected });
 
 /** Opens a page, from any button that says which. */
 function go(next: View) {
@@ -1832,9 +1805,7 @@ function go(next: View) {
   void render();
 }
 tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => tab.addEventListener("click", () => go(tab.dataset.tab as View)));
-planBadge.addEventListener("click", (event) => {
-  if ((event.target as Element | null)?.closest("#plan-upgrade")) go("pro");
-});
+
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "tracker-changed") return void loadTracker();

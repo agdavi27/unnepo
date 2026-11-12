@@ -27,17 +27,8 @@ button { font: inherit; color: inherit; }
 .logo-row { display: flex; align-items: center; gap: 8px; }
 .plan-badge { height: 22px; padding: 0 8px; border-radius: 6px; display: inline-flex; align-items: center; font: 600 11px Geist, sans-serif; white-space: nowrap; }
 .plan-badge.pro { border: 1px solid var(--accent); color: var(--accent); letter-spacing: .4px; }
-button.plan-badge { border: 0; background: var(--accent); color: #000; cursor: pointer; }
-button.plan-badge:hover { filter: brightness(1.1); }
-/* Get Pro: why Pro, then the button to the plans. */
-.pro-page { display: flex; flex-direction: column; gap: 14px; }
-.pro-price { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
-.pro-price small { font-size: 13px; font-weight: 400; color: var(--muted); }
-.pro-reasons { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
-.pro-reasons li { display: grid; grid-template-columns: 18px 1fr; gap: 8px; align-items: start; }
-.pro-reasons li::before { content: "✓"; color: var(--accent); font-weight: 700; }
-.pro-reasons strong { display: block; font-weight: 600; }
-.pro-reasons span { color: var(--muted-3); font-size: 13px; }
+a.plan-badge { background: var(--accent); color: #000; text-decoration: none; }
+a.plan-badge:hover { filter: brightness(1.1); }
 .dot { color: var(--accent); }
 .ticker { margin: 4px 0 0; font-size: 12px; color: var(--muted-3); min-height: 18px; overflow-wrap: anywhere; }
 .ticker.alert { color: #FCA5A5; }

@@ -32,11 +32,23 @@ type Workspace = {
 
 // The tracker, reminders, people and follow-ups live in the Chrome extension. The site keeps the profile and the
 // plans, and shows the jobs applied to.
-type View = "home" | "jobs" | "settings";
+type View = "home" | "jobs" | "settings" | "pro";
 const VIEWS: { id: View; label: string }[] = [
   { id: "home", label: "Home" },
   { id: "jobs", label: "Jobs" },
   { id: "settings", label: "Settings and plans" },
+  // Only on Free: why Pro, and the button to get it.
+  { id: "pro", label: "Upgrade to Pro" },
+];
+
+/** What Pro does that Free doesn't, on the Upgrade to Pro page. */
+const PRO_REASONS: Array<[string, string]> = [
+  ["See who to email at every company", "Names, titles and checked emails for recruiters, hiring managers and the team, not just how many there are."],
+  ["Show person on every job", "Reveal the people on a job's list, with their LinkedIn and email."],
+  ["Cover letters written for each job", "Tailored to the posting and your resume."],
+  ["The hard questions answered for you", "\"Why do you want to work here?\" and every other written question, drafted from your profile."],
+  ["Follow-up emails written for you", "A short note to each person, ready to send from Gmail or Outlook."],
+  ["People at 25 companies a month, or 100 a semester", "Plus 50 more companies for $15 whenever you need them."],
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 
@@ -59,7 +71,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
       setEditing(true);
       window.history.replaceState(null, "", window.location.pathname);
-    } else if (tab === "settings" || tab === "jobs") {
+    } else if (tab === "settings" || tab === "jobs" || tab === "pro") {
       setView(tab);
       window.history.replaceState(null, "", "/home" + window.location.hash);
     } else if (params.get("billing")) {
@@ -184,6 +196,8 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
 
   const admin = Boolean(data?.admin);
+  // Free with the trial over: the Upgrade to Pro page shows in the menu.
+  const onFree = Boolean(data?.credits.usage?.free);
   const planView = data?.credits.usage?.preview ?? null;
   // An admin viewing as Free or Pro sees that plan as theirs.
   const currentPlan = planView ?? data?.credits.plan ?? "free";
@@ -204,7 +218,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
             <Logo />
             {data && !showOnboarding && (
               <nav aria-label="App" className="flex gap-1">
-                {VIEWS.map((item) => (
+                {VIEWS.filter((item) => item.id !== "pro" || onFree).map((item) => (
                   <button
                     key={item.id}
                     type="button"
@@ -253,7 +267,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
           </div>
         )}
         {!data && !error && <SpiderLoader label="Loading your workspace…" />}
-        {data && !showOnboarding && usage && !usage.unlimited && view !== "settings" && <TrialBanner usage={usage} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />}
+        {data && !showOnboarding && usage && !usage.unlimited && view !== "settings" && view !== "pro" && <TrialBanner usage={usage} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />}
         {notice && (
           <div className="flex items-start justify-between gap-3 rounded-xl border border-line bg-card px-4 py-3 text-sm text-zinc-300">
             <p>{notice}</p>
@@ -268,6 +282,10 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
           />
         )}
         {data && !showOnboarding && view === "jobs" && <JobsView />}
+        {data && !showOnboarding && view === "pro" && (
+          onFree ? <UpgradePage busy={billingBusy} admin={admin} onUpgrade={(billing) => (admin ? void switchPlanView("pro") : void goToBilling("checkout", { plan: "pro", billing }))} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />
+            : <p className="text-sm text-muted">You&apos;re on Pro. Your plan is under <button type="button" onClick={() => setView("settings")} className="underline underline-offset-4 hover:text-white">Settings and plans</button>.</p>
+        )}
         {data && !showOnboarding && view === "home" && <ExtensionHome installed={extension} completeness={data.completeness} onEdit={() => { setEditing(true); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "settings" && (
           <>
@@ -383,6 +401,37 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
  * The Pro trial, while it runs (how long is left, and what goes when it ends), and once it's over (what Free
  * doesn't do). Shown above every page but Settings, where the plans are.
  */
+/** Upgrade to Pro: the price, every reason, and the button to Stripe (an admin just switches their view). */
+function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin: boolean; onUpgrade: (billing: "monthly" | "semester") => void; onPlans: () => void }) {
+  const pro = PUBLIC_PLANS.find((plan) => plan.id === "pro")!;
+  return (
+    <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
+      <div>
+        <p className="font-mono text-xs uppercase tracking-[0.16em] text-faint">Unnepo Pro</p>
+        <h1 className="mt-2 text-3xl font-bold tracking-tight md:text-4xl">Get replies, not just applications</h1>
+        <p className="mt-3 text-muted">You&apos;re on Free. Pro is everything Free does, plus finding the right person at each company and writing to them for you.</p>
+      </div>
+      <div className="rounded-2xl border border-[#3D8BFF] bg-panel p-6">
+        <p className="text-4xl font-bold tabular-nums">{pro.priceLabel}<span className="text-base font-normal text-muted"> / month</span></p>
+        {pro.semesterLabel && <p className="mt-1 text-sm text-faint">{pro.semesterLabel}</p>}
+        <ul className="m-0 mt-6 flex list-none flex-col gap-4 p-0">
+          {PRO_REASONS.map(([title, why]) => (
+            <li key={title} className="grid grid-cols-[20px_1fr] gap-3">
+              <span aria-hidden className="font-bold text-[#3D8BFF]">✓</span>
+              <span><span className="block font-semibold">{title}</span><span className="text-sm text-muted">{why}</span></span>
+            </li>
+          ))}
+        </ul>
+        <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+          <button type="button" disabled={busy} onClick={() => onUpgrade("monthly")} className="flex-1 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{admin ? "Switch to Pro (admin, free)" : `Upgrade to Pro, ${pro.priceLabel} a month`}</button>
+          {!admin && <button type="button" disabled={busy} onClick={() => onUpgrade("semester")} className="flex-1 rounded-xl border border-line px-4 py-2.5 text-sm hover:bg-white/5 disabled:opacity-50">Pay by the semester</button>}
+        </div>
+        <p className="mt-3 text-xs text-faint">Cancel any time. <button type="button" onClick={onPlans} className="underline underline-offset-4 hover:text-white">Compare every plan</button></p>
+      </div>
+    </section>
+  );
+}
+
 function TrialBanner({ usage, onPlans }: { usage: PlanUsage; onPlans: () => void }) {
   if (!usage.trial && !(usage.trialEnded && usage.free)) return null;
   const urgent = usage.trial ? usage.trial.hoursLeft <= 48 : true;

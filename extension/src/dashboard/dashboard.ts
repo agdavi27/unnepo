@@ -1,4 +1,5 @@
 import { followUpsDue } from "@/lib/apply/follow-ups";
+import { UPGRADE_URL } from "@/lib/plan";
 import { stageOf } from "@/lib/apply/stats";
 import { detectedMenu, escape, isAppliedJob, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, stageLabel, store, wireDetected, wireJobPage, wireReminders } from "../shared/tracker-view";
 import type { TrackerJob } from "../shared/types";
@@ -94,7 +95,7 @@ function openJob(id: string, contact = "") {
   if (id) detail.scrollIntoView({ block: "nearest" });
 }
 
-setHost({ redraw: draw, openJob, upgradeUrl: () => `${apiBase}/home?tab=settings#plans` });
+setHost({ redraw: draw, openJob, upgradeUrl: () => `${apiBase}${UPGRADE_URL}` });
 for (const box of [search, filter, sort]) box.addEventListener(box === search ? "input" : "change", drawTable);
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === "tracker-changed") void loadTracker();
