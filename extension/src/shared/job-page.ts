@@ -19,6 +19,8 @@ export function isJobPage(page: JobPageSigns): boolean {
   try { url = new URL(page.url); } catch { return false; }
   if (!/^https?:$/.test(url.protocol)) return false;
   if (page.ats && page.ats !== "other") return true;
+  // LinkedIn is mostly a feed and searches: only a job it has open (/jobs/view/<id>, or a search's currentJobId).
+  if (/(^|\.)linkedin\.com$/i.test(url.hostname)) return /\/jobs\/view\/|[?&]currentJobId=\d/.test(url.pathname + url.search);
   if (JOB_HOSTS.test(url.hostname)) return true;
   // A posting read from the page (schema.org JobPosting, Handshake's pane) is a job wherever it is.
   if ((page.description ?? "").trim().length >= 200) return true;

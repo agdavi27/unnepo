@@ -233,7 +233,8 @@ const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPen
 function homeLists(state: PanelState) {
   const noEmail = firstEmailCount();
   const nudge = noEmail ? `<button type="button" class="note warn nudge" data-show-jobs="reach">${noEmail} ${noEmail === 1 ? "job you applied to has" : "jobs you applied to have"} no email sent yet. See them →</button>` : "";
-  const list = `${nudge}${jobsList()}<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>`;
+  // A clear line between the calendar and the job list, so the tab reads as two parts.
+  const list = `<div class="section-divider" role="separator"><span>Your jobs</span></div>${nudge}${jobsList()}<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>`;
   return `${startCard(state)}${weekView(new Date(), list)}`;
 }
 

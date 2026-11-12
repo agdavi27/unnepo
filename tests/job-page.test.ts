@@ -6,6 +6,11 @@ describe("isJobPage", () => {
     expect(isJobPage({ url: "https://boards.greenhouse.io/stripe/jobs/123" })).toBe(true);
     expect(isJobPage({ url: "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Boston/Analyst_R1" })).toBe(true);
     expect(isJobPage({ url: "https://app.joinhandshake.com/stu/jobs/9" })).toBe(true);
+    // LinkedIn: only a job it has open, never the feed or a search with no job picked.
+    expect(isJobPage({ url: "https://www.linkedin.com/jobs/view/4012345678/" })).toBe(true);
+    expect(isJobPage({ url: "https://www.linkedin.com/jobs/search/?currentJobId=4012345678&keywords=intern" })).toBe(true);
+    expect(isJobPage({ url: "https://www.linkedin.com/jobs/search/?keywords=intern", description: "x".repeat(400) })).toBe(false);
+    expect(isJobPage({ url: "https://www.linkedin.com/feed/", description: "x".repeat(400) })).toBe(false);
     expect(isJobPage({ url: "https://www.acme.com/careers/data-intern-4411" })).toBe(true);
     expect(isJobPage({ url: "https://careers.acme.com/role/analyst" })).toBe(true);
     expect(isJobPage({ url: "https://example.com/page", ats: "lever" })).toBe(true);
