@@ -550,11 +550,8 @@ function homeView(state: PanelState) {
   if (state.job?.submission || state.job?.error) return card + homeLists(state);
   if (card) return here.step === "check" ? card : card + homeLists(state);
   if (AUTOFILL_ENABLED && jobFound(state)) return jobFillPage(state);
-  // A job on the tab: its box on top, then the calendar. The cover letter and question tools are on the Jobs tab.
-  if (!AUTOFILL_ENABLED) {
-    const onJob = jobFound(state) || state.applying;
-    return (onJob ? `${jobBox(state)}${jobFound(state) && !state.applying ? hereLinks() : ""}${note}` : note) + homeLists(state);
-  }
+  // Week is just the week. The job on the tab (Begin applying) and the tools are on the Jobs tab.
+  if (!AUTOFILL_ENABLED) return note + homeLists(state);
   const how = dismissal(state);
   const onWeb = Boolean(state.tab && /^https:\/\//.test(state.tab.url)) && !onUnnepo(state);
   return `${how ? `<div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>` : ""}
@@ -1501,7 +1498,8 @@ function wireManualJob(state: PanelState) {
 
 /**
  * The Jobs tab. Logging jobs first: adding one by hand, "I already applied" for the job on the tab, and the jobs
- * the extension caught. The list of every job is on Week. Below a divider, the tools: Autofill, a cover letter, answering a question, the resume and password.
+ * the extension caught. The list of every job is on Week. Below a divider, the job on the tab (Begin applying)
+ * and the tools: Autofill, a cover letter, answering a question, the resume and password.
  */
 function jobsView(state: PanelState) {
   ensureTracker();
@@ -1513,6 +1511,7 @@ function jobsView(state: PanelState) {
       ${detectedMenu()}
     </div>
     <div class="section-divider" role="separator"><span>Tools</span></div>
+    ${!AUTOFILL_ENABLED && (jobFound(state) || state.applying) ? jobBox(state) : ""}
     ${toolsPage(state)}`;
 }
 
