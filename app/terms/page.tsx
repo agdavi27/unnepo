@@ -16,7 +16,7 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     body: (
       <p>
         These terms are an agreement between you and Unnepo (&quot;Unnepo,&quot; &quot;we,&quot; &quot;us&quot;) about your use of the Unnepo website at
-        unneponew.vercel.app, the Unnepo Chrome extension, and any related services (together, the &quot;Service&quot;). By creating an account or using the
+        unnepo.com, the Unnepo Chrome extension, and any related services (together, the &quot;Service&quot;). By creating an account or using the
         Service, you agree to these terms and to our <Link href="/privacy">Privacy Policy</Link>. If you don&apos;t agree, please don&apos;t use Unnepo.
       </p>
     ),

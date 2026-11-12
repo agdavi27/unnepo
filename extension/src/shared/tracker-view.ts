@@ -126,7 +126,7 @@ function freeRow(name: string | null, title: string, role: string) {
   const sub = name ? [title || label] : [title ? label : "", "Name hidden"];
   return `<li class="person compact">${AVATAR}
     <div class="person-text"><span class="person-name" title="${escape(main)}">${escape(main)}</span><span class="sub">${escape(sub.filter(Boolean).join(" · "))}</span></div>
-    <button type="button" class="solid" data-upgrade>Show person</button></li>`;
+    <span class="pro-tag" title="Included with Pro">Pro</span><button type="button" class="solid" data-upgrade>Show person</button></li>`;
 }
 const EMAIL_SOURCE: Record<string, string> = {
   apollo: "Verified", hunter: "Verified", pattern: "Verified", job_posting: "From the job posting", website: "From the company's website",

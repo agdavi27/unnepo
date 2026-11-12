@@ -154,7 +154,7 @@ function watchForReceived() {
 // Notes which questions the student answers by hand, so Fill never types over them.
 watchEdits();
 
-if (window.top === window && !/unneponew\.vercel\.app$|^localhost$/.test(location.hostname)) watchForReceived();
+if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) watchForReceived();
 if (window.top === window && QUICK_BOARDS.test(location.hostname)) {
   watchApplyPresses((message) => {
     try {
@@ -166,7 +166,7 @@ if (window.top === window && QUICK_BOARDS.test(location.hostname)) {
 }
 
 // Job sites build their pages after loading, so it checks a few times over the first half minute.
-if (window.top === window && !/unneponew\.vercel\.app$|^localhost$/.test(location.hostname) && !dismissed()) {
+if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname) && !dismissed()) {
   let tries = 0;
   const check = () => {
     if (looksLikeJobPage()) return show();

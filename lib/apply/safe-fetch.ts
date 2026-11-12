@@ -56,7 +56,7 @@ export async function safeGet(raw: string, accept = "text/html,application/json;
     const response = await fetch(current, {
       redirect: "manual",
       signal: AbortSignal.timeout(TIMEOUT_MS),
-      headers: { Accept: accept, "User-Agent": "Mozilla/5.0 (compatible; UnnepoJobReader/1.0; +https://unneponew.vercel.app)" },
+      headers: { Accept: accept, "User-Agent": "Mozilla/5.0 (compatible; UnnepoJobReader/1.0; +https://www.unnepo.com)" },
     });
     if (response.status >= 300 && response.status < 400 && response.headers.get("location")) {
       current = await assertPublicUrl(new URL(response.headers.get("location")!, current).toString());
