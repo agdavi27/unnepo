@@ -25,10 +25,29 @@ const PAGE_NAME = /^(jobs?|job search|search( jobs| results)?|find (a )?jobs?|br
 // A site's menu bar and counters: LinkedIn's "0 notifications", "3 new messages", "My Network", "Messaging".
 const SITE_MENU = /^(\d+\+? (new |unread )?(notifications?|messages?|alerts?)|(new |unread )?(notifications?|messages?) \(\d+\)|my network|messaging|me|for business|try premium.*|skip to (main )?content|home|jobs home)$/i;
 
-/** Whether this text is a status or date line rather than a job's name. */
+// What sites say around their jobs that's never a job's name: feedback and survey prompts ("Are these results
+// helpful? Your feedback helps us…"), sign-in walls, error pages, result counts and search headings.
+const SITE_TALK = /\b(your feedback|feedback helps|give feedback|share (your )?feedback|are these (results|jobs) (helpful|relevant)|(was|is) this (page |job |result )?(helpful|relevant)|rate (this|your)|take (our|a|the) survey|how (are|did) we do|sign in to|log in to|join (now )?to (see|view|apply)|create (an|your) account|something went wrong|page (not found|unavailable)|access denied|verify (you are|you're) (a )?human|no longer available|we use cookies|accept (all )?cookies|showing \d+|\d+[,\d]* (results|jobs|openings)|results? for\b|jobs? (you may|you might|based on|recommended)|similar jobs|people also viewed|try premium|premium members)\b/i;
+// Openings of a sentence spoken to the reader, never of a job's name.
+const SENTENCE_START = /^(are|is|was|were|do|does|did|can|could|would|should|will|have|has|how|what|why|when|where|who|which|we|we're|we've|you|you're|your|our|this|these|that|please|thanks|thank you|sorry|oops|welcome|hi|hello|looking for|want to|ready to|don't|didn't)\b/i;
+
+/**
+ * Whether this line reads like something a page says rather than a job's name: a question, a prompt, two
+ * sentences, or a long sentence. Job names are short noun phrases ("Senior Data Analyst, Growth").
+ */
+export function siteSentence(line: string) {
+  const words = line.split(" ").length;
+  if (SITE_TALK.test(line)) return true;
+  if (/\?/.test(line)) return true;
+  if (/[.!…]\s+\S/.test(line) || /\.\.\.$|…$/.test(line) && words > 4) return true;
+  if (SENTENCE_START.test(line) && words >= 3) return true;
+  return words > 16;
+}
+
+/** Whether this text is a status, date, page name, menu item or site sentence rather than a job's name. */
 export function notJobTitle(text: string) {
   const line = text.replace(/\s+/g, " ").trim();
-  return line.length < 2 || STATUS.test(line) || DATE_ONLY.test(line) || PAGE_NAME.test(line) || SITE_MENU.test(line);
+  return line.length < 2 || line.length > 150 || STATUS.test(line) || DATE_ONLY.test(line) || PAGE_NAME.test(line) || SITE_MENU.test(line) || siteSentence(line);
 }
 
 // Words around an employer's name on job pages: links ("See more jobs at …", "Follow …"), labels, ratings.

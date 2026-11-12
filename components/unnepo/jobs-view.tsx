@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNo
 import { createPortal } from "react-dom";
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { H, ON_DARK, W, spiderRects } from "@/extension/src/shared/sprite";
-import { STEPS, STEP_LABEL, emailedCount, progressOf, type Progress } from "@/lib/apply/progress";
+import { STEPS, STEP_LABEL, progressOf, type Progress } from "@/lib/apply/progress";
 import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
 import type { TrackerJob } from "@/lib/extension/service";
 import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid, activityOf, longestRun } from "@/lib/apply/calendar";
@@ -15,7 +15,7 @@ import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid, activityOf, 
  * info opens its details over the page. Jobs can be added by hand and deleted here; the extension does the rest.
  */
 
-type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null };
+type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free?: boolean };
 type Row = { job: TrackerJob; progress: Progress };
 type Filter = "all" | "reach" | "waiting" | "follow" | "interview";
 const FILTERS: Array<[Filter, string]> = [["all", "All"], ["reach", "Reach out"], ["waiting", "Waiting"], ["follow", "Follow up"], ["interview", "Interview"]];
@@ -38,6 +38,64 @@ const tileColor = (name: string) => TILE[[...name].reduce((sum, char) => sum + c
 const HEAT = ACTIVITY_HEAT;
 const WEEKS = 12;
 const PERSON_STATUS: Record<string, string> = { emailed: "Emailed", replied: "Replied", no_response: "No reply" };
+const ROLE_LABEL: Record<string, string> = { job_poster: "Posted the job", poster: "Posted the job", recruiter: "Recruiter", alumni: "Alum", team_member: "Team", department: "Team" };
+
+/** A blank profile photo. */
+function Avatar() {
+  return (
+    <span aria-hidden className="grid h-9 w-9 flex-none place-items-end overflow-hidden rounded-full bg-[#26262C]">
+      <svg viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 text-[#8B8B94]"><circle cx="12" cy="9" r="4.2" /><path d="M3.5 24c.8-5 4.2-8 8.5-8s7.7 3 8.5 8z" /></svg>
+    </span>
+  );
+}
+
+/**
+ * The people at the company, in a job's popup: everyone the extension found, with their email and LinkedIn.
+ * On Free, people not shown yet (and Free's preview, which has titles only) have a blank photo, a Pro tag and
+ * Show person, which opens Upgrade to Pro.
+ */
+function PeopleAt({ job, free }: { job: TrackerJob; free: boolean }) {
+  const company = job.companyMissing ? "this company" : job.company;
+  const preview = !job.contacts.length ? job.fillReport?.peoplePreview?.rows ?? [] : [];
+  const head = <p className="m-0 font-mono text-[11px] uppercase tracking-[1.4px] text-[#8B8B94]">People at {company}{job.contacts.length ? ` · ${job.contacts.length}` : ""}</p>;
+  const locked = (key: string, main: string, sub: string) => (
+    <li key={key} className="flex items-center gap-3 rounded-xl border border-[#1F1F24] px-3 py-2">
+      <Avatar />
+      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{main}</span><span className="block truncate text-xs text-[#8B8B94]">{sub}</span></span>
+      <span className="flex-none rounded-[5px] border border-[#3D8BFF] px-1.5 font-mono text-[10px] font-semibold uppercase tracking-[.6px] text-[#3D8BFF]">Pro</span>
+      <a href="/home?tab=pro" className="flex-none rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200">Show person</a>
+    </li>
+  );
+  if (!isApplied(job)) return <div className="flex flex-col gap-2">{head}<p className="m-0 text-sm text-muted">Once you apply, Unnepo finds who to email here: recruiters, the hiring manager, and the team.</p></div>;
+  if (!job.contacts.length && !preview.length) {
+    const searching = job.contactsStatus === "finding" || job.contactsStatus === "writing";
+    return <div className="flex flex-col gap-2">{head}<p className="m-0 text-sm text-muted">{searching ? `Searching for people at ${company}…` : job.contactsStatus === "idle" ? "Press Find people on this job in the extension." : `No one found at ${company} yet.`}</p></div>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {head}
+      <ul className="m-0 flex list-none flex-col gap-2 p-0">
+        {preview.map((row, index) => locked(`preview-${index}`, row.title || ROLE_LABEL[row.role] || "Someone", [row.title ? ROLE_LABEL[row.role] : "", "Name hidden"].filter(Boolean).join(" · ")))}
+        {job.contacts.map((person) => {
+          const hidden = !person.email && job.hidden.includes(person.name.toLowerCase());
+          if (free && hidden) return locked(person.id, person.name, person.title || ROLE_LABEL[person.role] || "");
+          return (
+            <li key={person.id} className="flex items-center gap-3 rounded-xl border border-[#1F1F24] px-3 py-2">
+              <Avatar />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold">{person.name} <span className="ml-1 rounded-full border border-[#26262C] px-1.5 font-mono text-[10px] font-normal text-[#B4B4BC]">{ROLE_LABEL[person.role] ?? person.role}</span></span>
+                <span className="block truncate text-xs text-[#8B8B94]">{person.title}</span>
+                {person.email && <a href={`mailto:${person.email}`} className="block truncate text-xs text-[#B4B4BC] underline underline-offset-2 hover:text-white">{person.email}</a>}
+              </span>
+              {PERSON_STATUS[person.outreachStatus] && <span className={`flex-none font-mono text-[10.5px] uppercase ${person.outreachStatus === "replied" ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{PERSON_STATUS[person.outreachStatus]}</span>}
+              {person.linkedinUrl && <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="flex-none text-xs underline underline-offset-4">LinkedIn ↗</a>}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 const short = (date: Date) => date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const companyOf = (job: TrackerJob) => (job.companyMissing ? "Company missing" : job.company);
@@ -129,11 +187,9 @@ function Popup({ label, onClose, children, width = "max-w-lg" }: { label: string
 
 /* ───────────── Popups ───────────── */
 
-function InfoPopup({ row, now, onClose, onDelete }: { row: Row; now: Date; onClose: () => void; onDelete: () => void }) {
+function InfoPopup({ row, now, free, onClose, onDelete }: { row: Row; now: Date; free: boolean; onClose: () => void; onDelete: () => void }) {
   const { job, progress } = row;
   const events = eventsOf(job);
-  const emailed = job.contacts.filter((person) => person.outreachStatus !== "not_contacted");
-  const count = emailedCount(job as never);
   return (
     <Popup label={`${companyOf(job)}, ${titleOf(job)}`} onClose={onClose}>
       <div className="flex flex-col gap-5">
@@ -161,19 +217,7 @@ function InfoPopup({ row, now, onClose, onDelete }: { row: Row; now: Date; onClo
             </ol>
           </div>
         )}
-        {emailed.length > 0 ? (
-          <div className="flex flex-col gap-1">
-            <p className="m-0 font-mono text-[11px] uppercase tracking-[1.4px] text-[#8B8B94]">People you emailed</p>
-            {emailed.map((person) => (
-              <div key={person.id} className="flex items-center justify-between gap-3 text-sm">
-                <span className="min-w-0 truncate">{person.name}{person.title ? <span className="text-[#8B8B94]"> · {person.title}</span> : null}</span>
-                <span className={`flex-none font-mono text-[10.5px] uppercase ${person.outreachStatus === "replied" ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{PERSON_STATUS[person.outreachStatus] ?? ""}</span>
-              </div>
-            ))}
-          </div>
-        ) : isApplied(job) && (
-          <p className="m-0 text-sm text-muted">{count ? `You've emailed ${count} ${count === 1 ? "person" : "people"} here.` : "You haven't emailed anyone here yet."}</p>
-        )}
+        <PeopleAt job={job} free={free} />
         <p className="m-0 text-[13px] text-[#8B8B94]">Email people and change its status in the extension.</p>
         <div className="flex flex-wrap items-center gap-3 border-t border-[#1F1F24] pt-4">
           {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-4">Job posting ↗</a>}
@@ -467,7 +511,7 @@ export function JobsView() {
       )}
 
       {open?.kind === "add" && <AddPopup onCancel={() => setOpen(null)} onAdded={(company) => { setDay(null); void refresh(`Added ${company}.`); }} />}
-      {open?.kind === "info" && current && <InfoPopup row={current} now={now} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} />}
+      {open?.kind === "info" && current && <InfoPopup row={current} now={now} free={Boolean(tracker?.free)} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} />}
       {open?.kind === "delete" && current && (
         <DeletePopup job={current.job} onCancel={() => setOpen(null)} onDeleted={() => {
           setTracker((list) => (list ? { ...list, jobs: list.jobs.filter((job) => job.id !== current.job.id) } : list));

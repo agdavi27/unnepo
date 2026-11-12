@@ -276,7 +276,8 @@ async function peek(tabId: number, url: string): Promise<PanelState["page"]> {
     title: scan.title,
     company: scan.company,
     fields: scan.fields.length + scan.passwordBoxes,
-    posting: Boolean(status?.apply) && scan.fields.length < 3,
+    // An Apply button counts only on a page that is a job: a LinkedIn search or feed is full of Easy Apply buttons.
+    posting: Boolean(status?.apply) && scan.fields.length < 3 && isJobPage({ url: scan.jobUrl || scan.url, ats: scan.ats, description: scan.description, fields: scan.fields.length }),
     account: accountPage ? (known ? "sign_in" : "new") : null,
     mentionsCv: scan.mentionsCv,
   };
