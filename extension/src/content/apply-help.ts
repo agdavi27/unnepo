@@ -3,7 +3,7 @@ import type { BeginResult, ComplexQuestion, FileData, JobDetails, PageField } fr
 import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
 import { typeInto } from "./dom";
 import { uploadResumeNow } from "./generic";
-import { findMarked, isEmpty, openedJob, scanFields, scanPage, structuredJobs } from "./scan";
+import { findMarked, isEmpty, linkedinJob, openedJob, scanFields, scanPage, structuredJobs } from "./scan";
 
 /**
  * The job box and "Begin applying" in the panel. Three things happen on the page:
@@ -63,6 +63,10 @@ function factsFromText(text: string) {
 }
 
 export function jobDetails(): JobDetails {
+  // LinkedIn's details pane still on the job before: nothing to read about this one yet.
+  if (linkedinJob()?.waiting) {
+    return { title: "", company: "", description: "", url: location.href, from: "details pane", location: "", pay: "", type: "", posted: "", remote: "", site: location.hostname.replace(/^www\./, ""), questions: 0, uploads: 0, resumeBox: false };
+  }
   const opened = openedJob();
   const scan = scanPage();
   const title = opened.title || scan.title;
