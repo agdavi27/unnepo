@@ -16,6 +16,23 @@ What the research says, and what the extension's cover letter writer does with i
 - **Short wins.** Sources agree on three or four short paragraphs, roughly 250–300 words at most.
 - Later "2024/2025/2026 ResumeGo" figures repeated online couldn't be traced to a primary source; don't cite them.
 
+- **Readers skim.** Ladders' eye-tracking work (as widely cited) puts the first review of an application at a few
+  seconds, so the role and the strongest match have to be in the first two sentences, and each paragraph's
+  first sentence has to carry its point.
+- **Generic and AI-sounding letters are penalized.** In vendor surveys of hiring managers (CV Genius, 625
+  managers; TopResume, 600; Robert Walters), most say they can spot AI-written letters, mainly by impersonal,
+  polished-but-empty phrasing and a lack of engagement with the posting; around a fifth say they'd reject one.
+  In tech, AI help is accepted, but a generic letter that shows no familiarity with the job description isn't.
+  These are self-reported and from firms with an interest, so read them as direction, not data.
+- **Evidence over enthusiasm, the employer over the applicant.** Career-office and recruiter advice for
+  entry-level applicants agrees: show research and a track record (projects, classes, clubs, part-time work)
+  instead of saying you're passionate, and talk about what you'd do for them rather than what you want from them.
+- **Do recruiters even read them?** Surveys disagree widely (Resume Genius: 83% read them often; ResumeBuilder
+  2024: 26%). Where they are read, a strong one can tip a borderline candidate (Resume Genius: 49%).
+
+These rules are in `LETTER_VOICE` ("What makes a letter work"), so the website's and the extension's letters
+both follow them.
+
 ## What Unnepo does
 
 Every format is built on the posting's own top two or three requirements, matched to the student's real

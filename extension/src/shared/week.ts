@@ -118,10 +118,27 @@ export function weekView(now = new Date(), under = "") {
         <div class="heat-col heat-letters"><span class="heat-month"></span>${letters}</div>
         ${columns}
       </div>
+      ${heatKey()}
       ${detail || `<p class="small">Tap a day to see what happened.</p>`}
     </section>
     ${under}
     ${friendsWeekCard(week)}`;
+}
+
+/**
+ * The calendar's key: each square is a day, darker for nothing done and brighter the more happened (applying,
+ * emailing someone, a follow-up, an interview, an offer or a no each count as one), plus today's ring.
+ */
+function heatKey() {
+  const steps = ["0", "1", "2", "3", "4+"];
+  return `
+      <div class="heat-key" aria-label="Key: darker squares are days with less done, brighter ones more">
+        <span class="small">Less</span>
+        ${steps.map((label, index) => `<span class="heat-key-step"><span class="heat-key-swatch" style="background:${ACTIVITY_HEAT[index]}"></span><span class="heat-key-num">${label}</span></span>`).join("")}
+        <span class="small">More</span>
+        <span class="heat-key-step today-key"><span class="heat-key-swatch today"></span><span class="heat-key-num">Today</span></span>
+      </div>
+      <p class="small heat-key-note">Each square is a day. The brighter it is, the more you did: each application, email, follow-up, interview, offer or no counts as one.</p>`;
 }
 
 export function wireWeek(root: HTMLElement) {

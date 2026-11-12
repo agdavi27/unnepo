@@ -413,6 +413,8 @@ async function noteDetected(item: Omit<Detected, "id" | "at" | "site">) {
  * panel reads the page every few seconds.
  */
 async function noteViewed(seen: { url: string; title: string; company: string; description?: string; poster?: Detected["poster"] }) {
+  // A job already in the student's jobs (added from here, or by hand) isn't one to offer again.
+  if ((await trackerCopy())?.data.jobs.some((job) => !job.titleMissing && sameJobTitle(job, seen))) return;
   const list = await detectedList();
   const index = list.findIndex((other) => (other.url && seen.url && sameJobPage(other.url, seen.url) && sameJobTitle(other, seen)) || sameJobTitle(other, seen));
   const before = index >= 0 ? list[index] : null;
@@ -423,6 +425,13 @@ async function noteViewed(seen: { url: string; title: string; company: string; d
   const next: Detected = { id: before?.id ?? crypto.randomUUID(), url: seen.url, title: seen.title, company: seen.company, description, poster, site: siteName(seen.url), at: Date.now(), sure: "viewed", state: "seen" };
   if (index >= 0) list.splice(index, 1);
   await saveDetectedList([next, ...list]);
+}
+
+/** Takes a job off Detected jobs once the student added it to their jobs: it's in the list of jobs now. */
+async function dropDetected(job: { url?: string; title: string; company: string }) {
+  const list = await detectedList();
+  const kept = list.filter((other) => !(sameJobTitle(other, job) || (job.url && other.url && sameJobPage(other.url, job.url) && sameJobTitle(other, job))));
+  if (kept.length !== list.length) await saveDetectedList(kept);
 }
 
 // What a job board or a page calls itself, which isn't the employer.
@@ -1516,6 +1525,23 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         return reply({ ok: Boolean(details), details });
       }
       // "Begin applying": resume in, spiders beside the complex questions.
+      // "Attach" on the cover letter: into the cover letter box on the tab's page or any of its form frames.
+      case "attach-letter": {
+        if (sender.tab) return reply({ ok: false });
+        const target = Number(message.tabId);
+        const file = message.file as FileData | undefined;
+        if (!file?.base64) return reply({ ok: false, error: "Write the cover letter first." });
+        await look(target);
+        const frames = (await chrome.webNavigation.getAllFrames({ tabId: target }).catch(() => null)) ?? [{ frameId: 0, url: "" }];
+        const attached: string[] = [];
+        for (const frame of frames.filter((item) => item.frameId === 0 || (/^https:\/\//.test(item.url) && !SKIP_FRAME.test(item.url)))) {
+          const result = await send<{ attached: string[] }>(target, { type: "attach-letter", file }, frame.frameId).catch(() => null);
+          attached.push(...(result?.attached ?? []));
+        }
+        if (!attached.length) return reply({ ok: false, error: "No cover letter upload box on this page yet. Open the application, then press Attach." });
+        void log(`Attached your cover letter to "${attached[0].slice(0, 40)}".`);
+        return reply({ ok: true, attached });
+      }
       case "begin-applying": {
         if (sender.tab) return reply({ ok: false });
         try {
@@ -1658,6 +1684,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             url = "";
           }
           await api("POST", "add-job", { title: job.title, company: job.company, url, stage: job.stage, description: typeof job.description === "string" ? job.description : undefined });
+          // The same job waiting on Detected jobs is done: it's in the student's jobs now.
+          await dropDetected({ url, title: String(job.title ?? ""), company: String(job.company ?? "") }).catch(() => undefined);
+          await readTracker().catch(() => undefined);
           return reply({ ok: true });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't add it." });
@@ -1937,9 +1966,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
             const saved = await saveSubmission({ url: item.url, title: item.title, company: item.company, description: item.description, poster: item.poster, confidence: "likely", text: "You said you applied.", how: "you_marked" });
             item.applicationId = saved.application.id;
           } else return reply({ ok: false, needsForm: true, error: "Unnepo didn't catch the company. Add it with + Add a job." });
-          item.state = "yes";
-          item.error = undefined;
-          await saveDetectedList(list);
+          // Added: it's in the student's jobs now, so it leaves Detected jobs.
+          await saveDetectedList(list.filter((entry) => entry.id !== item.id));
           await readTracker().catch(() => undefined);
           return reply({ ok: true });
         } catch (error) {
