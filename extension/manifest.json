@@ -38,6 +38,10 @@
   "content_scripts": [
     {
       "matches": [
+        "https://www.unnepo.com/extension/connect*",
+        "https://www.unnepo.com/home*",
+        "https://unnepo.com/extension/connect*",
+        "https://unnepo.com/home*",
         "https://unneponew.vercel.app/extension/connect*",
         "https://unneponew.vercel.app/home*",
         "http://localhost/extension/connect*",
@@ -111,7 +115,9 @@
       ],
       "exclude_matches": [
         "https://*.linkedin.com/*",
-        "https://unneponew.vercel.app/*"
+        "https://unneponew.vercel.app/*",
+        "https://www.unnepo.com/*",
+        "https://unnepo.com/*"
       ],
       "js": [
         "content/launcher.js"

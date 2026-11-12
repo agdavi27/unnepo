@@ -8,7 +8,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(here, "..");
 const out = path.join(here, "dist");
 // UNNEPO_API overrides the server, for testing against a local copy.
-const api = process.env.UNNEPO_API || "https://unneponew.vercel.app";
+const api = process.env.UNNEPO_API || "https://www.unnepo.com";
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });

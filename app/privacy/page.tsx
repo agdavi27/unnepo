@@ -16,7 +16,7 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     body: (
       <p>
         Unnepo helps college students find professionals at companies they care about and reach out to them. This policy explains what we collect when
-        you use unnepo (the website at unneponew.vercel.app and any related services), how we use it, and the choices you have.
+        you use unnepo (the website at unnepo.com and any related services), how we use it, and the choices you have.
       </p>
     ),
   },

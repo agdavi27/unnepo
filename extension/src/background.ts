@@ -13,13 +13,17 @@ import { dueCount, reminders } from "./shared/reminders";
 
 declare const __UNNEPO_API__: string;
 const DEFAULT_API = __UNNEPO_API__;
-const ALLOWED_API = /^(https:\/\/unneponew\.vercel\.app|http:\/\/localhost(:\d+)?)$/;
+const ALLOWED_API = /^(https:\/\/(www\.)?unnepo\.com|https:\/\/unneponew\.vercel\.app|http:\/\/localhost(:\d+)?)$/;
+// Unnepo's old address and the bare domain: the same app, so a connection made there moves to www.unnepo.com.
+const MOVED_API = /^https:\/\/(unneponew\.vercel\.app|unnepo\.com)$/;
 
 type Job = NonNullable<PanelState["job"]> & { url: string; clickedAt: number | null; host: string };
 
 async function settings() {
   const stored = await chrome.storage.local.get(["token", "apiBase", "autoSubmit"]);
-  return { token: (stored.token as string | undefined) ?? null, apiBase: (stored.apiBase as string | undefined) ?? DEFAULT_API, autoSubmit: Boolean(stored.autoSubmit) };
+  const saved = stored.apiBase as string | undefined;
+  const apiBase = !saved || (MOVED_API.test(saved) && !MOVED_API.test(DEFAULT_API)) ? DEFAULT_API : saved;
+  return { token: (stored.token as string | undefined) ?? null, apiBase, autoSubmit: Boolean(stored.autoSubmit) };
 }
 
 /** The password typed into job sites' account and sign-in forms. Made on first use; kept only on this computer. */
