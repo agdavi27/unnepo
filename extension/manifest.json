@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Unnepo",
   "short_name": "Unnepo",
-  "version": "1.76",
-  "version_name": "1.076",
+  "version": "1.77",
+  "version_name": "1.077",
   "description": "Your job search in Chrome: catches the jobs you apply to, finds who to email at each company, and reminds you to follow up. You approve every submit.",
   "minimum_chrome_version": "116",
   "action": {
@@ -72,6 +72,7 @@
         "https://*.applytojob.com/*",
         "https://*.dayforcehcm.com/*",
         "https://*.joinhandshake.com/*",
+        "https://*.linkedin.com/*",
         "https://*.ziprecruiter.com/*",
         "https://*.indeed.com/*",
         "https://*.glassdoor.com/*",

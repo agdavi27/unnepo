@@ -338,6 +338,64 @@ export function handshakeJob(where: { hostname: string; pathname: string } = win
   return { title: title.slice(0, 200), company: employerIn(pane, heading ?? null, title).slice(0, 200), description };
 }
 
+const LINKEDIN_HOST = /(^|\.)linkedin\.com$/;
+
+/** LinkedIn's id for a job: /jobs/view/<id>, or the search's open job in `currentJobId`. "" when there's none. */
+export function linkedinJobId(href: string) {
+  try {
+    const url = new URL(href);
+    if (!LINKEDIN_HOST.test(url.hostname)) return "";
+    return url.pathname.match(/\/jobs\/view\/(?:[^/]*?-)?(\d{6,})/)?.[1] ?? url.searchParams.get("currentJobId") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * LinkedIn shows the job you clicked beside the search results (/jobs/search/?currentJobId=<id>), or alone on
+ * /jobs/view/<id>. Like Handshake, this reads the details pane: the job's heading, up to the largest box that
+ * still isn't the results list, then the employer's link and the "About the job" text. LinkedIn renames its
+ * classes often, so each part has its known names first and a plain-page fallback after.
+ */
+export function linkedinJob(where: { hostname: string; pathname: string; href: string } = window.location): { title: string; company: string; description: string } | null {
+  if (!LINKEDIN_HOST.test(where.hostname) || !/^\/jobs\//.test(where.pathname) || !linkedinJobId(where.href)) return null;
+  const first = (selectors: string[], root: ParentNode = document) => {
+    for (const selector of selectors) {
+      const found = Array.from(root.querySelectorAll<HTMLElement>(selector)).find((el) => visible(el) && clean(el.textContent).length >= 2);
+      if (found) return found;
+    }
+    return null;
+  };
+  const heading = first([
+    ".job-details-jobs-unified-top-card__job-title h1", ".job-details-jobs-unified-top-card__job-title", ".jobs-unified-top-card__job-title",
+    ".top-card-layout__title", ".jobs-details-top-card__job-title", "[data-testid*='job-title' i]",
+  ]) ?? Array.from(document.querySelectorAll<HTMLElement>("h1, h2")).find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !notJobTitle(clean(el.textContent)) && !NOT_JOB_NAME.test(clean(el.textContent)));
+  // The tab's own name on a job's page: "Growth Intern | MealPal | LinkedIn".
+  const fromTab = /\/jobs\/view\//.test(where.pathname) ? titleParts(document.title) : null;
+  const title = clean(heading?.textContent) || fromTab?.title || "";
+  if (!title || notJobTitle(title)) return null;
+  // The results list links to many jobs; the details pane to at most one.
+  let pane: HTMLElement = heading ?? document.body;
+  while (heading && pane.parentElement && pane.parentElement !== document.body && distinctJobLinks(pane.parentElement) <= 1) pane = pane.parentElement;
+  const companyEl = first([
+    ".job-details-jobs-unified-top-card__company-name a", ".job-details-jobs-unified-top-card__company-name", ".jobs-unified-top-card__company-name a",
+    ".jobs-unified-top-card__company-name", ".topcard__org-name-link", ".top-card-layout__second-subline a", "a[href*='/company/']",
+  ], pane);
+  const company = [clean(companyEl?.textContent), fromTab?.company ?? ""].map((name) => cleanCompanyName(name)).find((name) => goodEmployer(name, title))
+    || employerIn(pane, heading ?? null, title);
+  const about = first(["#job-details", ".jobs-description__content", ".jobs-description-content__text", ".jobs-box__html-content", ".show-more-less-html__markup", ".description__text"], pane)
+    ?? first(["#job-details", ".jobs-description__content", ".show-more-less-html__markup", ".description__text"]);
+  let text = about?.innerText ?? "";
+  if (!text) {
+    // No known box: the "About the job" heading's section.
+    let box: HTMLElement | null = Array.from(pane.querySelectorAll<HTMLElement>("h2, h3, span, div")).find((el) => el.children.length <= 1 && /^about the job$/i.test(clean(el.textContent))) ?? null;
+    while (box && box !== pane && (box.innerText || "").length < 300) box = box.parentElement;
+    text = box?.innerText || pane.innerText || "";
+  }
+  const description = text.replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
+  return { title: title.slice(0, 200), company: company.slice(0, 200), description };
+}
+
 /**
  * The person LinkedIn shows under "Meet the hiring team" on a job the student opened: the first profile link
  * in that box, its name, and the line under it. Only what the page already shows; nothing is looked up.
@@ -470,7 +528,7 @@ export function scanPage(): Scan {
   // The job a job board shows (Handshake's details pane, or a posting's schema.org data).
   // On a job board, the job that's open, not the results listed beside it.
   const opened = QUICK_BOARDS.test(host) ? findOpenedJob() : null;
-  const posting = handshakeJob() ?? opened ?? (host.endsWith("linkedin.com") ? null : structuredJob());
+  const posting = handshakeJob() ?? linkedinJob() ?? opened ?? structuredJob();
   const poster = hiringTeam();
   // On a job board without posting data, the tab's title names the job and company better than the page does.
   const fromTitle = posting || !QUICK_BOARDS.test(host) ? null : titleParts(document.title) ?? titleParts(meta("og:title"));
@@ -539,6 +597,9 @@ export function jobLink(href: string) {
     const url = new URL(href);
     const indeedJob = /(^|\.)indeed\.com$/.test(url.hostname) ? url.searchParams.get("jk") ?? url.searchParams.get("vjk") : null;
     if (indeedJob) return `${url.origin}/viewjob?jk=${indeedJob}`;
+    // LinkedIn's search keeps the open job in `currentJobId`; its own page is /jobs/view/<id>/.
+    const linkedin = linkedinJobId(url.href);
+    if (linkedin) return `https://www.linkedin.com/jobs/view/${linkedin}/`;
     return url.href;
   } catch {
     return href;
@@ -623,6 +684,8 @@ function findOpenedJob(given?: Element | null): OpenedJob | null {
   const handshake = handshakeJob();
   const address = jobLink(window.location.href);
   if (handshake?.title) return { ...handshake, url: address, from: "details pane" };
+  const linkedin = linkedinJob();
+  if (linkedin?.title) return { ...linkedin, url: address, from: "details pane" };
   const postings = structuredJobs();
   const buttons = pressed ? [pressed as HTMLElement] : Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button], input[type=submit]"))
     .filter((el) => visible(el) && APPLY_LABEL.test(clean(el.textContent || (el as HTMLInputElement).value || el.getAttribute("aria-label"))));

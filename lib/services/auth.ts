@@ -216,10 +216,14 @@ export function publicUser(user: User) {
   };
 }
 
-export async function isAdminEmail(user: User) {
+/** Always admins, whatever ADMIN_EMAILS says: the founders' own accounts. */
+const OWNER_ADMINS = ["agdavi27@colby.edu"];
+
+export async function isAdminEmail(user: Pick<User, "email" | "role">) {
   const list = (process.env.ADMIN_EMAILS || "")
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
-  return user.role === "admin" || list.includes(user.email.toLowerCase());
+  const email = user.email.trim().toLowerCase();
+  return user.role === "admin" || list.includes(email) || OWNER_ADMINS.includes(email);
 }

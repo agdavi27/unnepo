@@ -4,6 +4,7 @@ import { CREDIT_COST } from "@/lib/config";
 import { CLASS_YEARS, classYearOf, type StudentProfile } from "@/lib/profile/student";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, isFree, planUsage } from "@/lib/apply/limits";
+import { isAdminEmail } from "@/lib/services/auth";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
@@ -94,6 +95,9 @@ export async function extensionMe(userId: string) {
     // What the account is on (billing), and what it works as: Pro during the trial.
     plan: credits?.plan ?? "free",
     effectivePlan: usage.plan,
+    // Admins can switch what the account works as (Free or Pro) to see both.
+    admin: user ? await isAdminEmail(user) : false,
+    planPreview: usage.preview ?? null,
     trial: usage.trial,
     trialEnded: usage.trialEnded,
     coverLetters: { used: usage.letters.used, left: usage.free ? usage.letters.left : null },

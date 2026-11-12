@@ -11,7 +11,7 @@ import type { JobApplication } from "@/lib/apply/types";
  * Reading a job's link for its details: the title, company, place and description. Company career sites and job
  * systems (Greenhouse, Lever, Workday…) are read here, on the server. Job boards (Indeed, Handshake, ZipRecruiter,
  * Glassdoor) don't let servers read them, so the extension reads those in the student's own browser and sends
- * back what the page showed. LinkedIn is never read.
+ * back what the page showed, LinkedIn included.
  */
 
 export type LinkInfo = { title: string; company: string; location: string; description: string; url: string };
@@ -30,7 +30,8 @@ function hostOf(url: string) {
 export async function readJobLink(raw: unknown): Promise<{ info: LinkInfo }> {
   const url = String((raw as { url?: unknown } | null)?.url ?? "").trim().slice(0, 2000);
   if (!/^https:\/\/\S+\.\S+/i.test(url)) throw new ServiceError("The link should start with https://.", "url", 400);
-  if (LINKEDIN.test(hostOf(url))) throw new ServiceError("Unnepo doesn't read LinkedIn. Type the job title and company.", "linkedin", 422);
+  // LinkedIn only shows its jobs to someone signed in: the extension reads it in the student's own browser.
+  if (LINKEDIN.test(hostOf(url))) throw new ServiceError("LinkedIn only shows its jobs in your browser. The Unnepo extension reads it there.", "in_browser", 422);
   try {
     const job = await extractJob(url);
     return { info: { title: job.title, company: isJobSiteName(job.company) ? "" : job.company, location: job.location ?? "", description: job.description.slice(0, 8000), url } };

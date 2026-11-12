@@ -252,6 +252,8 @@ export type ApplicationProfile = {
   resumeProfile?: ResumeProfile | null;
   /** Applications per week the student is aiming for. */
   weeklyGoal?: number;
+  /** Admins only: the plan the account works as, to see what students on it see. Billing is untouched. */
+  planPreview?: "free" | "pro";
   dailyGoal?: number;
   /** Optional goals, left out until the student sets them. */
   monthlyGoal?: number;
