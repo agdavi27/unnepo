@@ -133,6 +133,13 @@ details.part .view { padding: 12px 0 0; }
 .tools { flex: none; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-top: 16px; }
 .big-tool { min-height: 84px; flex: none; padding: 0 18px; border: 1px solid #33333B; border-radius: 14px; background: #111114; display: flex; align-items: center; gap: 12px; font: 600 16px Geist, sans-serif; text-align: left; cursor: pointer; }
 .big-tool:hover { border-color: #4A4A55; background: #16161A; }
+/* A tool's count in its top-right corner: "4 left today" on Free, "Unlimited" on Pro. */
+.big-tool { position: relative; }
+.big-tool:has(.tool-count) { padding-right: 104px; }
+.tool-count { position: absolute; top: 10px; right: 12px; font: 500 11px var(--mono); letter-spacing: .02em; color: var(--muted); white-space: nowrap; }
+.tool-count.out { color: var(--warn); }
+.people-count { font: 500 11px var(--mono); color: var(--muted); white-space: nowrap; }
+.people-count.out { color: var(--warn); }
 .big-tool-icon { flex: none; color: var(--accent); }
 .tool-lines { margin-top: 10px; display: flex; flex-direction: column; }
 .tool-line { min-height: 52px; display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); font-size: 13px; }

@@ -254,7 +254,9 @@ function peopleCard(job: TrackerJob) {
   const posted = job.postedRecruiter
     ? `<p class="small">Posted by <strong>${escape(job.postedRecruiter.name)}</strong>${job.postedRecruiter.title ? `, ${escape(job.postedRecruiter.title)}` : ""}${job.postedRecruiter.linkedinUrl ? ` · <a href="${escape(job.postedRecruiter.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</p>`
     : "";
-  const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}</span>${job.contacts.length ? `<span class="mono">${job.contacts.length}</span>` : ""}</div>`;
+  // The corner says how many companies' people are left: "1 left this week" on Free, "Unlimited" on Pro.
+  const badge = store.tracker?.peopleBadge;
+  const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${job.contacts.length ? ` · ${job.contacts.length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
   if (!isAppliedJob(job)) {
     return `<section class="page people" aria-label="People">${head}${posted}<p class="note">Once you apply, Unnepo finds who to email here: recruiters, the team, and people from your school.</p></section>`;
   }

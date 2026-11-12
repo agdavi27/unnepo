@@ -3,7 +3,7 @@ import { notJobTitle } from "@/lib/apply/job-title";
 import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
-import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
+import { AUTOFILL_ENABLED, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
 import { detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { friendRequests, friendsSettingsCard, wireFriends } from "../shared/friends";
@@ -327,18 +327,14 @@ const SPARK_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="curre
 
 /** The blue AI spark on the two big buttons. */
 const SPARK = SPARK_SMALL.replace('width="13" height="13"', 'class="big-tool-icon" width="20" height="20"');
-/**
- * "Write cover letter (2 credits)" on Free, where it uses credits up. Pro includes writing, so its
- * credits don't move and the button says so; unlimited accounts see no cost. The server's number wins; the
- * fallback covers a server that doesn't send one.
- */
+/** "Write cover letter (4 left today)" on Free, which counts by the day; Pro has no limit, so just the label. */
 const withCost = (label: string, kind: "letters" | "answers") => {
-  const me = lastState?.me;
-  if (me?.unlimitedCredits) return label;
-  if (me?.usage && !me.usage.free) return `${label} (included in your plan)`;
-  const cost = lastState?.me?.creditCost?.[kind] ?? CREDIT_COST_FALLBACK[kind];
-  return `${label} (${cost} ${cost === 1 ? "credit" : "credits"})`;
+  const usage = lastState?.me?.usage;
+  return usage?.free && !lastState?.me?.unlimitedCredits ? `${label} (${usage[kind].left} left today)` : label;
 };
+
+/** The count in a tool box's top-right corner: "4 left today" on Free, "Unlimited" on Pro. */
+const toolCount = (line?: { left: number; badge?: string }) => (line?.badge ? `<span class="tool-count${line.left === 0 ? " out" : ""}">${escape(line.badge)}</span>` : "");
 /**
  * Autofill, in beta: fills the application on this tab from the profile and stops at Submit (unless Me says
  * otherwise). Only offered on a job page; everywhere else it says where to go.
@@ -347,7 +343,7 @@ function autofillTool(state: PanelState) {
   const ready = jobFound(state) && !state.job?.running && Boolean(state.me?.profileReady);
   const why = !state.me?.profileReady ? "Finish your profile first." : jobFound(state) ? "Fills this application. You check it and press Submit." : "Open a job application, then press this.";
   return `<button type="button" class="big-tool autofill-tool" id="beta-fill" ${ready ? "" : "disabled"}>
-      ${SPARK}<span class="big-tool-text"><span>Autofill this application <span class="beta">Beta</span></span><span class="small">${why}</span></span>
+      ${toolCount(state.me?.usage?.autofills)}${SPARK}<span class="big-tool-text"><span>Autofill this application <span class="beta">Beta</span></span><span class="small">${why}</span></span>
     </button>`;
 }
 
@@ -355,8 +351,8 @@ function autofillTool(state: PanelState) {
 function toolsPage(state: PanelState, extra = "") {
   return `
     <div class="tools">
-      <button type="button" class="big-tool" data-popup="cover">${SPARK}Write a cover letter</button>
-      <button type="button" class="big-tool" data-popup="answer">${SPARK}Answer a question</button>
+      <button type="button" class="big-tool" data-popup="cover">${toolCount(state.me?.usage?.letters)}${SPARK}Write a cover letter</button>
+      <button type="button" class="big-tool" data-popup="answer">${toolCount(state.me?.usage?.answers)}${SPARK}Answer a question</button>
       ${autofillTool(state)}
       <div class="tool-lines">${resumeLine(state)}${letterLine()}<div id="password-slot"></div></div>
       ${extra}
@@ -393,12 +389,11 @@ const MINI_SPIDER = `<svg class="mini-spider" viewBox="0 0 ${SPRITE_W} ${SPRITE_
 /** Answering every complex question: what's going on, and edits to answers not yet put back on the page. */
 const complex = { busy: false, note: "", drafts: {} as Record<string, string>, open: new Set<string>() };
 
-/** The complex questions' cost on Free, where each answer uses credits. */
+/** On Free, how many of the day's answers are left, since each question uses one. */
 function answersCost(count: number) {
   const me = lastState?.me;
-  if (!count || me?.unlimitedCredits || (me?.usage && !me.usage.free)) return "";
-  const each = me?.creditCost?.answers ?? CREDIT_COST_FALLBACK.answers;
-  return ` (${each * count} ${each * count === 1 ? "credit" : "credits"})`;
+  if (!count || me?.unlimitedCredits || !me?.usage?.free) return "";
+  return ` (${me.usage.answers.left} left today)`;
 }
 
 function applyingBox(state: PanelState) {
@@ -878,7 +873,6 @@ function allQuestionsPopup(state: PanelState, note: string) {
   };
   const action = complex.busy
     ? `<div class="letter-writing" role="status">${typingSpiderSvg(90, spiderLook)}<span class="small">Answering ${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}…</span></div>`
-    : unanswered.length && state.me?.usage?.free && !state.me?.unlimitedCredits ? `<p class="note">Answering every question on a page at once is part of Pro. On Free, copy one question into “One question”. <a href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Get Pro</a></p>`
     : unanswered.length ? `<button type="button" class="btn primary big" id="answer-all">${SPARK_SMALL}Answer ${unanswered.length === questions.length ? "all " : ""}${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}${answersCost(unanswered.length)}</button>${usesLine(usesNow?.answers.note)}`
     : notPut.length > 1 ? `<button type="button" class="btn primary big" id="put-all">Put all ${notPut.length} in their boxes</button>` : "";
   return popupShell(title, `
@@ -1293,7 +1287,7 @@ async function replaceResume(file: File) {
 function profileCard(state: PanelState) {
   const me = state.me!;
   const missing = me.missing ?? [];
-  const credits = me.unlimitedCredits ? "Unlimited credits" : `${me.usage?.credits ?? me.credits * 5} credits left`;
+  const credits = me.unlimitedCredits ? "Unlimited" : me.trial ? "Pro trial" : me.usage?.free ? "Resets every day" : `${me.usage?.credits ?? me.credits * 5} credits left`;
   const plan = me.trial ? "Pro trial" : (me.effectivePlan ?? me.plan ?? "free").replace(/^\w/, (letter) => letter.toUpperCase());
   const name = me.user.name || me.user.email;
   const initials = name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((part) => part[0]!.toUpperCase()).join("");
@@ -1305,7 +1299,7 @@ function profileCard(state: PanelState) {
       </div>
       <div class="account-plan"><span><strong>${escape(plan)}</strong> · ${credits}</span><a class="link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a></div>
       ${me.admin ? adminPlanSwitch(me.planPreview ?? null) : ""}
-      ${me.usage?.free ? `<span class="small">Left this month: ${me.usage.letters.left} cover letters · ${me.usage.answers.left} answers${me.usage.unlimited ? "" : ` · ${me.usage.people.left} people searches`}</span>` : ""}
+      ${me.usage?.free ? `<span class="small">Left today: ${me.usage.letters.left} cover letters · ${me.usage.answers.left} answers · ${me.usage.autofills.left} autofills. People: ${escape(me.usage.people.badge ?? `${me.usage.people.left} left`)}</span>` : ""}
       ${me.completeness < 100 ? `<div class="row-between"><span class="small"${!me.profileReady ? ' style="color: var(--warn)"' : ""}>Profile ${me.completeness}% done${missing.length ? `: ${missing.map(escape).join(", ")}` : ""}</span></div>
       <div class="bar" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}"><div style="width:${me.completeness}%"></div></div>` : ""}
       <a class="link" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">${me.completeness < 100 ? "Finish my profile" : "Edit my profile"} ↗</a>

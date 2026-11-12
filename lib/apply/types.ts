@@ -230,7 +230,7 @@ export type ApplicationContact = {
   updatedAt: string;
 };
 
-export type UsageCounts = { letters?: number; answers?: number; autofills?: number };
+export type UsageCounts = { letters?: number; answers?: number; autofills?: number; people?: number };
 
 /** Reusable answers for application forms. Only what the student typed or what appears in their resume. */
 export type ApplicationProfile = {
@@ -260,8 +260,8 @@ export type ApplicationProfile = {
   weeklyEmailGoal?: number;
   monthlyInterviewGoal?: number;
   streakGoal?: number;
-  /** Plan uses: this month's ("2026-11"), for Free's monthly allowance and Pro's hidden cap. */
-  uses?: { total: UsageCounts; month: string; monthly: UsageCounts };
+  /** Plan uses, counted by day ("2026-11-12", Free's daily allowance), week (its Monday, Free's people) and month (Pro's hidden guards), in Eastern time. */
+  uses?: { total: UsageCounts; month: string; monthly: UsageCounts; day?: string; daily?: UsageCounts; week?: string; weekly?: UsageCounts };
   /** "Did you apply to these?": jobs Apply was pressed on or filled that nothing confirmed. Shared by the panel and the web app. */
   maybeApplied?: MaybeApplied[];
   /** An applying session: when it started, and the last thing that happened in it (it ends after 15 idle minutes). */

@@ -122,14 +122,15 @@ describe("structured profile", () => {
     expect((await repo.getAccount(a))?.balance).toBe(3);
   });
 
-  it("offers Free and Pro, monthly or by the semester, with 1 credit per company and 15 more for $15", () => {
-    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 0], ["pro", "$25", "or $75 a semester", 20]]);
+  it("offers Free and Pro, monthly or by the semester, with Free counted by the day and Pro unlimited", () => {
+    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 1], ["pro", "$25", "or $75 a semester", 20]]);
     expect(creditMath(1)).toBe("People at 1 company");
     expect(creditMath(40)).toBe("People at 40 companies");
     const saved = process.env.SIGNUP_CREDITS;
     delete process.env.SIGNUP_CREDITS;
     expect(serverConfig().signupCredits).toBe(3);
-    expect(FREE_CREDITS).toBe(11);
+    expect(FREE_CREDITS).toBe(15);
+    expect(serverConfig().proPeopleLimit).toBe(100);
     expect(serverConfig().proMonthlyCredits).toBe(20);
     expect(serverConfig().proSemesterCredits).toBe(70);
     expect(serverConfig().premiumMonthlyCredits).toBe(75);

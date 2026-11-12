@@ -30,6 +30,8 @@ export function serverConfig() {
     premiumSemesterPriceCents: intEnv("PREMIUM_SEMESTER_PRICE_CENTS", 11700),
     // Pro's writing and autofill are unlimited; this is a hidden fair-use guard against scripts, never shown as a number.
     proAiLimit: intEnv("PRO_AI_LIMIT", 1000),
+    /** Pro's people have no limit; this hidden monthly guard (companies, about 30¢ each) only stops scripts. */
+    proPeopleLimit: intEnv("PRO_PEOPLE_LIMIT", 100),
     premiumAiLimit: intEnv("PREMIUM_AI_LIMIT", 1000),
     dailyGlobalSpendCents: intEnv("DAILY_GLOBAL_SPEND_CENTS", 25000),
     // The most one account can spend on finding people in a day ($3): stops a script, never a real student.
@@ -50,20 +52,18 @@ export function serverConfig() {
 }
 
 /**
- * Pricing, built to keep 60%+ margins. Writing and autofill cost under a cent or two each, so Pro has no limit on
- * them (only a hidden fair-use guard, PRO_AI_LIMIT). Finding people costs about 30¢ a company, so that's what's
- * counted on every plan: Pro gets PRO_MONTHLY_CREDITS companies a month (PRO_SEMESTER_CREDITS a semester), more in
- * packs of PACK_CREDITS. Free, after the 7-day trial, gets FREE_LIMITS each month (general letters and single
- * answers; the basic autofill has no limit) and sees who works at each company, with names and emails on Pro. The
- * trial's people are SIGNUP_CREDITS companies. `balance` on an account counts people searches (1 = the people at
- * the company for one job, charged only when someone is found); students see it in credits, at CREDIT_COST.people.
+ * Pricing. Free gets FREE_LIMITS each day (cover letters, answers, and full autofills that answer the questions
+ * too; after those, autofill still fills the basic details) and FREE_PEOPLE_PER_WEEK companies' names and emails
+ * a week, plus whatever the 7-day trial's SIGNUP_CREDITS left. Pro has no limits: only hidden monthly guards
+ * against scripts (PRO_AI_LIMIT for writing and autofill, PRO_PEOPLE_LIMIT for companies, about 30¢ each), which a
+ * real student never meets. `balance` on an account counts people searches left from the trial or a pack.
  */
-export const FREE_LIMITS = { letters: 3, answers: 5, autofills: 10 };
-/** People searches with names and emails on Free: none beyond what the trial left. Free sees who's there without names. */
-export const FREE_PEOPLE = 0;
+export const FREE_LIMITS = { letters: 5, answers: 5, autofills: 5 };
+/** Companies a week whose people Free sees with names and emails (1 = everyone found at one job's company). */
+export const FREE_PEOPLE_PER_WEEK = 1;
 export const CREDIT_COST = { letters: 2, answers: 1, autofills: 1, people: 5 };
-/** What Free gets each month, in credits: 6 for cover letters and 5 for answers. Free's autofill (the basic fields) has no limit. */
-export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers + FREE_PEOPLE * CREDIT_COST.people;
+/** What Free gets each day, in credits. */
+export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers;
 
 /** A semester plan: four months paid up front, with four months of credits at once. */
 export const SEMESTER_MONTHS = 4;
@@ -84,10 +84,10 @@ export const PUBLIC_PLANS = [
     cta: "Start 7 days of Pro free",
     popular: false,
     monthly: false,
-    credits: FREE_PEOPLE,
+    credits: FREE_PEOPLE_PER_WEEK,
     semesterCredits: null,
-    applicationsLabel: "Free every month",
-    features: ["7 days of Pro free, no card", "Autofill for your basic details, no limit", `${FREE_LIMITS.letters} general cover letters a month`, `${FREE_LIMITS.answers} question answers a month`, "See who works at each company", "Tracker and job matches"],
+    applicationsLabel: "Free every day",
+    features: ["7 days of Pro free, no card", `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.autofills} autofills a day`, `Names and emails at ${FREE_PEOPLE_PER_WEEK} company a week`, "Tracker and job matches"],
   },
   {
     id: "pro" as const,
@@ -95,14 +95,14 @@ export const PUBLIC_PLANS = [
     priceLabel: "$25",
     semesterLabel: "or $75 a semester",
     cadence: "Billed monthly or each semester",
-    blurb: "Unlimited writing and autofill",
+    blurb: "Unlimited everything",
     cta: "Choose Pro",
     popular: true,
     monthly: true,
     credits: 20,
     semesterCredits: 70,
-    applicationsLabel: "Unlimited autofill and writing",
-    features: ["Unlimited autofill that answers the questions too", "Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", "Unlimited follow-up emails written for you", "Email updates the moment they arrive", "Names and emails at 20 companies a month, or 70 a semester", "15 more companies for $15 when you need them"],
+    applicationsLabel: "Unlimited everything",
+    features: ["Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", "Unlimited autofill that answers the questions too", "Names and emails at every company you apply to", "Follow-up emails written for you", "Email updates the moment they arrive"],
   },
 ];
 

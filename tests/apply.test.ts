@@ -21,6 +21,7 @@ import { checkSchool } from "@/lib/school-plans";
 import { classYearOf } from "@/lib/profile/student";
 import { contactBounced, revealContact, applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
+import { planUsage } from "@/lib/apply/limits";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
 
@@ -647,15 +648,18 @@ describe("people after applying", () => {
     expect(application.fillReport?.peopleLinks?.["sam l."]?.[0]?.label).toBe("LinkedIn");
   });
 
-  it("spends 1 credit for a job's list, not again on a new search, and looks no one up without credits", async () => {
+  it("counts a job's people once (Free's weekly company before any credit), shows only who's there with none left, and never stops Pro", async () => {
     const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
     const { userId, application, contacts, searches } = await appliedWith(found, { verified: ["a1"] });
     expect(contacts.length).toBeGreaterThan(0);
     const debits = async () => (await repo.listLedger(userId)).filter((entry) => entry.entryType === "unlock_debit").reduce((sum, entry) => sum - entry.amount, 0);
-    expect(await debits()).toBe(1);
+    // The week's free company paid for it, not a credit.
+    expect(await debits()).toBe(0);
+    expect((await planUsage(userId)).people).toMatchObject({ used: 1, allowance: 0 });
     await applications.update(userId, application.id, { contactsStatus: "idle" });
     await runContactDiscovery(userId, application.id);
-    expect(await debits()).toBe(1);
+    expect(await debits()).toBe(0);
+    expect((await planUsage(userId)).people.used).toBe(1);
 
     const another = async (n: number) => (await applications.insert({
       userId, jobKey: `url:acme.com/job/${n}`, jobUrl: `https://acme.com/job/${n}`, ats: "other", title: "Analyst", company: "Acme Corp", companyDomain: "acme.com", department: null, location: null,
@@ -663,8 +667,8 @@ describe("people after applying", () => {
       confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: true, attempts: 0,
     })).app;
 
-    // Another job with no credits left, on Free: who's there, from the free searches, kept as roles and titles
-    // only (no names, no emails), and nothing spent.
+    // Another job with this week's company used and no credits left, on Free: who's there, from the free
+    // searches, kept as roles and titles only (no names, no emails), and nothing spent.
     await repo.setAccountForTests(userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
     const app = await another(2);
     await runContactDiscovery(userId, app.id);
@@ -672,16 +676,18 @@ describe("people after applying", () => {
     const preview = (await applications.get(userId, app.id))?.fillReport?.peoplePreview;
     expect(preview?.rows).toEqual([{ role: "alumni", title: "Product Manager" }]);
     expect(JSON.stringify(preview)).not.toContain("Casey");
-    expect(await debits()).toBe(1);
+    expect(await debits()).toBe(0);
+    expect((await planUsage(userId)).people.note).toMatch(/this week's free company/);
 
-    // On a paid plan with no credits left: nobody is looked up.
+    // Pro has no limit, even with no credits: the people are looked up, and nothing is spent.
     await repo.setAccountForTests(userId, { plan: "pro" });
     const paid = await another(3);
     const searchesBefore = searches.length;
     await runContactDiscovery(userId, paid.id);
-    expect(searches.length).toBe(searchesBefore);
-    expect(await applicationContacts.list(userId, [paid.id])).toEqual([]);
-    expect((await applications.get(userId, paid.id))?.contactsMessage).toMatch(/out of credits/);
+    expect(searches.length).toBeGreaterThan(searchesBefore);
+    expect((await applicationContacts.list(userId, [paid.id])).length).toBeGreaterThan(0);
+    expect(await debits()).toBe(0);
+    expect((await planUsage(userId)).people.badge).toBe("Unlimited");
   });
 
   it("charges nothing for a list with no emails, and never charges an unlimited account", async () => {

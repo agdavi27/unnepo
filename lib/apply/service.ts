@@ -13,7 +13,7 @@ import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/ap
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
-import { hasUnlimitedCredits, isFree, planState, planUsage } from "@/lib/apply/limits";
+import { isFree, peopleAccess, peopleNote, planState, planUsage, spendPeople } from "@/lib/apply/limits";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { profileReady, profileState } from "@/lib/profile/service";
@@ -710,8 +710,8 @@ async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof stu
 export async function findPeopleOnApply(userId: string, applicationId: string) {
   const [app, plan, stored] = await Promise.all([applications.get(userId, applicationId), planState(userId), applicationProfiles.get(userId)]);
   if (!app || app.contactsStatus !== "idle" || (app.status !== "submitted" && app.status !== "applied_manual")) return false;
-  // Free with no searches left still gets the preview (who's there, blurred), which costs nothing.
-  const previewOnly = plan.free && (plan.account?.balance ?? 0) < 1 && !(await hasUnlimitedCredits(userId));
+  // Free with no company left this week still gets the preview (who's there, blurred), which costs nothing.
+  const previewOnly = plan.free && !(await peopleAccess(userId));
   const on = !plan.free ? stored?.autoFindPeople !== false : stored?.autoFindPeople === true || previewOnly;
   if (!on || companyMissing(app)) return false;
   await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: `Searching for relevant people at ${app.company}…` });
@@ -781,14 +781,15 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     if (contactsBusy(app)) return;
     await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
   }
-  // 1 credit finds 1 person, spent only when one with a verified email turns up. With none left, nothing is looked up.
+  // A company's people count once (Free's weekly company, a trial credit, or Pro's hidden guard), only when
+  // someone with an email turns up. With none left, nothing is looked up.
   const paidKey = `person:${userId}:${app.id}`;
   const alreadyPaid = Boolean(app.fillReport?.personCharged);
-  const unlimited = await hasUnlimitedCredits(userId);
-  if (!alreadyPaid && !unlimited && ((await repo.getAccount(userId))?.balance ?? 0) < 1) {
+  const way = alreadyPaid ? null : await peopleAccess(userId);
+  if (!alreadyPaid && !way) {
     // Free: who's there, blurred, from the free searches. Pro shows them.
     if (await isFree(userId)) return previewPeople(userId, app);
-    await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 5 credits find the people at a company for one job." });
+    await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: await peopleNote(userId) });
     return;
   }
   let found: Awaited<ReturnType<typeof findPeopleForApplication>>;
@@ -813,13 +814,12 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   let charged = alreadyPaid;
   // 1 credit for the job's list of people, once, and only when someone on it has an email (checked or written
   // from the company's format). Searching again is free; a list with no emails costs nothing.
-  if (found.people.some((person) => person.email) && !charged && !unlimited) {
-    const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: paidKey, note: `A person at ${app.company.slice(0, 80)}`, entryType: "unlock_debit" });
-    if (spent.insufficient) {
-      await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: "You're out of credits. 5 credits find the people at a company for one job." });
+  if (found.people.some((person) => person.email) && !charged && way) {
+    if (!(await spendPeople(userId, way, paidKey, `A person at ${app.company.slice(0, 80)}`))) {
+      await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: await peopleNote(userId) });
       return;
     }
-    charged = true;
+    charged = way !== "unlimited";
   }
   await applicationContacts.replace(userId, app.id, found.people.map((person) => ({ rank: person.rank, role: person.role, name: person.name, title: person.title, email: person.email, emailSource: person.emailSource, relevance: person.relevance, linkedinUrl: person.linkedinUrl, photoUrl: person.photoUrl, applicationId: app.id, userId, emailSubject: null, emailBody: null })));
   const peopleLinks = Object.fromEntries(found.people.filter((person) => person.links.length).map((person) => [person.name.toLowerCase(), person.links]));
@@ -911,19 +911,16 @@ export async function revealContact(userId: string, raw: unknown) {
   if (!hidden) throw new ServiceError("This person can't be looked up any further.", "not_found", 404);
   if ((report.peopleReveals ?? 0) >= MAX_REVEALS) throw new ServiceError(`You've shown ${MAX_REVEALS} people for this job, which is the limit.`, "reveal_limit", 429);
   const info = await student(userId);
-  // The first email on a job's list is what its credit pays for.
-  const unlimited = await hasUnlimitedCredits(userId);
-  const paid = Boolean(report.personCharged) || unlimited;
-  if (!paid && ((await repo.getAccount(userId))?.balance ?? 0) < 1) throw new ServiceError("You're out of credits. 5 credits find the people at a company for one job.", "credits", 402);
+  // The first email on a job's list is what counts the company (or spends its credit).
+  const paid = Boolean(report.personCharged);
+  const way = paid ? null : await peopleAccess(userId);
+  if (!paid && !way) throw new ServiceError(await peopleNote(userId), "credits", 402);
   const base = contact.relevance.replace(/^(Also|May have) [^.]+\.\s*/g, "").replace(/^(Also|May have) [^.]+\.\s*/g, "");
   const shown = await revealHiddenPerson(userId, app, hidden, info.context.school, base);
   const { [key]: done, ...rest } = report.peopleHidden ?? {};
   void done;
   let charged = Boolean(report.personCharged);
-  if (shown?.email && !paid) {
-    const spent = await repo.spendCredits({ userId, amount: 1, idempotencyKey: `person:${userId}:${app.id}`, note: `A person at ${app.company.slice(0, 80)}`, entryType: "unlock_debit" });
-    charged = !spent.insufficient;
-  }
+  if (shown?.email && !paid && way) charged = way !== "unlimited" && (await spendPeople(userId, way, `person:${userId}:${app.id}`, `A person at ${app.company.slice(0, 80)}`));
   const latest = (await applications.get(userId, app.id)) ?? app;
   const latestReport = latest.fillReport ?? report;
   await applications.update(userId, app.id, { fillReport: {

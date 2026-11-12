@@ -1,18 +1,24 @@
-import { CREDIT_COST, FREE_LIMITS, FREE_PEOPLE, PUBLIC_PLANS, serverConfig } from "@/lib/config";
+import { CREDIT_COST, FREE_LIMITS, FREE_PEOPLE_PER_WEEK, serverConfig } from "@/lib/config";
 import { repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
+import type { UsageCounts } from "@/lib/apply/types";
 import { applicationProfiles } from "@/lib/apply/store";
 import { effectivePlan, trialEndedAt, trialFor, type StoredPlan } from "@/lib/plan";
 import { isAdminEmail } from "@/lib/services/auth";
 
 /**
- * Plan limits beyond people searches. Free has a small allowance of each every month; Pro has no limit, only a hidden
- * monthly fair-use guard (PRO_AI_LIMIT) against scripts.
+ * Plan limits. Free has a few cover letters, answers and full autofills each day, and one company's people a week
+ * (plus anything the trial left); Pro has no limits, only hidden monthly guards (PRO_AI_LIMIT, PRO_PEOPLE_LIMIT)
+ * against scripts. Days, weeks (from Monday) and months are counted in Eastern time, so they turn over at midnight
+ * for most students.
  * Accounts listed in UNLIMITED_CREDIT_EMAILS (comma-separated, set in Vercel) never run out of credits and
  * aren't charged them, but keep their plan, so a Free account still sees every Free limit.
  */
 
+/** Writing and autofill, which Free counts by the day. */
 export type UsageKind = keyof typeof FREE_LIMITS;
+/** Everything counted: people too, which Free counts by the week. */
+export type CountedKind = UsageKind | "people";
 
 export async function hasUnlimitedCredits(userId: string) {
   const list = (process.env.UNLIMITED_CREDIT_EMAILS || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
@@ -53,73 +59,126 @@ export async function setPlanPreview(userId: string, raw: unknown) {
 /** True when the account works as Free (the trial over, no paid plan). */
 export const isFree = async (userId: string) => (await planState(userId)).free;
 
-const thisMonth = () => new Date().toISOString().slice(0, 7);
+const ZONE = "America/New_York";
+/** "2026-11-12", in Eastern time. */
+const dayKey = (at = new Date()) => new Intl.DateTimeFormat("en-CA", { timeZone: ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(at);
+/** The Monday the week started on, as "2026-11-09". */
+const weekKey = () => {
+  const [year, month, day] = dayKey().split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+  return date.toISOString().slice(0, 10);
+};
+const monthKey = () => dayKey().slice(0, 7);
 
-const NAMES: Record<UsageKind | "people", [string, string]> = {
+const NAMES: Record<CountedKind, [string, string]> = {
   letters: ["cover letter", "cover letters"],
   answers: ["question answer", "question answers"],
   autofills: ["autofill", "autofills"],
-  people: ["people search", "people searches"],
+  people: ["company", "companies"],
 };
 
-/** "Only 2 autofills left": empty until the number is worth a mention. Free's low point is a few uses; a paid cap's is 20. */
-function usesNote(kind: UsageKind | "people", left: number, free: boolean, cap: number) {
+/** The line for a tool that's run out (or is down to its last one). The count itself is the badge in each box's corner. */
+function usesNote(kind: CountedKind, left: number, free: boolean, cap: number) {
   const [one, many] = NAMES[kind];
-  if (left <= 0) {
-    if (kind === "people") return free ? `Free shows who works there. Pro shows their names and emails, ${PUBLIC_PLANS[1].credits} companies a month.` : `No ${many} left until your plan renews. Add more under Settings and plans.`;
-    // Pro's writing is unlimited: only the hidden fair-use guard ends it, which a real student never meets.
-    return free ? `No ${many} left this month. Pro has no limit.` : `That's a lot of ${many} this month (${cap}). More on the 1st, or write to us if you need more sooner.`;
-  }
-  // Pro never sees a count for writing or autofill: it has no limit.
-  if (!free && kind !== "people") return "";
-  const low = kind === "people" ? (free ? 2 : 5) : kind === "letters" ? 1 : 2;
-  return left <= low ? `Only ${left} ${left === 1 ? one : many} left${free && kind !== "people" ? " this month" : ""}` : "";
+  if (left > 0) return free && left === 1 && kind !== "people" ? `Only 1 ${one} left today` : "";
+  if (!free) return `That's a lot of ${many} this month (${cap}). More on the 1st, or write to us if you need more sooner.`;
+  if (kind === "people") return "You've seen this week's free company. More on Monday, or Pro shows everyone at every company.";
+  if (kind === "autofills") return `Today's ${FREE_LIMITS.autofills} full autofills are used. Autofill still fills your basic details; Pro answers the questions too, with no limit.`;
+  return `No ${many} left today. More tomorrow, or Pro has no limit.`;
 }
 
-/** What the student has left on their plan, in uses and in credits, and the line to show for anything running low. */
+/** What the student has left on their plan: each tool's count, the badge for its box, and a line once it runs out. */
 export async function planUsage(userId: string) {
   const [state, stored, unlimited] = await Promise.all([planState(userId), applicationProfiles.get(userId), hasUnlimitedCredits(userId)]);
   const { account, free } = state;
-  // Previewing Free shows Free's notes; credits still aren't charged (reveals read the real setting).
+  // Previewing Free shows Free's limits; credits still aren't charged (reveals read the real setting).
   const shownUnlimited = unlimited && state.preview !== "free";
+  // Paying (or an admin previewing Pro): unlimited. The trial works as Pro for writing, but its people come from
+  // the trial's credits and Free's weekly company, since each costs real money.
+  const paid = !free && (state.stored !== "free" || state.preview === "pro");
   const config = serverConfig();
   const fairUse = state.plan === "premium" ? config.premiumAiLimit : config.proAiLimit;
   const uses = stored?.uses;
-  // Every plan counts by the month now: Free's allowance comes back on the 1st, Pro's fair-use guard too.
-  const count = (kind: UsageKind) => (uses?.month === thisMonth() ? uses.monthly?.[kind] : 0) ?? 0;
+  const [today, week, month] = [dayKey(), weekKey(), monthKey()];
+  const daily = (kind: CountedKind) => (uses?.day === today ? uses.daily?.[kind] : 0) ?? 0;
+  const weekly = (kind: CountedKind) => (uses?.week === week ? uses.weekly?.[kind] : 0) ?? 0;
+  const monthly = (kind: CountedKind) => (uses?.month === month ? uses.monthly?.[kind] : 0) ?? 0;
   const one = (kind: UsageKind) => {
+    const used = free ? daily(kind) : monthly(kind);
     const limit = free ? FREE_LIMITS[kind] : fairUse;
-    const left = Math.max(0, limit - count(kind));
-    return { used: count(kind), limit, left, note: usesNote(kind, left, free, limit) };
+    const left = Math.max(0, limit - used);
+    return { used, limit, left, note: usesNote(kind, left, free, limit), badge: free ? `${left} left today` : "Unlimited" };
   };
   const [letters, answers] = [one("letters"), one("answers")];
-  // Free fills the basic fields (no AI), with no limit; the AI answers to a form's questions are for Pro.
-  const autofills = free ? { used: count("autofills"), limit: 0, left: 0, note: "", basic: true } : { ...one("autofills"), basic: false };
-  const peopleLeft = account?.balance ?? (free ? FREE_PEOPLE : 0);
-  const people = { left: peopleLeft, note: shownUnlimited ? "" : usesNote("people", peopleLeft, free, 0) };
+  // Free's full autofills (the questions answered too) are counted; after them it fills the basic details, with no limit.
+  const fills = one("autofills");
+  const autofills = { ...fills, basic: free && fills.left === 0, badge: free && fills.left === 0 ? "Basic only today" : fills.badge };
+  const credits = account?.balance ?? 0;
+  const people = (() => {
+    if (shownUnlimited) return { used: 0, left: 999, allowance: 999, credits, paid: true, note: "", badge: "Unlimited" };
+    if (paid) {
+      const left = Math.max(0, config.proPeopleLimit - monthly("people"));
+      return { used: monthly("people"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, config.proPeopleLimit), badge: "Unlimited" };
+    }
+    const allowance = Math.max(0, FREE_PEOPLE_PER_WEEK - weekly("people"));
+    const left = allowance + credits;
+    return { used: weekly("people"), left, allowance, credits, paid: false, note: usesNote("people", left, true, 0), badge: credits ? `${left} left` : `${left} left this week` };
+  })();
   const writing = free ? letters.left * CREDIT_COST.letters + answers.left * CREDIT_COST.answers : 0;
-  return { free, plan: state.plan, preview: state.preview, trial: state.trial, trialEnded: state.trialEnded, unlimited: shownUnlimited, credits: shownUnlimited ? null : writing + peopleLeft * CREDIT_COST.people, letters, answers, autofills, people };
+  return {
+    free, plan: state.plan, preview: state.preview, trial: state.trial, trialEnded: state.trialEnded,
+    unlimited: shownUnlimited || paid,
+    credits: shownUnlimited || paid ? null : writing + people.left * CREDIT_COST.people,
+    letters, answers, autofills, people,
+  };
+}
+
+/** How a people search would be paid for: Pro's plan, Free's weekly company, or a credit from the trial or a pack. */
+export type PeopleWay = "unlimited" | "plan" | "credit";
+
+export async function peopleAccess(userId: string): Promise<PeopleWay | null> {
+  if (await hasUnlimitedCredits(userId)) return "unlimited";
+  const { people } = await planUsage(userId);
+  if (people.paid) return people.left > 0 ? "plan" : null;
+  if (people.allowance > 0) return "plan";
+  return people.credits > 0 ? "credit" : null;
+}
+
+/** A company's people were found with an email: counts it, or spends the credit. False when the credit was gone. */
+export async function spendPeople(userId: string, way: PeopleWay, key: string, note: string) {
+  if (way === "unlimited") return true;
+  if (way === "credit") return !(await repo.spendCredits({ userId, amount: 1, idempotencyKey: key, note, entryType: "unlock_debit" })).insufficient;
+  await countUse(userId, "people");
+  return true;
+}
+
+/** What to say when there's no way to pay for a people search. */
+export async function peopleNote(userId: string) {
+  return (await planUsage(userId)).people.note || "No more companies right now.";
 }
 
 /** Before an AI use: stops at the plan's number. */
 export async function assertUseAllowed(userId: string, kind: UsageKind) {
   const usage = await planUsage(userId);
-  // Free's autofill is the basic fields, which has no limit.
+  // Free out of full autofills still fills the basic details, which has no limit.
   if (kind === "autofills" && usage.autofills.basic) return;
   if (usage[kind].left === 0) throw new ServiceError(usage[kind].note, kind, usage.free ? 402 : 429);
 }
 
-/** After a use that worked: one more. Edits the student types themselves don't count. */
-export async function countUse(userId: string, kind: UsageKind) {
-  const stored = await applicationProfiles.get(userId);
-  if (!stored) return;
-  const month = thisMonth();
+/** After a use that worked: one more, in the day's, week's and month's counts. Edits the student types themselves don't count. */
+export async function countUse(userId: string, kind: CountedKind) {
+  // An account with no saved profile yet still counts, or it would never run out: its profile is built from the
+  // account, as everywhere else (imported here, since the service imports this file).
+  const stored = (await applicationProfiles.get(userId)) ?? (await (await import("@/lib/apply/service")).student(userId)).profile;
+  const [day, week, month] = [dayKey(), weekKey(), monthKey()];
   const uses = stored.uses;
-  const monthly = uses?.month === month ? uses.monthly : {};
+  const bump = (counts: UsageCounts | undefined) => ({ ...counts, [kind]: (counts?.[kind] ?? 0) + 1 });
   await applicationProfiles.put(userId, { ...stored, uses: {
-    total: { ...uses?.total, [kind]: (uses?.total?.[kind] ?? 0) + 1 },
-    month,
-    monthly: { ...monthly, [kind]: (monthly[kind] ?? 0) + 1 },
+    total: bump(uses?.total),
+    month, monthly: bump(uses?.month === month ? uses.monthly : {}),
+    day, daily: bump(uses?.day === day ? uses.daily : {}),
+    week, weekly: bump(uses?.week === week ? uses.weekly : {}),
   } });
 }
 
