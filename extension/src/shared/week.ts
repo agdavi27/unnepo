@@ -66,7 +66,8 @@ const shortDate = (date: Date) => date.toLocaleDateString("en-US", { month: "sho
  * Week: every day you did something over the last 12 weeks (applied, emailed someone, heard back), brighter for
  * a busier day, with this week's count, the goal and the streak on top. Tapping a day shows what happened.
  */
-export function weekView(now = new Date()) {
+/** `under` goes right below the calendar, above friends: the job list on Week. */
+export function weekView(now = new Date(), under = "") {
   if (!store.tracker) return `<section class="page"><span class="eyebrow">Every day you did something</span><p class="note">${escape(store.error || "Loading your week…")}</p></section>`;
   const jobs = store.tracker.jobs;
   const applied = perDay(jobs);
@@ -119,6 +120,7 @@ export function weekView(now = new Date()) {
       </div>
       ${detail || `<p class="small">Tap a day to see what happened.</p>`}
     </section>
+    ${under}
     ${friendsWeekCard(week)}`;
 }
 

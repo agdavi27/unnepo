@@ -228,11 +228,15 @@ const usesLine = (note?: string) => (note ? `<span class="small uses-left" role=
 let fillPending: number | null = null;
 const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPending !== null && fillPending === state.tab?.id);
 
-/** Week with no job on the tab: getting started, the calendar of every day you did something, and friends. */
+/**
+ * Week with no job on the tab: getting started, the calendar of every day you did something, then every job with
+ * its progress (searchable, filtered by step) and the dashboard on unnepo.com, then friends.
+ */
 function homeLists(state: PanelState) {
   const noEmail = firstEmailCount();
   const nudge = noEmail ? `<button type="button" class="note warn nudge" data-show-jobs="reach">${noEmail} ${noEmail === 1 ? "job you applied to has" : "jobs you applied to have"} no email sent yet. See them →</button>` : "";
-  return `${startCard(state)}${weekView()}${nudge}`;
+  const list = `${nudge}${jobsList()}<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>`;
+  return `${startCard(state)}${weekView(new Date(), list)}`;
 }
 
 /**
@@ -1496,9 +1500,8 @@ function wireManualJob(state: PanelState) {
 }
 
 /**
- * The Jobs tab. Logging jobs first: adding one by hand, "I already applied" for the job on the tab, the jobs the
- * extension caught, then every job with its progress and a link to the Jobs page on unnepo.com. Below a divider,
- * the tools: Autofill, a cover letter, answering a question, the resume and password.
+ * The Jobs tab. Logging jobs first: adding one by hand, "I already applied" for the job on the tab, and the jobs
+ * the extension caught. The list of every job is on Week. Below a divider, the tools: Autofill, a cover letter, answering a question, the resume and password.
  */
 function jobsView(state: PanelState) {
   ensureTracker();
@@ -1508,8 +1511,6 @@ function jobsView(state: PanelState) {
       ${jobFound(state) && !manualJob.open ? hereLinks() : ""}
       ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
       ${detectedMenu()}
-      ${jobsList()}
-      <a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>
     </div>
     <div class="section-divider" role="separator"><span>Tools</span></div>
     ${toolsPage(state)}`;
@@ -1772,7 +1773,7 @@ function draw(state: PanelState): boolean {
     wireWeek(app);
     wireFriends(app);
     wireJobsList(app);
-    app.querySelectorAll<HTMLButtonElement>("[data-show-jobs]").forEach((button) => button.addEventListener("click", () => { showJobs("reach"); go("jobs"); }));
+    app.querySelectorAll<HTMLButtonElement>("[data-show-jobs]").forEach((button) => button.addEventListener("click", () => { showJobs("reach"); go("home"); }));
     const job = view === "job" ? jobById(openedJob.id) : null;
     if (job) wireJobPage(app, job);
     wireTracking();
