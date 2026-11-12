@@ -9,7 +9,7 @@ import { readStoredResume } from "@/lib/services/resume";
 import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/resume-profile";
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { MAX_REVEALS, checkBeforeWriting, findPeopleForApplication, hunterReady, revealHiddenPerson, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
-import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
+import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
@@ -434,8 +434,11 @@ async function companyFromPosting(userId: string, app: JobApplication) {
  */
 export async function repairCompanies(userId: string, apps: JobApplication[]) {
   const tidied = await Promise.all(apps.map(async (app) => {
-    // Saved with the words around the name ("See more jobs at Anderson Equipment Company"): just the name.
-    const cleaned = cleanCompanyName(app.company);
+    // Saved with the words around the name ("See more jobs at Anderson Equipment Company", "Details from MealPal"):
+    // just the name. No name at all, but a title that was an apply pop-up's heading ("Apply to MealPal"): that one.
+    const fromHeading = companyFromApplyHeading(app.title);
+    let cleaned = cleanCompanyName(app.company);
+    if (fromHeading && (cleaned.length < 2 || companyMissing({ company: cleaned, jobUrl: app.jobUrl }))) cleaned = fromHeading;
     if (cleaned !== app.company && cleaned.length >= 2) return (await applications.update(userId, app.id, { company: cleaned.slice(0, 200) })) ?? app;
     return app;
   }));
