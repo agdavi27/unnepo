@@ -3,7 +3,7 @@ import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, CREDIT_COST_FALLBACK, NEVER_READ, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
-import { detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
+import { detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { friendRequests, friendsSettingsCard, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
@@ -12,20 +12,19 @@ import { dueCount } from "../shared/reminders";
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
  * while it fills, just the spider typing on his laptop; when it's applied, went wrong, or there's no job, two big
  * buttons that open a popup asking one question at a time, with the resume and password small under them. The menu
- * runs along the bottom: Week, Jobs, Tools and Me.
+ * runs along the bottom: Week, Jobs (with the tools on top) and Me.
  */
 
 const app = document.getElementById("app")!;
 const passwordSection = document.getElementById("password")!;
 const tabBar = document.getElementById("tabs")!;
-const weekBadge = document.getElementById("week-count")!;
 const jobsBadge = document.getElementById("jobs-count")!;
 const meBadge = document.getElementById("me-count")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-/** The four tabs along the bottom (home = Week, jobs, more = Tools, settings = Me), and the pages opened from them. */
-type View = "home" | "jobs" | "more" | "feedback" | "settings" | "job";
-const TABS: View[] = ["home", "jobs", "more", "settings"];
+/** The three tabs along the bottom (home = Week, jobs = Jobs and the tools, settings = Me), and the pages opened from them. */
+type View = "home" | "jobs" | "feedback" | "settings" | "job";
+const TABS: View[] = ["home", "jobs", "settings"];
 let view: View = "home";
 /** The job open on the "job" page, and the person to show on it. */
 let openedJob = { id: "", contact: "" };
@@ -231,14 +230,11 @@ const usesLine = (note?: string) => (note ? `<span class="small uses-left" role=
 let fillPending: number | null = null;
 const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPending !== null && fillPending === state.tab?.id);
 
-/**
- * Home with no job on the tab: today's reminders, the newest jobs (each opens its page, with the people at the
- * company), adding one by hand, and the dashboard.
- */
+/** Week with no job on the tab: getting started, the calendar of every day you did something, and friends. */
 function homeLists(state: PanelState) {
   const noEmail = firstEmailCount();
   const nudge = noEmail ? `<button type="button" class="note warn nudge" data-show-jobs="reach">${noEmail} ${noEmail === 1 ? "job you applied to has" : "jobs you applied to have"} no email sent yet. See them →</button>` : "";
-  return `${startCard(state)}${weekView()}${nudge}${remindersCard(6, "To do", false)}`;
+  return `${startCard(state)}${weekView()}${nudge}`;
 }
 
 /**
@@ -279,7 +275,7 @@ function jobFillPage(state: PanelState) {
       ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
     </section>
     <div class="job-foot">
-      <button type="button" class="more-row" data-go="more">Cover letter, resume, more <span aria-hidden="true">›</span></button>
+      <button type="button" class="more-row" data-go="jobs">Cover letter, resume, more <span aria-hidden="true">›</span></button>
       ${goalBar(state)}
     </div>`;
 }
@@ -553,8 +549,7 @@ function homeView(state: PanelState) {
   if (state.job?.submission || state.job?.error) return menu + card + homeLists(state);
   if (card) return here.step === "check" ? card : menu + card + homeLists(state);
   if (AUTOFILL_ENABLED && jobFound(state)) return jobFillPage(state);
-  // A job on the tab: its box on top. Then what's due today and every job applied to. The cover letter and
-  // question tools are on the Tools tab.
+  // A job on the tab: its box on top, then the calendar. The cover letter and question tools are on the Jobs tab.
   if (!AUTOFILL_ENABLED) {
     const onJob = jobFound(state) || state.applying;
     return menu + (onJob ? `${jobBox(state)}${jobFound(state) && !state.applying ? hereLinks() : ""}${note}` : note) + homeLists(state);
@@ -581,8 +576,7 @@ function pageView(state: PanelState) {
   const heading = (text: string) => `<div class="row-between"><span class="heading">${text}</span></div>`;
   const pages: Record<Exclude<View, "home">, () => string> = {
     job: jobView,
-    jobs: () => jobsView(),
-    more: () => toolsPage(state, jobFound(state) ? hereLinks() : ""),
+    jobs: () => jobsView(state),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     // Me: who you are and your plan, friends, how Unnepo behaves, then help. Sign out and the version last.
     settings: () => `${profileCard(state)}
@@ -1504,10 +1498,13 @@ function wireManualJob(state: PanelState) {
   });
 }
 
-/** The Jobs tab: every job as a floating bubble (See info, Delete), adding one by hand, and the dashboard. */
-function jobsView() {
+/**
+ * The Jobs tab: the tools first (Autofill, a cover letter, answering a question, the resume and password), then
+ * adding a job by hand, every job with its progress, and the dashboard.
+ */
+function jobsView(state: PanelState) {
   ensureTracker();
-  return `${manualJobForm()}${jobsList()}
+  return `${toolsPage(state, jobFound(state) ? hereLinks() : "")}${manualJobForm()}${jobsList()}
     <a class="btn" href="${escape(DASHBOARD_URL)}" target="_blank" rel="noreferrer">Open my dashboard</a>`;
 }
 
@@ -1545,6 +1542,8 @@ function wireTracking() {
     tracking!.mailer = value;
     store.mailer = value;
     void chrome.storage.local.set({ mailer: value });
+    // Chosen: let redraws through again.
+    (event.target as HTMLSelectElement).blur();
   });
   document.getElementById("notify")?.addEventListener("change", (event) => {
     tracking!.notify = (event.target as HTMLInputElement).checked;
@@ -1704,9 +1703,8 @@ function draw(state: PanelState): boolean {
   if (state.job?.running && fillPending === state.tab?.id) fillPending = null;
   tabBar.hidden = !state.connected;
   const tabNow = view === "job" ? jobFrom : view === "feedback" ? "settings" : view;
-  // Week: what's due today. Jobs: jobs applied to with nobody emailed yet.
+  // Jobs: jobs applied to with nobody emailed yet. Me: friend requests.
   const badge = (element: HTMLElement, count: number) => { element.textContent = count ? String(count) : ""; element.hidden = !count; };
-  badge(weekBadge, state.connected && store.tracker ? dueCount(todayList().items) : 0);
   badge(jobsBadge, state.connected ? firstEmailCount() : 0);
   badge(meBadge, state.connected ? friendRequests() : 0);
   tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => {
@@ -1724,6 +1722,8 @@ function draw(state: PanelState): boolean {
   if (document.activeElement?.matches("#password input")) return false;
   // Nor a search in Jobs, or a friend's email.
   if (document.activeElement?.matches("#job-search, #friend-email")) return false;
+  // Nor an open dropdown: redrawing it closes the list before a choice is made.
+  if (document.activeElement instanceof HTMLSelectElement && app.contains(document.activeElement)) return false;
   // Nor the job being checked before "I applied" saves it.
   if (document.activeElement?.closest("#here-form") && document.activeElement.matches("input")) return false;
   // The password is drawn on its own, so a redraw can't lose what's typed: it's moved out, then back into its slot.
