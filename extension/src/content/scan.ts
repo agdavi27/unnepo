@@ -1,4 +1,4 @@
-import { cleanCompanyName, notJobTitle } from "@/lib/apply/job-title";
+import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
 import { QUICK_BOARDS } from "./quick-apply";
 import type { FieldType, PageField, Scan } from "../shared/types";
 
@@ -449,6 +449,16 @@ function hostCompany(host: string) {
   return NOT_COMPANY.test(first) ? "" : first;
 }
 
+/** What a job is called when the page doesn't say: the same words the server saves, so it shows as missing. */
+const NO_TITLE = "Job title missing";
+
+/** The employer an open apply pop-up names: Handshake's reads "Apply to Runway Services". "" when none does. */
+function applyDialogCompany() {
+  const dialog = openDialog();
+  if (!dialog) return "";
+  return Array.from(dialog.querySelectorAll<HTMLElement>(HEADING)).map((el) => companyFromApplyHeading(clean(el.textContent))).find(Boolean) ?? "";
+}
+
 /** What the page is: the job system, title and company, and the form's fields. */
 export function scanPage(): Scan {
   const host = window.location.hostname;
@@ -466,9 +476,12 @@ export function scanPage(): Scan {
   const fromTitle = posting || !QUICK_BOARDS.test(host) ? null : titleParts(document.title) ?? titleParts(meta("og:title"));
   const named = (text: string | undefined) => (text && !notJobTitle(text) ? text : "");
   const firstHeading = Array.from(document.querySelectorAll("h1")).map((el) => clean(el.textContent)).find((text) => text && !notJobTitle(text)) ?? "";
-  const title = (named(posting?.title) || greenhouseTitle?.[1] || named(fromTitle?.title) || named(heading) || firstHeading || named(meta("og:title")) || document.title).slice(0, 200);
+  // The tab's own name is the last resort, without the site's name after it, and never a page name like "Jobs".
+  // Nothing at all: the server's own "Job title missing", so the job is still caught and can be named later.
+  const tabName = clean(document.title.split(/\s+[|–—-]\s+/)[0]);
+  const title = (named(posting?.title) || greenhouseTitle?.[1] || named(fromTitle?.title) || named(heading) || firstHeading || named(meta("og:title")) || named(tabName) || NO_TITLE).slice(0, 200);
   const siteName = meta("og:site_name");
-  const company = (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "")
+  const company = (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "") || applyDialogCompany()
     || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || hostCompany(host)).slice(0, 200);
   const frame = document.querySelector<HTMLIFrameElement>("iframe#grnhse_iframe, iframe[src*='greenhouse.io/embed'], iframe[src*='jobs.lever.co'], iframe[src*='ashbyhq.com']");
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);

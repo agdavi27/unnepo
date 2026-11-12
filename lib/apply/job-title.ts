@@ -1,7 +1,7 @@
 /**
  * Lines a job's page shows about the student's application or the posting, which are never the job's name:
  * "Applied on November 2, 2026", "Application submitted", "Posted 3 days ago", and an apply pop-up's headings
- * ("Apply to Runway Services", "Details from Runway Services"). A real title that starts the same way ("Applied
+ * ("Apply to Runway Services", "Details from Runway Services"), and a site's page names ("Jobs", "Job search"). A real title that starts the same way ("Applied
  * Scientist", "Application Engineer") still counts. No server imports, so the extension uses it too.
  */
 
@@ -19,11 +19,13 @@ const STATUS = new RegExp(
   "i",
 );
 const DATE_ONLY = new RegExp(`^${MONTH} \\d{1,2}(, \\d{4})?$`, "i");
+// A site's own page names, the heading over a job board's search or menu: "Jobs", "Job search", "Saved jobs".
+const PAGE_NAME = /^(jobs?|job search|search( jobs| results)?|find (a )?jobs?|browse jobs|all jobs|saved jobs|recommended( jobs)?|jobs for you|job (postings?|board|listings?)|postings?|listings?|careers?|career (center|centre|services)|home|explore|discover|internships?( and jobs)?|opportunities|open (roles|positions)|positions|(my )?applications|messages|inbox|events|employers|companies|dashboard|feed|notifications|profile)$/i;
 
 /** Whether this text is a status or date line rather than a job's name. */
 export function notJobTitle(text: string) {
   const line = text.replace(/\s+/g, " ").trim();
-  return line.length < 2 || STATUS.test(line) || DATE_ONLY.test(line);
+  return line.length < 2 || STATUS.test(line) || DATE_ONLY.test(line) || PAGE_NAME.test(line);
 }
 
 // Words around an employer's name on job pages: links ("See more jobs at …", "Follow …"), labels, ratings.

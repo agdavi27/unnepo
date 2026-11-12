@@ -256,6 +256,9 @@ describe("status lines aren't job titles", () => {
     expect(cleanCompanyName("Apply to Runway Services")).toBe("Runway Services");
     expect(companyFromApplyHeading("Apply to Odyssey Search Partners")).toBe("Odyssey Search Partners");
     expect(companyFromApplyHeading("Growth Intern")).toBe("");
+    // A site's own page names aren't a job either.
+    for (const line of ["Jobs", "Job search", "Saved jobs", "Careers", "Home"]) expect(notJobTitle(line)).toBe(true);
+    for (const title of ["Jobs Program Analyst", "Careers Coordinator", "Home Health Aide"]) expect(notJobTitle(title)).toBe(false);
   });
 
   it("never saves one as the title, lists the job as missing its title, and fills it in from the link or by hand", async () => {
