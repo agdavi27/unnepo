@@ -451,3 +451,9 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .friend-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 .friend-actions .solid { height: 32px; padding: 0 12px; }
 .friend-actions .quiet-link { min-height: 32px; }
+
+/* Jobs tab: logging jobs on top, then a clear line, then the tools. */
+.jobs-log { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.section-divider { display: flex; align-items: center; gap: 10px; margin: 18px 0 2px; font: 600 11px var(--mono); letter-spacing: 1.4px; text-transform: uppercase; color: var(--muted-2); }
+.section-divider::before, .section-divider::after { content: ""; flex: 1; height: 1px; background: #33333B; }
+.section-divider + .tools { padding-top: 6px; }

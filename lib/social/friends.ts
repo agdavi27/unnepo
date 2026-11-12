@@ -93,12 +93,24 @@ export async function inviteFriend(userId: string, emailRaw: unknown) {
     db.friendships.push(row);
     return { status: "sent" as const, row };
   });
+  // A new request is emailed. So is one still waiting whose email never went out (email wasn't set up yet, or it
+  // failed): adding them again tries once more.
   let emailed = false;
-  if (result.status === "sent") {
+  const ours = result.row.fromUserId === userId;
+  if (result.status === "sent" || (result.status === "waiting" && ours && !result.row.emailedAt)) {
     const appliedThisWeek = await appliedSince(userId, Date.now() - 7 * 86_400_000).catch(() => 0);
-    emailed = await sendFriendInviteEmail({ to: typed, fromName: shownName(user), appliedThisWeek, hasAccount: Boolean(toUserId), origin: appOrigin() }).catch(() => false);
+    emailed = await sendFriendInviteEmail({ to: typed, fromName: shownName(user), appliedThisWeek, hasAccount: Boolean(toUserId), origin: appOrigin() }).catch((error) => {
+      console.error("friend_invite_email_failed", error);
+      return false;
+    });
+    if (emailed) {
+      await withLock((db) => {
+        const row = (db.friendships ?? []).find((item) => item.id === result.row.id);
+        if (row) row.emailedAt = nowIso();
+      });
+    } else console.error("friend_invite_email_not_sent", { resend: Boolean(process.env.RESEND_API_KEY) });
   }
-  return { ok: true, status: result.status, emailed };
+  return { ok: true, status: result.status, emailed: emailed || Boolean(result.row.emailedAt) };
 }
 
 /** Accepts or declines a request sent to the student. Declining deletes it; the sender isn't told. */

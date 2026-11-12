@@ -30,8 +30,6 @@ let view: View = "home";
 let openedJob = { id: "", contact: "" };
 /** The tab a job's page was opened from, where Back goes. */
 let jobFrom: View = "home";
-/** The extension's own dashboard: every job in one table. */
-const DASHBOARD_URL = chrome.runtime.getURL("dashboard/dashboard.html");
 /** The cover letter or answer popup, and which of its questions is showing. */
 let popup: { kind: "cover" | "answer"; step: number } | null = null;
 
@@ -542,22 +540,21 @@ const hereLinks = () => {
 function homeView(state: PanelState) {
   if (isRunning(state)) return fillingView();
   ensureTracker();
-  const menu = detectedMenu();
   const note = here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : "";
-  if (onLinkedIn(state)) return menu + linkedInCard(state) + homeLists(state);
+  if (onLinkedIn(state)) return linkedInCard(state) + homeLists(state);
   const card = openedCard(state);
-  if (state.job?.submission || state.job?.error) return menu + card + homeLists(state);
-  if (card) return here.step === "check" ? card : menu + card + homeLists(state);
+  if (state.job?.submission || state.job?.error) return card + homeLists(state);
+  if (card) return here.step === "check" ? card : card + homeLists(state);
   if (AUTOFILL_ENABLED && jobFound(state)) return jobFillPage(state);
   // A job on the tab: its box on top, then the calendar. The cover letter and question tools are on the Jobs tab.
   if (!AUTOFILL_ENABLED) {
     const onJob = jobFound(state) || state.applying;
-    return menu + (onJob ? `${jobBox(state)}${jobFound(state) && !state.applying ? hereLinks() : ""}${note}` : note) + homeLists(state);
+    return (onJob ? `${jobBox(state)}${jobFound(state) && !state.applying ? hereLinks() : ""}${note}` : note) + homeLists(state);
   }
   const how = dismissal(state);
   const onWeb = Boolean(state.tab && /^https:\/\//.test(state.tab.url)) && !onUnnepo(state);
   return `${how ? `<div class="row-between"><span class="sub">${how === "skipped" ? "Job skipped." : "Marked as not a job."}</span><button type="button" class="quiet-link" id="undo-dismiss">Undo</button></div>` : ""}
-    ${menu}${onWeb && !how ? hereLinks() : ""}${note}${homeLists(state)}`;
+    ${onWeb && !how ? hereLinks() : ""}${note}${homeLists(state)}`;
 }
 
 /** Back, on a page opened from a tab: a job's page goes back where it came from, Feedback to Settings. */
@@ -1499,13 +1496,23 @@ function wireManualJob(state: PanelState) {
 }
 
 /**
- * The Jobs tab: the tools first (Autofill, a cover letter, answering a question, the resume and password), then
- * adding a job by hand, every job with its progress, and the dashboard.
+ * The Jobs tab. Logging jobs first: adding one by hand, "I already applied" for the job on the tab, the jobs the
+ * extension caught, then every job with its progress and a link to the Jobs page on unnepo.com. Below a divider,
+ * the tools: Autofill, a cover letter, answering a question, the resume and password.
  */
 function jobsView(state: PanelState) {
   ensureTracker();
-  return `${toolsPage(state, jobFound(state) ? hereLinks() : "")}${manualJobForm()}${jobsList()}
-    <a class="btn" href="${escape(DASHBOARD_URL)}" target="_blank" rel="noreferrer">Open my dashboard</a>`;
+  return `
+    <div class="jobs-log">
+      ${manualJobForm()}
+      ${jobFound(state) && !manualJob.open ? hereLinks() : ""}
+      ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
+      ${detectedMenu()}
+      ${jobsList()}
+      <a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>
+    </div>
+    <div class="section-divider" role="separator"><span>Tools</span></div>
+    ${toolsPage(state)}`;
 }
 
 /** Settings for catching applications, email links and reminders. Kept on this computer. */
@@ -1703,9 +1710,11 @@ function draw(state: PanelState): boolean {
   if (state.job?.running && fillPending === state.tab?.id) fillPending = null;
   tabBar.hidden = !state.connected;
   const tabNow = view === "job" ? jobFrom : view === "feedback" ? "settings" : view;
-  // Jobs: jobs applied to with nobody emailed yet. Me: friend requests.
+  // Me: friend requests.
   const badge = (element: HTMLElement, count: number) => { element.textContent = count ? String(count) : ""; element.hidden = !count; };
-  badge(jobsBadge, state.connected ? firstEmailCount() : 0);
+  // Jobs counts jobs with nobody emailed yet, plus caught jobs asking "Did you apply?".
+  const asking = (store.detected ?? []).filter((item) => item.state === "ask").length;
+  badge(jobsBadge, state.connected ? firstEmailCount() + asking : 0);
   badge(meBadge, state.connected ? friendRequests() : 0);
   tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => {
     const on = tab.dataset.tab === tabNow;

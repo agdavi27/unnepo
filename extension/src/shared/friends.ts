@@ -97,7 +97,8 @@ async function act(body: Record<string, unknown>, done: (result: { status?: stri
   type Answer = { ok: boolean; error?: string; status?: string; emailed?: boolean };
   const result = await ask<Answer>({ type: "friend-action", body }).catch((): Answer => ({ ok: false, error: "Couldn't reach Unnepo." }));
   friends.busy = false;
-  friends.noteBad = !result.ok;
+  // An invite whose email didn't go out shows in the warning color.
+  friends.noteBad = !result.ok || (body.action === "invite" && (result.status === "sent" || result.status === "waiting") && !result.emailed);
   friends.note = result.ok ? done(result) : result.error ?? "Couldn't do that.";
   await loadFriends();
 }
@@ -114,8 +115,8 @@ export function wireFriends(root: HTMLElement) {
       friends.email = "";
       if (result.status === "accepted") return "They'd already asked you, so you're friends now.";
       if (result.status === "already") return "You're already friends.";
-      if (result.status === "waiting") return "Already sent. Waiting for them to accept.";
-      return result.emailed ? `Sent. ${email} got an email inviting them to compete.` : `Sent. ${email} sees it in Unnepo under Me.`;
+      if (result.status === "waiting") return result.emailed ? "Already sent. Waiting for them to accept." : "Saved, but the email to them didn't go out. Unnepo's email isn't working right now; try adding them again later.";
+      return result.emailed ? `Sent. ${email} got an email inviting them to compete.` : `Saved, but the email to ${email} didn't go out. They'll see your request under Me once they sign up.`;
     });
   });
   root.querySelectorAll<HTMLButtonElement>("[data-friend-accept]").forEach((button) => button.addEventListener("click", () => void act({ action: "respond", id: button.dataset.friendAccept, accept: true }, () => "You're friends now.")));

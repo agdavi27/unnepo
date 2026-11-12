@@ -72,6 +72,23 @@ describe("friends", () => {
     expect(String(sent[0].html)).toContain("/signup?email=lee.kay%40colby.edu");
   });
 
+  it("tries the email again when a request is re-added after email wasn't set up", async () => {
+    const pat = await student("pat.doe@colby.edu", "Pat Doe");
+    const first = await inviteFriend(pat, "lee.kay@colby.edu");
+    expect(first).toMatchObject({ status: "sent", emailed: false });
+    process.env.RESEND_API_KEY = "test-key";
+    let sent = 0;
+    vi.stubGlobal("fetch", async (url: string) => {
+      if (url.includes("resend")) sent += 1;
+      return new Response("{}", { status: 200 });
+    });
+    expect(await inviteFriend(pat, "lee.kay@colby.edu")).toMatchObject({ status: "waiting", emailed: true });
+    expect(sent).toBe(1);
+    // Once it went out, adding them again doesn't send another.
+    expect(await inviteFriend(pat, "lee.kay@colby.edu")).toMatchObject({ status: "waiting", emailed: true });
+    expect(sent).toBe(1);
+  });
+
   it("refuses yourself and bad emails, and removes or declines", async () => {
     const pat = await student("pat.doe@colby.edu", "Pat Doe");
     const sam = await student("sam.roe@colby.edu", "Sam Roe");

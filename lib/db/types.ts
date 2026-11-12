@@ -561,6 +561,8 @@ export type Friendship = {
   status: "pending" | "accepted";
   createdAt: string;
   acceptedAt: string | null;
+  /** When the invite email went out; unset while it hasn't, so adding them again tries once more. */
+  emailedAt?: string | null;
 };
 
 export type Database = {
