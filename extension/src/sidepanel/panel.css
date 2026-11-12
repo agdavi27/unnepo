@@ -255,6 +255,12 @@ details.part .view { padding: 12px 0 0; }
 .job-box.compact .desc summary, .job-box.compact .quiet-link { font-size: 12px; }
 .job-box + .tools { padding-top: 0; }
 .job-name.small-name { font-size: 19px; }
+.job-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.job-title-row .job-name { flex: 1; min-width: 0; }
+.status-mini { flex: none; height: 26px; margin-top: 1px; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--surface); color: var(--fg); font: 500 12px Geist, sans-serif; cursor: pointer; }
+select.status-mini { padding-right: 4px; }
+button.status-mini:hover, select.status-mini:hover { border-color: var(--accent); }
+.edit-job { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 12px; }
 .facts { display: flex; flex-wrap: wrap; gap: 6px; }
 .fact { padding: 3px 9px; border: 1px solid var(--control); border-radius: 999px; font-size: 12px; color: var(--muted-3); }
 .desc summary, .q-answer summary { cursor: pointer; font-size: 13px; color: var(--muted-3); }

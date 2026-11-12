@@ -346,6 +346,19 @@ describe("editing a job and its notes", () => {
   });
 });
 
+describe("editing a job from the extension", () => {
+  it("changes the title, company and link, and nothing else", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    const saved = await (await call("POST", "submissions", token, { url: "https://jobs.lever.co/acme/123", title: "Data Analyst", company: "Acme", confidence: "likely", how: "page_said" })).json();
+    const edited = await (await call("POST", "edit-job", token, { applicationId: saved.application.id, title: "Data Analyst Intern", company: "Acme Corp", url: "https://jobs.lever.co/acme/456", description: "ignored" })).json();
+    expect(edited.application).toMatchObject({ title: "Data Analyst Intern", company: "Acme Corp" });
+    expect(edited.application.fillReport?.postingUrl).toBe("https://jobs.lever.co/acme/456");
+    const bad = await call("POST", "edit-job", token, { applicationId: saved.application.id, url: "jobs.lever.co" });
+    expect(bad.status).toBe(400);
+  });
+});
+
 describe("filling in a job from its link", () => {
   it("fills a missing company from what the extension read, and never replaces a real one", async () => {
     const userId = await readyStudent();

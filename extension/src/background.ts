@@ -1929,6 +1929,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         } catch (error) {
           return reply(failed(error, "Couldn't change it."));
         }
+      // "Edit job info": the job's title, company and posting link.
+      case "edit-job":
+        if (!fromExtension(sender)) return reply({ ok: false });
+        try {
+          await api("POST", "edit-job", { applicationId: message.applicationId, title: message.title, company: message.company, url: message.url });
+          await readTracker().catch(() => undefined);
+          return reply({ ok: true });
+        } catch (error) {
+          return reply(failed(error, "Couldn't save it."));
+        }
       case "delete-job":
         if (!fromExtension(sender)) return reply({ ok: false });
         try {
