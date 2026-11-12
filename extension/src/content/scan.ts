@@ -373,15 +373,17 @@ export function linkedinJob(where: { hostname: string; pathname: string; href: s
     const text = clean(el.textContent);
     const rect = el.getBoundingClientRect();
     return visible(el) && rect.width >= 20 && rect.height >= 10 && text.length >= 3 && text.length <= 150 && !notJobTitle(text) && !NOT_JOB_NAME.test(text)
-      && !el.closest("header, nav, [role='navigation'], #global-nav, .global-nav, [class*='global-nav']");
+      && !el.closest("header, nav, footer, aside, [role='navigation'], [role='contentinfo'], [role='complementary'], #global-nav, .global-nav, [class*='global-nav'], [class*='footer'], [class*='alert'], [class*='upsell'], [class*='promo']");
   };
   const known = [
     ".job-details-jobs-unified-top-card__job-title h1", ".job-details-jobs-unified-top-card__job-title", ".jobs-unified-top-card__job-title",
     ".top-card-layout__title", ".jobs-details-top-card__job-title", "[data-testid*='job-title' i]",
   ].flatMap((selector) => Array.from(document.querySelectorAll<HTMLElement>(selector))).find(readable);
   const size = (el: HTMLElement) => parseFloat(window.getComputedStyle(el).fontSize) || 0;
-  const heading = known ?? Array.from(document.querySelectorAll<HTMLElement>(`h1, h2, a[href*='/jobs/view/${jobId}']`)).filter(readable)
-    .sort((a, b) => size(b) - size(a))[0];
+  // Then a link to this very job (the pane's title links to itself), then the page's main heading. Other
+  // headings ("Stay on top of new job openings", "Jobs you may be interested in") are LinkedIn's own boxes.
+  const biggest = (selector: string) => Array.from(document.querySelectorAll<HTMLElement>(selector)).filter(readable).sort((a, b) => size(b) - size(a))[0];
+  const heading = known ?? (jobId ? biggest(`a[href*='/jobs/view/${jobId}']`) : undefined) ?? biggest("h1");
   // The tab's own name: "Growth Intern | MealPal | LinkedIn".
   const fromTab = titleParts(document.title);
   const title = clean(heading?.textContent) || fromTab?.title || "";
