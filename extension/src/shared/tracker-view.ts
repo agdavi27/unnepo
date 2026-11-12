@@ -1,4 +1,5 @@
 import { stageOf } from "@/lib/apply/stats";
+import { composeLink } from "@/lib/apply/compose-link";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { STEPS, STEP_LABEL, progressOf as sharedProgress, type Progress } from "@/lib/apply/progress";
 import { MAX_FOLLOW_UPS, reminders, type Reminder } from "./reminders";
@@ -139,20 +140,7 @@ const when = (at: string) => {
 
 // ---- The email link ----
 
-/** Links that are cut off past this length (mailto and Outlook): longer emails go on the clipboard instead. */
-const MAX_LINK = 2000;
-
-/** The email ready to send, in Gmail, Outlook on the web, or the mail app. `cut`: the body didn't fit in the link. */
-export function composeLink(mailer: Mailer, to: string, subject: string, body: string) {
-  const q = (pairs: Record<string, string>) => Object.entries(pairs).filter(([, value]) => value).map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
-  const build = (text: string) => mailer === "gmail"
-    ? `https://mail.google.com/mail/?${q({ view: "cm", fs: "1", to, su: subject, body: text })}`
-    : mailer === "outlook"
-      ? `https://outlook.office.com/mail/deeplink/compose?${q({ to, subject, body: text })}`
-      : `mailto:${encodeURIComponent(to).replace(/%40/g, "@")}?${q({ subject, body: text })}`;
-  const full = build(body);
-  return full.length <= MAX_LINK ? { url: full, cut: false } : { url: build(""), cut: true };
-}
+export { composeLink };
 
 const MAILER_NAME: Record<Mailer, string> = { gmail: "Gmail", outlook: "Outlook", mailto: "your mail app" };
 
