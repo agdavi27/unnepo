@@ -10,6 +10,7 @@
     "test": "vitest run",
     "setup:db": "node scripts/setup-db.mjs",
     "extension:build": "node extension/build.mjs",
+    "extension:zip": "node extension/build.mjs --zip",
     "extension:typecheck": "tsc -p extension/tsconfig.json",
     "icons": "node scripts/spider-icons.mjs",
     "push": "node scripts/push.mjs"

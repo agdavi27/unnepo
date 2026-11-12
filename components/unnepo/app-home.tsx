@@ -237,7 +237,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
             {data && !showOnboarding && extension !== null && (
               extension
                 ? <span className="hidden items-center gap-2 text-[13px] text-[#9A9AA3] md:inline-flex"><span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#4ADE80]" />Extension installed</span>
-                : <a href="/extension/connect" className="hidden items-center gap-2 text-[13px] text-[#9A9AA3] hover:text-white md:inline-flex"><span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#8B8B94]" />Get the extension</a>
+                : <a href="/extension/install" className="hidden items-center gap-2 text-[13px] text-[#9A9AA3] hover:text-white md:inline-flex"><span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#8B8B94]" />Get the extension</a>
             )}
             {data && <span className="font-mono text-xs uppercase text-[#8B8B94]">{creditsLabel}</span>}
             {data ? (
@@ -467,7 +467,7 @@ function ExtensionHome({ installed, completeness, onEdit }: { installed: boolean
           <li><strong className="text-ink">Dashboard</strong>: every job in one table, opened from the panel.</li>
         </ul>
         <div className="mt-5 flex flex-wrap gap-3">
-          <a href="/extension/connect" className="inline-flex items-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">{installed ? "Connect the extension" : "Get the extension"}</a>
+          <a href={installed ? "/extension/connect" : "/extension/install"} className="inline-flex items-center rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200">{installed ? "Connect the extension" : "Get the extension"}</a>
           <button type="button" onClick={onEdit} className="rounded-xl border border-line px-4 py-2 text-sm hover:bg-white/5">Edit my info</button>
         </div>
       </div>

@@ -46,6 +46,7 @@ next-env.d.ts
 
 # Chrome extension build
 /extension/dist/
+/unnepo-extension-*
 
 # practice pages for the extension filler, built
 /tests/practice/dist

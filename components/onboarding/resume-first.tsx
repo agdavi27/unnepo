@@ -447,8 +447,8 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
             </ol>
           </div>
           <div className="flex flex-wrap items-center gap-3 border-t border-[#17171B] pt-6">
-            {state.extensionUrl ? <a href={state.extensionUrl} target="_blank" rel="noreferrer" className={primary}>Add to Chrome</a> : null}
-            <a href="/extension/connect" target="_blank" rel="noreferrer" className={state.extensionUrl ? secondary : primary}>Connect the extension</a>
+            <a href={state.extensionUrl ?? "/extension/install"} target="_blank" rel="noreferrer" className={primary}>Add to Chrome</a>
+            <a href="/extension/connect" target="_blank" rel="noreferrer" className={secondary}>Connect the extension</a>
             <button type="button" className={secondary} onClick={() => setStep("finish")}>Next</button>
           </div>
         </div>
@@ -458,12 +458,8 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
         <div className="space-y-5 rounded-2xl border border-[#17171B] bg-[#0C0C0E] p-6">
           <p className="text-sm text-[#B4B4BC]">Your profile is {draft.completeness}% ready. The Unnepo Chrome extension fills applications from it, right in your own browser.</p>
           <div className="flex flex-wrap gap-3">
-            {state.extensionUrl ? (
-              <a href={state.extensionUrl} target="_blank" rel="noreferrer" className={primary}>Add to Chrome</a>
-            ) : (
-              <span className="inline-flex min-h-11 items-center rounded-[10px] border border-[#26262C] px-4 text-sm text-[#8B8B94]">Chrome extension coming soon</span>
-            )}
-            <button type="button" className={state.extensionUrl ? secondary : primary} onClick={onDone}>Go to Unnepo</button>
+            <a href={state.extensionUrl ?? "/extension/install"} target="_blank" rel="noreferrer" className={primary}>Add to Chrome</a>
+            <button type="button" className={secondary} onClick={onDone}>Go to Unnepo</button>
           </div>
           <p className="text-xs text-[#8B8B94]">You can change anything later in Settings, under Profile.</p>
         </div>
