@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: "What Unnepo collects, how it is used, and the choices you have.",
 };
 
-const UPDATED = "October 29, 2026";
+const UPDATED = "November 12, 2026";
 
 const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
   {
@@ -37,9 +37,11 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     title: "Information about people at companies you apply to",
     body: (
       <p>
-        After you apply, we get professional details about a few people at that company (recruiters and team members) from our data providers, Apollo.io
-        and Hunter: name, job title, company, work email, profile photo, and public profile links such as LinkedIn. If you are one of those
-        professionals and want your details removed from Unnepo, email us at the address below and we will delete them.
+        After you apply, we get professional details about a few people at that company (recruiters, alumni of your school, and team members) from
+        our data provider, Apollo.io, and from public web pages and search results: name, job title, company, work email, profile photo, and public
+        profile links such as LinkedIn. We also keep each company&apos;s email format (for example, first.last@company.com) so we can find work
+        emails there again. If you are one of those professionals and want your details removed from Unnepo, email us at the address below and we
+        will delete them.
       </p>
     ),
   },
@@ -65,11 +67,10 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
         <p>We share only what each service needs to do its job:</p>
         <ul>
           <li><strong>Vercel</strong> hosts the website.</li>
-          <li><strong>MillionVerifier</strong>, when we use it, receives a work email address to check that it exists.</li>
-          <li><strong>Hunter</strong> receives the names and company domains of people you&apos;re trying to reach, to find and verify their work emails.</li>
+          <li><strong>MillionVerifier</strong> receives a work email address to check that it exists.</li>
           <li><strong>Supabase</strong> stores the database and resume files.</li>
           <li><strong>Apollo.io</strong> receives the company and kinds of roles you&apos;re looking for (such as recruiters) to find people at companies you applied to and verify their emails.</li>
-          <li><strong>Anthropic</strong> receives your profile, resume text, and a job&apos;s application questions, so its AI can prepare answers, email drafts, highlights, and cover letters. It also receives a job&apos;s company, title, and location to search the web for its posting or for people who work there. Anthropic does not use this data to train its models.</li>
+          <li><strong>Anthropic</strong> receives your profile, resume text, and a job&apos;s application questions, so its AI can prepare answers, email drafts, highlights, and cover letters. It also receives a job&apos;s company, title, and location to search the web for its posting or for people who work there, and the first names and job titles of people found at that company, to look up their full names in public search results. Nothing about you is included in those searches. Anthropic does not use this data to train its models.</li>
           <li><strong>Google</strong> provides sign-in with Google.</li>
           <li><strong>Resend</strong> delivers account emails such as verification links.</li>
           <li><strong>Stripe</strong> processes payments if you buy a plan. We never see or store your full card number.</li>
