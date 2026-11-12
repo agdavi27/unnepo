@@ -15,7 +15,7 @@ const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Prom
 const short = (text: string, max = 60) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
 /** What the page around this does: draw again, open a job (and a person on it), and where the plans are. */
-export type Host = { redraw: () => void; openJob: (id: string, contactId?: string) => void; upgradeUrl: () => string; addJob?: (from: Detected) => void; /** The Get Pro page, on Free. */ openUpgrade?: () => void };
+export type Host = { redraw: () => void; openJob: (id: string, contactId?: string) => void; upgradeUrl: () => string; addJob?: (from: Detected) => void };
 
 // ---- The tracker, kept here between draws ----
 
@@ -119,7 +119,7 @@ const ROLE_LABEL: Record<string, string> = { alumni: "Alum", recruiter: "Recruit
 /** A blank profile photo, for people Free doesn't show yet. */
 const AVATAR = `<span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="9" r="4.2"/><path d="M3.5 24c.8-5 4.2-8 8.5-8s7.7 3 8.5 8z"/></svg></span>`;
 
-/** One tight row on Free: blank photo, who they are, and Show person, which opens Get Pro. No name yet: the title leads. */
+/** One tight row on Free: blank photo, who they are, and Show person, which opens Upgrade to Pro on the website. No name yet: the title leads. */
 function freeRow(name: string | null, title: string, role: string) {
   const label = ROLE_LABEL[role] ?? role;
   const main = name || title || label;
@@ -361,10 +361,9 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     store.notes[job.id] = result.ok ? "" : result.error ?? "Couldn't start the search.";
     await loadTracker(true);
   }));
-  // On Free, Show person opens Get Pro (or the plans, where the panel has no such page).
+  // On Free, Show person opens the Upgrade to Pro page on the website.
   root.querySelectorAll<HTMLButtonElement>("[data-upgrade]").forEach((button) => button.addEventListener("click", () => {
-    if (host.openUpgrade) host.openUpgrade();
-    else if (host.upgradeUrl()) window.open(host.upgradeUrl(), "_blank", "noreferrer");
+    if (host.upgradeUrl()) window.open(host.upgradeUrl(), "_blank", "noreferrer");
   }));
   root.querySelectorAll<HTMLButtonElement>("[data-reveal]").forEach((button) => button.addEventListener("click", () => void run("reveal", button.dataset.reveal!, { action: "reveal" })));
   root.querySelectorAll<HTMLDetailsElement>("details[data-person]").forEach((box) => box.addEventListener("toggle", () => {
