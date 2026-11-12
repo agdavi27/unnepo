@@ -131,6 +131,56 @@ function Status({ row }: { row: Row }) {
   );
 }
 
+const OUTCOME_LABEL: Array<[string, string]> = [["submitted", "Applied"], ["follow_up", "Follow up"], ["assessment", "Assessment"], ["interviewing", "Interviewing"], ["offer", "Offer"], ["rejected", "Rejected"]];
+
+/**
+ * The job's status as a menu, in its popup: Not applied (until it is), Applied, then what happened after. A job not
+ * applied to yet is marked applied first; "Applied" clears an outcome. The list is read again after each change.
+ */
+function StatusMenu({ row, onChanged }: { row: Row; onChanged: (note: string) => void }) {
+  const { job } = row;
+  const applied = isApplied(job);
+  const current = applied ? job.fillReport?.outcome ?? "submitted" : "not_applied";
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const { color } = statusOf(row);
+  const change = async (next: string) => {
+    if (next === current) return;
+    setBusy(true);
+    setError("");
+    const send = async (path: string, method: string, body: unknown) => {
+      const response = await fetch(`/api/apply/${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+      const payload = await response?.json().catch(() => ({}));
+      if (!response?.ok) throw new Error(payload?.error || "Couldn't change it. Try again.");
+    };
+    try {
+      if (!applied) await send("applied", "POST", { applicationId: job.id });
+      if (next !== "submitted" || applied) await send("outcome", "PATCH", { applicationId: job.id, outcome: next === "submitted" ? null : next });
+      onChanged(`Status: ${OUTCOME_LABEL.find(([value]) => value === next)?.[1] ?? "Applied"}.`);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Couldn't change it.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="inline-flex flex-col gap-1">
+      <select
+        aria-label="Status"
+        value={current}
+        disabled={busy}
+        onChange={(event) => void change(event.target.value)}
+        className="h-8 cursor-pointer rounded-full border bg-[#0C0C0E] px-3 text-[13px] font-medium disabled:opacity-60"
+        style={{ color, borderColor: `${color}66` }}
+      >
+        {!applied && <option value="not_applied">Not applied</option>}
+        {OUTCOME_LABEL.filter(([value]) => value !== "assessment" || current === "assessment").map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+      </select>
+      {error && <span role="alert" className="text-[12px] text-[#F87171]">{error}</span>}
+    </span>
+  );
+}
+
 function Tile({ name, size = 34 }: { name: string; size?: number }) {
   return (
     <span aria-hidden className={`${PIXEL} grid flex-none place-items-center text-white`} style={{ width: size, height: size, background: tileColor(name), fontSize: size * 0.36, boxShadow: "inset -2px -2px 0 rgba(0,0,0,.25)" }}>
@@ -187,7 +237,7 @@ function Popup({ label, onClose, children, width = "max-w-lg" }: { label: string
 
 /* ───────────── Popups ───────────── */
 
-function InfoPopup({ row, now, free, onClose, onDelete }: { row: Row; now: Date; free: boolean; onClose: () => void; onDelete: () => void }) {
+function InfoPopup({ row, now, free, onClose, onDelete, onChanged }: { row: Row; now: Date; free: boolean; onClose: () => void; onDelete: () => void; onChanged: (note: string) => void }) {
   const { job, progress } = row;
   const events = eventsOf(job);
   return (
@@ -200,7 +250,7 @@ function InfoPopup({ row, now, free, onClose, onDelete }: { row: Row; now: Date;
             <p className="m-0 truncate text-sm text-muted">{companyOf(job)} · {isApplied(job) ? `applied ${short(appliedOn(job as never))}` : "not applied yet"}{job.location ? ` · ${job.location}` : ""}</p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-3"><Status row={row} /><span className={`text-sm ${progress.due ? "text-[#F5A524]" : "text-[#B4B4BC]"}`}>{progress.next}</span></div>
+        <div className="flex flex-wrap items-center gap-3"><StatusMenu row={row} onChanged={onChanged} /><span className={`text-sm ${progress.due ? "text-[#F5A524]" : "text-[#B4B4BC]"}`}>{progress.next}</span></div>
         {isApplied(job) && <StepsLine progress={progress} />}
         {events.length > 0 && (
           <div className="flex flex-col gap-2">
@@ -218,7 +268,7 @@ function InfoPopup({ row, now, free, onClose, onDelete }: { row: Row; now: Date;
           </div>
         )}
         <PeopleAt job={job} free={free} />
-        <p className="m-0 text-[13px] text-[#8B8B94]">Email people and change its status in the extension.</p>
+        <p className="m-0 text-[13px] text-[#8B8B94]">Email people from the extension.</p>
         <div className="flex flex-wrap items-center gap-3 border-t border-[#1F1F24] pt-4">
           {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-4">Job posting ↗</a>}
           <button type="button" onClick={onDelete} className="ml-auto h-9 rounded-xl border border-[#3A2020] px-3 text-sm text-[#F87171] hover:bg-[#2A1A1A]">Delete job</button>
@@ -511,7 +561,7 @@ export function JobsView() {
       )}
 
       {open?.kind === "add" && <AddPopup onCancel={() => setOpen(null)} onAdded={(company) => { setDay(null); void refresh(`Added ${company}.`); }} />}
-      {open?.kind === "info" && current && <InfoPopup row={current} now={now} free={Boolean(tracker?.free)} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} />}
+      {open?.kind === "info" && current && <InfoPopup row={current} now={now} free={Boolean(tracker?.free)} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} onChanged={(note) => { void load().then(setTracker, () => undefined); setToast(note); }} />}
       {open?.kind === "delete" && current && (
         <DeletePopup job={current.job} onCancel={() => setOpen(null)} onDeleted={() => {
           setTracker((list) => (list ? { ...list, jobs: list.jobs.filter((job) => job.id !== current.job.id) } : list));
