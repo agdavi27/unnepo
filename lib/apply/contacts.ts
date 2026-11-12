@@ -6,7 +6,7 @@ import { ServiceError } from "@/lib/errors";
 import { safeGet } from "@/lib/apply/safe-fetch";
 import { HUNTER_CENTS, buildEmail, checkerReady, guessEmail, hunterCheck, hunterCount, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, siteEmails, type EmailFormat, type KnownEmail } from "@/lib/apply/email-guess";
 import { sameCompany } from "@/lib/apply/match";
-import { peopleFromWeb } from "@/lib/apply/people-web";
+import { lastNamesFromWeb, peopleFromWeb } from "@/lib/apply/people-web";
 import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, searchCompanies, searchPeopleQuery, spentTodayCents } from "@/lib/providers/contacts/router";
 import { COMPANY_DOMAINS, RECRUITER_TITLES, type ApolloPeopleQuery } from "@/lib/providers/contacts/apollo";
 import type { ApplicationContact, ContactRole, HiddenPerson, JobApplication, PeopleSearch } from "@/lib/apply/types";
@@ -552,6 +552,24 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
     }
   }
 
+  // Blurred last names, filled in by one web search for the whole list (about 3¢), before anyone is paid for.
+  // A name counts only when it fits the letters Apollo shows; the saved format and a check do the rest.
+  if (blurredNow().length && !over()) {
+    const blurred = blurredNow().slice(0, LIST_SIZE + 2);
+    await say(`Looking up full names at ${app.company}…`);
+    const asked = blurred.map((person) => { const [first, ...rest] = person.name.trim().split(/\s+/); return { first, last: rest.join(" "), title: person.title }; });
+    const names = await withLimit(lastNamesFromWeb(userId, trimmedCompany, asked), 20_000, [] as string[]);
+    const candidates = names.map((name) => ({ name, email: "" }));
+    let filled = 0;
+    for (const person of blurred) {
+      const match = unblur(person.name, candidates);
+      if (!match) continue;
+      person.name = match.name;
+      filled += 1;
+    }
+    search.steps.push({ step: "Full names from the web", domain: domain ?? "", found: filled });
+  }
+
   // A web search of public pages, only when nobody at all has turned up.
   if (!listed.length && !over()) {
     await say(`Searching public pages for people at ${app.company}…`);
@@ -613,6 +631,17 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
     } else if (checkerReady()) {
       person.email = null;
       person.emailSource = null;
+    }
+  }
+
+  // An email Apollo checked teaches the company's format, kept for every student who applies there next.
+  if (domain && !format?.pattern) {
+    for (const person of listed) {
+      const pattern = person.emailSource === "apollo" && person.email && fullName(person.name) ? patternOf(person.email, person.name) : null;
+      if (!pattern) continue;
+      format = { pattern, acceptAll: false, source: "apollo", known: format?.known ?? [] };
+      await repo.setEmailFormat(domain, { pattern, acceptAll: false, source: "apollo" }).catch(() => undefined);
+      break;
     }
   }
 

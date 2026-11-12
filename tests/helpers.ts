@@ -3,12 +3,15 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { resetMemory, setDataDir } from "@/lib/db/file-store";
 import { resetContactFetcher } from "@/lib/providers/contacts/http";
+import { setLastNameSearcherForTests } from "@/lib/apply/people-web";
 
 export function useTempDb() {
   const dir = mkdtempSync(path.join(tmpdir(), "unnepo-"));
   setDataDir(dir);
   resetMemory();
   resetContactFetcher();
+  // The web search for blurred last names finds nothing unless a test says otherwise.
+  setLastNameSearcherForTests(async () => []);
   delete process.env.APOLLO_API_KEY;
   delete process.env.HUNTER_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;

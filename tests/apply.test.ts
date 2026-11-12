@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { setPeopleSearcherForTests } from "@/lib/apply/people-web";
+import { setLastNameSearcherForTests, setPeopleSearcherForTests } from "@/lib/apply/people-web";
 import { findPeopleForApplication, mixedList, placeBonus } from "@/lib/apply/contacts";
 import { repo } from "@/lib/db/file-store";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
@@ -544,9 +544,11 @@ describe("people after applying", () => {
   type Search = { q_organization_domains_list: string[]; person_titles?: string[]; q_keywords?: string; contact_email_status?: string[] };
 
   /** A student who applied to Acme's Greenhouse job, and an Apollo that answers searches with `people`. */
-  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { reveal?: Record<string, Record<string, unknown>>; verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }>; revealFails?: boolean; hunterEmails?: Array<{ value: string; first_name: string; last_name: string; verification?: { status: string } }> } = {}) {
+  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { reveal?: Record<string, Record<string, unknown>>; verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }>; revealFails?: boolean; /** Addresses MillionVerifier says are valid; giving any sets it up. */ verifierOk?: string[]; hunterEmails?: Array<{ value: string; first_name: string; last_name: string; verification?: { status: string } }> } = {}) {
     process.env.APOLLO_API_KEY = "apollo";
     delete process.env.HUNTER_API_KEY;
+    delete process.env.MILLIONVERIFIER_API_KEY;
+    if (options.verifierOk) process.env.MILLIONVERIFIER_API_KEY = "verifier";
     process.env.ANTHROPIC_API_KEY = "anthropic";
     process.env.DAILY_USER_SPEND_CENTS = "5000";
     process.env.DAILY_GLOBAL_SPEND_CENTS = "50000";
@@ -572,6 +574,7 @@ describe("people after applying", () => {
         if (asked.pathname.endsWith("/email-finder")) return Response.json({ data: { email: null } });
         return Response.json({ data: { pattern: null, accept_all: false, emails: options.hunterEmails ?? [] } });
       }
+      if (url.includes("api.millionverifier.com")) return Response.json({ result: options.verifierOk?.includes(new URL(url).searchParams.get("email") ?? "") ? "ok" : "invalid" });
       if (url.includes("bulk_match") && options.revealFails) return Response.json({ error: "api/v1/people/bulk_match is not accessible with this api_key on a free plan." }, { status: 403 });
       if (url.includes("bulk_match")) {
         const details = JSON.parse(String(init?.body)).details as Array<{ id: string }>;
@@ -630,6 +633,35 @@ describe("people after applying", () => {
     expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Avery Kim", "avery.kim@acme.com", "guess"]]);
     expect(application.contactsMessage).toContain("best guess");
     expect(application.fillReport?.peopleLinks?.["avery kim"]).toEqual([{ label: "LinkedIn", url: "https://linkedin.com/in/r1" }, { label: "X", url: "https://x.com/r1" }]);
+  });
+
+  it("fills blurred last names from one web search before paying Apollo, and checks the emails with MillionVerifier, without Hunter", async () => {
+    await repo.setEmailFormat("acme.com", { pattern: "{first}.{last}", acceptAll: false, source: "verified" });
+    // "Sam Smith" doesn't fit the letters Apollo shows for Sam ("Le***e"), so it isn't used.
+    setLastNameSearcherForTests(async () => ["Avery Kimball", "Sam Smith"]);
+    try {
+      const blurred = (id: string, first: string, hidden: string) => ({ ...person(id, first, "", "Recruiter"), last_name_obfuscated: hidden });
+      const { application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [blurred("r1", "Avery", "Ki***l"), blurred("r2", "Sam", "Le***e")] : []), {
+        poster: false, revealFails: true, verifierOk: ["avery.kimball@acme.com"],
+      });
+      expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([
+        ["Avery Kimball", "avery.kimball@acme.com", "pattern"],
+        ["Sam L.", null, null],
+      ]);
+      const steps = application.fillReport?.peopleSearch?.steps ?? [];
+      expect(steps.find((step) => step.step === "Full names from the web")).toMatchObject({ found: 1 });
+      // Apollo's paid reveal was never asked (it would have failed here): the web and the format were enough.
+      expect(steps.at(-1)).toMatchObject({ step: "Full names" });
+      expect(steps.at(-1)?.error).toBeUndefined();
+    } finally {
+      setLastNameSearcherForTests(async () => []);
+    }
+  });
+
+  it("keeps the email format Apollo's checked address shows, for the next student at that company", async () => {
+    const hidden = { ...person("r1", "Avery", "", "Recruiter"), last_name_obfuscated: "K***m" };
+    await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [hidden] : []), { poster: false, verified: ["r1"], reveal: { r1: { last_name: "Kim", email: "avery.kim@acme.com" } } });
+    expect((await repo.getEmailFormat("acme.com"))?.pattern).toBe("{first}.{last}");
   });
 
   it("shows blurred last names as an initial with no email, unless Hunter knows the person, and says why", async () => {

@@ -148,6 +148,15 @@ Follow-ups are reminders. Unnepo does not send them automatically. A reply sync 
 
 `ContactProviderRouter` searches and unlocks with Apollo. It does not enrich a person until that student clicks **Use 1 credit**. If Apollo returns no email and no phone, the unlock fails and the credit is returned. Apollo results are not replaced with sample profiles when Apollo fails.
 
+Finding people at a company goes cheapest first, and Apollo's paid reveal is the last resort:
+
+1. Apollo's people search: names (last names blurred), including alumni of the student's school.
+2. Free sources: the company's saved email format (kept per company and reused for every student), emails on its website, and people found before.
+3. Hunter, only when `HUNTER_API_KEY` is set. It's optional.
+4. One web search for the whole list's blurred last names (about 3¢). A name is used only if it fits the letters Apollo shows.
+5. Each email is built from the company's format and checked with MillionVerifier (`MILLIONVERIFIER_API_KEY`, about 0.4¢ a check, pay as you go), or Hunter if that's what's set.
+6. Apollo's paid reveal (about 8¢) only for someone still blurred with no usable email. An address Apollo checks teaches the company's format for next time.
+
 Set `APOLLO_API_KEY`. Search uses Apollo's people API search (`mixed_people/api_search`). Estimated unit costs are configured with `APOLLO_*_COST_CENTS` and are labeled as estimates in the admin dashboard until a provider invoice reports an actual charge. Cache provider rows with `shareable = false` unless your contract allows a shared cache.
 
 ## Anthropic, jobs, analytics
