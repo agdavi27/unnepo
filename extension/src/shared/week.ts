@@ -1,18 +1,18 @@
 import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
 import { escape, isAppliedJob, progressDots, progressOf, redraw, store } from "./tracker-view";
 import { friendsWeekCard } from "./friends";
+import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid } from "@/lib/apply/calendar";
 import type { TrackerJob } from "./types";
 
 /**
- * The side panel's Week tab and Jobs tab. Week: seven squares for this week that fill in with each application,
- * the streak, and the jobs applied to on the day picked. Jobs: every job with its progress, searchable and
+ * The side panel's Week tab and Jobs tab. Week: a 12-week calendar of every day something happened, this
+ * week's count and streak, and what happened on the day picked. Jobs: every job with its progress, searchable and
  * filtered by the step it's on. All of it is worked out here from the tracker, in the student's own time.
  */
 
 const DAY = 86_400_000;
-const LETTERS = ["M", "T", "W", "Th", "F", "Sa", "Su"];
 
-/** The day picked under the squares (YYYY-MM-DD); today until another is tapped. */
+/** The day picked on the calendar (YYYY-MM-DD); none until one is tapped. */
 let pickedDay = "";
 
 /** Applied jobs that count toward goals, by the day they were applied. */
@@ -59,58 +59,73 @@ export function jobRow(job: TrackerJob, sub = "") {
   </button></li>`;
 }
 
-/** The week: seven squares, the streak, the weekly goal, then the jobs from the day picked. */
+const WEEKS = 12;
+const shortDate = (date: Date) => date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+/**
+ * Week: every day you did something over the last 12 weeks (applied, emailed someone, heard back), brighter for
+ * a busier day, with this week's count, the goal and the streak on top. Tapping a day shows what happened.
+ */
 export function weekView(now = new Date()) {
-  if (!store.tracker) return `<section class="page"><span class="eyebrow">This week</span><p class="note">${escape(store.error || "Loading your week…")}</p></section>`;
+  if (!store.tracker) return `<section class="page"><span class="eyebrow">Every day you did something</span><p class="note">${escape(store.error || "Loading your week…")}</p></section>`;
   const jobs = store.tracker.jobs;
-  const days = perDay(jobs);
+  const applied = perDay(jobs);
+  const byDay = activityByDay(jobs);
+  const grid = activityGrid(now, WEEKS);
   const start = weekStart(now);
   const today = dayKey(now);
-  if (!pickedDay || pickedDay > today || pickedDay < dayKey(start)) pickedDay = today;
+  if (pickedDay && (pickedDay > today || pickedDay < dayKey(grid[0][0]))) pickedDay = "";
   const weekly = store.tracker.weeklyGoal ?? 0;
-  const daily = weekly ? Math.ceil(weekly / 5) : 0;
-  const level = (count: number) => (!count ? "" : daily ? (count >= daily ? "l3" : count * 2 >= daily ? "l2" : "l1") : count >= 4 ? "l3" : count >= 2 ? "l2" : "l1");
   let week = 0;
-  const squares = LETTERS.map((letter, index) => {
-    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + index);
-    const key = dayKey(date);
-    const count = days.get(key)?.length ?? 0;
-    week += count;
-    const future = key > today;
-    const name = date.toLocaleDateString("en-US", { weekday: "long" });
-    return `<button type="button" class="day${future ? " future" : ""}${key === today ? " today" : ""}${key === pickedDay ? " on" : ""}" data-week-day="${key}" ${future ? "disabled" : ""} aria-pressed="${key === pickedDay}" aria-label="${name}: ${count} applied">
-      <i class="${level(count)}">${future ? "" : count}</i><span>${letter}</span></button>`;
-  }).join("");
-  const streak = streakOf(days, now);
-  const weekEnd = start.getTime() + 7 * DAY;
-  const emails = emailsBetween(jobs, start.getTime(), weekEnd);
+  for (let index = 0; index < 7; index += 1) week += applied.get(dayKey(new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)))?.length ?? 0;
+  const streak = streakOf(applied, now);
+  const emails = emailsBetween(jobs, start.getTime(), start.getTime() + 7 * DAY);
 
-  const picked = new Date(`${pickedDay}T00:00:00`);
-  const dayJobs = (days.get(pickedDay) ?? []).slice().sort((a, b) => Date.parse(b.submittedAt ?? b.createdAt) - Date.parse(a.submittedAt ?? a.createdAt));
-  const dayEmails = emailsBetween(jobs, picked.getTime(), picked.getTime() + DAY);
-  const dayName = pickedDay === today ? "Today" : picked.toLocaleDateString("en-US", { weekday: "long" });
-  const time = (job: TrackerJob) => new Date(job.submittedAt ?? job.createdAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const columns = grid.map((days, index) => `<div class="heat-col">
+      <span class="heat-month">${index % 4 === 0 ? escape(shortDate(days[0])) : ""}</span>
+      ${days.map((date) => {
+        const key = dayKey(date);
+        if (key > today) return `<span class="heat-day future"></span>`;
+        const count = byDay.get(key)?.length ?? 0;
+        return `<button type="button" class="heat-day${key === today ? " today" : ""}${key === pickedDay ? " on" : ""}" data-week-day="${key}" aria-pressed="${key === pickedDay}" aria-label="${escape(shortDate(date))}: ${count} ${count === 1 ? "thing" : "things"}" style="background:${ACTIVITY_HEAT[Math.min(count, 4)]}"></button>`;
+      }).join("")}
+    </div>`).join("");
+  const letters = ["M", "T", "W", "T", "F", "S", "S"].map((letter) => `<span>${letter}</span>`).join("");
+
+  const picked = pickedDay ? byDay.get(pickedDay) ?? [] : [];
+  const pickedDate = pickedDay ? new Date(`${pickedDay}T00:00:00`) : null;
+  const detail = pickedDate ? `
+      <div class="heat-detail">
+        <div class="row-between"><span class="small"><b>${escape(shortDate(pickedDate))}</b>${pickedDay === today ? " · today" : ""}</span><button type="button" class="quiet-link tight" data-week-day="">Close</button></div>
+        ${picked.length ? `<ul class="heat-events">${picked.map((event) => {
+          const mark = ACTIVITY_MARK[event.kind];
+          const title = event.job.titleMissing ? "Job title missing" : event.job.title;
+          return `<li><button type="button" class="heat-event" data-open-job="${event.job.id}"><span class="heat-glyph" style="color:${mark.color}">${mark.glyph}</span><span>${mark.label}</span><span class="sub">· ${escape(event.job.company)}, ${escape(title)}</span></button></li>`;
+        }).join("")}</ul>` : `<p class="small">A quiet day. Nothing logged.</p>`}
+      </div>` : "";
 
   return `
-    <section class="page week-card" aria-label="This week">
+    <section class="page week-card" aria-label="Every day you did something">
       <div class="row-between">
         <span class="eyebrow">This week · ${week}${weekly ? ` of ${weekly}` : " applied"}</span>
         <span class="streak${streak ? " lit" : ""}" title="Days in a row with an application">${FLAME}${streak} ${streak === 1 ? "day" : "days"}</span>
       </div>
-      <div class="week-days" role="group" aria-label="Applications each day">${squares}</div>
       ${weekly ? `<div class="bar" role="progressbar" aria-label="Weekly goal" aria-valuemin="0" aria-valuemax="${weekly}" aria-valuenow="${Math.min(week, weekly)}"><div style="width:${Math.min(100, Math.round((week / weekly) * 100))}%"></div></div>` : ""}
-      <div class="row-between"><span class="small">${weekly ? (week >= weekly ? "Weekly goal hit." : `${weekly - week} to go this week.`) : "Set a weekly goal on unnepo.com to fill these in."}</span><span class="small">${emails} ${emails === 1 ? "email" : "emails"} sent</span></div>
+      <div class="row-between"><span class="small">${weekly ? (week >= weekly ? "Weekly goal hit." : `${weekly - week} to go this week.`) : "Set a weekly goal on unnepo.com."}</span><span class="small">${emails} ${emails === 1 ? "email" : "emails"} sent</span></div>
+      <span class="eyebrow">Every day you did something</span>
+      <div class="heat" role="group" aria-label="Every day you did something, last ${WEEKS} weeks">
+        <div class="heat-col heat-letters"><span class="heat-month"></span>${letters}</div>
+        ${columns}
+      </div>
+      ${detail || `<p class="small">Tap a day to see what happened.</p>`}
     </section>
-    ${friendsWeekCard(week)}
-    <section class="page day-card" aria-label="${dayName}">
-      <div class="row-between"><span class="eyebrow">${dayName}</span><span class="small">${dayJobs.length} applied · ${dayEmails} emailed</span></div>
-      ${dayJobs.length ? `<ul class="jobs-list">${dayJobs.map((job) => jobRow(job, time(job))).join("")}</ul>` : `<p class="note">${pickedDay === today ? "Nothing yet today. Apply somewhere and it shows up here." : "No applications that day."}</p>`}
-    </section>`;
+    ${friendsWeekCard(week)}`;
 }
 
 export function wireWeek(root: HTMLElement) {
   root.querySelectorAll<HTMLButtonElement>("[data-week-day]").forEach((button) => button.addEventListener("click", () => {
-    pickedDay = button.dataset.weekDay!;
+    const key = button.dataset.weekDay!;
+    pickedDay = key && key !== pickedDay ? key : "";
     redraw();
   }));
 }

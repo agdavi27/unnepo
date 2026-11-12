@@ -7,6 +7,7 @@ import { H, ON_DARK, W, spiderRects } from "@/extension/src/shared/sprite";
 import { STEPS, STEP_LABEL, emailedCount, progressOf, type Progress } from "@/lib/apply/progress";
 import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
 import type { TrackerJob } from "@/lib/extension/service";
+import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid, activityOf, longestRun } from "@/lib/apply/calendar";
 
 /**
  * The website's Jobs tab: a calendar of every day the student did something (applied, emailed someone, heard
@@ -34,7 +35,7 @@ const SPIDER = spiderRects(0, ON_DARK);
 const GREEN = "#4ADE80", BLUE = "#3D8BFF", AMBER = "#F5A524", RED = "#F87171", GOLD = "#E6C15A", GRAY = "#8B8B94";
 const TILE = ["#3D8BFF", "#8B5CF6", "#EC4899", "#14B8A6", "#F59E0B", "#22C55E", "#EF4444", "#06B6D4"];
 const tileColor = (name: string) => TILE[[...name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % TILE.length];
-const HEAT = ["#17171B", "#173A24", "#22603A", "#2F9A55", GREEN];
+const HEAT = ACTIVITY_HEAT;
 const WEEKS = 12;
 const PERSON_STATUS: Record<string, string> = { emailed: "Emailed", replied: "Replied", no_response: "No reply" };
 
@@ -48,35 +49,8 @@ function ago(date: Date, now: Date) {
 
 /* ───────────── What happened, by day ───────────── */
 
-type Kind = "applied" | "emailed" | "follow_up" | "interview" | "offer" | "rejected";
-type Event = { at: Date; day: string; kind: Kind; job: TrackerJob };
-const MARK: Record<Kind, { glyph: string; color: string; label: string }> = {
-  applied: { glyph: "●", color: GREEN, label: "Applied" },
-  emailed: { glyph: "✉", color: "#C7D7FF", label: "Emailed someone" },
-  follow_up: { glyph: "↺", color: AMBER, label: "Follow up" },
-  interview: { glyph: "★", color: GREEN, label: "Interview" },
-  offer: { glyph: "◆", color: GOLD, label: "Offer" },
-  rejected: { glyph: "✕", color: RED, label: "Said no" },
-};
-const HISTORY_KIND: Record<string, Kind | undefined> = { follow_up: "follow_up", assessment: "interview", interviewing: "interview", offer: "offer", rejected: "rejected" };
-
-/** Everything that happened on a job, one per kind per day, oldest first. */
-function eventsOf(job: TrackerJob): Event[] {
-  const list: Array<Omit<Event, "day" | "job">> = [];
-  if (isApplied(job) && countsTowardGoals(job as never)) list.push({ at: appliedOn(job as never), kind: "applied" });
-  for (const at of Object.values(job.fillReport?.emailedAt ?? {})) list.push({ at: new Date(at), kind: "emailed" });
-  if (job.fillReport?.reachedOut?.at) list.push({ at: new Date(job.fillReport.reachedOut.at), kind: "emailed" });
-  for (const change of job.fillReport?.statusHistory ?? []) {
-    const kind = HISTORY_KIND[change.status];
-    if (kind) list.push({ at: new Date(change.at), kind });
-  }
-  const seen = new Set<string>();
-  return list
-    .filter((event) => !Number.isNaN(event.at.getTime()))
-    .map((event) => ({ ...event, day: dayKey(event.at), job }))
-    .filter((event) => { const key = `${event.day}:${event.kind}`; if (seen.has(key)) return false; seen.add(key); return true; })
-    .sort((a, b) => a.at.getTime() - b.at.getTime());
-}
+const MARK = ACTIVITY_MARK;
+const eventsOf = (job: TrackerJob) => activityOf(job);
 
 /* ───────────── Small pieces ───────────── */
 
@@ -345,34 +319,10 @@ export function JobsView() {
   }, [toast]);
 
   const rows = useMemo<Row[]>(() => (tracker?.jobs ?? []).map((job) => ({ job, progress: progressOf(job) })), [tracker]);
-  const byDay = useMemo(() => {
-    const map = new Map<string, Event[]>();
-    for (const { job } of rows) for (const event of eventsOf(job)) map.set(event.day, [...(map.get(event.day) ?? []), event]);
-    return map;
-  }, [rows]);
-
-  // The calendar: WEEKS columns of Monday to Sunday, ending with this week.
-  const grid = useMemo(() => {
-    const first = weekStart(now);
-    first.setDate(first.getDate() - (WEEKS - 1) * 7);
-    return Array.from({ length: WEEKS }, (_, week) => Array.from({ length: 7 }, (_, weekday) => {
-      const date = new Date(first);
-      date.setDate(first.getDate() + week * 7 + weekday);
-      return date;
-    }));
-  }, [now]);
+  const byDay = useMemo(() => activityByDay(rows.map((row) => row.job)), [rows]);
+  const grid = useMemo(() => activityGrid(now, WEEKS), [now]);
   const todayKey = dayKey(now);
-
-  const streak = useMemo(() => {
-    let best = { length: 0, end: null as Date | null };
-    let run = 0;
-    for (const date of grid.flat()) {
-      if (date > now) break;
-      run = byDay.has(dayKey(date)) ? run + 1 : 0;
-      if (run > best.length) best = { length: run, end: date };
-    }
-    return best;
-  }, [grid, byDay, now]);
+  const streak = useMemo(() => longestRun(grid, byDay, now), [grid, byDay, now]);
 
   const stats = useMemo(() => {
     const since = weekStart(now).getTime();
@@ -459,7 +409,6 @@ export function JobsView() {
                 Green days are days you applied, emailed someone or heard back.
                 {streak.length > 1 && streakStart && streak.end ? <> Your longest run is <b className="text-cream">{streak.length} days</b> ({short(streakStart)} – {short(streak.end)}).</> : null}
               </p>
-              <p className="hand m-0 mt-auto text-xl text-cream">the brighter the square, the busier the day ↖</p>
             </>
           ) : (
             <>

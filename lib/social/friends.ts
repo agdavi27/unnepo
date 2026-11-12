@@ -94,7 +94,10 @@ export async function inviteFriend(userId: string, emailRaw: unknown) {
     return { status: "sent" as const, row };
   });
   let emailed = false;
-  if (result.status === "sent") emailed = await sendFriendInviteEmail(typed, shownName(user), `${appOrigin()}/signup`).catch(() => false);
+  if (result.status === "sent") {
+    const appliedThisWeek = await appliedSince(userId, Date.now() - 7 * 86_400_000).catch(() => 0);
+    emailed = await sendFriendInviteEmail({ to: typed, fromName: shownName(user), appliedThisWeek, hasAccount: Boolean(toUserId), origin: appOrigin() }).catch(() => false);
+  }
   return { ok: true, status: result.status, emailed };
 }
 

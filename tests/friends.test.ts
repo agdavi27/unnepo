@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applications } from "@/lib/apply/store";
 import { progressOf } from "@/lib/apply/progress";
 import { signUp } from "@/lib/services/auth";
@@ -17,6 +17,7 @@ async function applied(userId: string, n: number, submittedAt: string) {
 
 describe("friends", () => {
   beforeEach(() => { useTempDb(); });
+  afterEach(() => { vi.unstubAllGlobals(); delete process.env.RESEND_API_KEY; });
 
   it("shares this week's count only once the friend accepts", async () => {
     const pat = await student("pat.doe@colby.edu", "Pat Doe");
@@ -51,6 +52,24 @@ describe("friends", () => {
     expect((await inviteFriend(lee, "pat.doe@colby.edu")).status).toBe("accepted");
     expect((await listFriends(pat, "")).friends.map((friend) => friend.name)).toEqual(["Lee Kay"]);
     expect((await inviteFriend(pat, "lee.kay@colby.edu")).status).toBe("already");
+  });
+
+  it("emails the invite from contact@unnepo.com as a challenge, with a sign-up link", async () => {
+    const pat = await student("pat.doe@colby.edu", "Pat Doe");
+    await applied(pat, 1, new Date().toISOString());
+    process.env.RESEND_API_KEY = "test-key";
+    const sent: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      if (url.includes("resend")) sent.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    });
+    const result = await inviteFriend(pat, "lee.kay@colby.edu");
+    expect(result.emailed).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0].from).toBe("Unnepo <contact@unnepo.com>");
+    expect(sent[0].subject).toBe("Pat Doe wants to compete with you on Unnepo");
+    expect(String(sent[0].text)).toContain("Pat has applied to 1 job this week");
+    expect(String(sent[0].html)).toContain("/signup?email=lee.kay%40colby.edu");
   });
 
   it("refuses yourself and bad emails, and removes or declines", async () => {

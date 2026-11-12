@@ -668,5 +668,5 @@ export function wireBubbles(root: HTMLElement) {
 }
 
 export function wireJobRows(root: HTMLElement) {
-  root.querySelectorAll<HTMLButtonElement>(".job-row[data-open-job]").forEach((button) => button.addEventListener("click", () => host.openJob(button.dataset.openJob!)));
+  root.querySelectorAll<HTMLButtonElement>(".job-row[data-open-job], .heat-event[data-open-job]").forEach((button) => button.addEventListener("click", () => host.openJob(button.dataset.openJob!)));
 }
