@@ -265,7 +265,7 @@ const BOARD_NAME = /^(handshake|joinhandshake|ziprecruiter|zip recruiter|linkedi
 /** Whether the job was saved without a real company: blank, a job site's name, or a website address. */
 export function companyMissing(app: Pick<JobApplication, "company" | "jobUrl">) {
   const name = app.company.replace(/\s+/g, " ").trim();
-  if (isJobSiteName(name) || BOARD_NAME.test(name)) return true;
+  if (isJobSiteName(name) || BOARD_NAME.test(name) || /©|\(c\) \d{4}|\ball rights reserved\b|\bcopyright\b/i.test(name)) return true;
   if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(name)) return true;
   // The scanner's last resort is the site address's first part ("mealpal" from mealpal.applytojob.com is fine,
   // "jobs" from jobs.example.com isn't): a lowercase single word that's only the host.

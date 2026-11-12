@@ -28,6 +28,9 @@ const SITE_MENU = /^(\d+\+? (new |unread )?(notifications?|messages?|alerts?)|(n
 // What sites say around their jobs that's never a job's name: feedback and survey prompts ("Are these results
 // helpful? Your feedback helps us…"), sign-in walls, error pages, result counts and search headings.
 const SITE_TALK = /\b(your feedback|feedback helps|give feedback|share (your )?feedback|are these (results|jobs) (helpful|relevant)|(was|is) this (page |job |result )?(helpful|relevant)|rate (this|your)|take (our|a|the) survey|how (are|did) we do|sign in to|log in to|join (now )?to (see|view|apply)|create (an|your) account|something went wrong|page (not found|unavailable)|access denied|verify (you are|you're) (a )?human|no longer available|we use cookies|accept (all )?cookies|showing \d+|\d+[,\d]* (results|jobs|openings)|results? for\b|jobs? (you may|you might|based on|recommended)|similar jobs|people also viewed|try premium|premium members)\b/i;
+// Promos around the jobs list and the page's footer: job-alert prompts ("Stay on top of new job openings"),
+// upsells, and the legal line at the bottom ("LinkedIn Corporation © 2025", "All rights reserved").
+const SITE_PROMO = /(\bstay (on top of|up to date|in the loop)\b|\bjob alerts?\b|\b(set|create|turn on|get|manage) (an? |your |job )?alerts?\b|\bget notified\b|\bnotify me\b|\bnew (job )?openings\b|\bnever miss\b|©|\(c\) \d{4}|\bcopyright\b|\ball rights reserved\b|\bcorporation\b.*\d{3}|\b(user agreement|privacy policy|cookie policy|copyright policy|community guidelines|about accessibility|brand policy|guest controls)\b|\bopen to work\b|\bupdate your (profile|preferences)\b)/i;
 // Openings of a sentence spoken to the reader, never of a job's name.
 const SENTENCE_START = /^(are|is|was|were|do|does|did|can|could|would|should|will|have|has|how|what|why|when|where|who|which|we|we're|we've|you|you're|your|our|this|these|that|please|thanks|thank you|sorry|oops|welcome|hi|hello|looking for|want to|ready to|don't|didn't)\b/i;
 
@@ -37,7 +40,7 @@ const SENTENCE_START = /^(are|is|was|were|do|does|did|can|could|would|should|wil
  */
 export function siteSentence(line: string) {
   const words = line.split(" ").length;
-  if (SITE_TALK.test(line)) return true;
+  if (SITE_TALK.test(line) || SITE_PROMO.test(line)) return true;
   if (/\?/.test(line)) return true;
   if (/[.!…]\s+\S/.test(line) || /\.\.\.$|…$/.test(line) && words > 4) return true;
   if (SENTENCE_START.test(line) && words >= 3) return true;
