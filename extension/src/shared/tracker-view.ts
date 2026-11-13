@@ -180,39 +180,84 @@ const websites: Record<string, string> = {};
 /** The job whose "Edit job info" form is open, and what's typed in it. */
 const editing = { jobId: "", title: "", company: "", url: "", busy: false, error: "" };
 
+/** The job whose ⋯ menu is open, kept between draws. */
+let menuOpenFor = "";
+
+/**
+ * A job's page, top card: its name, company and date, a ⋯ menu (posting, edit, hide, delete) in the corner, the
+ * status, then what to do next in its own box with the button that does it. The people at the company follow.
+ */
 export function jobPage(job: TrackerJob, focus?: string) {
   if (focus) openPeople.add(focus);
   const applied = isAppliedJob(job);
   const stage = stageOf(job as never);
   const pick = (value: string, label: string) => `<option value="${value}"${(stage === "no_response" ? "submitted" : stage) === value ? " selected" : ""}>${label}</option>`;
   const note = store.notes[job.id];
-  // The status sits small beside the job's name: a menu once applied, a small "I applied" before.
+  const progress = progressOf(job);
   const status = applied
     ? `<select class="status-mini" data-outcome="${job.id}" aria-label="Status">${pick("submitted", "Applied")}${pick("follow_up", "Follow up")}${stage === "assessment" ? pick("assessment", "Assessment") : ""}${pick("interviewing", "Interviewing")}${pick("offer", "Offer")}${pick("rejected", "Rejected")}</select>`
-    : `<button type="button" class="status-mini" data-mark-applied="${job.id}">I applied</button>`;
+    : "";
+  const date = applied ? `Applied ${when(job.submittedAt ?? job.createdAt)}` : `Saved ${when(job.createdAt)}`;
+  const company = job.companyMissing ? "Company missing" : job.company;
+  const menuItem = (attrs: string, icon: string, label: string, danger = false) => `<button type="button" class="job-menu-item${danger ? " danger" : ""}" role="menuitem" ${attrs}>${icon}<span>${label}</span></button>`;
+  const menu = `
+        <details class="job-menu" data-job-menu="${job.id}" ${menuOpenFor === job.id ? "open" : ""}>
+          <summary aria-label="More for this job">${ICON.dots}</summary>
+          <div class="job-menu-list" role="menu">
+            ${job.url ? `<a class="job-menu-item" role="menuitem" href="${escape(job.url)}" target="_blank" rel="noreferrer">${ICON.link}<span>Job posting</span></a>` : ""}
+            ${menuItem(`data-edit-job="${job.id}"`, ICON.edit, "Edit job info")}
+            ${applied ? menuItem(`data-hide-job="${job.id}" data-hide="${isHiddenJob(job) ? "0" : "1"}"`, ICON.hide, isHiddenJob(job) ? "Show job again" : "Hide job") : ""}
+            ${menuItem(`data-delete-job="${job.id}"`, ICON.trash, "Delete job", true)}
+          </div>
+        </details>`;
+  // What to do next: its step, the words, and the one button that does it.
+  const step = Math.min(progress.done, STEPS.length - 1);
+  const tone = progress.ended === "Rejected" ? " ended" : progress.ended === "Offer" ? " ok" : progress.due ? " due" : "";
+  const eyebrow = progress.ended ? progress.ended : applied ? `Next · step ${step + 1} of ${STEPS.length}` : "Next";
+  const action = !applied
+    ? `<button type="button" class="btn primary next-btn" data-mark-applied="${job.id}">I applied</button>`
+    : !progress.ended && (progress.done === 1 || progress.due)
+      ? `<button type="button" class="btn primary next-btn" data-see-people>See people <span aria-hidden="true">↓</span></button>`
+      : "";
+  const bars = STEPS.map((_, index) => `<i class="${index < progress.done ? "d" : index === progress.done && !progress.ended ? (progress.due ? "w" : "n") : ""}"></i>`).join("");
   return `
     <section class="page job-view" aria-label="${escape(job.title)}">
-      <div>
-        <div class="job-title-row">
+      <div class="job-head">
+        <div class="job-head-text">
           <div class="job-name small-name">${escape(job.titleMissing ? "Job title missing" : job.title)}</div>
-          ${status}
+          <div class="job-detail">${escape(company)}${job.location ? ` · ${escape(job.location)}` : ""} · ${escape(date)}${job.confirmation?.confidence === "confirmed" ? ' <span class="confirmed" title="The site confirmed it">✓</span>' : ""}</div>
         </div>
-        <div class="job-detail">${escape(job.companyMissing ? "Company missing" : job.company)}${job.location ? ` · ${escape(job.location)}` : ""}</div>
-        <div class="sub">${applied ? `Applied ${when(job.submittedAt ?? job.createdAt)}${job.confirmation?.confidence === "confirmed" ? " · the site confirmed it" : ""}` : `Saved ${when(job.createdAt)}`}</div>
+        ${menu}
       </div>
-      ${progressLine(job)}
+      ${status ? `<div class="job-status">${status}</div>` : ""}
       ${editing.jobId === job.id ? editForm(job) : ""}
-      <div class="links">
-        ${job.url ? `<a class="link" href="${escape(job.url)}" target="_blank" rel="noreferrer">Job posting ↗</a>` : ""}
-        ${editing.jobId === job.id ? "" : `<button type="button" class="link" data-edit-job="${job.id}">Edit job info</button>`}
-        ${applied ? `<button type="button" class="link" data-hide-job="${job.id}" data-hide="${isHiddenJob(job) ? "0" : "1"}">${isHiddenJob(job) ? "Show job again" : "Hide job"}</button>` : ""}
-        <button type="button" class="link" data-delete-job="${job.id}">Delete job</button>
+      <div class="next-box${tone}">
+        <div class="next-top"><span class="next-eyebrow">${escape(eyebrow)}</span><span class="dots" aria-hidden="true">${bars}</span></div>
+        <p class="next-text">${escape(progress.next)}</p>
+        ${action}
       </div>
       ${note ? `<p class="small" role="status">${escape(note)}</p>` : ""}
     </section>
     ${peopleCard(job)}
     ${applied ? `<section class="page" aria-label="People you emailed">${reachPicker(job)}</section>` : ""}`;
 }
+
+// A click anywhere outside the ⋯ menu closes it.
+document.addEventListener("click", (event) => {
+  if (!menuOpenFor || (event.target as Element | null)?.closest?.(".job-menu")) return;
+  menuOpenFor = "";
+  document.querySelectorAll<HTMLDetailsElement>(".job-menu[open]").forEach((menu) => { menu.open = false; });
+});
+
+/** Small line icons for the ⋯ menu. */
+const svg = (path: string) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+const ICON = {
+  dots: `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>`,
+  link: svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
+  edit: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/>'),
+  hide: svg('<path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.2A9.8 9.8 0 0 1 12 5c5 0 9 5 9 7a12 12 0 0 1-2.4 3.3M6.6 6.6C4.5 8 3 10.3 3 12c0 2 4 7 9 7a9.6 9.6 0 0 0 4-.9"/>'),
+  trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-12M9 7V4h6v3"/>'),
+};
 
 /** "Edit job info": the job's title, company and posting link. */
 function editForm(job: TrackerJob) {
@@ -394,6 +439,14 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     const result = await ask<{ ok: boolean; error?: string }>({ type: "job-status", applicationId: job.id, applied: true }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
     say(result.ok ? "Marked as applied." : result.error ?? "Couldn't change it.");
     void loadTracker();
+  });
+  root.querySelectorAll<HTMLDetailsElement>("[data-job-menu]").forEach((menu) => {
+    menu.addEventListener("toggle", () => { menuOpenFor = menu.open ? menu.dataset.jobMenu! : menuOpenFor === menu.dataset.jobMenu ? "" : menuOpenFor; });
+    // Choosing anything closes it.
+    menu.querySelectorAll(".job-menu-item").forEach((item) => item.addEventListener("click", () => { menuOpenFor = ""; menu.open = false; }));
+  });
+  root.querySelector<HTMLButtonElement>("[data-see-people]")?.addEventListener("click", () => {
+    root.querySelector<HTMLElement>(".people")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
   root.querySelector<HTMLButtonElement>("[data-edit-job]")?.addEventListener("click", () => {
     Object.assign(editing, { jobId: job.id, title: job.titleMissing ? "" : job.title, company: job.companyMissing ? "" : job.company, url: job.url ?? "", busy: false, error: "" });
