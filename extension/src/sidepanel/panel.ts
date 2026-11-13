@@ -34,7 +34,7 @@ let openedJob = { id: "", contact: "" };
 /** The tab a job's page was opened from, where Back goes. */
 let jobFrom: View = "home";
 /** The cover letter or answer popup, and which of its questions is showing. */
-let popup: { kind: "cover" | "answer"; step: number } | null = null;
+let popup: { kind: "cover" | "answer" | "addjob"; step: number } | null = null;
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 /** "1.001": the version name, which keeps the zeros Chrome's own version number can't have. */
@@ -359,22 +359,45 @@ const toolCount = (line?: { left: number; badge?: string }) => (line?.badge ? `<
  */
 function autofillTool(state: PanelState) {
   const ready = jobFound(state) && !state.job?.running && Boolean(state.me?.profileReady);
-  const why = !state.me?.profileReady ? "Finish your profile first." : jobFound(state) ? "Fills this application. You check it and press Submit." : "Open a job application, then press this.";
-  return `<button type="button" class="big-tool autofill-tool" id="beta-fill" ${ready ? "" : "disabled"}>
-      ${toolCount(state.me?.usage?.autofills)}${SPARK}<span class="big-tool-text"><span>Autofill this application <span class="beta">Beta</span></span><span class="small">${why}</span></span>
+  const why = !state.me?.profileReady ? "Finish your profile first" : jobFound(state) ? "Fills this application" : "Open an application first";
+  return `<button type="button" class="tile autofill-tool" id="beta-fill" ${ready ? "" : "disabled"}>
+      ${SPARK}<span class="tile-text"><span class="tile-name">Autofill <span class="beta">Beta</span></span><span class="tile-sub">${why}</span></span>
     </button>`;
 }
 
-/** The tools: the whole page once a job is applied, went wrong, or there's no job. `extra` goes under them. */
+/** A tool's uses left, under its name on the tile: "4 left today" on Free, "Unlimited" on Pro. */
+const tileCount = (line?: { left: number; badge?: string }) => (line?.badge ? `<span class="tile-sub${line.left === 0 ? " out" : ""}">${escape(line.badge)}</span>` : "");
+
+/**
+ * The tools as four tiles, every one a tap away: a cover letter, answering a question, Autofill and adding a job
+ * (a small popup with the jobs Unnepo caught and a form for one it didn't). Under them, the resume and password.
+ */
 function toolsPage(state: PanelState, extra = "") {
+  const asking = (store.detected ?? []).filter((item) => item.state === "ask").length;
   return `
     <div class="tools">
-      <button type="button" class="big-tool" data-popup="cover">${toolCount(state.me?.usage?.letters)}${SPARK}Write a cover letter</button>
-      <button type="button" class="big-tool" data-popup="answer">${toolCount(state.me?.usage?.answers)}${SPARK}Answer a question</button>
-      ${autofillTool(state)}
+      <div class="tiles">
+        <button type="button" class="tile" data-popup="cover">${SPARK}<span class="tile-text"><span class="tile-name">Cover letter</span>${tileCount(state.me?.usage?.letters)}</span></button>
+        <button type="button" class="tile" data-popup="answer">${SPARK}<span class="tile-text"><span class="tile-name">Answer a question</span>${tileCount(state.me?.usage?.answers)}</span></button>
+        ${autofillTool(state)}
+        <button type="button" class="tile add-tile" data-popup="addjob">${PLUS}<span class="tile-text"><span class="tile-name">Add a job</span><span class="tile-sub${asking ? " out" : ""}">${asking ? `${asking} detected` : "Log one you applied to"}</span></span></button>
+      </div>
+      ${manualJob.note && !popup ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
+      ${here.note && !popup ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
       <div class="tool-lines">${resumeLine(state)}${letterLine()}<div id="password-slot"></div></div>
       ${extra}
     </div>`;
+}
+
+const PLUS = `<svg class="big-tool-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`;
+
+/**
+ * "Add a job": a small popup. The job on the tab first (I already applied / Save for later), then the jobs Unnepo
+ * caught, each answered with one tap, then a form for one it didn't see.
+ */
+function addJobPopup(state: PanelState) {
+  const onTab = jobFound(state) ? `<div class="add-part">${hereLinks()}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}</div>` : "";
+  return popupShell("Add a job", `${onTab}${detectedMenu(true)}<div class="add-part"><span class="eyebrow">Not here? Add it yourself</span>${manualJobFields()}</div>`, 0, 0, "mini");
 }
 
 /**
@@ -783,11 +806,11 @@ let pasteText = "";
 let letterSource: "job" | "paste" = "job";
 
 /** The popup's frame: its question, how far along it is, and a way back. */
-function popupShell(title: string, body: string, step = 0, steps = 0) {
+function popupShell(title: string, body: string, step = 0, steps = 0, size = "") {
   const bars = steps > 1 ? `<div class="steps" role="img" aria-label="Question ${step + 1} of ${steps}">${Array.from({ length: steps }, (_, at) => `<div class="${at <= step ? "on" : ""}"></div>`).join("")}</div>` : "";
   return `
     <div class="dim" id="popup-dim"></div>
-    <section class="sheet" id="popup" role="dialog" aria-modal="true" aria-label="${escape(title)}" tabindex="-1">
+    <section class="sheet${size ? ` ${size}` : ""}" id="popup" role="dialog" aria-modal="true" aria-label="${escape(title)}" tabindex="-1">
       <div class="popup-head"><span class="popup-title">${escape(title)}</span><button type="button" class="popup-x" id="popup-close" aria-label="Close">×</button></div>
       ${bars}
       ${body}
@@ -903,7 +926,7 @@ function allQuestionsPopup(state: PanelState, note: string) {
 
 function popupView(state: PanelState) {
   if (!popup || !state.connected || isRunning(state)) return "";
-  return popup.kind === "cover" ? coverPopup(state) : answerPopup(state);
+  return popup.kind === "cover" ? coverPopup(state) : popup.kind === "addjob" ? addJobPopup(state) : answerPopup(state);
 }
 /** Closes the popup, letting go of a box so what's behind it can be drawn. */
 function closePopup() {
@@ -926,7 +949,8 @@ function focusPopup() {
 
 function wirePopup() {
   app.querySelectorAll<HTMLButtonElement>("[data-popup]").forEach((button) => button.addEventListener("click", () => {
-    popup = { kind: button.dataset.popup as "cover" | "answer", step: 0 };
+    popup = { kind: button.dataset.popup as "cover" | "answer" | "addjob", step: 0 };
+    if (popup.kind === "addjob" && lastState) { startManualJob(lastState); manualJob.note = ""; }
     void render();
   }));
   document.getElementById("popup-close")?.addEventListener("click", closePopup);
@@ -1219,9 +1243,9 @@ function resumeLine(state: PanelState) {
     <div class="tool-line">
       <span class="tool-what">Resume</span>
       ${resume?.file ? `<button type="button" class="resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
+      ${resume?.file ? `<button type="button" class="tool-change" id="attach-resume" title="Attach your resume to the application on this tab" ${resumeAttach.busy ? "disabled" : ""}>${resumeAttach.busy ? "Attaching…" : "Attach"}</button>` : ""}
       <button type="button" class="tool-change" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Change" : "Upload"}</button>
     </div>
-    ${resume?.file ? `<button type="button" class="btn attach-btn" id="attach-resume" ${resumeAttach.busy ? "disabled" : ""}>${resumeAttach.busy ? "Attaching…" : "Attach resume to this application"}</button>` : ""}
     ${resumeAttach.note ? `<p class="small tool-note" role="status">${escape(resumeAttach.note)}</p>` : ""}
     ${note ? `<p class="small tool-note" role="status">${escape(note)}</p>` : ""}`;
 }
@@ -1498,33 +1522,24 @@ function startManualJob(state: PanelState) {
   const url = /^https:\/\//.test(key) ? key : "";
   Object.assign(manualJob, { key, title: parts.length >= 2 ? parts[0] : "", company: parts.length >= 3 ? parts[1] : "", url, note: "", saving: false, readFor: "", description: "" });
 }
-function manualJobForm() {
-  if (!manualJob.open) return `<button type="button" class="btn" id="add-job-open">+ Add a job I applied to</button>${manualJob.note ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}`;
+/** The form in the Add a job popup. */
+function manualJobFields() {
   const ready = manualJob.title.trim().length >= 2 && manualJob.company.trim().length >= 2;
   const stage = (value: string, label: string) => `<option value="${value}"${manualJob.stage === value ? " selected" : ""}>${label}</option>`;
   return `
-    <div class="letter-form" id="add-job-form">
-      <span class="eyebrow">Add a job</span>
-      <label class="question"><span class="q-label">Job title</span><input class="field" id="mj-title" value="${escape(manualJob.title)}" maxlength="200" placeholder="Growth Marketing Intern"></label>
-      <label class="question"><span class="q-label">Company</span><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="MealPal"></label>
+    <div class="letter-form flat" id="add-job-form">
       <label class="question"><span class="q-label">Job link</span><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="https://…"></label>
-      <div class="links"><button type="button" class="link" id="mj-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading the link…" : "Fill in the job information"}</button></div>
-      <label class="question"><span class="q-label">Status</span><select class="field" id="mj-stage">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("follow_up", "Follow up")}${stage("interviewing", "Interviewing")}${stage("rejected", "Rejected")}</select></label>
-      <div class="links">
-        <button type="button" class="solid" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add to tracker"}</button>
-        <button type="button" class="link" id="mj-cancel">Cancel</button>
+      <div class="links"><button type="button" class="link" id="mj-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading the link…" : "Fill in from the link"}</button></div>
+      <div class="two-up">
+        <label class="question"><span class="q-label">Job title</span><input class="field" id="mj-title" value="${escape(manualJob.title)}" maxlength="200" placeholder="Growth Intern"></label>
+        <label class="question"><span class="q-label">Company</span><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="MealPal"></label>
       </div>
+      <label class="question"><span class="q-label">Status</span><select class="field" id="mj-stage">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("follow_up", "Follow up")}${stage("interviewing", "Interviewing")}${stage("rejected", "Rejected")}</select></label>
+      <button type="button" class="btn primary" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add to tracker"}</button>
       ${manualJob.note ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
     </div>`;
 }
 function wireManualJob(state: PanelState) {
-  document.getElementById("add-job-open")?.addEventListener("click", () => {
-    startManualJob(state);
-    manualJob.open = true;
-    manualJob.note = "";
-    void render();
-  });
-  document.getElementById("mj-cancel")?.addEventListener("click", () => { manualJob.open = false; void render(); });
   for (const [id, key] of [["mj-title", "title"], ["mj-company", "company"], ["mj-url", "url"], ["mj-stage", "stage"]] as const) {
     const box = document.getElementById(id) as HTMLInputElement | HTMLSelectElement | null;
     box?.addEventListener(box instanceof HTMLSelectElement ? "change" : "input", () => {
@@ -1561,30 +1576,20 @@ function wireManualJob(state: PanelState) {
     manualJob.saving = false;
     if (result.ok) {
       manualJob.note = `Added: ${manualJob.title} at ${manualJob.company}.`;
-      manualJob.open = false;
       manualJob.key = "";
       void loadTracker(true);
+      // Added: the popup closes, and the line under the tiles says what was added.
+      popup = null;
     } else manualJob.note = result.error ?? "Couldn't add it.";
     if (document.activeElement?.closest(".letter-form")) (document.activeElement as HTMLElement).blur();
     void render();
   });
 }
 
-/**
- * The Jobs tab. Logging jobs first: adding one by hand, "I already applied" for the job on the tab, and the jobs
- * the extension caught (the last 5 opened or applied to, each with its details). Below a divider, the tools: Autofill, a cover letter, answering a question, the resume and password.
- */
+/** The Tools tab: four tiles (a cover letter, answering a question, Autofill, adding a job), then the resume and password. */
 function jobsView(state: PanelState) {
   ensureTracker();
-  return `
-    <div class="jobs-log">
-      ${manualJobForm()}
-      ${jobFound(state) && !manualJob.open ? hereLinks() : ""}
-      ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
-      ${detectedMenu()}
-    </div>
-    <div class="section-divider" role="separator"><span>Tools</span></div>
-    ${toolsPage(state)}`;
+  return toolsPage(state);
 }
 
 /** Settings for catching applications, email links and reminders. Kept on this computer. */
