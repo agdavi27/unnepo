@@ -777,3 +777,6 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 /* The name never shrinks to nothing next to its tags: the tags wrap under it instead. */
 .person-top { flex-wrap: wrap; row-gap: 2px; }
 .person-head .person-top .person-name { flex: 0 1 auto; min-width: 0; max-width: 100%; }
+
+/* Free: the one person's email is never checked, and says so. */
+.unverified-tag { align-self: flex-start; margin-top: 4px; border: 1px solid color-mix(in srgb, var(--warn, #F5A524) 50%, transparent); border-radius: 999px; padding: 1px 7px; font: 10px var(--mono); letter-spacing: .3px; color: var(--warn, #F5A524); }

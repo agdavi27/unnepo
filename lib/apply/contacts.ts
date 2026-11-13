@@ -255,8 +255,8 @@ function found(contact: Contact, role: ContactRole, relevance: string): FoundPer
   return { rank: 1, role, name: contact.fullName, title: contact.title, email: null, emailSource: null, relevance, linkedinUrl: contact.profileUrl, photoUrl: contact.photoUrl ?? null };
 }
 
-/** How many people the list shows for a job. */
-export const LIST_SIZE = 5;
+/** How many people the list shows for a job (a company). */
+export const LIST_SIZE = 3;
 /** Paid reveals: the search stops after this many on its own, and "Show person" stops at the second number. */
 export const AUTO_REVEALS = 2;
 export const MAX_REVEALS = 3;

@@ -85,7 +85,7 @@ async function post(body: Record<string, unknown>) {
 
 export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload, say }: { job: TrackerJob; free: boolean; badge?: string; note?: string; /** Free: written emails left today. */ emailsLeft?: number | null; reload: () => Promise<void>; say: (message: string) => void }) {
   // Free sees one person at each job: the one the posting names, else the first with an email, else the first.
-  const shown = free && job.contacts.length ? [job.contacts.find((person) => person.role === "job_poster") ?? job.contacts.find((person) => person.email) ?? job.contacts[0]] : job.contacts;
+  const shown = free && job.contacts.length ? [job.contacts.find((person) => person.role === "job_poster") ?? job.contacts.find((person) => person.email) ?? job.contacts[0]] : job.contacts.slice(0, 3);
   const company = job.companyMissing ? "this company" : job.company;
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
@@ -230,7 +230,7 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload,
             <GmailIcon />
             <span className="min-w-0 flex-1">
               <span className="block select-all truncate font-mono text-[13px] text-[#D4D4DA]">{person.email}</span>
-              {source && <span className={`block text-[11px] ${unsure ? "text-[#F5A524]" : "text-[#8B8B94]"}`}>{source}</span>}
+              {(free || source) && <span className={`block text-[11px] ${unsure || free ? "text-[#F5A524]" : "text-[#8B8B94]"}`}>{free ? "Unverified email" : source}</span>}
             </span>
             <button type="button" onClick={() => void navigator.clipboard.writeText(person.email!).then(() => say("Copied the address."), () => say("Couldn't copy."))} className="flex-none text-xs text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline">Copy</button>
           </div>
@@ -315,6 +315,7 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload,
                     ? <><GmailIcon /><span className="truncate font-mono text-[#D4D4DA]">{person.email}</span></>
                     : <span className="text-[#8B8B94]">{hidden ? "Tap to show who it is" : "No email found"}</span>}
                 </span>
+                {free && person.email && <span className="mt-1.5 inline-block rounded-full border border-[#F5A524]/50 px-1.5 font-mono text-[10px] text-[#F5A524]">Unverified email</span>}
               </span>
               <span className="flex flex-none flex-col items-end gap-1">
                 {status

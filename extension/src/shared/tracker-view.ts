@@ -356,8 +356,8 @@ function peopleCard(job: TrackerJob) {
 export function freePick<T extends { role: string; email: string | null }>(contacts: T[]) {
   return contacts.find((person) => person.role === "job_poster") ?? contacts.find((person) => person.email) ?? contacts[0];
 }
-/** The people on a job's list as Free sees them (one), or everyone. */
-const shownPeople = (job: TrackerJob) => (store.tracker?.free && job.contacts.length ? [freePick(job.contacts)] : job.contacts);
+/** The people on a job's list as Free sees them (one), or Pro's three (a list from before was longer). */
+const shownPeople = (job: TrackerJob) => (store.tracker?.free && job.contacts.length ? [freePick(job.contacts)] : job.contacts.slice(0, 3));
 
 function peopleList(job: TrackerJob) {
   const people = shownPeople(job);
@@ -409,6 +409,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
           <span class="person-top"><span class="person-name">${escape(person.name)}</span>${first ? `<span class="start-here">★ Start</span>` : ""}${person.role === "job_poster" ? `<span class="posted-tag">Shown on job posting</span>` : ""}</span>
           <span class="sub">${escape(person.title || ROLE_LABEL[person.role] || "")}</span>
           <span class="person-mail">${person.email ? `${GMAIL}<span class="mail-text">${escape(person.email)}</span>` : `<span class="muted">${hidden ? "Tap to show who it is" : "No email found"}</span>`}</span>
+          ${store.tracker?.free && person.email ? `<span class="unverified-tag">Unverified email</span>` : ""}
         </span>
         <span class="person-side">${tag}<span class="chev" aria-hidden="true">›</span></span>
       </button>
@@ -421,7 +422,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
             <textarea class="field letter-input" rows="7" data-body="${person.id}" aria-label="Email to ${escape(person.name)}">${escape(draft.body)}</textarea>
           </div>` : ""}
         <div class="person-line">${send}${person.linkedinUrl ? `<a class="link" href="${escape(person.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</div>
-        ${person.emailSource && person.email ? `<span class="small"${person.emailSource === "likely" || person.emailSource === "guess" ? ' style="color: var(--warn)"' : ""}>${escape(EMAIL_SOURCE[person.emailSource] ?? "")}</span>` : ""}
+        ${person.emailSource && person.email && !store.tracker?.free ? `<span class="small"${person.emailSource === "likely" || person.emailSource === "guess" ? ' style="color: var(--warn)"' : ""}>${escape(EMAIL_SOURCE[person.emailSource] ?? "")}</span>` : ""}
         ${person.email && !hidden ? `<div class="links">
           ${draft.body ? `<button type="button" class="quiet-link" data-write="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing…" : "Write it again"}</button>` : ""}
           ${drafts[person.id] ? `<button type="button" class="quiet-link" data-save-draft="${person.id}">Save my edits</button>` : ""}

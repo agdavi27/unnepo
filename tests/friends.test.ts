@@ -19,6 +19,23 @@ describe("friends", () => {
   beforeEach(() => { useTempDb(); });
   afterEach(() => { vi.unstubAllGlobals(); delete process.env.RESEND_API_KEY; });
 
+  it("shows admins a made-up friend, Brody, to compete against, and no one else", async () => {
+    process.env.ADMIN_EMAILS = "lee.admin@colby.edu";
+    try {
+      const admin = await student("lee.admin@colby.edu", "Lee Admin");
+      const pat = await student("pat.doe@colby.edu", "Pat Doe");
+      const since = new Date(Date.now() - 3 * 86_400_000).toISOString();
+      const { friends } = await listFriends(admin, since);
+      expect(friends).toEqual([{ id: "demo-brody", name: "Brody", applied: expect.any(Number) }]);
+      expect(friends[0].applied).toBeGreaterThan(2);
+      expect((await listFriends(pat, since)).friends).toEqual([]);
+      // Removing him does nothing harmful: he's back next time.
+      expect(await friendAction(admin, { action: "remove", id: "demo-brody" })).toMatchObject({ ok: true });
+    } finally {
+      delete process.env.ADMIN_EMAILS;
+    }
+  });
+
   it("shares this week's count only once the friend accepts", async () => {
     const pat = await student("pat.doe@colby.edu", "Pat Doe");
     const sam = await student("sam.roe@colby.edu", "Sam Roe");
