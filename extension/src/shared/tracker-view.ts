@@ -660,10 +660,10 @@ const SURE: Record<Detected["sure"], string> = { confirmed: "Confirmed", likely:
 let detectedOpen = false;
 /** Which detected job the Add a job popup shows: one at a time, by id. */
 let detectedShown = "";
-/** Back to the first job still waiting for an answer, each time the popup opens. */
+/** Back to the newest job, each time the popup opens. */
 export function resetDetectedPager() {
   const list = (store.detected ?? []).slice(0, 5);
-  detectedShown = (list.find((item) => item.state === "ask") ?? list[0])?.id ?? "";
+  detectedShown = list[0]?.id ?? "";
 }
 const ago = (at: number) => {
   const minutes = Math.round((Date.now() - at) / 60_000);
@@ -708,13 +708,41 @@ export function detectedMenu(inline = false) {
       </li>`;
   };
   if (inline) {
+    // The newest is almost always the one just applied to: it's the big card. The rest are small rows under it;
+    // tapping one makes it the big card.
     const shown = list.slice(0, 5);
-    const at = Math.max(0, shown.findIndex((item) => item.id === detectedShown));
-    const arrow = (to: number, label: string, glyph: string) => `<button type="button" class="pager-btn" data-detected-page="${shown[to]?.id ?? ""}" aria-label="${label}" ${shown[to] ? "" : "disabled"}>${glyph}</button>`;
+    if (!shown.length) return `<div class="add-part detected-inline"><span class="eyebrow">Detected</span><p class="small">Jobs you open or apply to show up here. Ones the site confirms are saved by themselves.</p></div>`;
+    const main = shown.find((item) => item.id === detectedShown) ?? shown[0];
+    const done = (item: Detected) => item.state === "saved" || item.state === "yes";
+    const open = (item: Detected) => item.state === "ask" || item.state === "seen";
+    const mainActions = open(main)
+      ? `<button type="button" class="btn primary" data-detected-yes="${main.id}">✓ I applied</button>${main.state === "ask" ? `<button type="button" class="btn square" data-detected-no="${main.id}" aria-label="I didn't apply">✗</button>` : ""}`
+      : done(main) ? `<span class="status done">${main.state === "saved" ? "Saved" : "Added"} ✓</span><button type="button" class="quiet-link" data-detected-undo="${main.id}">Undo</button>`
+      : `<span class="status">${main.state === "undone" ? "Undone" : "Not applied"}</span>`;
+    const description = (main.description ?? "").trim();
+    const details = description || main.poster || /^https:\/\//.test(main.url) ? `
+        <details class="detected-info">
+          <summary>Job details</summary>
+          ${main.poster ? `<p class="small">Hiring: ${escape(main.poster.name)}${main.poster.title ? ` · ${escape(short(main.poster.title, 80))}` : ""}</p>` : ""}
+          ${description ? `<p class="detected-desc">${escape(description.slice(0, 1500))}${description.length > 1500 ? "…" : ""}</p>` : ""}
+          ${/^https:\/\//.test(main.url) ? `<a class="quiet-link" href="${escape(main.url)}" target="_blank" rel="noreferrer">Open the job ↗</a>` : ""}
+        </details>` : "";
+    const others = shown.filter((item) => item !== main).map((item) => `
+        <li class="mini-detected${done(item) || item.state === "no" || item.state === "undone" ? " answered" : ""}">
+          <button type="button" class="mini-detected-text" data-detected-page="${item.id}" title="Show this one"><span class="mini-title">${escape(short(item.title, 60))}</span><span class="sub">${escape([item.company, ago(item.at)].filter(Boolean).join(" · "))}</span></button>
+          ${open(item) ? `<button type="button" class="mini-btn" data-detected-yes="${item.id}" aria-label="I applied to ${escape(item.title)}">✓</button>` : done(item) ? `<span class="mini-done" aria-label="Saved">✓</span>` : ""}
+        </li>`).join("");
     return `
     <div class="add-part detected-inline">
-      <div class="row-between"><span class="eyebrow">Detected${asking ? ` <span class="count">${asking}</span>` : ""}</span>${shown.length > 1 ? `<span class="pager">${arrow(at - 1, "Newer job", "‹")}<span class="mono">${at + 1} of ${shown.length}</span>${arrow(at + 1, "Older job", "›")}</span>` : ""}</div>
-      ${shown.length ? `<ul class="detected-list">${row(shown[at])}</ul>` : `<p class="small">Jobs you open or apply to show up here. Ones the site confirms are saved by themselves.</p>`}
+      <div class="detected-card${main.state === "ask" ? " asking" : ""}">
+        <span class="tile-sub">${escape([main.site, ago(main.at), SURE[main.sure]].filter(Boolean).join(" · "))}</span>
+        ${main.applicationId ? `<button type="button" class="detected-title big" data-open-job="${main.applicationId}">${escape(short(main.title, 80))}</button>` : `<span class="detected-title big">${escape(short(main.title, 80))}</span>`}
+        <span class="sub">${escape(main.company)}</span>
+        ${main.error ? `<span class="small" style="color: var(--warn)">${escape(main.error)}</span>` : ""}
+        ${details}
+        <div class="detected-card-actions">${mainActions}</div>
+      </div>
+      ${others ? `<ul class="mini-detected-list" aria-label="Other jobs Unnepo caught">${others}</ul>` : ""}
     </div>`;
   }
   return `

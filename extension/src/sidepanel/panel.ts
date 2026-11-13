@@ -397,7 +397,7 @@ const PLUS = `<svg class="big-tool-icon" width="20" height="20" viewBox="0 0 24 
  */
 function addJobPopup(state: PanelState) {
   const onTab = jobFound(state) ? `<div class="add-part">${hereLinks()}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}</div>` : "";
-  return popupShell("Add a job", `${onTab}${detectedMenu(true)}<div class="add-part"><span class="eyebrow">Add one yourself</span>${manualJobFields()}</div>`, 0, 0, "mini");
+  return popupShell("Add a job", `${onTab}${detectedMenu(true)}<div class="add-part">${manualJobFields()}</div>`, 0, 0, "mini");
 }
 
 /**
@@ -1518,9 +1518,11 @@ const manualJob = { open: false, key: "", title: "", company: "", url: "", stage
 function startManualJob(state: PanelState) {
   const key = state.tab?.url ?? "";
   if (manualJob.key === key) return;
-  const parts = (state.tab?.title ?? "").replace(/^\(\d+\)\s*/, "").split(/ [|\-–] /).map((part) => part.trim()).filter(Boolean);
-  const url = /^https:\/\//.test(key) ? key : "";
-  Object.assign(manualJob, { key, title: parts.length >= 2 ? parts[0] : "", company: parts.length >= 3 ? parts[1] : "", url, note: "", saving: false, readFor: "", description: "" });
+  // Only a job page fills the form in: a site's own tab ("Jobs | Handshake") isn't a job.
+  const isJob = jobFound(state);
+  const parts = isJob ? (state.tab?.title ?? "").replace(/^\(\d+\)\s*/, "").split(/ [|\-–] /).map((part) => part.trim()).filter(Boolean) : [];
+  const url = isJob && /^https:\/\//.test(key) ? key : "";
+  Object.assign(manualJob, { key, title: state.job?.title || state.page?.title || (parts.length >= 2 ? parts[0] : ""), company: state.job?.company || state.page?.company || (parts.length >= 3 ? parts[1] : ""), url, note: "", saving: false, readFor: "", description: "" });
 }
 /** The form in the Add a job popup: short enough to see whole, the labels inside the boxes. */
 function manualJobFields() {
@@ -1528,9 +1530,9 @@ function manualJobFields() {
   const stage = (value: string, label: string) => `<option value="${value}"${manualJob.stage === value ? " selected" : ""}>${label}</option>`;
   return `
     <div class="letter-form flat add-form" id="add-job-form">
-      <div class="add-row"><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="Job link (optional)" aria-label="Job link"><button type="button" class="btn" id="mj-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading…" : "Fill in"}</button></div>
+      <div class="add-row"><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="Job link" aria-label="Job link"><button type="button" class="btn" id="mj-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading…" : "Fill in"}</button></div>
       <div class="two-up"><input class="field" id="mj-title" value="${escape(manualJob.title)}" maxlength="200" placeholder="Job title" aria-label="Job title"><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="Company" aria-label="Company"></div>
-      <div class="add-row"><select class="field" id="mj-stage" aria-label="Status">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("follow_up", "Follow up")}${stage("interviewing", "Interviewing")}${stage("rejected", "Rejected")}</select><button type="button" class="btn primary" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add job"}</button></div>
+      <div class="add-row"><select class="field" id="mj-stage" aria-label="Status">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("follow_up", "Follow up")}${stage("interviewing", "Interviewing")}${stage("rejected", "Rejected")}</select><button type="button" class="btn accent" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add job"}</button></div>
       ${manualJob.note ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
     </div>`;
 }
