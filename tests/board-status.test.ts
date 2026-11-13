@@ -48,6 +48,8 @@ describe("isAppliedListPage", () => {
   it("knows the boards' application lists", () => {
     expect(page("https://app.joinhandshake.com/stu/applications")).toBe(true);
     expect(page("https://colby.joinhandshake.com/applications?page=2")).toBe(true);
+    expect(page("https://app.joinhandshake.com/job-tracker?status=applied")).toBe(true);
+    expect(page("https://app.joinhandshake.com/job-tracker")).toBe(true);
     expect(page("https://www.linkedin.com/my-items/saved-jobs/?cardType=APPLIED")).toBe(true);
     expect(page("https://www.linkedin.com/jobs-tracker/?stage=applied")).toBe(true);
     expect(page("https://www.ziprecruiter.com/candidate/my-jobs")).toBe(true);
@@ -55,6 +57,7 @@ describe("isAppliedListPage", () => {
   });
   it("leaves job pages alone", () => {
     expect(page("https://app.joinhandshake.com/stu/jobs/123")).toBe(false);
+    expect(page("https://app.joinhandshake.com/job-tracker?status=saved")).toBe(false);
     expect(page("https://www.linkedin.com/my-items/saved-jobs/?cardType=SAVED")).toBe(false);
     expect(page("https://www.linkedin.com/jobs/view/123")).toBe(false);
     expect(page("https://www.example.com/applications")).toBe(false);

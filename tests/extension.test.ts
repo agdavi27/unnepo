@@ -855,6 +855,8 @@ describe("one link per job", () => {
   it("turns Indeed's search with a job open into that job's own page, and leaves other links alone", () => {
     expect(jobLink("https://www.indeed.com/jobs?q=intern&l=Boston&vjk=9f8e7d6c5b4a3210")).toBe("https://www.indeed.com/viewjob?jk=9f8e7d6c5b4a3210");
     expect(jobLink("https://www.indeed.com/viewjob?jk=abc123&from=serp")).toBe("https://www.indeed.com/viewjob?jk=abc123");
+    expect(jobLink("https://app.joinhandshake.com/job-search/11922471?page=1&per_page=25")).toBe("https://app.joinhandshake.com/jobs/11922471");
+    expect(jobLink("https://app.joinhandshake.com/stu/jobs/123456?ref=x")).toBe("https://app.joinhandshake.com/jobs/123456");
     expect(jobLink("https://www.ziprecruiter.com/c/MealPal/Job/Intern?jid=1a2b")).toBe("https://www.ziprecruiter.com/c/MealPal/Job/Intern?jid=1a2b");
     // LinkedIn: the search's open job and the job's own page are one address.
     expect(jobLink("https://www.linkedin.com/jobs/search/?currentJobId=4012345678&keywords=intern")).toBe("https://www.linkedin.com/jobs/view/4012345678/");
