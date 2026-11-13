@@ -536,6 +536,7 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .person-mail .muted { color: var(--muted); }
 .gmail { flex: none; width: 16px; height: 12px; }
 .person-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; align-self: stretch; gap: 6px; }
+.posted-tag { flex: none; border: 1px solid var(--control); border-radius: 999px; padding: 0 6px; font: 10px var(--mono); color: var(--muted-3); white-space: nowrap; }
 .card-tag { font: 10px var(--mono); text-transform: uppercase; color: var(--muted-2); }
 .card-tag.written { color: var(--accent); }
 .card-tag.ok { color: var(--ok); }

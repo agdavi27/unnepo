@@ -15,7 +15,7 @@ import type { TrackerJob } from "@/lib/extension/service";
 type Person = TrackerJob["contacts"][number];
 type Draft = { subject: string; body: string };
 
-const ROLE_LABEL: Record<string, string> = { job_poster: "Posted the job", poster: "Posted the job", recruiter: "Recruiter", alumni: "Alum", team_member: "Team", department: "Team" };
+const ROLE_LABEL: Record<string, string> = { job_poster: "Shown on job posting", poster: "Shown on job posting", recruiter: "Recruiter", alumni: "Alum", team_member: "Team", department: "Team" };
 const PERSON_STATUS: Record<string, string> = { emailed: "Emailed", replied: "Replied", no_response: "No reply" };
 const EMAIL_SOURCE: Record<string, string> = {
   apollo: "Verified", hunter: "Verified", pattern: "Verified", job_posting: "From the job posting", website: "From the company's website",
@@ -194,63 +194,6 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
     </li>
   );
 
-  // Free's preview: titles only, with Pro to see who they are.
-  if (preview.length && free) {
-    return (
-      <div className="flex flex-col gap-2">
-        {head}
-        <ul className="m-0 flex list-none flex-col gap-2 p-0">
-          {preview.map((row, index) => locked(`preview-${index}`, row.title || ROLE_LABEL[row.role] || "Someone", [row.title ? ROLE_LABEL[row.role] : "", "Name hidden"].filter(Boolean).join(" · ")))}
-        </ul>
-      </div>
-    );
-  }
-
-  // Not searched yet: the button.
-  if (job.contactsStatus === "idle" || (preview.length && !free)) {
-    return (
-      <div className="flex flex-col gap-3">
-        {head}
-        <Spots />
-        <div className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] bg-[#0A0A0C] p-4">
-          <p className="m-0 text-sm text-[#B4B4BC]">Unnepo finds recruiters, the team, and people you have something in common with, with their work emails.</p>
-          <div><button type="button" onClick={() => void find()} disabled={busy.has("find")} className={primary}>{busy.has("find") ? "Starting…" : "Find people"}</button></div>
-        </div>
-        {note && <p className="m-0 text-[13px] text-[#F5A524]">{note}</p>}
-        {errorLine}
-      </div>
-    );
-  }
-
-  if (searching && !stale) {
-    return (
-      <div className="flex flex-col gap-2">
-        {head}
-        <Spots searching />
-        <p role="status" className="m-0 flex items-center gap-2 text-sm text-muted"><span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-[#3D8BFF]" />{job.contactsMessage || `Searching for people at ${company}…`}</p>
-      </div>
-    );
-  }
-
-  if (!job.contacts.length) {
-    return (
-      <div className="flex flex-col gap-3">
-        {head}
-        <Spots />
-        <div className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] bg-[#0A0A0C] p-4">
-          <p className="m-0 text-sm text-[#B4B4BC]">{stale || job.contactsStatus === "failed" ? "That search didn't finish." : "No one found yet."} Add the company&apos;s website and Unnepo looks again.</p>
-          <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void find(); }}>
-            <input value={website} onChange={(event) => setWebsite(event.target.value)} placeholder="Company website, like acme.com" aria-label="Company website" className="h-10 min-w-0 flex-1 basis-48 rounded-xl border border-[#26262C] bg-[#0C0C0E] px-3 text-sm placeholder:text-[#5C5C66] focus:border-[#3D8BFF] focus:outline-none" />
-            <button type="submit" disabled={busy.has("find")} className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{busy.has("find") ? "Starting…" : "Search"}</button>
-          </form>
-          <p className="m-0 text-[13px] text-[#8B8B94]">Or look yourself: {linkedIn("recruiters", `recruiter ${job.company}`)} · {linkedIn("the team", `${job.department || job.title} ${job.company}`)} on LinkedIn ↗</p>
-        </div>
-        {note && <p className="m-0 text-[13px] text-[#F5A524]">{note}</p>}
-        {errorLine}
-      </div>
-    );
-  }
-
   const firstWithEmail = job.contacts.find((person) => person.email)?.id;
   const revealsLeft = (job.fillReport?.peopleReveals ?? 0) < MAX_REVEALS;
   const isHiddenPerson = (person: Person) => !person.email && job.hidden.includes(person.name.toLowerCase());
@@ -343,46 +286,109 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
     );
   };
 
+  const list = (
+    <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
+      {job.contacts.map((person) => {
+        const hidden = isHiddenPerson(person);
+        if (free && hidden) return locked(person.id, person.name, person.title || ROLE_LABEL[person.role] || "");
+        const start = person.id === firstWithEmail;
+        const status = PERSON_STATUS[person.outreachStatus];
+        const written = Boolean(person.emailBody);
+        return (
+          <li key={person.id}>
+            <button type="button" onClick={() => setFocus(person.id)} aria-label={`Open ${person.name}`}
+              className={`group flex w-full items-center gap-3 rounded-xl border bg-[#0A0A0C] px-3 py-3 text-left transition-colors hover:border-[#3A3A42] hover:bg-white/[0.03] ${start ? "border-[#2A3A5A]" : "border-[#1F1F24]"}`}>
+              <Avatar name={person.name} />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <span className="truncate text-sm font-semibold">{person.name}</span>
+                  {start && <span className="flex-none font-mono text-[10px] uppercase tracking-[.6px] text-[#3D8BFF]">★ Start</span>}
+                  {person.role === "job_poster" && <span className="flex-none rounded-full border border-[#26262C] px-1.5 font-mono text-[10px] text-[#B4B4BC]">Shown on job posting</span>}
+                </span>
+                <span className="block truncate text-xs text-[#8B8B94]">{person.title || ROLE_LABEL[person.role] || ""}</span>
+                <span className="mt-1 flex items-center gap-1.5 text-xs">
+                  {person.email
+                    ? <><GmailIcon /><span className="truncate font-mono text-[#D4D4DA]">{person.email}</span></>
+                    : <span className="text-[#8B8B94]">{hidden ? "Tap to show who it is" : "No email found"}</span>}
+                </span>
+              </span>
+              <span className="flex flex-none flex-col items-end gap-1">
+                {status
+                  ? <span className={`font-mono text-[10px] uppercase ${person.outreachStatus === "replied" ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{status}</span>
+                  : written ? <span className="font-mono text-[10px] uppercase text-[#3D8BFF]">Written</span> : null}
+                <span aria-hidden className="text-[#5C5C66] transition-transform group-hover:translate-x-0.5 group-hover:text-white">›</span>
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+  const popup = focused ? <Popup label={focused.name} onClose={() => setFocus(null)} width="max-w-xl">{details(focused)}</Popup> : null;
+
+  // Free's preview: titles only, with Pro to see who they are.
+  if (preview.length && free) {
+    return (
+      <div className="flex flex-col gap-2">
+        {head}
+        <ul className="m-0 flex list-none flex-col gap-2 p-0">
+          {preview.map((row, index) => locked(`preview-${index}`, row.title || ROLE_LABEL[row.role] || "Someone", [row.title ? ROLE_LABEL[row.role] : "", "Name hidden"].filter(Boolean).join(" · ")))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Not searched yet: the button.
+  if (job.contactsStatus === "idle" || (preview.length && !free)) {
+    return (
+      <div className="flex flex-col gap-3">
+        {head}
+        {job.contacts.length ? <>{list}{popup}</> : <Spots />}
+        <div className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] bg-[#0A0A0C] p-4">
+          <p className="m-0 text-sm text-[#B4B4BC]">Unnepo finds recruiters, the team, and people you have something in common with, with their work emails.</p>
+          <div><button type="button" onClick={() => void find()} disabled={busy.has("find")} className={primary}>{busy.has("find") ? "Starting…" : "Find people"}</button></div>
+        </div>
+        {note && <p className="m-0 text-[13px] text-[#F5A524]">{note}</p>}
+        {errorLine}
+      </div>
+    );
+  }
+
+  if (searching && !stale) {
+    return (
+      <div className="flex flex-col gap-2">
+        {head}
+        {job.contacts.length ? <>{list}{popup}</> : <Spots searching />}
+        <p role="status" className="m-0 flex items-center gap-2 text-sm text-muted"><span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-[#3D8BFF]" />{job.contactsMessage || `Searching for people at ${company}…`}</p>
+      </div>
+    );
+  }
+
+  if (!job.contacts.length) {
+    return (
+      <div className="flex flex-col gap-3">
+        {head}
+        <Spots />
+        <div className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] bg-[#0A0A0C] p-4">
+          <p className="m-0 text-sm text-[#B4B4BC]">{stale || job.contactsStatus === "failed" ? "That search didn't finish." : "No one found yet."} Add the company&apos;s website and Unnepo looks again.</p>
+          <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void find(); }}>
+            <input value={website} onChange={(event) => setWebsite(event.target.value)} placeholder="Company website, like acme.com" aria-label="Company website" className="h-10 min-w-0 flex-1 basis-48 rounded-xl border border-[#26262C] bg-[#0C0C0E] px-3 text-sm placeholder:text-[#5C5C66] focus:border-[#3D8BFF] focus:outline-none" />
+            <button type="submit" disabled={busy.has("find")} className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{busy.has("find") ? "Starting…" : "Search"}</button>
+          </form>
+          <p className="m-0 text-[13px] text-[#8B8B94]">Or look yourself: {linkedIn("recruiters", `recruiter ${job.company}`)} · {linkedIn("the team", `${job.department || job.title} ${job.company}`)} on LinkedIn ↗</p>
+        </div>
+        {note && <p className="m-0 text-[13px] text-[#F5A524]">{note}</p>}
+        {errorLine}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2">
       {head}
       {!focused && errorLine}
-      <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
-        {job.contacts.map((person) => {
-          const hidden = isHiddenPerson(person);
-          if (free && hidden) return locked(person.id, person.name, person.title || ROLE_LABEL[person.role] || "");
-          const start = person.id === firstWithEmail;
-          const status = PERSON_STATUS[person.outreachStatus];
-          const written = Boolean(person.emailBody);
-          return (
-            <li key={person.id}>
-              <button type="button" onClick={() => setFocus(person.id)} aria-label={`Open ${person.name}`}
-                className={`group flex w-full items-center gap-3 rounded-xl border bg-[#0A0A0C] px-3 py-3 text-left transition-colors hover:border-[#3A3A42] hover:bg-white/[0.03] ${start ? "border-[#2A3A5A]" : "border-[#1F1F24]"}`}>
-                <Avatar name={person.name} />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center gap-2">
-                    <span className="truncate text-sm font-semibold">{person.name}</span>
-                    {start && <span className="flex-none font-mono text-[10px] uppercase tracking-[.6px] text-[#3D8BFF]">★ Start</span>}
-                  </span>
-                  <span className="block truncate text-xs text-[#8B8B94]">{person.title || ROLE_LABEL[person.role] || ""}</span>
-                  <span className="mt-1 flex items-center gap-1.5 text-xs">
-                    {person.email
-                      ? <><GmailIcon /><span className="truncate font-mono text-[#D4D4DA]">{person.email}</span></>
-                      : <span className="text-[#8B8B94]">{hidden ? "Tap to show who it is" : "No email found"}</span>}
-                  </span>
-                </span>
-                <span className="flex flex-none flex-col items-end gap-1">
-                  {status
-                    ? <span className={`font-mono text-[10px] uppercase ${person.outreachStatus === "replied" ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{status}</span>
-                    : written ? <span className="font-mono text-[10px] uppercase text-[#3D8BFF]">Written</span> : null}
-                  <span aria-hidden className="text-[#5C5C66] transition-transform group-hover:translate-x-0.5 group-hover:text-white">›</span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {focused && <Popup label={focused.name} onClose={() => setFocus(null)} width="max-w-xl">{details(focused)}</Popup>}
+      {list}
+      {popup}
     </div>
   );
 }

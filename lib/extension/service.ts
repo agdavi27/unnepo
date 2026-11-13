@@ -186,6 +186,25 @@ export async function extensionMaybe(userId: string, raw: unknown) {
   throw new ServiceError("Unknown action.", "action", 400);
 }
 
+/**
+ * LinkedIn's "Meet the hiring team" person, kept on the job and listed with its people as soon as the page shows
+ * them, tagged "Shown on job posting", whether or not a people search has run (a later search keeps them first).
+ */
+async function notePoster(userId: string, app: JobApplication, poster: PostedRecruiter | null) {
+  const named = poster ?? app.postedRecruiter;
+  if (!named) return app;
+  const current = app.postedRecruiter ? app : (await applications.update(userId, app.id, { postedRecruiter: named })) ?? app;
+  const people = await applicationContacts.list(userId, [app.id]);
+  const same = (name: string) => name.trim().toLowerCase() === named.name.trim().toLowerCase();
+  if (!people.some((person) => person.role === "job_poster" || same(person.name))) {
+    await applicationContacts.add(userId, {
+      applicationId: app.id, userId, rank: 0, role: "job_poster", name: named.name, title: named.title ?? "", email: named.email, emailSource: named.email ? "job_posting" : null,
+      relevance: named.linkedinUrl ? "Shown under \"Meet the hiring team\" on this job." : "Named on the job posting.", linkedinUrl: named.linkedinUrl ?? null, photoUrl: null, emailSubject: null, emailBody: null,
+    });
+  }
+  return current;
+}
+
 async function openJob(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { url?: unknown; title?: unknown; company?: unknown; description?: unknown; poster?: unknown };
   const url = String(body.url ?? "").trim().slice(0, 2000);
@@ -196,7 +215,10 @@ async function openJob(userId: string, raw: unknown) {
   const tracked = await trackedAt(userId, url, { title: String(body.title ?? ""), company: String(body.company ?? "") });
   const existing = tracked.app;
   if (existing) {
-    if (poster && !existing.postedRecruiter) return { application: summary((await applications.update(userId, existing.id, { postedRecruiter: poster, ...(pageDescription && !existing.description ? { description: pageDescription } : {}) }))!), created: false };
+    if (poster) {
+      const noted = await notePoster(userId, existing, existing.postedRecruiter ? null : poster);
+      return { application: summary(pageDescription && !noted.description ? (await applications.update(userId, existing.id, { description: pageDescription }))! : noted), created: false };
+    }
     if (pageDescription && !existing.description) return { application: summary((await applications.update(userId, existing.id, { description: pageDescription, postedRecruiter: existing.postedRecruiter ?? findPostedRecruiter(pageDescription) }))!), created: false };
     return { application: summary(existing), created: false };
   }
@@ -207,6 +229,7 @@ async function openJob(userId: string, raw: unknown) {
   if (pageTitle && pageCompany) {
     if (!(await profileReady(userId))) throw new ServiceError("Finish your profile first so Unnepo has your details to apply with.", "profile", 400);
     const app = await minimalApplication(userId, { url, title: pageTitle, company: pageCompany, description: pageDescription, poster, key: tracked.key });
+    if (poster) await notePoster(userId, app, null);
     runLater(async () => {
       if (!pageDescription) await enrichFromPosting(userId, app.id, url);
       await preWriteLetter(userId, app.id);
@@ -663,6 +686,8 @@ export async function extensionSubmission(userId: string, raw: unknown) {
     if (!description || companyMissing(app)) runLater(() => enrichFromPosting(userId, app!.id, url));
     if (description && companyMissing(app)) runLater(() => nameCompanyFromDescription(userId, app!.id));
   }
+  const seenPoster = pagePoster(body.poster);
+  if (seenPoster || app.postedRecruiter) app = await notePoster(userId, app, app.postedRecruiter ? null : seenPoster);
   await ensureCharged(userId, app);
   const receiptPath = await saveScreenshot(userId, app.id, body.screenshot);
   const detectedAt = nowIso();

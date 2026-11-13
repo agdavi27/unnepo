@@ -128,7 +128,7 @@ export function progressDots(job: TrackerJob) {
   return `<span class="dots-wrap"><span class="dots" aria-hidden="true">${bars}</span><span class="dots-label${progress.due ? " due" : progress.ended === "Offer" || progress.done >= 5 ? " ok" : ""}">${escape(label)}</span></span>`;
 }
 
-const ROLE_LABEL: Record<string, string> = { alumni: "Alum", recruiter: "Recruiter", department: "Team", team_member: "Team", poster: "Posted the job", job_poster: "Posted the job" };
+const ROLE_LABEL: Record<string, string> = { alumni: "Alum", recruiter: "Recruiter", department: "Team", team_member: "Team", poster: "Shown on job posting", job_poster: "Shown on job posting" };
 
 /** A blank profile photo, for people Free doesn't show yet. */
 const AVATAR = `<span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="9" r="4.2"/><path d="M3.5 24c.8-5 4.2-8 8.5-8s7.7 3 8.5 8z"/></svg></span>`;
@@ -264,7 +264,8 @@ export function wireReach(root: HTMLElement) {
 
 function peopleCard(job: TrackerJob) {
   const company = job.companyMissing ? "this company" : job.company;
-  const posted = job.postedRecruiter
+  // Once the poster is one of the job's people, their card says so instead.
+  const posted = job.postedRecruiter && !job.contacts.some((person) => person.role === "job_poster")
     ? `<p class="small">Posted by <strong>${escape(job.postedRecruiter.name)}</strong>${job.postedRecruiter.title ? `, ${escape(job.postedRecruiter.title)}` : ""}${job.postedRecruiter.linkedinUrl ? ` · <a href="${escape(job.postedRecruiter.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</p>`
     : "";
   // The corner says how many companies' people are left: "1 left this week" on Free, "Unlimited" on Pro.
@@ -282,15 +283,16 @@ function peopleCard(job: TrackerJob) {
       <p class="small">Unnepo found ${escape(parts.join(", ") || `${preview.rows.length} people`)} at ${escape(company)}.</p>
       <ul class="people-list">${preview.rows.map((row) => freeRow(null, row.title, row.role)).join("")}</ul></section>`;
   }
+  const known = job.contacts.length ? peopleList(job) : "";
   if (job.contactsStatus === "idle" || (preview && !store.tracker?.free)) {
-    return `<section class="page people" aria-label="People">${head}${posted}
+    return `<section class="page people" aria-label="People">${head}${posted}${known}
       <p class="note">Recruiters, the team, and people you have something in common with.</p>
       <button type="button" class="btn primary" data-find-people="${job.id}" ${store.busy.has(`find:${job.id}`) ? "disabled" : ""}>Find people</button>
       ${store.tracker?.peopleNote ? `<p class="small" style="color: var(--warn)">${escape(store.tracker.peopleNote)}</p>` : ""}</section>`;
   }
   const stale = job.contactsStatus === "finding" && Date.now() - Date.parse(job.updatedAt) > 2 * 60 * 1000;
   if ((job.contactsStatus === "finding" || job.contactsStatus === "writing") && !stale) {
-    return `<section class="page people" aria-label="People">${head}${posted}<p class="note" role="status">${escape(job.contactsMessage || `Searching for people at ${company}…`)}</p></section>`;
+    return `<section class="page people" aria-label="People">${head}${posted}${known}<p class="note" role="status">${escape(job.contactsMessage || `Searching for people at ${company}…`)}</p></section>`;
   }
   const none = !job.contacts.length;
   const linkedIn = (label: string, keywords: string) => `<a class="link" href="https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords })}" target="_blank" rel="noreferrer">${label} on LinkedIn ↗</a>`;
@@ -301,10 +303,14 @@ function peopleCard(job: TrackerJob) {
         <p class="note">${stale || job.contactsStatus === "failed" ? "That search didn't finish." : `No one found at ${escape(company)} yet.`}</p>
         <div class="links">${linkedIn("Recruiters", `recruiter ${job.company}`)}${linkedIn("The team", `${job.department || job.title} ${job.company}`)}</div>
         <div class="connect-code"><input class="field" data-website="${job.id}" value="${escape(websites[job.id] ?? "")}" placeholder="Company website, like acme.com" aria-label="Company website"><button type="button" class="solid" data-find-people="${job.id}">Search again</button></div>`
-        : `<ul class="people-list">${job.contacts.map((person, index) => store.tracker?.free && !person.email && job.hidden.includes(person.name.toLowerCase())
-          ? freeRow(person.name, person.title, person.role)
-          : personRow(job, person, index === job.contacts.findIndex((other) => other.email))).join("")}</ul>`}
+        : known}
     </section>`;
+}
+
+function peopleList(job: TrackerJob) {
+  return `<ul class="people-list">${job.contacts.map((person, index) => store.tracker?.free && !person.email && job.hidden.includes(person.name.toLowerCase())
+    ? freeRow(person.name, person.title, person.role)
+    : personRow(job, person, index === job.contacts.findIndex((other) => other.email))).join("")}</ul>`;
 }
 
 function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
@@ -335,7 +341,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
       <button type="button" class="person-head" data-person-toggle="${person.id}" aria-expanded="${open}" aria-label="${escape(person.name)}">
         ${initialsAvatar(person.name)}
         <span class="person-text">
-          <span class="person-top"><span class="person-name">${escape(person.name)}</span>${first ? `<span class="start-here">★ Start</span>` : ""}</span>
+          <span class="person-top"><span class="person-name">${escape(person.name)}</span>${first ? `<span class="start-here">★ Start</span>` : ""}${person.role === "job_poster" ? `<span class="posted-tag">Shown on job posting</span>` : ""}</span>
           <span class="sub">${escape(person.title || ROLE_LABEL[person.role] || "")}</span>
           <span class="person-mail">${person.email ? `${GMAIL}<span class="mail-text">${escape(person.email)}</span>` : `<span class="muted">${hidden ? "Tap to show who it is" : "No email found"}</span>`}</span>
         </span>
