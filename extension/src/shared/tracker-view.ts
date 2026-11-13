@@ -315,7 +315,7 @@ function peopleCard(job: TrackerJob) {
     : "";
   // The corner says how many companies' people are left: "1 person per job" on Free, "Unlimited" on Pro.
   const badge = store.tracker?.peopleBadge;
-  const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${job.contacts.length ? ` · ${job.contacts.length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
+  const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${job.contacts.length ? ` · ${shownPeople(job).length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
   if (!isAppliedJob(job)) {
     return `<section class="page people" aria-label="People">${head}${posted}<p class="note">Once you apply, Unnepo finds who to email here: recruiters, the team, and people from your school.</p></section>`;
   }
@@ -352,20 +352,30 @@ function peopleCard(job: TrackerJob) {
     </section>`;
 }
 
+/** Free sees one person at each job: the one the posting names, else the first with an email, else the first. */
+export function freePick<T extends { role: string; email: string | null }>(contacts: T[]) {
+  return contacts.find((person) => person.role === "job_poster") ?? contacts.find((person) => person.email) ?? contacts[0];
+}
+/** The people on a job's list as Free sees them (one), or everyone. */
+const shownPeople = (job: TrackerJob) => (store.tracker?.free && job.contacts.length ? [freePick(job.contacts)] : job.contacts);
+
 function peopleList(job: TrackerJob) {
-  return `<ul class="people-list">${job.contacts.map((person, index) => store.tracker?.free && !person.email && job.hidden.includes(person.name.toLowerCase())
-    ? freeRow(person.name, person.title, person.role)
-    : personRow(job, person, index === job.contacts.findIndex((other) => other.email))).join("")}${store.tracker?.free ? unlockRow(job) : ""}</ul>`;
+  const people = shownPeople(job);
+  return `<ul class="people-list">${people.map((person, index) => personRow(job, person, index === people.findIndex((other) => other.email))).join("")}${store.tracker?.free ? `</ul>${unlockCard(job)}` : "</ul>"}`;
 }
 
-/** Free shows one person: the rest of who the search found, and checked emails, come with Pro. */
-function unlockRow(job: TrackerJob) {
-  const more = job.fillReport?.peopleLocked ?? 0;
+const LOCK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`;
+/** Free: who else is there, blurred, and one button to Pro. */
+function unlockCard(job: TrackerJob) {
+  const more = Math.max(0, job.contacts.length - 1) + (job.fillReport?.peopleLocked ?? 0);
   const company = job.companyMissing ? "this company" : short(job.company, 24);
-  const line = more ? `${more} more ${more === 1 ? "person" : "people"} at ${company}, with checked emails` : "Recruiters, the team and alumni, with checked emails";
-  return `<li class="person compact unlock-row"><span class="unlock-plus" aria-hidden="true">+</span>
-    <div class="person-text"><span class="person-name">Unlock more people</span><span class="sub" title="${escape(line)}">${escape(line)}</span></div>
-    <button type="button" class="solid" data-upgrade>Upgrade to Pro</button></li>`;
+  const title = more ? `Unlock ${more} more ${more === 1 ? "person" : "people"}` : "Unlock more people";
+  const faces = ["#3D8BFF", "#A78BFA", "#34D399"].map((color) => `<span class="unlock-face" style="background:${color}33;box-shadow:inset 0 0 0 1.5px ${color}88"></span>`).join("");
+  return `<div class="unlock-card">
+    <div class="unlock-top"><span class="unlock-faces" aria-hidden="true">${faces}<span class="unlock-lock">${LOCK}</span></span>
+      <div class="unlock-copy"><strong>${escape(title)}</strong><span>Recruiters, the team and alumni at ${escape(company)}, with checked emails.</span></div></div>
+    <button type="button" class="unlock-btn" data-upgrade>Upgrade to Pro <span aria-hidden="true">→</span></button>
+  </div>`;
 }
 
 function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
@@ -384,7 +394,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
   const send = person.email
     ? link
       ? `<a class="solid send-mail" href="${escape(link.url)}" ${link.url.startsWith("mailto:") ? "" : 'target="_blank" rel="noreferrer"'} data-email-link="${person.id}" data-cut="${link.cut}">${store.mailer === "gmail" ? GMAIL : ""}${followUp ? "Open again" : "Send"} in ${MAILER_NAME[store.mailer]} ↗</a>`
-      : `<button type="button" class="solid send-mail" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing your email…" : "Write email"}</button>`
+      : `<button type="button" class="solid send-mail" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing your email…" : `Write email${typeof store.tracker?.emailsLeft === "number" ? ` (${store.tracker.emailsLeft} left today)` : ""}`}</button>`
     : hidden
       ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>` : `<span class="small">You've shown 3 people for this job.</span>`
       : `<span class="small">No email found.</span>`;
@@ -856,9 +866,10 @@ export function followUpView() {
   const waiting = jobs.filter((job) => isAppliedJob(job) && emailedCount(job) > 0 && !["rejected", "offer"].includes(stageOf(job as never)));
   const due = new Set(followUpsDue(jobs as never).map((item) => item.applicationId));
   const people = (job: TrackerJob) => {
-    const withEmail = job.contacts.filter((person) => person.email).length;
+    const shown = shownPeople(job);
+    const withEmail = shown.filter((person) => person.email).length;
     if (job.contactsStatus === "finding") return "Finding people…";
-    if (job.contacts.length) return `${job.contacts.length} ${job.contacts.length === 1 ? "person" : "people"} found${withEmail ? `, ${withEmail} with email` : ""}`;
+    if (shown.length) return `${shown.length} ${shown.length === 1 ? "person" : "people"} found${withEmail ? `, ${withEmail} with email` : ""}`;
     return "No one found yet";
   };
   const todoRow = (job: TrackerJob, index: number) => {

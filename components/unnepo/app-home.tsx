@@ -48,10 +48,10 @@ const VIEWS: { id: View; label: string }[] = [
 const PRO_REASONS: Array<[string, string]> = [
   ["See who to email at every company", "Names, titles and checked emails for recruiters, hiring managers and the team, not just how many there are."],
   ["Show person on every job", "Reveal the people on a job's list, with their LinkedIn and email."],
-  ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 5 general ones a day."],
-  ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 5 a day."],
-  ["Unlimited autofill that answers the questions too", "Free has 5 full autofills a day, then fills your basic details."],
-  ["Follow-up emails written for you", "A short note to each person, ready to send from Gmail or Outlook."],
+  ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 3 general ones a day."],
+  ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 3 a day."],
+  ["Unlimited autofill that answers the questions too", "Free has 3 full autofills a day, then fills your basic details."],
+  ["Unlimited emails and follow-ups written for you", "A short note to each person, ready to send from Gmail or Outlook. Free writes 3 emails a day."],
   ["Names and emails at every company you apply to", "Free shows 1 person at each job, with an email that isn't checked."],
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
@@ -211,7 +211,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
   const creditsLeft = usage?.credits ?? (data?.credits.balance ?? 0) * CREDIT_COST.people;
   const creditsLabel = data?.credits.unlimited || usage?.unlimited ? "Unlimited" : usage?.free ? "Resets every day" : `${creditsLeft} ${creditsLeft === 1 ? "credit" : "credits"} left`;
   const usesLeft = usage ? [
-    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"} today`, `${usage.answers.left} ${usage.answers.left === 1 ? "answer" : "answers"} today`, `${usage.autofills.left} ${usage.autofills.left === 1 ? "autofill" : "autofills"} today`] : []),
+    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"} today`, `${usage.answers.left} ${usage.answers.left === 1 ? "answer" : "answers"} today`, `${usage.autofills.left} ${usage.autofills.left === 1 ? "autofill" : "autofills"} today`, `${usage.emails.left} written ${usage.emails.left === 1 ? "email" : "emails"} today`] : []),
     ...(usage.unlimited ? [] : [`people: ${usage.people.badge}`]),
   ] : [];
   const initials = (data?.user.name || data?.user.email || "").split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();

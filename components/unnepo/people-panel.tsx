@@ -83,7 +83,9 @@ async function post(body: Record<string, unknown>) {
   return payload as { contact?: Person; gone?: boolean };
 }
 
-export function PeoplePanel({ job, free, badge, note, reload, say }: { job: TrackerJob; free: boolean; badge?: string; note?: string; reload: () => Promise<void>; say: (message: string) => void }) {
+export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload, say }: { job: TrackerJob; free: boolean; badge?: string; note?: string; /** Free: written emails left today. */ emailsLeft?: number | null; reload: () => Promise<void>; say: (message: string) => void }) {
+  // Free sees one person at each job: the one the posting names, else the first with an email, else the first.
+  const shown = free && job.contacts.length ? [job.contacts.find((person) => person.role === "job_poster") ?? job.contacts.find((person) => person.email) ?? job.contacts[0]] : job.contacts;
   const company = job.companyMissing ? "this company" : job.company;
   const [busy, setBusy] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
@@ -173,7 +175,7 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
 
   const head = (
     <div className="flex items-center justify-between gap-3">
-      <p className={eyebrow}>People{job.contacts.length ? ` · ${job.contacts.length}` : ""}</p>
+      <p className={eyebrow}>People{shown.length ? ` · ${shown.length}` : ""}</p>
       {badge && isApplied(job) && <span className={`rounded-full border px-2 py-0.5 font-mono text-[10.5px] uppercase ${/^0 /.test(badge) ? "border-[#3A2020] text-[#F87171]" : "border-[#26262C] text-[#9A9AA3]"}`}>{badge}</span>}
     </div>
   );
@@ -196,8 +198,7 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
 
   const firstWithEmail = job.contacts.find((person) => person.email)?.id;
   // Free shows one person; the rest of who the search found (and checked emails) come with Pro.
-  const moreFound = job.fillReport?.peopleLocked ?? 0;
-  const unlockLine = moreFound ? `${moreFound} more ${moreFound === 1 ? "person" : "people"} at ${company}, with checked emails` : "Recruiters, the team and alumni, with checked emails";
+  const moreFound = Math.max(0, job.contacts.length - 1) + (job.fillReport?.peopleLocked ?? 0);
   const revealsLeft = (job.fillReport?.peopleReveals ?? 0) < MAX_REVEALS;
   const isHiddenPerson = (person: Person) => !person.email && job.hidden.includes(person.name.toLowerCase());
   const focused = focus ? job.contacts.find((person) => person.id === focus) ?? null : null;
@@ -261,7 +262,7 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
               </>
             ) : (
               <div className="flex flex-col items-start gap-2">
-                <button type="button" disabled={isBusy("write")} onClick={() => void write(person, false)} className={primary}>{isBusy("write") ? "Writing your email…" : "Write email"}</button>
+                <button type="button" disabled={isBusy("write")} onClick={() => void write(person, false)} className={primary}>{isBusy("write") ? "Writing your email…" : `Write email${emailsLeft !== null ? ` (${emailsLeft} left today)` : ""}`}</button>
                 <span className="text-[12px] text-[#8B8B94]">Written from your resume and this job. You read it before it goes.</span>
               </div>
             )}
@@ -291,7 +292,7 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
 
   const list = (
     <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
-      {job.contacts.map((person) => {
+      {shown.map((person) => {
         const hidden = isHiddenPerson(person);
         if (free && hidden) return locked(person.id, person.name, person.title || ROLE_LABEL[person.role] || "");
         const start = person.id === firstWithEmail;
@@ -325,16 +326,6 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
           </li>
         );
       })}
-      {free && job.contacts.length > 0 && (
-        <li className="flex items-center gap-3 rounded-xl border border-dashed border-[#2A3A5A] px-3 py-3">
-          <span aria-hidden className="grid h-9 w-9 flex-none place-items-center rounded-full bg-[#3D8BFF]/10 text-[#3D8BFF]">+</span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-sm font-semibold">Unlock more people</span>
-            <span className="block truncate text-xs text-[#8B8B94]">{unlockLine}</span>
-          </span>
-          <a href="/home?tab=pro" className="flex-none rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200">Upgrade to Pro</a>
-        </li>
-      )}
     </ul>
   );
   const popup = focused ? <Popup label={focused.name} onClose={() => setFocus(null)} width="max-w-xl">{details(focused)}</Popup> : null;
@@ -401,7 +392,31 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
       {head}
       {!focused && errorLine}
       {list}
+      {free && shown.length > 0 && <UnlockCard more={moreFound} company={company} />}
       {popup}
+    </div>
+  );
+}
+
+/** Free: under the one person shown, who else is there (blurred) and one button to Pro. */
+function UnlockCard({ more, company }: { more: number; company: string }) {
+  return (
+    <div className="mt-1 flex flex-col gap-3 rounded-xl border border-[#3D8BFF]/40 bg-[radial-gradient(120%_140%_at_0%_0%,rgba(61,139,255,.16),transparent_60%)] p-4 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span aria-hidden className="relative flex flex-none pr-1.5">
+          {["#3D8BFF", "#A78BFA", "#34D399"].map((color, index) => (
+            <span key={color} className={`h-[26px] w-[26px] rounded-full blur-[0.6px] ${index ? "-ml-2" : ""}`} style={{ background: `${color}33`, boxShadow: `inset 0 0 0 1.5px ${color}88` }} />
+          ))}
+          <span className="absolute -bottom-1 -right-0.5 grid h-[18px] w-[18px] place-items-center rounded-full bg-[#3D8BFF] text-white ring-2 ring-[#0A0A0C]">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+          </span>
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold">{more ? `Unlock ${more} more ${more === 1 ? "person" : "people"}` : "Unlock more people"}</span>
+          <span className="block text-xs leading-snug text-[#8B8B94]">Recruiters, the team and alumni at {company}, with checked emails.</span>
+        </span>
+      </div>
+      <a href="/home?tab=pro" className="flex h-10 flex-none items-center justify-center gap-1.5 rounded-lg bg-[#3D8BFF] px-4 text-sm font-semibold text-white transition hover:brightness-110">Upgrade to Pro <span aria-hidden>→</span></a>
     </div>
   );
 }

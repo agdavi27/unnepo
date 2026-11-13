@@ -7,8 +7,8 @@ import { effectivePlan, trialEndedAt, trialFor, type StoredPlan } from "@/lib/pl
 import { isAdminEmail } from "@/lib/services/auth";
 
 /**
- * Plan limits. Free has a few cover letters, answers and full autofills each day, and one person at each job, with an
- * email that isn't checked (plus full lists from anything the trial left); Pro has no limits, only hidden monthly guards (PRO_AI_LIMIT, PRO_PEOPLE_LIMIT)
+ * Plan limits. Free has a few cover letters, answers, written emails and full autofills each day, and one person at
+ * each job, with an email that isn't checked, whatever credits it has (the trial spends its credits on whole lists); Pro has no limits, only hidden monthly guards (PRO_AI_LIMIT, PRO_PEOPLE_LIMIT)
  * against scripts. Days, weeks (from Monday) and months are counted in Eastern time, so they turn over at midnight
  * for most students.
  * Accounts listed in UNLIMITED_CREDIT_EMAILS (comma-separated, set in Vercel) never run out of credits and
@@ -75,6 +75,7 @@ const NAMES: Record<CountedKind, [string, string]> = {
   letters: ["cover letter", "cover letters"],
   answers: ["question answer", "question answers"],
   autofills: ["autofill", "autofills"],
+  emails: ["written email", "written emails"],
   people: ["company", "companies"],
 };
 
@@ -109,7 +110,7 @@ export async function planUsage(userId: string) {
     const left = Math.max(0, limit - used);
     return { used, limit, left, note: usesNote(kind, left, free, limit), badge: free ? `${left} left today` : "Unlimited" };
   };
-  const [letters, answers] = [one("letters"), one("answers")];
+  const [letters, answers, emails] = [one("letters"), one("answers"), one("emails")];
   // Free's full autofills (the questions answered too) are counted; after them it fills the basic details, with no limit.
   const fills = one("autofills");
   const autofills = { ...fills, basic: free && fills.left === 0, badge: free && fills.left === 0 ? "Basic only today" : fills.badge };
@@ -120,15 +121,16 @@ export async function planUsage(userId: string) {
       const left = Math.max(0, config.proPeopleLimit - monthly("people"));
       return { used: monthly("people"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, config.proPeopleLimit), badge: "Unlimited" };
     }
-    // Free's one person at each job costs nothing to count; only the trial's or a pack's credits show whole lists.
+    // Free sees one person at each job, which isn't counted, credits or not. The trial spends its credits on whole lists.
+    if (free) return { used: 0, left: 0, allowance: 0, credits, paid: false, note: "", badge: "1 person per job" };
     return { used: weekly("people"), left: credits, allowance: 0, credits, paid: false, note: "", badge: credits ? `${credits} left` : "1 person per job" };
   })();
-  const writing = free ? letters.left * CREDIT_COST.letters + answers.left * CREDIT_COST.answers : 0;
+  const writing = free ? letters.left * CREDIT_COST.letters + answers.left * CREDIT_COST.answers + emails.left * CREDIT_COST.emails : 0;
   return {
     free, plan: state.plan, preview: state.preview, trial: state.trial, trialEnded: state.trialEnded,
     unlimited: shownUnlimited || paid,
     credits: shownUnlimited || paid ? null : writing + people.left * CREDIT_COST.people,
-    letters, answers, autofills, people,
+    letters, answers, autofills, emails, people,
   };
 }
 
@@ -139,6 +141,8 @@ export async function peopleAccess(userId: string): Promise<PeopleWay | null> {
   if (await hasUnlimitedCredits(userId)) return "unlimited";
   const { people } = await planUsage(userId);
   if (people.paid) return people.left > 0 ? "plan" : null;
+  // Free: one person at each job, never a whole list, even with credits left over from the trial.
+  if ((await planState(userId)).free) return null;
   return people.credits > 0 ? "credit" : null;
 }
 
