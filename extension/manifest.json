@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "Unnepo",
   "short_name": "Unnepo",
-  "version": "1.103",
-  "version_name": "1.103",
+  "version": "1.104",
+  "version_name": "1.104",
   "description": "Track every job you apply to, autofill applications, write cover letters, and find who to email at each company.",
   "minimum_chrome_version": "116",
   "action": {
