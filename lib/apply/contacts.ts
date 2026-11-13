@@ -6,6 +6,7 @@ import { ServiceError } from "@/lib/errors";
 import { safeGet } from "@/lib/apply/safe-fetch";
 import { HUNTER_CENTS, buildEmail, checkerReady, guessEmail, hunterCheck, hunterCount, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, siteEmails, type EmailFormat, type KnownEmail } from "@/lib/apply/email-guess";
 import { sameCompany } from "@/lib/apply/match";
+import { jobIdOf, outreachEmail } from "@/lib/apply/outreach-email";
 import { lastNamesFromWeb, peopleFromWeb } from "@/lib/apply/people-web";
 import { assertSpendAllowed, enrichPeopleBatch, isPersonalWorkEmail, looksLikePerson, searchCompanies, searchPeopleQuery, spentTodayCents } from "@/lib/providers/contacts/router";
 import { COMPANY_DOMAINS, RECRUITER_TITLES, type ApolloPeopleQuery } from "@/lib/providers/contacts/apollo";
@@ -752,21 +753,31 @@ function recruiterWhy(app: JobApplication, person: Contact) {
   return `${person.title || "Recruiter"} at ${app.company}${team ? `, which may include the ${team} team` : ""}.`;
 }
 
-export const OUTREACH_EMAIL_PROMPT = `You write short cold emails from a college student to people at a company where the student just applied.
-Use only facts from the student's resume and profile, the job posting, and the person's name and title. Never invent experience, mutual connections, numbers, or anything about the person beyond their name and title. If a person has something "confirmed in common with the student", open with it. Otherwise don't claim anything in common.
-Each email: mention the specific role the student applied to, one or two real experiences that fit the job's requirements, and a small ask fitting the person (a recruiter: a quick look at the application; a hiring manager or teammate: a short chat about the team). Under 120 words. Plain text, a greeting with the person's first name, and a sign-off with the student's name. No placeholders in brackets.
+/** Follow-ups: a short nudge on the email already sent. */
+export const OUTREACH_EMAIL_PROMPT = `You write short follow-up emails from a college student to people at a company where the student applied.
+Use only facts from the student's resume and profile, the job posting, and the person's name and title. Never invent experience, mutual connections, numbers, or anything about the person beyond their name and title.
+Plain text, a greeting with the person's first name, and a sign-off with the student's name. No placeholders in brackets.
 Return only JSON: {"emails":[{"index":1,"subject":"...","body":"..."}]} with one entry per person, using the index given.`;
 
+/** First emails follow the student's fixed template; the AI writes only its two personal lines. */
+export const OUTREACH_PIECES_PROMPT = `You help a college student fill in two lines of a cold email to people at a company where the student just applied. The rest of the email is already written:
+"I was excited to learn more about {company}'s work on {detail}. {link}"
+detail: a short noun phrase (3 to 12 words, no period) naming a specific product, project, client, deal, team, or kind of work at the company that fits this role. Take it from the job posting; otherwise use something well known and certain about the company. Never invent one; if nothing specific is certain, name the kind of work the posting describes.
+link: one sentence (under 30 words) tying that to a real experience, project, class, or interest from the student's resume or profile. Never invent experience or numbers. If a person has something "confirmed in common with the student", you may mention it here.
+Return only JSON: {"emails":[{"index":1,"detail":"...","link":"..."}]} with one entry per person, using the index given.`;
+
 /** One model call writes an email for every person, from the student's resume and the posting. */
-export async function writeOutreachEmails(userId: string, app: JobApplication, people: Array<Pick<ApplicationContact, "name" | "title" | "role"> & { relevance?: string }>, student: { name: string; resumeText: string; profile: string }, options: { followUp?: { subject: string; body: string; sentAt: string | null } } = {}) {
+export async function writeOutreachEmails(userId: string, app: JobApplication, people: Array<Pick<ApplicationContact, "name" | "title" | "role"> & { relevance?: string }>, student: { name: string; resumeText: string; profile: string; school?: string; year?: string; major?: string }, options: { followUp?: { subject: string; body: string; sentAt: string | null } } = {}) {
   if (!people.length) return [];
+  const followUp = Boolean(options.followUp);
   const apiKey = await readAnthropicKey();
   if (!apiKey) throw new Error("AI writing is not configured.");
   const config = serverConfig();
   const prompt = [
     `Student: ${student.name}`,
     `Role applied to: ${app.title} at ${app.company}${app.department ? ` (${app.department})` : ""}`,
-    app.requirements.length ? `Requirements from the posting:\n${app.requirements.slice(0, 12).map((item) => `- ${item}`).join("\n")}` : `Job description:\n${app.description.slice(0, 3000)}`,
+    app.requirements.length ? `Requirements from the posting:\n${app.requirements.slice(0, 12).map((item) => `- ${item}`).join("\n")}` : "",
+    app.description && (!followUp || !app.requirements.length) ? `Job description:\n${app.description.slice(0, 3000)}` : "",
     student.resumeText ? `Resume:\n${student.resumeText.slice(0, 5000)}` : "",
     student.profile ? `Profile:\n${student.profile.slice(0, 3000)}` : "",
     // Only what's confirmed goes to the writer: "May have gone to Colby" isn't a fact to put in an email.
@@ -784,7 +795,7 @@ export async function writeOutreachEmails(userId: string, app: JobApplication, p
   const response = await client.messages.create({
     model,
     max_tokens: 3000,
-    system: [{ type: "text", text: OUTREACH_EMAIL_PROMPT, cache_control: { type: "ephemeral" } }],
+    system: [{ type: "text", text: followUp ? OUTREACH_EMAIL_PROMPT : OUTREACH_PIECES_PROMPT, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: prompt }],
   });
   if (response.stop_reason === "refusal") throw new Error("The AI declined to write these emails.");
@@ -794,14 +805,19 @@ export async function writeOutreachEmails(userId: string, app: JobApplication, p
   const costCents = (inputTokens * config.fastInputCentsPerMillion + outputTokens * config.fastOutputCentsPerMillion) / 1_000_000;
   await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "outreach_emails", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
   await repo.insertGeneration({ id: id(), userId, purpose: "outreach_emails", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
-  let parsed: { emails?: Array<{ index?: number; subject?: string; body?: string }> } = {};
+  let parsed: { emails?: Array<{ index?: number; subject?: string; body?: string; detail?: string; link?: string }> } = {};
   try {
     parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1));
   } catch {
     throw new Error("The AI returned emails Unnepo couldn't read. Try again.");
   }
-  return people.map((_, index) => {
+  const jobId = jobIdOf(app);
+  return people.map((person, index) => {
     const email = parsed.emails?.find((item) => Number(item.index) === index + 1);
-    return { subject: String(email?.subject ?? "").trim().slice(0, 200), body: String(email?.body ?? "").trim().slice(0, 4000) };
+    if (followUp) return { subject: String(email?.subject ?? "").trim().slice(0, 200), body: String(email?.body ?? "").trim().slice(0, 4000) };
+    return outreachEmail({
+      firstName: person.name.trim().split(/\s+/)[0] ?? "", studentName: student.name, year: student.year ?? "", school: student.school ?? "", major: student.major ?? "",
+      role: app.title, company: app.company, jobId, detail: String(email?.detail ?? "").slice(0, 160), link: String(email?.link ?? "").slice(0, 300),
+    });
   });
 }

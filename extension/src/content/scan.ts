@@ -503,7 +503,8 @@ export function linkedinCard(jobId: string): { title: string; company: string } 
 export function hiringTeam(): { name: string; title: string; profileUrl: string } | null {
   if (!/(^|\.)linkedin\.com$/.test(window.location.hostname)) return null;
   const heading = Array.from(document.querySelectorAll<HTMLElement>("h2, h3, span, div"))
-    .find((el) => el.children.length <= 1 && /^(meet the hiring team|people you can reach out to)$/i.test(clean(el.textContent)) && visible(el));
+    .find((el) => el.children.length <= 1 && /^(meet the hiring team|people you can reach out to)$/i.test(clean(el.textContent)) && visible(el))
+    ?? Array.from(document.querySelectorAll<HTMLElement>(".hirer-card__hirer-information, [class*='people-who-can-help'], [class*='hirer-card']")).find(visible);
   if (!heading) return null;
   let box: HTMLElement | null = heading;
   while (box && box !== document.body && !box.querySelector("a[href*='/in/']")) box = box.parentElement;

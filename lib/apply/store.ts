@@ -237,6 +237,21 @@ export const applicationContacts = {
     return withLock((db) => (db.applicationContacts ?? []).filter((row) => row.userId === userId && wanted.has(row.applicationId)).sort((a, b) => a.rank - b.rank));
   },
 
+  /** Adds one person to an application's list, leaving everyone already there as they are. */
+  async add(userId: string, contact: Omit<ApplicationContact, "id" | "createdAt" | "updatedAt" | "outreachStatus">) {
+    const row: ApplicationContact = { ...contact, userId, outreachStatus: "not_contacted", id: id(), createdAt: nowIso(), updatedAt: nowIso() };
+    if (onTables()) {
+      const { error } = await supabaseTables().from("application_contacts").insert(toRow(row, CONTACT_COLUMNS));
+      if (error) throw tableError(error);
+      return row;
+    }
+    return withLock((db) => {
+      db.applicationContacts = db.applicationContacts ?? [];
+      db.applicationContacts.push(row);
+      return row;
+    });
+  },
+
   /** Replaces the people for one application, keeping outreach status for anyone already there. */
   async replace(userId: string, applicationId: string, contacts: Array<Omit<ApplicationContact, "id" | "createdAt" | "updatedAt" | "outreachStatus"> & { outreachStatus?: ApplicationContact["outreachStatus"] }>) {
     const previous = await this.list(userId, [applicationId]);

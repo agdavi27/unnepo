@@ -877,7 +877,7 @@ export async function writeContactEmail(userId: string, raw: unknown) {
   const info = await student(userId);
   // "Write follow-up": a short nudge on the email already sent, which stays in the thread.
   const followUp = body.followUp === true && contact.emailBody ? { subject: contact.emailSubject ?? "", body: contact.emailBody, sentAt: app.fillReport?.emailedAt?.[contact.id] ?? null } : undefined;
-  const [email] = await writeOutreachEmails(userId, app, [writeTo], { name: info.user.name, resumeText: info.resumeText, profile: info.profileText }, { followUp }).catch((error: unknown) => {
+  const [email] = await writeOutreachEmails(userId, app, [writeTo], { name: info.user.name, resumeText: info.resumeText, profile: info.profileText, school: info.context.school, year: info.context.classYear, major: info.context.majors.join(" and ") }, { followUp }).catch((error: unknown) => {
     throw new ServiceError(`The email couldn't be written. ${error instanceof Error ? error.message : ""}`.trim(), "write_failed", 502);
   });
   if (!email?.body) throw new ServiceError("The email couldn't be written. Try again.", "write_failed", 502);
