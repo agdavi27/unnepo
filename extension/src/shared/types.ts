@@ -115,6 +115,8 @@ export type PanelState = {
   applying?: Applying | null;
   /** "Did you apply to these?": jobs pressed Apply on or filled that nothing confirmed. */
   maybe?: Array<{ id: string; title: string; company: string; site: string; at: string }>;
+  /** On a job board's applications page: how many it lists, and the ones not in Unnepo yet. */
+  boardList?: { site: string; total: number; missing: Array<{ title: string; company: string; url: string; day: string }> } | null;
 };
 
 /** The confirmation language a site shows after an application goes through. */

@@ -1,6 +1,7 @@
 import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
 import { QUICK_BOARDS, watchApplyPresses } from "./quick-apply";
 import { watchEdits } from "./edits";
+import { appliedList, appliedStatus, isAppliedListPage } from "./board-status";
 
 /**
  * The little spider that drops down on the right of a job page, like a "fill with" button. It runs on
@@ -151,10 +152,55 @@ function watchForReceived() {
   check();
 }
 
+/**
+ * On job boards: the board's own word that the student applied. The open job's "Applied on November 12, 2026"
+ * line is told once per job (a moment after the job opens, so the pane has caught up with the address), and on a
+ * board's applications page, its list. The extension decides what to save; this only reads.
+ */
+function watchBoard() {
+  let pageAt = location.href;
+  let openedAt = Date.now();
+  const told = new Set<string>();
+  let listed = "";
+  let pending = 0;
+  const send = (message: Record<string, unknown>) => {
+    try {
+      void chrome.runtime.sendMessage(message).catch(() => undefined);
+    } catch {
+      observer.disconnect();
+    }
+  };
+  const check = () => {
+    pending = 0;
+    if (!document.body) return;
+    if (location.href !== pageAt) { pageAt = location.href; openedAt = Date.now(); }
+    if (isAppliedListPage()) {
+      const items = appliedList();
+      const key = items.map((item) => item.url).join("|");
+      if (items.length && key !== listed) { listed = key; send({ type: "board-list", url: location.href, items }); }
+      return;
+    }
+    // The pane swaps in a moment after the address changes: wait for it.
+    if (Date.now() - openedAt < 1500) { pending = window.setTimeout(check, 1600); return; }
+    const status = appliedStatus();
+    if (!status) return;
+    const key = `${location.href.split("#")[0]}|${status.text}`;
+    if (told.has(key)) return;
+    told.add(key);
+    send({ type: "board-applied", url: location.href, text: status.text, day: status.day });
+  };
+  const observer = new MutationObserver(() => {
+    if (!pending) pending = window.setTimeout(check, 900);
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  pending = window.setTimeout(check, 2000);
+}
+
 // Notes which questions the student answers by hand, so Fill never types over them.
 watchEdits();
 
 if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) watchForReceived();
+if (window.top === window && QUICK_BOARDS.test(location.hostname)) watchBoard();
 if (window.top === window && QUICK_BOARDS.test(location.hostname)) {
   watchApplyPresses((message) => {
     try {

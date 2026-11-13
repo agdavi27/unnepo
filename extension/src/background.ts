@@ -553,7 +553,10 @@ async function state(): Promise<PanelState> {
   // Asked about two minutes after Apply was pressed, when a confirmation would have shown by then.
   const maybe = (me?.maybe ?? []).filter((item) => Date.now() - Date.parse(item.at) > 120_000);
   const applying = tab?.id !== undefined ? (await applyingAll())[tab.id] ?? null : null;
-  return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase, maybe, applying };
+  // On a job board's applications page: the ones Unnepo doesn't have yet.
+  const listed = tab?.id !== undefined ? (await boardLists())[tab.id] : undefined;
+  const boardList = me && listed && tab?.url && pageKey(listed.url) === pageKey(tab.url) ? { site: siteName(listed.url), total: listed.items.length, missing: await missingFromBoard(listed) } : null;
+  return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase, maybe, applying, boardList };
 }
 
 /** The frame the application form is in, per tab: 0 for the page itself, or an embedded form's frame. */
@@ -1229,8 +1232,54 @@ const applyClicks = new Map<number, number>();
 // The job board saving an application, after one of those presses: an apply or application address, never a page view.
 const BOARD_APPLY = /\/(apply|applications?|quick[-_]?apply|one[-_]?click)(\/|\?|$)|[?&](action|op)=apply\b/i;
 const BOARD_NOT_APPLY = /(view|impression|track|analytics|log|metric|beacon|event|recommend|save[-_]?job|bookmark)/i;
+
+/** When Apply (any Apply) was last pressed in each tab, so what the site sends next can be traced. */
+const pressedAt = new Map<number, number>();
+/** What each tab's site sent in the two minutes after an Apply press: addresses and GraphQL operation names, never what was in them. For "It missed one". */
+const pressTrace = new Map<number, string[]>();
+/** GraphQL requests that send an application (Handshake sends everything to one /graphql address), waiting for their answer. */
+const graphApplies = new Set<string>();
+const GRAPH_APPLY = /(apply|application|submit)/i;
+const GRAPH_NOT_APPLY = /^(get|fetch|list|search|load|query)|search|view|count|recommend|saved|bookmark|draft|track|log|event|impression|preview|eligib/i;
+/** The operations a GraphQL request body names, and whether each is a mutation. Only the names are kept. */
+function graphOps(body?: chrome.webRequest.OnBeforeRequestDetails["requestBody"]): Array<{ name: string; mutation: boolean | null }> {
+  const bytes = body?.raw?.[0]?.bytes;
+  if (!bytes) return [];
+  try {
+    const data = JSON.parse(new TextDecoder().decode(bytes).slice(0, 300_000)) as unknown;
+    return (Array.isArray(data) ? data : [data]).map((op) => {
+      const query = typeof (op as { query?: unknown })?.query === "string" ? String((op as { query: string }).query) : "";
+      const name = String((op as { operationName?: unknown })?.operationName ?? "") || query.match(/^\s*(?:mutation|query)\s+(\w+)/)?.[1] || "";
+      return { name, mutation: query ? /^\s*mutation\b/.test(query) : null };
+    }).filter((op) => op.name);
+  } catch {
+    return [];
+  }
+}
+chrome.webRequest.onBeforeRequest.addListener((details): undefined => {
+  if (details.method !== "POST" || details.tabId < 0) return;
+  const at = pressedAt.get(details.tabId);
+  if (!at || Date.now() - at > 120_000) return;
+  let url: URL;
+  try { url = new URL(details.url); } catch { return; }
+  if (NOT_SUBMIT.test(url.hostname + url.pathname)) return;
+  const ops = /graphql/i.test(url.pathname) ? graphOps(details.requestBody) : [];
+  const trace = pressTrace.get(details.tabId) ?? [];
+  trace.push(`${url.hostname}${url.pathname.slice(0, 60)}${ops.length ? ` (${ops.map((op) => op.name).join(", ").slice(0, 80)})` : ""}`);
+  pressTrace.set(details.tabId, trace.slice(-12));
+  if (ops.some((op) => op.mutation !== false && GRAPH_APPLY.test(op.name) && !GRAPH_NOT_APPLY.test(op.name))) graphApplies.add(details.requestId);
+}, { urls: ["https://*/*"] }, ["requestBody"]);
+chrome.webRequest.onErrorOccurred.addListener((details) => { graphApplies.delete(details.requestId); }, { urls: ["https://*/*"] });
+
 chrome.webRequest.onCompleted.addListener((details) => {
+  const graphApply = graphApplies.delete(details.requestId);
   if (details.method !== "POST" || details.tabId < 0 || details.statusCode < 200 || details.statusCode >= 300) return;
+  if (graphApply) {
+    applyClicks.delete(details.tabId);
+    void log("The job site's own request to send the application went through.");
+    void recordSeen(details.tabId, "The job site saved your application.", "board_saved").catch(() => undefined);
+    return;
+  }
   try {
     if (LINKEDIN.test(new URL(details.url).hostname) && LINKEDIN_APPLY.test(details.url)) {
       void recordLinkedIn(details.tabId).catch(() => undefined);
@@ -1252,6 +1301,83 @@ chrome.webRequest.onCompleted.addListener((details) => {
     if (sameSite && SUBMIT_REQUEST.test(details.url) && !NOT_SUBMIT.test(details.url)) void record(details.tabId, "confirmed", "The site accepted the submission.");
   });
 }, { urls: ["https://*/*"] });
+
+/**
+ * A company's application site moving to its confirmation page (Greenhouse's /confirmation, Lever's /thanks,
+ * "?submitted=true") right after its form was in this tab: the site's own word that it went through.
+ */
+const CONFIRM_URL = /\/(confirmation|confirmed|thank-?you|thanks|application-?(submitted|complete|received)|submitted|success)(\/|\?|#|$)|[?&](submitted|success|applied|application_submitted)=(true|1)\b/i;
+async function confirmationPage(details: { tabId: number; frameId: number; url: string }) {
+  if (details.frameId !== 0 || details.tabId < 0 || !CONFIRM_URL.test(details.url)) return;
+  const [job, seen] = [(await jobs())[details.tabId], (await seenJobs())[details.tabId]];
+  if (job?.applicationId && !job.submission && (job.clickedAt || job.report?.filled.length)) return void record(details.tabId, "confirmed", "The site's confirmation page opened.", "site_confirmed");
+  if (!job?.submission && (seen?.form || seen?.sent)) {
+    void log("The site moved to its confirmation page.");
+    await recordSeen(details.tabId, "The site's confirmation page opened.", "site_confirmed");
+  }
+}
+chrome.webNavigation.onCompleted.addListener((details) => void confirmationPage(details).catch(() => undefined));
+chrome.webNavigation.onHistoryStateUpdated.addListener((details) => void confirmationPage(details).catch(() => undefined));
+
+/**
+ * A job board's own line that the student applied ("Applied on November 12, 2026", "Applied 3 days ago") on the
+ * open job: the surest sign there is, so it's saved (or asked about, when the student chose Ask me), with the day
+ * the board says. Each job once: one the student deleted or said no to isn't brought back.
+ */
+const localDay = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+async function boardHandled(): Promise<string[]> {
+  return ((await chrome.storage.local.get("boardHandled")).boardHandled as string[] | undefined) ?? [];
+}
+async function markBoardHandled(keys: string[]) {
+  const list = await boardHandled();
+  await chrome.storage.local.set({ boardHandled: [...keys, ...list.filter((key) => !keys.includes(key))].slice(0, 500) });
+}
+const boardKey = (job: { url: string; title: string; company: string }) => `${job.url.split("#")[0]}|${job.title.trim().toLowerCase()}|${job.company.trim().toLowerCase()}`;
+const appliedInTracker = (tracked: Tracker | undefined, job: { title: string; company: string }) =>
+  Boolean(tracked?.jobs.some((item) => (item.status === "submitted" || item.status === "applied_manual") && !item.titleMissing && sameJobTitle(item, job)));
+
+async function boardApplied(tabId: number, text: string, day: string) {
+  const scan = await look(tabId).catch(() => null);
+  if (!scan || /^job title missing$/i.test(scan.title) || notJobTitle(scan.title) || !scan.company.trim()) return void log(`The page says "${text.slice(0, 50)}", but the job's name couldn't be read.`);
+  const job = { url: scan.jobUrl || scan.url, title: scan.title, company: scan.company };
+  const key = boardKey(job);
+  if ((await boardHandled()).includes(key)) return;
+  const tracked = (await jobs())[tabId];
+  if (tracked?.submission && sameJobTitle(tracked, job)) return void markBoardHandled([key]);
+  if (appliedInTracker((await trackerCopy())?.data, job)) return void markBoardHandled([key]);
+  if ((await detectedList()).some((item) => sameJobTitle(item, job) && (item.state === "no" || item.state === "undone"))) return void markBoardHandled([key]);
+  await rememberSeen(tabId, scan);
+  await markBoardHandled([key]);
+  const fresh = !day || day === localDay();
+  void log(`The board says "${text.slice(0, 50)}" for ${job.title} at ${job.company}.`);
+  if (!(await savesByItself())) {
+    await noteDetected({ ...job, description: scan.description, poster: scan.poster, sure: "confirmed", state: "ask" });
+    return void log("It's under Detected jobs on Home.");
+  }
+  try {
+    const saved = await saveSubmission({ ...job, description: scan.description, poster: scan.poster, confidence: "confirmed", text, how: "board_saved", ...(day ? { appliedOn: day } : {}), ...(fresh ? {} : { noPeople: true }) });
+    if (fresh) celebrate(tabId);
+    await noteDetected({ ...job, title: saved.application.title, company: saved.application.company, applicationId: saved.application.id, sure: "confirmed", state: "saved" });
+    void log(`Saved: ${saved.application.title} at ${saved.application.company} (the job board says you applied${day && !fresh ? ` on ${day}` : ""}).`);
+    void readTracker().then(() => chrome.runtime.sendMessage({ type: "tracker-changed" }).catch(() => undefined), () => undefined);
+  } catch (error) {
+    await noteDetected({ ...job, description: scan.description, sure: "likely", state: "ask" });
+    void log(error instanceof Error ? `Couldn't save it: ${error.message}` : "Couldn't save it.");
+  }
+}
+
+/** One page: its address without the part after #. */
+const pageKey = (url: string) => url.split("#")[0];
+/** A board's applications page, by tab: what it lists, for "Bring in what Unnepo missed". */
+type BoardList = { url: string; at: number; items: Array<{ title: string; company: string; url: string; day: string }> };
+async function boardLists(): Promise<Record<string, BoardList>> {
+  return ((await chrome.storage.session.get("boardLists")).boardLists as Record<string, BoardList> | undefined) ?? {};
+}
+/** The listed applications not in the student's tracker yet. */
+async function missingFromBoard(list: BoardList) {
+  const tracked = (await trackerCopy())?.data;
+  return list.items.filter((item) => !appliedInTracker(tracked, item));
+}
 
 /**
  * The tracker (every job with its people), as the panel, the dashboard and the reminders read it. A copy is kept
@@ -1649,11 +1775,11 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (sender.tab) return reply({ ok: false });
         const tab = Number(message.tabId);
         await look(tab).catch(() => null);
-        const page = await send<{ path: string; title: string; headings: string[]; buttons: string[]; postingData: boolean; job: { title: string; company: string } }>(tab, { type: "page-report" }, 0).catch(() => null);
+        const page = await send<{ path: string; title: string; headings: string[]; buttons: string[]; postingData: boolean; job: { title: string; company: string }; status?: string; dialog?: boolean }>(tab, { type: "page-report" }, 0).catch(() => null);
         const url = (await chrome.tabs.get(tab).catch(() => null))?.url ?? "";
         if (!page) return reply({ ok: false, error: "Couldn't read this page. Reload it and try again." });
         const recent = (((await chrome.storage.local.get("activityLog")).activityLog as Array<{ at: number; text: string }> | undefined) ?? []).filter((item) => Date.now() - item.at < 30 * 60 * 1000).slice(0, 5).map((item) => item.text);
-        await addIssues(url, [{ kind: "note", what: `Missed an application. Page "${page.title}" (${page.path}). Job read as "${page.job.title}" at "${page.job.company}"${page.postingData ? ", with posting data" : ", no posting data"}. Buttons: ${page.buttons.join(" | ") || "none"}. Headings: ${page.headings.join(" | ") || "none"}. Recent: ${recent.join(" / ") || "nothing seen"}.` }]);
+        await addIssues(url, [{ kind: "note", what: `Missed an application. Page "${page.title}" (${page.path}). Job read as "${page.job.title}" at "${page.job.company}"${page.postingData ? ", with posting data" : ", no posting data"}. Buttons: ${page.buttons.join(" | ") || "none"}. Headings: ${page.headings.join(" | ") || "none"}. Status line: ${page.status || "none"}${page.dialog ? " (a pop-up is open)" : ""}. Sent after Apply: ${(pressTrace.get(tab) ?? []).join(" | ") || "nothing traced"}. Recent: ${recent.join(" / ") || "nothing seen"}.` }]);
         void log("Saved a report of this page to your issues list (Profile).");
         return reply({ ok: true });
       }
@@ -1808,6 +1934,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       // applied to. `final`: a button that sends the application itself (1-Click Apply, Submit application).
       case "apply-clicked": {
         if (tabId === undefined) return reply({ ok: false });
+        // What the site sends next is traced (addresses only), for "It missed one".
+        if (!pressedAt.has(tabId) || Date.now() - pressedAt.get(tabId)! > 120_000) pressTrace.set(tabId, []);
+        pressedAt.set(tabId, Date.now());
         const scan = await look(tabId).catch(() => null);
         if (scan?.title.trim() && scan.company.trim()) {
           const all = await seenJobs();
@@ -1843,6 +1972,43 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (message.final) applyClicks.set(tabId, Date.now());
         void log(`Saw "${String(message.label ?? "Apply").slice(0, 40)}" pressed${scan?.title ? ` on ${scan.title}${scan.company ? ` at ${scan.company}` : ""}` : ""}. Watching for the confirmation.`);
         return reply({ ok: true });
+      }
+      // The open job's pane shows the board's own "Applied on …" line.
+      case "board-applied":
+        if (tabId === undefined) return reply({ ok: false });
+        void boardApplied(tabId, String(message.text ?? "Applied").slice(0, 120), /^\d{4}-\d{2}-\d{2}$/.test(String(message.day ?? "")) ? String(message.day) : "").catch(() => undefined);
+        return reply({ ok: true });
+      // A board's applications page and what it lists.
+      case "board-list": {
+        if (tabId === undefined) return reply({ ok: false });
+        const items = (Array.isArray(message.items) ? message.items : []).slice(0, 100).map((item: Record<string, unknown>) => ({ title: String(item?.title ?? "").slice(0, 200), company: String(item?.company ?? "").slice(0, 200), url: String(item?.url ?? "").slice(0, 2000), day: /^\d{4}-\d{2}-\d{2}$/.test(String(item?.day ?? "")) ? String(item.day) : "" }))
+          .filter((item: { title: string; company: string; url: string }) => item.title && item.company && /^https:\/\//.test(item.url));
+        const all = await boardLists();
+        all[tabId] = { url: String(message.url ?? sender.tab?.url ?? ""), at: Date.now(), items };
+        await chrome.storage.session.set({ boardLists: all });
+        void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+        return reply({ ok: true });
+      }
+      // "Bring in": every listed application the tracker doesn't have, as applied on the day the board says.
+      case "board-import": {
+        if (sender.tab) return reply({ ok: false });
+        const list = (await boardLists())[Number(message.tabId)];
+        if (!list) return reply({ ok: false, error: "Open the board's applications page again." });
+        let added = 0;
+        const failed: string[] = [];
+        for (const item of await missingFromBoard(list)) {
+          try {
+            await saveSubmission({ url: item.url, title: item.title, company: item.company, confidence: "confirmed", text: "On the job board's list of your applications.", how: "board_saved", ...(item.day ? { appliedOn: item.day } : {}), noPeople: true });
+            added += 1;
+          } catch {
+            failed.push(item.title);
+          }
+        }
+        await markBoardHandled(list.items.map((item) => boardKey(item)));
+        await readTracker().catch(() => undefined);
+        void log(`Brought in ${added} ${added === 1 ? "application" : "applications"} from ${siteName(list.url)}${failed.length ? `; ${failed.length} couldn't be saved` : ""}.`);
+        void chrome.runtime.sendMessage({ type: "tracker-changed" }).catch(() => undefined);
+        return reply({ ok: true, added, failed: failed.length });
       }
       // The page changed to say so right after an Apply press ("Applied", "Application sent").
       case "applied-detected":

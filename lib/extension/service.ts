@@ -644,7 +644,7 @@ async function saveScreenshot(userId: string, applicationId: string, dataUrl: un
  * said so after a submit click ("likely"). Records it and keeps the screenshot.
  */
 export async function extensionSubmission(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; url?: unknown; postingUrl?: unknown; title?: unknown; company?: unknown; description?: unknown; poster?: unknown; confidence?: unknown; screenshot?: unknown; text?: unknown; how?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; url?: unknown; postingUrl?: unknown; title?: unknown; company?: unknown; description?: unknown; poster?: unknown; confidence?: unknown; screenshot?: unknown; text?: unknown; how?: unknown; appliedOn?: unknown; noPeople?: unknown };
   const confidence = body.confidence === "confirmed" ? "confirmed" : body.confidence === "likely" ? "likely" : null;
   if (!confidence) throw new ServiceError("Say whether the submission was confirmed or likely.", "confidence", 400);
   const url = String(body.url ?? "").trim().slice(0, 2000);
@@ -666,6 +666,9 @@ export async function extensionSubmission(userId: string, raw: unknown) {
   await ensureCharged(userId, app);
   const receiptPath = await saveScreenshot(userId, app.id, body.screenshot);
   const detectedAt = nowIso();
+  // The day the job board says it was applied ("Applied on Oct 3"): a job applied to before Unnepo saw it keeps its own day.
+  const day = String(body.appliedOn ?? "");
+  const boardDay = /^\d{4}-\d{2}-\d{2}$/.test(day) && Date.parse(`${day}T12:00:00Z`) <= Date.now() ? new Date(`${day}T12:00:00Z`).toISOString() : null;
   // The job board posting the application came from, when it isn't the page applied on: the job's link.
   const postingUrl = String(body.postingUrl ?? "").trim().slice(0, 2000);
   const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
@@ -673,7 +676,7 @@ export async function extensionSubmission(userId: string, raw: unknown) {
   const updated = await applications.update(userId, app.id, {
     ...(keepPosting ? { fillReport: { ...report, postingUrl } } : {}),
     status: "submitted",
-    submittedAt: app.submittedAt ?? detectedAt,
+    submittedAt: app.submittedAt ?? boardDay ?? detectedAt,
     confirmation: { url: url || app.applicationUrl || app.jobUrl, text: String(body.text ?? "").slice(0, 240) || `Detected by the Unnepo extension (${confidence}).`, detectedAt, receiptPath, confidence },
     statusMessage: confidence === "confirmed" ? "Submitted. The site accepted your application." : "Submitted, as far as the page shows. Check your email for the site's confirmation.",
   });
@@ -681,8 +684,9 @@ export async function extensionSubmission(userId: string, raw: unknown) {
   const how = APPLIED_HOW.find((item) => item === body.how) ?? (confidence === "confirmed" ? "site_confirmed" : "page_said");
   await addActivity(userId, app.id, { kind: "applied", how });
   await dropMaybe(userId, { applicationId: app.id, url });
-  // People are looked for now when the student's plan or setting says so; otherwise when they ask.
-  await findPeopleOnApply(userId, app.id);
+  // People are looked for now when the student's plan or setting says so; otherwise when they ask. Not for old
+  // applications brought in from a job board's list: the student asks for those one by one.
+  if (body.noPeople !== true) await findPeopleOnApply(userId, app.id);
   return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }
 

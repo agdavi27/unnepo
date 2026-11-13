@@ -3,7 +3,8 @@ import { watchEdits } from "@/extension/src/content/edits";
 import { fillGeneric } from "@/extension/src/content/generic";
 import { keptByStudent } from "@/extension/src/content/kept";
 import { celebrateSpiders } from "@/extension/src/content/spiders";
-import { openedJob, scanFields, structuredJob } from "@/extension/src/content/scan";
+import { handshakeJob, openedJob, scanFields, structuredJob } from "@/extension/src/content/scan";
+import { appliedList, appliedStatus } from "@/extension/src/content/board-status";
 import { markNeeds, reviewLeft, type CheckItem } from "@/extension/src/content/needs";
 import { watchApplyPresses } from "@/extension/src/content/quick-apply";
 import type { Answer, DropdownMethod, PageField } from "@/extension/src/shared/types";
@@ -30,6 +31,12 @@ declare global {
     openedJob: () => unknown;
     /** What the job-board Apply watcher told the extension, in order. */
     quickMessages: Array<Record<string, unknown>>;
+    /** The board's own "Applied on …" line on the open job. */
+    boardStatus: () => unknown;
+    /** A board's list of applications, as "Bring in" reads it. */
+    appliedList: () => unknown;
+    /** The page read as Handshake's job page. */
+    handshakeJob: () => unknown;
   }
 }
 
@@ -58,5 +65,8 @@ window.review = (needs, check) => ({ marked: markNeeds(needs, check), left: revi
 window.postingData = structuredJob;
 window.openedJob = openedJob;
 window.quickMessages = [];
+window.boardStatus = () => appliedStatus();
+window.appliedList = appliedList;
+window.handshakeJob = () => handshakeJob({ hostname: "app.joinhandshake.com", pathname: "/job-search/2" });
 if (document.body.dataset.quickApply !== undefined) watchApplyPresses((message) => window.quickMessages.push(message));
 watchEdits();

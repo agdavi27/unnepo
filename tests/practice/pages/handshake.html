@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Practice: Handshake's apply pop-up</title>
+<style>body{font:15px system-ui;margin:24px;display:flex;gap:24px} aside{width:260px} .card{display:block;border:1px solid #ccc;border-radius:8px;padding:8px;margin-bottom:6px} main{flex:1} [role=dialog]{position:fixed;inset:60px;background:#fff;border:2px solid #333;padding:24px} button{font:inherit;padding:8px 14px}</style>
+</head>
+<body data-quick-apply>
+<aside id="results"></aside>
+<main id="pane">
+  <a href="/e/software-galaxy"><img alt="Software Galaxy Systems logo" width="40" height="40"></a>
+  <a href="/e/software-galaxy">Software Galaxy Systems</a>
+  <h1>Backend Engineering Intern</h1>
+  <p>Remote · Internship · $30/hr</p>
+  <div id="status"><button id="apply">Apply</button></div>
+  <h2>About the job</h2>
+  <p>Software Galaxy Systems builds tools for developers. You'll work on our APIs, write Go and TypeScript, and ship to production in your first week. We're looking for students who like hard problems.</p>
+</main>
+<script>
+  const results = document.getElementById("results");
+  const draw = () => { results.innerHTML = [["1", "Data Analyst Intern · Acme"], ["2", "Backend Engineering Intern · Software Galaxy Systems"], ["3", "Designer · Initech"]].map(([id, text]) => `<a class="card" href="/job-search/${id}">${text}${id === "1" ? ' <span>Applied</span>' : ""}</a>`).join(""); };
+  draw();
+  document.addEventListener("click", () => setTimeout(draw, 50));
+  document.getElementById("apply").addEventListener("click", () => {
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    dialog.setAttribute("aria-modal", "true");
+    dialog.innerHTML = `<h2>Apply to Software Galaxy Systems</h2><h3>Details from Software Galaxy Systems</h3><p>Your resume: resume.pdf</p><button id="submit">Submit Application</button>`;
+    document.body.appendChild(dialog);
+    dialog.querySelector("#submit").addEventListener("click", () => setTimeout(() => {
+      dialog.remove();
+      // Handshake redraws the pane's status: deeply wrapped, with an icon beside it.
+      document.getElementById("status").innerHTML = `<div class="chip"><svg width="12" height="12"></svg><span><span>Applied on November 12, 2026</span></span></div>`;
+    }, 800));
+  });
+  window.pageValues = () => ({});
+</script>
+<script src="harness.js"></script>
+</body>
+</html>
