@@ -1004,6 +1004,17 @@ export async function setReachedOut(userId: string, raw: unknown) {
   return { application: summary(updated!) };
 }
 
+/** Hide a job from the student's lists (or show it again). It still counts toward goals and spiders. */
+export async function setJobHidden(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; hidden?: unknown };
+  const app = await requireApp(userId, body.applicationId);
+  const report = app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
+  const rest = { ...report };
+  delete rest.jobHidden;
+  const updated = await applications.update(userId, app.id, { fillReport: body.hidden === true ? { ...rest, jobHidden: true } : rest });
+  return { application: summary(updated!) };
+}
+
 export async function deleteApplication(userId: string, raw: unknown) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
   await applications.remove(userId, app.id);

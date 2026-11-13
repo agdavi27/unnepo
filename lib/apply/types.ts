@@ -118,6 +118,8 @@ export type FillReport = {
    * the list, but it doesn't count toward goals, today's count or the streak, since the day it was applied isn't known.
    */
   notCounted?: boolean;
+  /** The student hid this job from their lists. It still counts as applied. */
+  jobHidden?: boolean;
   /** Starred by the student on the Applications page, to keep an eye on. */
   starred?: boolean;
   /** The student's own notes on this job, typed on the Applied page. */

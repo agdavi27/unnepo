@@ -1,7 +1,7 @@
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { UPGRADE_URL } from "@/lib/plan";
 import { stageOf } from "@/lib/apply/stats";
-import { detectedMenu, escape, isAppliedJob, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, stageLabel, store, wireDetected, wireJobPage, wireReminders } from "../shared/tracker-view";
+import { detectedMenu, escape, isAppliedJob, isHiddenJob, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, stageLabel, store, wireDetected, wireJobPage, wireReminders } from "../shared/tracker-view";
 import type { TrackerJob } from "../shared/types";
 
 /**
@@ -30,6 +30,8 @@ function shownJobs(): TrackerJob[] {
   const due = new Set(followUpsDue(jobs as never).map((item) => item.applicationId));
   const matches = jobs.filter((job) => {
     if (words && !`${job.title} ${job.company} ${job.location ?? ""}`.toLowerCase().includes(words)) return false;
+    if (filter.value === "hidden") return isHiddenJob(job);
+    if (isHiddenJob(job)) return false;
     const stage = stageOf(job as never);
     switch (filter.value) {
       case "applied": return isAppliedJob(job);

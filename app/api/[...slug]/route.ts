@@ -21,7 +21,7 @@ import { friendAction, listFriends } from "@/lib/social/friends";
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSubmission, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
-import { contactBounced, revealContact, applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
+import { contactBounced, revealContact, applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, setJobHidden, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 
 /** Reading a job and preparing its answers makes one AI call; contact discovery runs after the response. */
 export const maxDuration = 60;
@@ -204,6 +204,7 @@ async function handle(request: Request, slug: string[]) {
     if (action === "applied" && method === "POST") return json(await markApplied(user.id, await request.json()));
     if (action === "retry-contacts" && method === "POST") return json(await retryContacts(user.id, await request.json()));
     if (action === "outcome" && method === "PATCH") return json(await setOutcome(user.id, await request.json()));
+    if (action === "hide-job" && method === "PATCH") return json(await setJobHidden(user.id, await request.json()));
     if (action === "contact" && method === "PATCH") return json(await updateOutreach(user.id, await request.json()));
     if (action === "reveal-person" && method === "POST") {
       if (!rateLimit(`reveal:${user.id}`, 40, 60 * 60 * 1000)) throw new ServiceError("That's a lot of people in an hour. Try again a bit later.", "rate_limited", 429);

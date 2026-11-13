@@ -1921,7 +1921,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "job-status":
         if (!fromExtension(sender)) return reply({ ok: false });
         try {
-          await api("POST", "status", typeof message.reachedOut === "number"
+          await api("POST", "status", typeof message.hidden === "boolean"
+            ? { applicationId: message.applicationId, hidden: message.hidden }
+            : typeof message.reachedOut === "number"
             ? { applicationId: message.applicationId, reachedOut: message.reachedOut }
             : { applicationId: message.applicationId, applied: message.applied === true, outcome: message.outcome ?? null });
           await readTracker().catch(() => undefined);
