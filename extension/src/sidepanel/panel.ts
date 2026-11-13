@@ -233,9 +233,9 @@ const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPen
  */
 function homeLists(state: PanelState) {
   const noEmail = firstEmailCount();
-  const nudge = noEmail ? `<button type="button" class="note warn nudge" data-show-jobs="reach">${noEmail} ${noEmail === 1 ? "job you applied to has" : "jobs you applied to have"} no email sent yet. See them →</button>` : "";
-  // A clear line between the calendar and the job list, so the tab reads as two parts.
-  const list = `<div class="section-divider" role="separator"><span>Your jobs</span></div>${nudge}${jobsList()}<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>`;
+  const nudge = noEmail ? `<button type="button" class="email-nudge" data-show-jobs="reach"><span>${noEmail} ${noEmail === 1 ? "job needs" : "jobs need"} a first email</span><span aria-hidden="true">See →</span></button>` : "";
+  // The job list scrolls inside its own box, so the calendar stays on screen above it.
+  const list = (friends: string) => jobsList(nudge, `<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>${friends}`);
   return `${boardCard(state)}${startCard(state)}${weekView(new Date(), list)}`;
 }
 
@@ -1816,7 +1816,13 @@ function draw(state: PanelState): boolean {
   const shown = state.connected && view === "home" && isRunning(state);
   const wasAt = shown ? null : laptopRect();
   if (shown) popup = null;
+  // The job list scrolls in its own box: keep where it was scrolled to across redraws.
+  const listAt = app.querySelector(".jobs-scroll")?.scrollTop ?? 0;
   app.innerHTML = !state.connected ? connectView(state) : `${view === "home" ? homeView(state) : pageView(state)}${popupView(state)}`;
+  const listBox = app.querySelector<HTMLElement>(".jobs-scroll");
+  // With the job list on screen the panel fits the window: the calendar stays put and the spider hangs onto it.
+  document.body.classList.toggle("contained", Boolean(listBox));
+  if (listBox) listBox.scrollTop = listAt;
   focusPopup();
   moveSpider(state, shown, wasAt);
   const slot = document.getElementById("password-slot");
