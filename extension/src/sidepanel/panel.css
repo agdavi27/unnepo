@@ -518,3 +518,29 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .hidden-jobs > summary { list-style: none; cursor: pointer; }
 .hidden-jobs > summary::-webkit-details-marker { display: none; }
 .hidden-jobs:not([open]) { gap: 0; }
+
+/* People as cards, like the website: initials, name, title, the address with a Gmail mark. Tap to open. */
+.person.card { padding: 0; gap: 0; border-color: #1F1F24; background: #0A0A0C; overflow: hidden; }
+.person.card.first { border-color: #2A3A5A; }
+.person-head { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px; cursor: pointer; }
+.person-head:hover { background: rgba(255, 255, 255, .03); }
+.person-head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 12px; }
+.avatar.initials { width: 40px; height: 40px; place-items: center; font-weight: 600; font-size: 15px; }
+.person-head .person-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.person-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.person-head .person-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+.person-head .start-here { flex: none; font: 10px var(--mono); text-transform: uppercase; letter-spacing: .6px; color: var(--accent); }
+.person-head .sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person-mail { display: flex; align-items: center; gap: 6px; margin-top: 3px; min-width: 0; font-size: 12px; }
+.person-mail .mail-text { font-family: var(--mono); color: #D4D4DA; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.person-mail .muted { color: var(--muted); }
+.gmail { flex: none; width: 16px; height: 12px; }
+.person-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; align-self: stretch; gap: 6px; }
+.card-tag { font: 10px var(--mono); text-transform: uppercase; color: var(--muted-2); }
+.card-tag.written { color: var(--accent); }
+.card-tag.ok { color: var(--ok); }
+.chev { margin-top: auto; color: #5C5C66; font-size: 18px; line-height: 1; transition: transform .15s; }
+.person.card.open .chev { transform: rotate(90deg); color: var(--fg); }
+.person-body { display: flex; flex-direction: column; gap: 10px; padding: 0 12px 12px; border-top: 1px solid #1F1F24; padding-top: 12px; }
+.send-mail { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.person-body .links .quiet-link { min-height: 28px; }
