@@ -9,7 +9,7 @@ import { CREDIT_COST, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
 import type { planUsage } from "@/lib/apply/limits";
 import { Logo } from "@/components/brand/logo";
 import { SpiderSettings } from "@/components/unnepo/spider-settings";
-import { JobsView, ReachOut } from "@/components/unnepo/jobs-view";
+import { JobsView } from "@/components/unnepo/jobs-view";
 import { extensionHere } from "@/lib/extension-bridge";
 import { trialLeftLabel } from "@/lib/plan";
 
@@ -64,7 +64,6 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [extension, setExtension] = useState<boolean | null>(null);
   /** A job to open on the Jobs tab, from Home's "Email someone". */
-  const [openJob, setOpenJob] = useState<string | null>(null);
   const menu = useRef<HTMLDivElement>(null);
   // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans, ?tab=jobs the Jobs tab.
   useEffect(() => {
@@ -225,7 +224,7 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => { setView(item.id); setOpenJob(null); }}
+                    onClick={() => setView(item.id)}
                     aria-current={view === item.id ? "page" : undefined}
                     className={`h-9 whitespace-nowrap rounded-full px-3.5 text-sm font-medium ${view === item.id ? "bg-[#F7F7F8] text-[#070708]" : "text-[#9A9AA3] hover:text-white"}`}
                   >
@@ -284,12 +283,12 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
             onDone={() => { setEditing(false); void load(); }}
           />
         )}
-        {data && !showOnboarding && view === "jobs" && <JobsView key={openJob ?? "jobs"} openJob={openJob} />}
+        {data && !showOnboarding && view === "jobs" && <JobsView />}
         {data && !showOnboarding && view === "pro" && (
           onFree ? <UpgradePage busy={billingBusy} admin={admin} onUpgrade={(billing) => (admin ? void switchPlanView("pro") : void goToBilling("checkout", { plan: "pro", billing }))} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />
             : <p className="text-sm text-muted">You&apos;re on Pro. Your plan is under <button type="button" onClick={() => setView("settings")} className="underline underline-offset-4 hover:text-white">Settings and plans</button>.</p>
         )}
-        {data && !showOnboarding && view === "home" && <ExtensionHome installed={extension} completeness={data.completeness} onEdit={() => { setEditing(true); window.scrollTo({ top: 0 }); }} onOpenJob={(id) => { setOpenJob(id); setView("jobs"); }} />}
+        {data && !showOnboarding && view === "home" && <ExtensionHome installed={extension} completeness={data.completeness} onEdit={() => { setEditing(true); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "settings" && (
           <>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
@@ -455,12 +454,11 @@ function TrialBanner({ usage, onPlans }: { usage: PlanUsage; onPlans: () => void
  * Home on the site: everything day to day happens in the extension (the tracker, reminders, the people at each
  * company, follow-ups), so this says where to find it, with the profile it all runs on.
  */
-function ExtensionHome({ installed, completeness, onEdit, onOpenJob }: { installed: boolean | null; completeness: number; onEdit: () => void; onOpenJob: (jobId: string) => void }) {
+function ExtensionHome({ installed, completeness, onEdit }: { installed: boolean | null; completeness: number; onEdit: () => void }) {
   const card = "rounded-2xl border border-line bg-panel p-5 sm:p-6";
   return (
     <section className="flex max-w-3xl flex-col gap-5">
       <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Home</h1>
-      <ReachOut onOpen={onOpenJob} />
       <p className="m-0 text-[15px] leading-[1.6] text-muted">The extension fills applications and logs each one you submit. Your jobs, the people at each company and follow-ups are here and in its side panel.</p>
       <div className={card}>
         <ul className="m-0 flex list-none flex-col gap-3 p-0 text-sm text-[#B4B4BC]">
