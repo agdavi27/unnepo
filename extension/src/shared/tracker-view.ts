@@ -668,7 +668,8 @@ const ago = (at: number) => {
 };
 
 /** "Detected jobs (2)": closed by default; open, the last 5 jobs the extension caught, newest first. */
-export function detectedMenu() {
+/** `inline`: open and without its fold, for the Add a job popup. */
+export function detectedMenu(inline = false) {
   const list = store.detected ?? [];
   const asking = list.filter((item) => item.state === "ask").length;
   const row = (item: Detected) => {
@@ -699,6 +700,11 @@ export function detectedMenu() {
         <div class="detected-actions">${actions}</div>
       </li>`;
   };
+  if (inline) return `
+    <div class="add-part detected-inline">
+      <div class="row-between"><span class="eyebrow">Detected${asking ? ` <span class="count">${asking}</span>` : ""}</span><span class="mono">LAST ${Math.min(5, list.length) || 5}</span></div>
+      ${list.length ? `<ul class="detected-list">${list.slice(0, 5).map(row).join("")}</ul>` : `<p class="small">Jobs you open or apply to show up here. Ones the site confirms are saved by themselves.</p>`}
+    </div>`;
   return `
     <details class="detected-menu" id="detected-menu" ${detectedOpen ? "open" : ""}>
       <summary><span>Detected jobs${asking ? ` <span class="count">${asking}</span>` : ""}</span><span class="mono">LAST ${Math.min(5, list.length) || 5}</span></summary>
