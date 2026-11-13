@@ -6,7 +6,7 @@ import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
 import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
-import { friendRequests, friendsSettingsCard, wireFriends } from "../shared/friends";
+import { friendPopup, friendRequests, friendsStrip, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
 import { UPGRADE_URL } from "@/lib/plan";
 
@@ -34,7 +34,7 @@ let openedJob = { id: "", contact: "" };
 /** The tab a job's page was opened from, where Back goes. */
 let jobFrom: View = "home";
 /** The cover letter or answer popup, and which of its questions is showing. */
-let popup: { kind: "cover" | "answer" | "addjob"; step: number } | null = null;
+let popup: { kind: "cover" | "answer" | "addjob" | "friend" | "activity"; step: number; id?: string } | null = null;
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 /** "1.001": the version name, which keeps the zeros Chrome's own version number can't have. */
@@ -572,15 +572,14 @@ function pageView(state: PanelState) {
     jobs: () => jobsView(state),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     // Me: who you are and your plan, friends, how Unnepo behaves, then help. Sign out and the version last.
+    // Me: you first (plan, what's left today, profile), friends as a strip, the switches, then one quiet line.
     settings: () => `${profileCard(state)}
-      ${friendsSettingsCard()}
+      ${friendsStrip()}
       ${trackingSettings(state)}
-      <section class="page settings-card" aria-label="Help">
-        <span class="eyebrow">Help</span>
-        ${part("activity", "What Unnepo noticed lately", () => activityCard())}
-        <button type="button" class="more-row" data-go="feedback">Report a problem or send feedback <span aria-hidden="true">›</span></button>
-      </section>
-      <div class="row-between settings-foot"><button type="button" class="quiet" id="disconnect">Sign out</button><span class="mono">V${escape(extensionVersion())}</span></div>`,
+      <div class="me-foot">
+        <span><button type="button" class="quiet" data-popup="activity">Activity</button><span aria-hidden="true">·</span><button type="button" class="quiet" data-go="feedback">Feedback</button></span>
+        <span><button type="button" class="quiet" id="disconnect">Sign out</button><span class="mono">V${escape(extensionVersion())}</span></span>
+      </div>`,
   };
   return (TABS.includes(view) ? "" : back()) + pages[view as Exclude<View, "home">]();
 }
@@ -926,6 +925,13 @@ function allQuestionsPopup(state: PanelState, note: string) {
 
 function popupView(state: PanelState) {
   if (!popup || !state.connected || isRunning(state)) return "";
+  if (popup.kind === "friend") {
+    const shown = friendPopup(popup.id ?? "add");
+    // Accepted, removed or cancelled: that person's popup is done.
+    if (!shown) { popup = null; return ""; }
+    return popupShell(shown.title, shown.body, 0, 0, "mini");
+  }
+  if (popup.kind === "activity") return popupShell("What Unnepo noticed lately", activityCard(), 0, 0, "mini");
   return popup.kind === "cover" ? coverPopup(state) : popup.kind === "addjob" ? addJobPopup(state) : answerPopup(state);
 }
 /** Closes the popup, letting go of a box so what's behind it can be drawn. */
@@ -949,7 +955,7 @@ function focusPopup() {
 
 function wirePopup() {
   app.querySelectorAll<HTMLButtonElement>("[data-popup]").forEach((button) => button.addEventListener("click", () => {
-    popup = { kind: button.dataset.popup as "cover" | "answer" | "addjob", step: 0 };
+    popup = { kind: button.dataset.popup as "cover" | "answer" | "addjob" | "activity", step: 0 };
     if (popup.kind === "addjob" && lastState) { startManualJob(lastState); manualJob.note = ""; resetDetectedPager(); }
     void render();
   }));
@@ -1326,25 +1332,30 @@ async function replaceResume(file: File) {
   void render();
 }
 
+/** Me's top: you in the middle (plan and profile under your name), then what's left today and the way up. */
 function profileCard(state: PanelState) {
   const me = state.me!;
   const missing = me.missing ?? [];
-  const credits = me.unlimitedCredits ? "Unlimited" : me.trial ? "Pro trial" : me.usage?.free ? "Resets every day" : `${me.usage?.credits ?? me.credits * 5} credits left`;
-  const plan = me.trial ? "Pro trial" : (me.effectivePlan ?? me.plan ?? "free").replace(/^\w/, (letter) => letter.toUpperCase());
+  const free = Boolean(me.usage?.free);
+  const plan = free ? "Free" : me.trial ? "Pro trial" : (me.effectivePlan ?? me.plan ?? "free").replace(/^\w/, (letter) => letter.toUpperCase());
   const name = me.user.name || me.user.email;
   const initials = name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((part) => part[0]!.toUpperCase()).join("");
+  const profileUrl = `${state.apiBase}/home?edit=profile`;
+  const profile = me.completeness < 100
+    ? `<a class="me-link${!me.profileReady ? " warn" : ""}" href="${escape(profileUrl)}" target="_blank" rel="noreferrer" title="${missing.length ? `Missing: ${escape(missing.join(", "))}` : ""}">${me.completeness}% profile · Finish</a>`
+    : `<a class="me-link" href="${escape(profileUrl)}" target="_blank" rel="noreferrer">Edit profile</a>`;
+  const stat = (count: number | string | undefined, label: string) => `<span class="me-stat"><b>${escape(String(count ?? 0))}</b><span>${label}</span></span>`;
+  const credits = me.unlimitedCredits ? "Unlimited" : me.trial ? `${me.trial.daysLeft} ${me.trial.daysLeft === 1 ? "day" : "days"} left` : `${me.usage?.credits ?? me.credits * 5} credits`;
   return `
-    <section class="page settings-card" aria-label="Account">
-      <div class="account-head">
-        <span class="account-av" aria-hidden="true">${escape(initials || "?")}</span>
-        <span class="account-text"><span class="account-name">${escape(name)}</span>${me.user.name ? `<span class="sub">${escape(me.user.email)}</span>` : ""}</span>
+    <section class="me-hero" aria-label="Account">
+      <span class="account-av big" aria-hidden="true">${escape(initials || "?")}</span>
+      <span class="account-name" title="${escape(me.user.email)}">${escape(name)}</span>
+      <span class="me-line"><span>${escape(plan)}</span><span aria-hidden="true">·</span>${profile}</span>
+      <div class="me-stats" aria-label="${free ? "Left today" : "Your plan"}">
+        ${free ? `${stat(me.usage?.letters.left, "letters")}${stat(me.usage?.answers.left, "answers")}${stat(me.usage?.autofills.left, "fills")}<a class="btn accent small-btn" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade</a>`
+          : `${stat(credits, "")}<a class="me-link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a>`}
       </div>
-      <div class="account-plan"><span><strong>${escape(plan)}</strong> · ${credits}</span><a class="link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a></div>
       ${me.admin ? adminPlanSwitch(me.planPreview ?? null) : ""}
-      ${me.usage?.free ? `<span class="small">Left today: ${me.usage.letters.left} cover letters · ${me.usage.answers.left} answers · ${me.usage.autofills.left} autofills. People: ${escape(me.usage.people.badge ?? `${me.usage.people.left} left`)}</span>` : ""}
-      ${me.completeness < 100 ? `<div class="row-between"><span class="small"${!me.profileReady ? ' style="color: var(--warn)"' : ""}>Profile ${me.completeness}% done${missing.length ? `: ${missing.map(escape).join(", ")}` : ""}</span></div>
-      <div class="bar" role="progressbar" aria-label="Profile ready" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${me.completeness}"><div style="width:${me.completeness}%"></div></div>` : ""}
-      <a class="link" href="${escape(state.apiBase)}/home?edit=profile" target="_blank" rel="noreferrer">${me.completeness < 100 ? "Finish my profile" : "Edit my profile"} ↗</a>
     </section>`;
 }
 
@@ -1598,26 +1609,24 @@ function trackingSettings(state: PanelState) {
   if (!tracking) return "";
   const option = (name: string, value: string, label: string, on: boolean) => `<label class="check"><input type="radio" name="${name}" value="${value}" ${on ? "checked" : ""}>${label}</label>`;
   const mail = (value: Mailer, label: string) => `<option value="${value}"${tracking!.mailer === value ? " selected" : ""}>${label}</option>`;
+  const toggle = (id: string, label: string, sub: string, on: boolean) => `<label class="set-row"><span class="set-text"><span>${label}</span>${sub ? `<span class="sub">${sub}</span>` : ""}</span><input type="checkbox" class="switch" id="${id}" ${on ? "checked" : ""}></label>`;
   return `
     <section class="page settings-card" aria-label="Settings">
       <span class="eyebrow">Settings</span>
-      <div class="stack tight">
-        <span class="q-label">When a site confirms you applied</span>
-        ${option("auto-detect", "auto", "Save it to my jobs (with Undo)", tracking.autoDetect === "auto")}
-        ${option("auto-detect", "ask", "Ask me first", tracking.autoDetect === "ask")}
+      <div class="set-rows">
+        ${toggle("auto-save", "Save jobs automatically", tracking.autoDetect === "auto" ? "When a site confirms it" : "Off: Unnepo asks first", tracking.autoDetect === "auto")}
+        ${toggle("notify", "Follow-up reminders", "Once a day, when due", tracking.notify)}
+        ${toggle("pause", `Stop at Submit <span class="beta">Beta</span>`, "Autofill waits for you to check", !state.autoSubmit)}
+        <label class="set-row"><span class="set-text"><span>Email links open in</span></span><select class="field set-select" id="mailer">${mail("gmail", "Gmail")}${mail("outlook", "Outlook")}${mail("mailto", "Mail app")}</select></label>
       </div>
-      <label class="question"><span class="q-label">Email links open in</span>
-        <select class="field" id="mailer">${mail("gmail", "Gmail")}${mail("outlook", "Outlook on the web")}${mail("mailto", "My computer's mail app")}</select>
-      </label>
-      <label class="check"><input type="checkbox" id="notify" ${tracking.notify ? "checked" : ""}>Remind me once a day when follow-ups are due</label>
-      <label class="check"><input type="checkbox" id="pause" ${state.autoSubmit ? "" : "checked"}><span>Autofill <span class="beta">Beta</span> stops at Submit so I can check it</span></label>
     </section>`;
 }
 function wireTracking() {
-  app.querySelectorAll<HTMLInputElement>('input[name="auto-detect"]').forEach((input) => input.addEventListener("change", () => {
-    tracking!.autoDetect = input.value as "auto" | "ask";
-    void chrome.storage.local.set({ autoDetect: input.value });
-  }));
+  document.getElementById("auto-save")?.addEventListener("change", (event) => {
+    tracking!.autoDetect = (event.target as HTMLInputElement).checked ? "auto" : "ask";
+    void chrome.storage.local.set({ autoDetect: tracking!.autoDetect });
+    void render();
+  });
   document.getElementById("mailer")?.addEventListener("change", (event) => {
     const value = (event.target as HTMLSelectElement).value as Mailer;
     tracking!.mailer = value;
@@ -1865,6 +1874,10 @@ function draw(state: PanelState): boolean {
     wireBubbles(app);
     wireWeek(app);
     wireFriends(app);
+    app.querySelectorAll<HTMLButtonElement>("[data-friend-open]").forEach((button) => button.addEventListener("click", () => {
+      popup = { kind: "friend", step: 0, id: button.dataset.friendOpen };
+      void render();
+    }));
     wireJobsList(app);
     app.querySelectorAll<HTMLButtonElement>("[data-show-jobs]").forEach((button) => button.addEventListener("click", () => { showJobs("reach"); go("home"); }));
     const job = view === "job" ? jobById(openedJob.id) : null;
