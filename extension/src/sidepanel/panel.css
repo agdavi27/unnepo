@@ -573,3 +573,30 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .next-box.ok .next-eyebrow { color: var(--ok); }
 .next-box.ended { border-color: var(--line-2); background: transparent; }
 .next-box.ended .next-eyebrow { color: var(--muted-2); }
+
+/* Home with the job list: the panel fits the window. The spider hangs down onto the calendar's corner, the calendar
+   stays put, and the job list scrolls inside its own box. */
+body.contained { height: 100vh; min-height: 0; }
+.contained .top { position: relative; z-index: 3; padding-bottom: 0; margin-bottom: -30px; pointer-events: none; }
+.contained .top a, .contained .top button { pointer-events: auto; }
+.contained .spider { margin-top: 14px; }
+.contained .spider .thread { height: 46px; }
+.contained .body { min-height: 0; overflow-y: auto; padding-top: 12px; gap: 10px; }
+.contained .week-card { flex: none; padding: 14px; gap: 10px; }
+.week-head { display: flex; align-items: center; gap: 10px; padding-right: 76px; min-height: 18px; }
+.week-head .streak { font-size: 12px; }
+.week-head .streak svg { width: 13px; height: 13px; }
+.heat-how > summary { font-size: 11px; color: var(--muted-2); }
+.jobs-pane { flex: 1 1 auto; min-height: 260px; padding: 12px 14px 0; gap: 10px; overflow: hidden; }
+.jobs-tools { display: flex; align-items: center; gap: 6px; }
+.jobs-tools .chips { flex: 1; min-width: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.jobs-tools .chips::-webkit-scrollbar { display: none; }
+.jobs-tools .chip { flex: none; height: 28px; }
+.icon-btn { flex: none; width: 28px; height: 28px; padding: 0; border-radius: 999px; border: 1px solid var(--control); background: transparent; color: var(--muted-3); display: grid; place-items: center; cursor: pointer; }
+.icon-btn:hover, .icon-btn.on { color: var(--fg); border-color: var(--muted); }
+.jobs-pane .search { flex: none; height: 34px; }
+.jobs-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin: 0 -14px; padding: 0 14px 14px; border-top: 1px solid var(--line); scrollbar-width: thin; scrollbar-color: var(--control) transparent; }
+.jobs-scroll .jobs-group { padding-top: 10px; }
+.jobs-pane .dots { display: none; }
+.email-nudge { flex: none; display: flex; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 10px; border: 0; border-radius: 10px; background: rgba(245, 165, 36, .1); color: var(--warn); font: 500 12px Geist, sans-serif; text-align: left; cursor: pointer; }
+.email-nudge:hover { background: rgba(245, 165, 36, .16); }

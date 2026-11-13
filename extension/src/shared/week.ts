@@ -66,8 +66,11 @@ const shortDate = (date: Date) => date.toLocaleDateString("en-US", { month: "sho
  * Week: every day you did something over the last 12 weeks (applied, emailed someone, heard back), brighter for
  * a busier day, with this week's count, the goal and the streak on top. Tapping a day shows what happened.
  */
-/** `under` goes right below the calendar, above friends: the job list on Week. */
-export function weekView(now = new Date(), under = "") {
+/**
+ * `under` goes right below the calendar, above friends: the job list on Week. Given as a function, it gets the
+ * friends card to place itself (the home screen puts it at the end of its scrolling job list).
+ */
+export function weekView(now = new Date(), under: string | ((friends: string) => string) = "") {
   if (!store.tracker) return `<section class="page"><span class="eyebrow">Every day you did something</span><p class="note">${escape(store.error || "Loading your week…")}</p></section>`;
   const jobs = store.tracker.jobs;
   const applied = perDay(jobs);
@@ -105,23 +108,22 @@ export function weekView(now = new Date(), under = "") {
         }).join("")}</ul>` : `<p class="small">A quiet day. Nothing logged.</p>`}
       </div>` : "";
 
+  const friends = friendsWeekCard(week);
   return `
     <section class="page week-card" aria-label="Every day you did something">
-      <div class="row-between">
-        <span class="eyebrow">This week · ${week}${weekly ? ` of ${weekly}` : " applied"}</span>
+      <div class="week-head">
+        <span class="eyebrow" title="${weekly ? (week >= weekly ? "Weekly goal hit" : `${weekly - week} to go this week`) : "Set a weekly goal on unnepo.com"}">${week}${weekly ? ` / ${weekly}` : ""} this week</span>
         <span class="streak${streak ? " lit" : ""}" title="Days in a row with an application">${FLAME}${streak} ${streak === 1 ? "day" : "days"}</span>
       </div>
       ${weekly ? `<div class="bar" role="progressbar" aria-label="Weekly goal" aria-valuemin="0" aria-valuemax="${weekly}" aria-valuenow="${Math.min(week, weekly)}"><div style="width:${Math.min(100, Math.round((week / weekly) * 100))}%"></div></div>` : ""}
-      <div class="row-between"><span class="small">${weekly ? (week >= weekly ? "Weekly goal hit." : `${weekly - week} to go this week.`) : "Set a weekly goal on unnepo.com."}</span><span class="small">${emails} ${emails === 1 ? "email" : "emails"} sent</span></div>
       <div class="heat" role="group" aria-label="Every day you did something, last ${WEEKS} weeks">
         <div class="heat-col heat-letters"><span class="heat-month"></span>${letters}</div>
         ${columns}
       </div>
       ${detail}
-      ${heatKey()}
+      ${heatKey(emails, weekly ? (week >= weekly ? "Weekly goal hit." : `${weekly - week} to go this week.`) : "Set a weekly goal on unnepo.com.")}
     </section>
-    ${under}
-    ${friendsWeekCard(week)}`;
+    ${typeof under === "function" ? under(friends) : `${under}${friends}`}`;
 }
 
 /** Whether "How it works" under the calendar is open; kept across redraws. */
@@ -130,7 +132,7 @@ let keyOpen = false;
  * The calendar's key: each square is a day, darker for nothing done and brighter the more happened (applying,
  * emailing someone, a follow-up, an interview, an offer or a no each count as one), plus today's ring.
  */
-function heatKey() {
+function heatKey(emails: number, goal: string) {
   const steps = ["0", "1", "2", "3", "4", "5", "6", "7", "8+"];
   return `
       <details class="heat-how" id="heat-how" ${keyOpen ? "open" : ""}>
@@ -141,6 +143,7 @@ function heatKey() {
           <span class="small">More</span>
           <span class="heat-key-step today-key"><span class="heat-key-swatch today"></span><span class="heat-key-num">Today</span></span>
         </div>
+        <p class="small heat-key-note">${escape(goal)} ${emails} ${emails === 1 ? "email" : "emails"} sent this week.</p>
         <p class="small heat-key-note">Each square is a day over the last ${WEEKS} weeks. The brighter it is, the more you did that day: each application, email, follow-up, interview, offer or no counts as one, up to 8 or more. Tap a day to see what happened.</p>
       </details>`;
 }
@@ -161,6 +164,9 @@ type Filter = "all" | "reach" | "waiting" | "follow" | "interview";
 const FILTERS: Array<[Filter, string]> = [["all", "All"], ["reach", "Reach out"], ["waiting", "Waiting"], ["follow", "Follow up"], ["interview", "Interview"]];
 let filter: Filter = "all";
 let query = "";
+/** Whether the search box is open; it stays open while there's something typed in it. */
+let searchOpen = false;
+const SEARCH_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>`;
 
 function matches(job: TrackerJob, which: Filter) {
   if (which === "all") return true;
@@ -175,8 +181,11 @@ function matches(job: TrackerJob, which: Filter) {
 /** Opens the Jobs tab on one filter, like Reach out from Week. */
 export function showJobs(which: Filter) { filter = which; }
 
-/** Every job with its progress: a search box, a chip per step, applied jobs first, then the ones not applied yet. */
-export function jobsList() {
+/**
+ * Every job with its progress, in a box that scrolls on its own so the calendar above stays put: a chip per step
+ * and a search button on top, applied jobs first, then the ones not applied yet. `tail` goes at the end of the list.
+ */
+export function jobsList(lead = "", tail = "") {
   if (!store.tracker) return `<p class="note">${escape(store.error || "Loading your jobs…")}</p>`;
   const jobs = store.tracker.jobs;
   const chips = FILTERS.map(([value, label]) => {
@@ -187,15 +196,24 @@ export function jobsList() {
   const applied = shown.filter(isAppliedJob);
   const saved = shown.filter((job) => !isAppliedJob(job));
   const when = (job: TrackerJob) => new Date(job.submittedAt ?? job.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  // The group's name only when there are two groups to tell apart.
   const group = (label: string, list: TrackerJob[]) => list.length ? `
-    <div class="row-between"><span class="eyebrow">${label}</span><span class="mono">${list.length}</span></div>
+    ${applied.length && saved.length ? `<div class="row-between jobs-group"><span class="eyebrow">${label}</span><span class="mono">${list.length}</span></div>` : ""}
     <ul class="jobs-list">${list.map((job) => jobRow(job, when(job))).join("")}</ul>` : "";
+  const searching = searchOpen || Boolean(query);
   return `
-    <section class="page jobs-card" aria-label="Your jobs">
-      <input class="field search" id="job-search" type="search" placeholder="Search jobs or companies" aria-label="Search jobs or companies" value="${escape(query)}" autocomplete="off">
-      <div class="chips" role="group" aria-label="Show">${chips}</div>
-      ${shown.length ? `${group("Applied", applied)}${group("Not applied yet", saved)}` : `<p class="note">${filter === "all" ? "Every job you apply to shows up here." : "No jobs on this step right now."}</p>`}
-      <p class="note" id="job-search-none" hidden>No jobs match that.</p>
+    <section class="page jobs-card jobs-pane" aria-label="Your jobs">
+      ${lead}
+      <div class="jobs-tools">
+        <div class="chips" role="group" aria-label="Show">${chips}</div>
+        <button type="button" class="icon-btn${searching ? " on" : ""}" id="job-search-toggle" aria-label="Search jobs" aria-expanded="${searching}">${SEARCH_ICON}</button>
+      </div>
+      ${searching ? `<input class="field search" id="job-search" type="search" placeholder="Search jobs or companies" aria-label="Search jobs or companies" value="${escape(query)}" autocomplete="off">` : ""}
+      <div class="jobs-scroll">
+        ${shown.length ? `${group("Applied", applied)}${group("Not applied yet", saved)}` : `<p class="note">${filter === "all" ? "Every job you apply to shows up here." : "No jobs on this step right now."}</p>`}
+        <p class="note" id="job-search-none" hidden>No jobs match that.</p>
+        ${tail}
+      </div>
     </section>`;
 }
 
@@ -216,6 +234,12 @@ export function wireJobsList(root: HTMLElement) {
     filter = button.dataset.jobFilter as Filter;
     redraw();
   }));
+  root.querySelector("#job-search-toggle")?.addEventListener("click", () => {
+    searchOpen = !(searchOpen || query);
+    if (!searchOpen) query = "";
+    redraw();
+    if (searchOpen) document.querySelector<HTMLInputElement>("#job-search")?.focus();
+  });
   const search = root.querySelector<HTMLInputElement>("#job-search");
   search?.addEventListener("input", () => { query = search.value; applySearch(root); });
   applySearch(root);
