@@ -44,7 +44,7 @@ export default function ForStudentsPage() {
         </p>
 
         <Link href="/signup" className="mt-8 inline-flex rounded-full bg-white px-5 py-2.5 text-sm font-semibold text-black">
-          Start with 7 days of Pro free, no card
+          Start free, no card
         </Link>
       </main>
     </div>

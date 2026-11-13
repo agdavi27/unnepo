@@ -11,7 +11,7 @@ export const CONTACT_EMAIL = "contact@unnepo.com";
 /** Pricing, credit rules, and spend caps. All of these are environment-configurable. */
 export function serverConfig() {
   return {
-    // People searches a new account starts with: the trial's people (3 companies), kept after it ends.
+    // Whole lists of people a new account starts with (only a trial, when TRIAL_DAYS turns one on, can use them).
     signupCredits: intEnv("SIGNUP_CREDITS", 3),
     unlockCreditCost: intEnv("UNLOCK_CREDIT_COST", 1),
     referralCredits: intEnv("REFERRAL_CREDITS", 25),
@@ -54,7 +54,7 @@ export function serverConfig() {
 /**
  * Pricing. Free gets FREE_LIMITS each day (cover letters, answers, written emails, and full autofills that answer the questions
  * too; after those, autofill still fills the basic details) and FREE_PEOPLE_PER_JOB person at each job, with an
- * email that isn't checked, plus whole lists from whatever the 7-day trial's SIGNUP_CREDITS left. Pro has no limits: only hidden monthly guards
+ * email that isn't checked. Pro has no limits: only hidden monthly guards
  * against scripts (PRO_AI_LIMIT for writing and autofill, PRO_PEOPLE_LIMIT for companies, about 30¢ each), which a
  * real student never meets. `balance` on an account counts people searches left from the trial or a pack.
  */
@@ -79,15 +79,15 @@ export const PUBLIC_PLANS = [
     name: "Free",
     priceLabel: "$0",
     semesterLabel: null,
-    cadence: "After 7 days of Pro free",
-    blurb: "Start with Pro, free for 7 days",
-    cta: "Start 7 days of Pro free",
+    cadence: "Free for students, no card",
+    blurb: "Everything you need to start",
+    cta: "Start free",
     popular: false,
     monthly: false,
     credits: FREE_PEOPLE_PER_JOB,
     semesterCredits: null,
     applicationsLabel: "Free every day",
-    features: ["7 days of Pro free, no card", `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.autofills} autofills a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_PEOPLE_PER_JOB} person to email at each job`, "Tracker and job matches"],
+    features: [`${FREE_LIMITS.autofills} full autofills a day, then your basic details`, `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_PEOPLE_PER_JOB} person to email at each job (email not checked)`, "Compete with friends", "Tracker and job matches"],
   },
   {
     id: "pro" as const,
@@ -102,7 +102,7 @@ export const PUBLIC_PLANS = [
     credits: 20,
     semesterCredits: 70,
     applicationsLabel: "Unlimited everything",
-    features: ["Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", "Unlimited autofill that answers the questions too", "Names and emails at every company you apply to", "Follow-up emails written for you", "Email updates the moment they arrive"],
+    features: ["Unlimited autofill that answers the questions too", "Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", "3 people at every company, with checked emails", "Unlimited emails and follow-ups written for you", "Email updates the moment they arrive", "Compete with friends"],
   },
 ];
 

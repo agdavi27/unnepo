@@ -1,5 +1,6 @@
 /**
- * The Pro trial: every new account has Pro for its first TRIAL_DAYS days, with no card, counted from signup.
+ * The Pro trial, off unless TRIAL_DAYS is set: a new account has Pro for its first TRIAL_DAYS days, with no card,
+ * counted from signup.
  * After that a Free account is Free again. Paid plans are never touched. Nothing is stored for it: the account
  * stays "free" and the trial is worked out from when the student signed up, so it ends on its own.
  *
@@ -11,11 +12,11 @@ export type StoredPlan = "free" | "grind" | "pack" | "pro" | "premium";
 /** Where "Get Pro" goes in the web app: the Upgrade to Pro page, beside Settings (Settings and plans once on Pro). */
 export const UPGRADE_URL = "/home?tab=pro";
 
-/** Days of Pro a new account gets. TRIAL_DAYS=0 turns the trial off. */
+/** Days of Pro a new account gets: none, unless TRIAL_DAYS turns a trial on. */
 export const trialDays = () => {
   const set = typeof process !== "undefined" ? process.env.TRIAL_DAYS?.trim() : "";
   const raw = set ? Number(set) : NaN;
-  return Number.isFinite(raw) && raw >= 0 ? raw : 7;
+  return Number.isFinite(raw) && raw >= 0 ? raw : 0;
 };
 
 /**

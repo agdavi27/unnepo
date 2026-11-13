@@ -46,13 +46,11 @@ const VIEWS: { id: View; label: string }[] = [
 
 /** What Pro does that Free doesn't, on the Upgrade to Pro page. */
 const PRO_REASONS: Array<[string, string]> = [
-  ["See who to email at every company", "Names, titles and checked emails for recruiters, hiring managers and the team, not just how many there are."],
-  ["Show person on every job", "Reveal the people on a job's list, with their LinkedIn and email."],
+  ["3 people to email at every company", "Names, titles and checked emails for recruiters, hiring managers and the team. Free shows 1 person, with an email that isn't checked."],
   ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 3 general ones a day."],
   ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 3 a day."],
   ["Unlimited autofill that answers the questions too", "Free has 3 full autofills a day, then fills your basic details."],
   ["Unlimited emails and follow-ups written for you", "A short note to each person, ready to send from Gmail or Outlook. Free writes 3 emails a day."],
-  ["Names and emails at every company you apply to", "Free shows 1 person at each job, with an email that isn't checked."],
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 
