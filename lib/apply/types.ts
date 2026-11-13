@@ -101,6 +101,8 @@ export type FillReport = {
   peopleReveals?: number;
   /** When the student marked each person (by contact id) as emailed, for follow-up reminders. */
   emailedAt?: Record<string, string>;
+  /** Each email sent, follow-up sent and reply had, with when, for the week's count against friends. */
+  outreachLog?: Array<{ at: string; contactId: string; kind: "email" | "follow_up" | "reply" }>;
   /** How many people the student says they emailed about this job (anyone, on the list or not), and when. */
   reachedOut?: { count: number; at: string };
   /** The credit for this job's person was spent, so searching again is free. */

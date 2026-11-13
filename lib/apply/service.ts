@@ -978,7 +978,12 @@ export async function updateOutreach(userId: string, raw: unknown) {
     // "I sent the follow-up" starts the five business days again.
     if (status === "emailed") emailedAt[row.id] = body.followedUp === true ? nowIso() : emailedAt[row.id] ?? nowIso();
     else delete emailedAt[row.id];
-    await applications.update(userId, app.id, { fillReport: { ...report, emailedAt } });
+    // What counts against friends this week: the first email to someone, every follow-up, and their first reply.
+    const log = report.outreachLog ?? [];
+    const had = (kind: "email" | "reply") => log.some((entry) => entry.contactId === row.id && entry.kind === kind) || (kind === "email" && Boolean(report.emailedAt?.[row.id]));
+    const kind: "email" | "follow_up" | "reply" | null = status === "emailed" ? (body.followedUp === true ? "follow_up" : had("email") ? null : "email") : status === "replied" && !had("reply") ? "reply" : null;
+    const outreachLog = kind ? [...log, { at: nowIso(), contactId: row.id, kind }].slice(-200) : log;
+    await applications.update(userId, app.id, { fillReport: { ...report, emailedAt, outreachLog } });
   }
   return { contact: row };
 }

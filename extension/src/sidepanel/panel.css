@@ -780,3 +780,25 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 
 /* Free: the one person's email is never checked, and says so. */
 .unverified-tag { align-self: flex-start; margin-top: 4px; border: 1px solid color-mix(in srgb, var(--warn, #F5A524) 50%, transparent); border-radius: 999px; padding: 1px 7px; font: 10px var(--mono); letter-spacing: .3px; color: var(--warn, #F5A524); }
+
+/* A friend's popup: this week's points, you against them, and where each point came from. */
+.score-top { display: flex; align-items: center; justify-content: space-around; gap: 8px; margin-bottom: 12px; }
+.score-side { display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 70px; }
+.score-side .friend-av { width: 34px; height: 34px; font-size: 13px; }
+.score-side.me .friend-av { color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.score-side.them .friend-av { color: #A78BFA; background: rgba(167, 139, 250, .16); }
+.score-num { font: 500 28px var(--mono); line-height: 1.1; color: var(--muted); }
+.score-side.win.me .score-num { color: var(--accent); }
+.score-side.win.them .score-num { color: #A78BFA; }
+.score-pill { flex: none; padding: 3px 10px; border-radius: 999px; font: 11px var(--mono); border: 1px solid var(--control); color: var(--muted); }
+.score-pill.ahead { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.score-pill.behind { color: #A78BFA; border-color: rgba(167, 139, 250, .45); background: rgba(167, 139, 250, .1); }
+.score-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 8px; }
+.score-table th { font: 10px var(--mono); text-transform: uppercase; letter-spacing: .5px; color: var(--muted); text-align: right; padding: 0 0 6px; font-weight: 400; }
+.score-table th:first-child, .score-table td:first-child { text-align: left; }
+.score-table td { padding: 6px 0; border-top: 1px solid var(--line-2); text-align: right; font-family: var(--mono); color: var(--muted-2); }
+.score-table td:first-child { font-family: inherit; color: var(--fg); }
+.score-table .pts { color: var(--muted); font-size: 11px; }
+.score-table td.win.me { color: var(--accent); font-weight: 600; }
+.score-table td.win.them { color: #A78BFA; font-weight: 600; }
+.quiet-remove { width: 100%; margin-top: 6px; }

@@ -95,7 +95,7 @@ ${corner("You", "?", "not in the ring yet", true)}
 </tr></table></td></tr>
 <tr><td align="center" style="padding:18px 32px 0"><img src="${spider}" width="120" height="120" alt="Unnepo's spider, refereeing" style="display:block;border:0;width:120px;height:120px"></td></tr>
 <tr><td align="center" style="padding:4px 32px 24px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#FFFFFF" style="${font};background:#FFFFFF;border-radius:14px;padding:12px 18px;font-size:15px;line-height:21px;font-weight:700;color:#111111;text-align:center">&ldquo;${ref}&rdquo;</td></tr></table></td></tr>
-<tr><td align="center" style="${font};padding:0 32px 22px;font-size:15px;line-height:22px;color:#C4C4CC">Accept and you each see how many jobs the other applied to this week, side by side. Nothing else is shared.</td></tr>
+<tr><td align="center" style="${font};padding:0 32px 22px;font-size:15px;line-height:22px;color:#C4C4CC">Accept and you each see what the other did this week, side by side: applications, emails, follow-ups, cover letters, replies and interviews. Never who you emailed or where you applied.</td></tr>
 ${perksHtml}
 <tr><td align="center" style="padding:0 32px 14px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#FF4D4D" style="border-radius:10px;background:#FF4D4D"><a href="${link}" style="${font};display:inline-block;padding:14px 28px;font-size:15px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:#FFFFFF;text-decoration:none;border-radius:10px">Step into the ring</a></td></tr></table></td></tr>
 <tr><td align="center" style="${font};padding:0 32px 26px;font-size:13px;line-height:19px;color:#9A9AA3">${how}</td></tr>
@@ -112,7 +112,7 @@ ${perksHtml}
       to: [input.to],
       subject: `${name} challenged you to a job hunt`,
       reply_to: CONTACT_EMAIL,
-      text: `TONIGHT'S MAIN EVENT: ${name} vs you.\n\n${score}\n\nThe ref says: "${ref}"\n\nAccept and you each see how many jobs the other applied to this week. Nothing else is shared.${perksText}\n\n${how}\n\nStep into the ring: ${link}\n\nYou got this because ${name} added this address on Unnepo. Ignore it and nothing happens. Questions? ${CONTACT_EMAIL}`,
+      text: `TONIGHT'S MAIN EVENT: ${name} vs you.\n\n${score}\n\nThe ref says: "${ref}"\n\nAccept and you each see what the other did this week: applications, emails, follow-ups, cover letters, replies and interviews. Never who you emailed or where you applied.${perksText}\n\n${how}\n\nStep into the ring: ${link}\n\nYou got this because ${name} added this address on Unnepo. Ignore it and nothing happens. Questions? ${CONTACT_EMAIL}`,
       html,
     }),
   });
