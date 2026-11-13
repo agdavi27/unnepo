@@ -13,7 +13,7 @@ import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/ap
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
-import { isFree, peopleAccess, peopleNote, planState, planUsage, spendPeople } from "@/lib/apply/limits";
+import { assertUseAllowed, countUse, isFree, peopleAccess, peopleNote, planState, planUsage, spendPeople } from "@/lib/apply/limits";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { profileReady, profileState } from "@/lib/profile/service";
@@ -783,6 +783,8 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   // A company's people count once (Free's weekly company, a trial credit, or Pro's hidden guard), only when
   // someone with an email turns up. With none left, nothing is looked up.
   const paidKey = `person:${userId}:${app.id}`;
+  // Free: one person at each job, even for a job whose whole list was paid for during the trial.
+  if (await isFree(userId)) return onePerson(userId, app);
   const alreadyPaid = Boolean(app.fillReport?.personCharged);
   const way = alreadyPaid ? null : await peopleAccess(userId);
   if (!alreadyPaid && !way) {
@@ -875,6 +877,8 @@ export async function writeContactEmail(userId: string, raw: unknown) {
     if (checked && (checked.email !== contact.email || checked.emailSource !== contact.emailSource)) writeTo = (await applicationContacts.update(userId, contact.id, checked)) ?? contact;
   }
   if (body.followUp === true && (await isFree(userId))) throw new ServiceError("Follow-up emails written for you are part of Pro.", "plan", 402);
+  // Free writes a few emails a day; follow-ups are Pro's.
+  if (body.followUp !== true) await assertUseAllowed(userId, "emails");
   const info = await student(userId);
   // "Write follow-up": a short nudge on the email already sent, which stays in the thread.
   const followUp = body.followUp === true && contact.emailBody ? { subject: contact.emailSubject ?? "", body: contact.emailBody, sentAt: app.fillReport?.emailedAt?.[contact.id] ?? null } : undefined;
@@ -883,6 +887,7 @@ export async function writeContactEmail(userId: string, raw: unknown) {
   });
   if (!email?.body) throw new ServiceError("The email couldn't be written. Try again.", "write_failed", 502);
   const row = await applicationContacts.update(userId, contact.id, { emailSubject: email.subject, emailBody: email.body });
+  if (body.followUp !== true) await countUse(userId, "emails");
   return { contact: row };
 }
 
@@ -911,6 +916,7 @@ export async function revealContact(userId: string, raw: unknown) {
   const hidden = report.peopleHidden?.[key];
   if (!hidden) throw new ServiceError("This person can't be looked up any further.", "not_found", 404);
   if ((report.peopleReveals ?? 0) >= MAX_REVEALS) throw new ServiceError(`You've shown ${MAX_REVEALS} people for this job, which is the limit.`, "reveal_limit", 429);
+  if (await isFree(userId)) throw new ServiceError("Showing more people is part of Pro.", "plan", 402);
   const info = await student(userId);
   // The first email on a job's list is what counts the company (or spends its credit).
   const paid = Boolean(report.personCharged);

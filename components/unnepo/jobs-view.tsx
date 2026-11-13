@@ -17,7 +17,7 @@ import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid, activityOf, 
  * in Gmail. Jobs can be added by hand and deleted here; the extension does the rest.
  */
 
-type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free?: boolean; peopleBadge?: string; peopleNote?: string };
+type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free?: boolean; peopleBadge?: string; peopleNote?: string; emailsLeft?: number | null };
 type Row = { job: TrackerJob; progress: Progress };
 type Filter = "all" | "reach" | "waiting" | "follow" | "interview" | "hidden";
 const FILTERS: Array<[Filter, string]> = [["all", "All"], ["reach", "Reach out"], ["waiting", "Waiting"], ["follow", "Follow up"], ["interview", "Interview"], ["hidden", "Hidden"]];
@@ -263,7 +263,7 @@ function InfoPopup({ row, now, tracker, onClose, onDelete, onHide, onChanged, re
             </div>
           </div>
           {editing && <EditJob job={job} onCancel={() => setEditing(false)} onSaved={(note) => { setEditing(false); onChanged(note); }} />}
-          <PeoplePanel job={job} free={Boolean(tracker.free)} badge={tracker.peopleBadge} note={tracker.peopleNote} reload={reload} say={say} />
+          <PeoplePanel job={job} free={Boolean(tracker.free)} badge={tracker.peopleBadge} note={tracker.peopleNote} emailsLeft={tracker.emailsLeft ?? null} reload={reload} say={say} />
         </div>
 
         {/* Where it is, its details, and what to do with it. */}

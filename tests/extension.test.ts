@@ -485,9 +485,9 @@ describe("CV generator", () => {
     expect(first.text).not.toContain("300%");
     expect(Buffer.from(first.pdfBase64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
     expect((await repo.getAccount(userId))!.balance).toBe(startCredits);
-    expect(first.usesLeft).toBe(4);
+    expect(first.usesLeft).toBe(2);
 
-    for (let index = 0; index < 4; index += 1) await call("POST", "cv", token, {});
+    for (let index = 0; index < 2; index += 1) await call("POST", "cv", token, {});
     const calls = model.calls;
     const response = await call("POST", "cv", token, {});
     expect(response.status).toBe(402);
@@ -501,21 +501,22 @@ describe("plan limits", () => {
     await repo.setAccountForTests(userId, { balance: 5 });
     const { token } = await issueExtensionToken(userId);
     const { usage } = await (await call("GET", "me", token)).json();
-    // 5 letters (2 credits each), 5 answers (1 each), and 5 lists of people left from the trial (5 each).
-    expect(usage.credits).toBe(40);
+    // 3 letters (2 credits each), 3 answers and 3 written emails (1 each). Free's people aren't counted, credits or not.
+    expect(usage.credits).toBe(12);
     // Each tool's box shows what's left today in its corner.
-    expect(usage.letters).toMatchObject({ left: 5, badge: "5 left today", note: "" });
-    expect(usage.autofills).toMatchObject({ left: 5, basic: false, badge: "5 left today" });
-    expect(usage.people).toMatchObject({ left: 5, note: "", badge: "5 left" });
+    expect(usage.letters).toMatchObject({ left: 3, badge: "3 left today", note: "" });
+    expect(usage.autofills).toMatchObject({ left: 3, basic: false, badge: "3 left today" });
+    expect(usage.emails).toMatchObject({ left: 3, badge: "3 left today" });
+    expect(usage.people).toMatchObject({ left: 0, note: "", badge: "1 person per job" });
     await repo.setAccountForTests(userId, { balance: 0 });
     const low = (await (await call("GET", "me", token)).json()).usage;
-    // Free still sees one person at each job, which isn't counted.
-    expect(low.credits).toBe(15);
+    expect(low.credits).toBe(12);
     expect(low.people).toMatchObject({ left: 0, badge: "1 person per job" });
   });
 
   it("keeps a short answer to two sentences unless the student asks for a longer one", async () => {
     const userId = await readyStudent();
+    await repo.setAccountForTests(userId, { plan: "pro" });
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
     const long = "I led the Colby Data Club. We met weekly. We built a dashboard. It helped the dean.";
@@ -530,11 +531,11 @@ describe("plan limits", () => {
     expect(await answer("long")).toBe(long);
   });
 
-  it("stops Free at 5 question answers a day", async () => {
+  it("stops Free at 3 question answers a day", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 3; index += 1) {
       model.replies.push("I led the Colby Data Club.");
       expect((await call("POST", "write", token, { question: "Describe a time you led a team" })).status).toBe(200);
     }
@@ -789,21 +790,21 @@ describe("quick answers before the first fill", () => {
 });
 
 describe("Free's cover letter limit", () => {
-  it("writes 5 a day on Free, then stops; the student's own edits and a reused letter don't count", async () => {
+  it("writes 3 a day on Free, then stops; the student's own edits and a reused letter don't count", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
     const job = await (await call("POST", "jobs", token, { url: "https://careers.globex.example/apply/78", title: "Data Intern", company: "Globex" })).json();
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < 3; index += 1) {
       model.replies.push(`Dear Hiring Team,\n\nLetter ${index}. I am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students.\n\nI would bring the same care to Globex's data team.\n\nSincerely,\nPat Doe`);
       expect((await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" })).status).toBe(200);
     }
     const blocked = await call("POST", "cover-letter", token, { applicationId: job.application.id, tone: "warm" });
     expect(blocked.status).toBe(402);
     expect((await blocked.json()).error).toBe("No cover letters left today. More tomorrow, or Pro has no limit.");
-    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 4.");
+    expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id })).json()).text).toContain("Letter 2.");
     expect((await (await call("POST", "cover-letter", token, { applicationId: job.application.id, text: "My own letter." })).json()).text).toBe("My own letter.");
-    expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 5, left: 0 });
+    expect((await (await call("GET", "me", token)).json()).coverLetters).toEqual({ used: 3, left: 0 });
   });
 });
 

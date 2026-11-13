@@ -22,7 +22,7 @@ import { classYearOf } from "@/lib/profile/student";
 import { contactBounced, revealContact, applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
 import { applicationStats, stageOf } from "@/lib/apply/stats";
 import { planUsage } from "@/lib/apply/limits";
-import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
+import type { ApplicationProfile, ApplicationQuestion, JobApplication } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
 
 const model = vi.hoisted(() => ({ replies: [] as string[], calls: [] as string[] }));
@@ -544,7 +544,7 @@ describe("people after applying", () => {
   type Search = { q_organization_domains_list: string[]; person_titles?: string[]; q_keywords?: string; contact_email_status?: string[] };
 
   /** A student who applied to Acme's Greenhouse job, and an Apollo that answers searches with `people`. */
-  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { reveal?: Record<string, Record<string, unknown>>; verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }>; revealFails?: boolean; /** Addresses MillionVerifier says are valid; giving any sets it up. */ verifierOk?: string[]; hunterEmails?: Array<{ value: string; first_name: string; last_name: string; verification?: { status: string } }> } = {}) {
+  async function appliedWith(people: (search: Search) => Array<ReturnType<typeof person>> | "fail", options: { reveal?: Record<string, Record<string, unknown>>; verified?: string[]; poster?: boolean; hunterValid?: string[]; twitter?: string[]; companies?: Array<{ name: string; primary_domain: string }>; revealFails?: boolean; /** Addresses MillionVerifier says are valid; giving any sets it up. */ verifierOk?: string[]; hunterEmails?: Array<{ value: string; first_name: string; last_name: string; verification?: { status: string } }>; /** Stay on Free (one person at each job); otherwise the account is on Pro. */ free?: boolean } = {}) {
     process.env.APOLLO_API_KEY = "apollo";
     delete process.env.HUNTER_API_KEY;
     delete process.env.MILLIONVERIFIER_API_KEY;
@@ -583,6 +583,8 @@ describe("people after applying", () => {
       return new Response("unexpected", { status: 500 });
     });
     await markApplied(userId, { applicationId: application.id });
+    // On Pro after applying, so the search below is the one that runs (Pro would start its own on apply).
+    if (!options.free) await repo.setAccountForTests(userId, { plan: "pro" });
     await runContactDiscovery(userId, application.id);
     return { userId, application: (await applications.get(userId, application.id))!, contacts: await applicationContacts.list(userId, [application.id]), searches };
   }
@@ -680,27 +682,26 @@ describe("people after applying", () => {
     expect(application.fillReport?.peopleLinks?.["sam l."]?.[0]?.label).toBe("LinkedIn");
   });
 
-  it("spends a credit once for a whole list, shows Free one unchecked person (the posting's first) with none left, and never stops Pro", async () => {
+  it("shows Free one unchecked person at each job (the posting's first), whatever credits it has, and never stops Pro", async () => {
     const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []);
-    const { userId, application, contacts, searches } = await appliedWith(found, { verified: ["a1"] });
-    expect(contacts.length).toBeGreaterThan(1);
+    const { userId, application, contacts, searches } = await appliedWith(found, { verified: ["a1", "r1"], free: true });
     const debits = async () => (await repo.listLedger(userId)).filter((entry) => entry.entryType === "unlock_debit").reduce((sum, entry) => sum - entry.amount, 0);
-    // A credit from the trial paid for the whole list, once: searching again is free.
-    expect(await debits()).toBe(1);
-    await applications.update(userId, application.id, { contactsStatus: "idle" });
-    await runContactDiscovery(userId, application.id);
-    expect(await debits()).toBe(1);
+    const enriched = async () => (await repo.snapshot()).usage.filter((row) => row.operation === "enrich").length;
+    // Credits left over from the trial don't buy Free a whole list: the posting's person, and the rest kept back for Pro.
+    expect((await repo.getAccount(userId))?.balance).toBeGreaterThan(0);
+    expect(contacts.map((row) => [row.name, row.email, row.emailSource])).toEqual([["Jordan Smith", "jordan.smith@acme.com", "job_posting"]]);
+    expect(application.fillReport?.peopleLocked).toBe(2);
+    expect(await enriched()).toBe(0);
+    expect(await debits()).toBe(0);
+    expect((await planUsage(userId)).people).toMatchObject({ left: 0, note: "", badge: "1 person per job" });
 
     const another = async (n: number, postedRecruiter: JobApplication["postedRecruiter"] = null) => (await applications.insert({
       userId, jobKey: `url:acme.com/job/${n}`, jobUrl: `https://acme.com/job/${n}`, ats: "other", title: "Analyst", company: "Acme Corp", companyDomain: "acme.com", department: null, location: null,
       description: "", requirements: [], applicationUrl: null, postedRecruiter, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
       confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: true, attempts: 0,
     })).app;
-    const enriched = async () => (await repo.snapshot()).usage.filter((row) => row.operation === "enrich").length;
 
-    // No credits left: one person, with an email that isn't checked, and the rest kept back for Pro. Nothing paid.
-    await repo.setAccountForTests(userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
-    const enrichBefore = await enriched();
+    // No one named on the posting: the most relevant person, with an email built from the format and not checked.
     const app = await another(2);
     await runContactDiscovery(userId, app.id);
     const one = await applicationContacts.list(userId, [app.id]);
@@ -708,24 +709,17 @@ describe("people after applying", () => {
     expect(one[0].email).toMatch(/@acme\.com$/);
     expect(["likely", "guess", "cant_check"]).toContain(one[0].emailSource);
     expect((await applications.get(userId, app.id))?.fillReport?.peopleLocked).toBe(1);
-    expect(await enriched()).toBe(enrichBefore);
-    expect(await debits()).toBe(1);
-    expect((await planUsage(userId)).people).toMatchObject({ left: 0, note: "", badge: "1 person per job" });
-
-    // The person the posting names comes first, with the posting's own address.
-    const posted = await another(3, { name: "Jordan Smith", title: "Recruiter", email: "jordan.smith@acme.com", linkedinUrl: null });
-    await runContactDiscovery(userId, posted.id);
-    expect((await applicationContacts.list(userId, [posted.id])).map((row) => [row.name, row.email, row.emailSource])).toEqual([["Jordan Smith", "jordan.smith@acme.com", "job_posting"]]);
-    expect((await applications.get(userId, posted.id))?.fillReport?.peopleLocked).toBe(2);
+    expect(await enriched()).toBe(0);
+    expect(await debits()).toBe(0);
 
     // Pro has no limit, even with no credits: the people are looked up, and nothing is spent.
     await repo.setAccountForTests(userId, { plan: "pro" });
-    const paid = await another(4);
+    const paid = await another(3);
     const searchesBefore = searches.length;
     await runContactDiscovery(userId, paid.id);
     expect(searches.length).toBeGreaterThan(searchesBefore);
-    expect((await applicationContacts.list(userId, [paid.id])).length).toBeGreaterThan(0);
-    expect(await debits()).toBe(1);
+    expect((await applicationContacts.list(userId, [paid.id])).length).toBeGreaterThan(1);
+    expect(await debits()).toBe(0);
     expect((await planUsage(userId)).people.badge).toBe("Unlimited");
   });
 
@@ -784,12 +778,19 @@ describe("people after applying", () => {
 
   it("doesn't write follow-ups on Free", async () => {
     const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
-    const { userId, application, contacts } = await appliedWith(found, { verified: ["a1"] });
-    const casey = contacts.find((item) => item.name === "Casey Park")!;
-    await writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, subject: "Hello", body: "Hi Casey." });
+    const { userId, application, contacts } = await appliedWith(found, { verified: ["a1"], free: true });
+    const jordan = contacts[0];
+    await writeContactEmail(userId, { applicationId: application.id, contactId: jordan.id, subject: "Hello", body: "Hi Jordan." });
     const calls = model.calls.length;
-    await expect(writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, followUp: true })).rejects.toMatchObject({ code: "plan", status: 402 });
+    await expect(writeContactEmail(userId, { applicationId: application.id, contactId: jordan.id, followUp: true })).rejects.toMatchObject({ code: "plan", status: 402 });
     expect(model.calls.length).toBe(calls);
+    // Free has 3 emails written for it a day; the student's own edits never count.
+    for (let index = 0; index < 3; index += 1) {
+      model.replies.push(JSON.stringify({ emails: [{ index: 1, subject: "Hello", body: `Hi Jordan, note ${index}.` }] }));
+      expect((await writeContactEmail(userId, { applicationId: application.id, contactId: jordan.id })).contact?.emailBody).toBeTruthy();
+    }
+    await expect(writeContactEmail(userId, { applicationId: application.id, contactId: jordan.id })).rejects.toMatchObject({ code: "emails", status: 402 });
+    expect((await planUsage(userId)).emails).toMatchObject({ left: 0, note: "No written emails left today. More tomorrow, or Pro has no limit." });
   });
 
   it("looks for people as soon as a job is applied to, on a paid plan or when Free turns it on", async () => {

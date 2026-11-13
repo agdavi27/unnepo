@@ -288,7 +288,7 @@ function jobFillPage(state: PanelState) {
   return `${setupCard(state)}
     <section class="job-page" aria-label="This job">
       <div><div class="job-name">${escape(title)}</div><div class="sub job-detail">${escape(detail)}</div></div>
-      <button type="button" class="btn primary big" id="fill" ${me!.profileReady ? "" : "disabled"}>${job?.report ? "Fill again" : "Autofill application"}</button>
+      <button type="button" class="btn primary big" id="fill" ${me!.profileReady ? "" : "disabled"}>${withCost(job?.report ? "Fill again" : "Autofill application", "autofills")}</button>
       ${usesLine(me?.usage?.autofills.note)}
       ${lockedLine(state)}
       ${trialLine(state)}
@@ -348,7 +348,7 @@ const SPARK_SMALL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="curre
 /** The blue AI spark on the two big buttons. */
 const SPARK = SPARK_SMALL.replace('width="13" height="13"', 'class="big-tool-icon" width="20" height="20"');
 /** "Write cover letter (4 left today)" on Free, which counts by the day; Pro has no limit, so just the label. */
-const withCost = (label: string, kind: "letters" | "answers") => {
+const withCost = (label: string, kind: "letters" | "answers" | "autofills") => {
   const usage = lastState?.me?.usage;
   return usage?.free && !lastState?.me?.unlimitedCredits ? `${label} (${usage[kind].left} left today)` : label;
 };
@@ -363,7 +363,7 @@ function autofillTool(state: PanelState) {
   const ready = jobFound(state) && !state.job?.running && Boolean(state.me?.profileReady);
   const why = !state.me?.profileReady ? "Finish your profile first" : jobFound(state) ? "Fills this application" : "Open an application first";
   return `<button type="button" class="tile autofill-tool" id="beta-fill" ${ready ? "" : "disabled"}>
-      ${SPARK}<span class="tile-text"><span class="tile-name">Autofill <span class="beta">Beta</span></span><span class="tile-sub">${why}</span></span>
+      ${SPARK}<span class="tile-text"><span class="tile-name">Autofill <span class="beta">Beta</span></span><span class="tile-sub">${why}</span>${state.me?.usage?.free ? tileCount(state.me.usage.autofills) : ""}</span>
     </button>`;
 }
 
