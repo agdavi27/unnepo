@@ -140,6 +140,22 @@ function Rects({ list }: { list: Run[] }) {
   return <>{list.map((run) => <rect key={`${run.x}-${run.y}`} x={run.x} y={run.y} width={run.w} height={1} fill={run.fill} />)}</>;
 }
 
+/** The spider dancing: his legs step through the crawl frames with his mouth open, while CSS bounces him side to side. */
+export function DancingSpider({ className = "" }: { className?: string }) {
+  const [frame, setFrame] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = window.setInterval(() => setFrame((value) => (value + 1) % CRAWL.length), 225);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className={`block w-full ${className}`} shapeRendering="crispEdges" aria-hidden>
+      <Rects list={CRAWL[frame]} />
+      <Rects list={MOUTH_OPEN} />
+    </svg>
+  );
+}
+
 function SpiderArt({ talking, mad, crawl }: { talking: boolean; mad: number; crawl: number | null }) {
   return (
     // A new key on each poke restarts the shake.

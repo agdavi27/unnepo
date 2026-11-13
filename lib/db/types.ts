@@ -610,7 +610,11 @@ export type Database = {
   applicationContacts?: ApplicationContact[];
   applicationProfiles?: Array<{ userId: string; data: ApplicationProfile; updatedAt: string }>;
   friendships?: Friendship[];
+  /** People who asked to hear when Unnepo launches, from the landing page popup. */
+  waitlist?: WaitlistEntry[];
 };
+
+export type WaitlistEntry = { id: string; name: string; email: string; phone?: string; createdAt: string };
 
 export function emptyDatabase(): Database {
   return {
