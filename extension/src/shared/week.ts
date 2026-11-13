@@ -60,6 +60,15 @@ export function jobRow(job: TrackerJob, sub = "") {
 }
 
 const WEEKS = 12;
+
+/** How much the calendar shows: this week, the last 5 weeks, or the last 12. Kept on this computer. */
+type Range = "1w" | "1m" | "3m";
+const RANGES: Array<[Range, string, number, string]> = [["1w", "1W", 1, "This week"], ["1m", "1M", 5, "Last 5 weeks"], ["3m", "3M", WEEKS, `Last ${WEEKS} weeks`]];
+let range: Range = "3m";
+void chrome.storage.local.get("graphRange").then((stored) => {
+  const saved = stored.graphRange as Range | undefined;
+  if (saved && saved !== range && RANGES.some(([value]) => value === saved)) { range = saved; redraw(); }
+});
 const shortDate = (date: Date) => date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
 /**
@@ -70,12 +79,13 @@ const shortDate = (date: Date) => date.toLocaleDateString("en-US", { month: "sho
  * `under` goes right below the calendar, above friends: the job list on Week. Given as a function, it gets the
  * friends card to place itself (the home screen puts it at the end of its scrolling job list).
  */
-export function weekView(now = new Date(), under: string | ((friends: string) => string) = "") {
+export function weekView(now = new Date(), under: string | ((friends: string) => string) = "", goalsUrl = "") {
   if (!store.tracker) return `<section class="page"><span class="eyebrow">Every day you did something</span><p class="note">${escape(store.error || "Loading your week…")}</p></section>`;
   const jobs = store.tracker.jobs;
   const applied = perDay(jobs);
   const byDay = activityByDay(jobs);
-  const grid = activityGrid(now, WEEKS);
+  const [, , weeks, rangeLabel] = RANGES.find(([value]) => value === range)!;
+  const grid = activityGrid(now, weeks);
   const start = weekStart(now);
   const today = dayKey(now);
   if (pickedDay && (pickedDay > today || pickedDay < dayKey(grid[0][0]))) pickedDay = "";
@@ -85,16 +95,22 @@ export function weekView(now = new Date(), under: string | ((friends: string) =>
   const streak = streakOf(applied, now);
   const emails = emailsBetween(jobs, start.getTime(), start.getTime() + 7 * DAY);
 
-  const columns = grid.map((days, index) => `<div class="heat-col">
-      <span class="heat-month">${index % 4 === 0 ? escape(shortDate(days[0])) : ""}</span>
-      ${days.map((date) => {
-        const key = dayKey(date);
-        if (key > today) return `<span class="heat-day future"></span>`;
-        const count = byDay.get(key)?.length ?? 0;
-        return `<button type="button" class="heat-day${key === today ? " today" : ""}${key === pickedDay ? " on" : ""}" data-week-day="${key}" aria-pressed="${key === pickedDay}" aria-label="${escape(shortDate(date))}: ${count} ${count === 1 ? "thing" : "things"}" style="background:${ACTIVITY_HEAT_FINE[Math.min(count, 8)]}"></button>`;
-      }).join("")}
-    </div>`).join("");
-  const letters = ["M", "T", "W", "T", "F", "S", "S"].map((letter) => `<span>${letter}</span>`).join("");
+  const day = (date: Date, inside = "") => {
+    const key = dayKey(date);
+    if (key > today) return `<span class="heat-day future">${inside}</span>`;
+    const count = byDay.get(key)?.length ?? 0;
+    return `<button type="button" class="heat-day${key === today ? " today" : ""}${key === pickedDay ? " on" : ""}" data-week-day="${key}" aria-pressed="${key === pickedDay}" aria-label="${escape(shortDate(date))}: ${count} ${count === 1 ? "thing" : "things"}" style="background:${ACTIVITY_HEAT_FINE[Math.min(count, 8)]}">${inside && count ? count : ""}</button>`;
+  };
+  const LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
+  const letters = LETTERS.map((letter) => `<span>${letter}</span>`).join("");
+  // One week: seven big squares in a row, each with its count. More: a column per week, Monday at the top.
+  const calendar = weeks === 1
+    ? `<div class="heat-week" role="group" aria-label="This week, day by day">${grid[0].map((date, index) => `<div class="heat-week-day">${day(date, " ")}<span>${LETTERS[index]}</span></div>`).join("")}</div>`
+    : `<div class="heat${weeks < WEEKS ? " roomy" : ""}" role="group" aria-label="Every day you did something, ${rangeLabel.toLowerCase()}" style="grid-template-columns: 12px repeat(${weeks}, minmax(0, ${weeks < WEEKS ? "26px" : "1fr"}))">
+        <div class="heat-col heat-letters"><span class="heat-month"></span>${letters}</div>
+        ${grid.map((days, index) => `<div class="heat-col"><span class="heat-month">${index % (weeks < WEEKS ? 2 : 4) === 0 ? escape(shortDate(days[0])) : ""}</span>${days.map((date) => day(date)).join("")}</div>`).join("")}
+      </div>`;
+  const ranges = RANGES.map(([value, label, , title]) => `<button type="button" class="range-btn${value === range ? " on" : ""}" data-graph-range="${value}" aria-pressed="${value === range}" title="${title}">${label}</button>`).join("");
 
   const picked = pickedDay ? byDay.get(pickedDay) ?? [] : [];
   const pickedDate = pickedDay ? new Date(`${pickedDay}T00:00:00`) : null;
@@ -116,12 +132,14 @@ export function weekView(now = new Date(), under: string | ((friends: string) =>
         <span class="streak${streak ? " lit" : ""}" title="Days in a row with an application">${FLAME}${streak} ${streak === 1 ? "day" : "days"}</span>
       </div>
       ${weekly ? `<div class="bar" role="progressbar" aria-label="Weekly goal" aria-valuemin="0" aria-valuemax="${weekly}" aria-valuenow="${Math.min(week, weekly)}"><div style="width:${Math.min(100, Math.round((week / weekly) * 100))}%"></div></div>` : ""}
-      <div class="heat" role="group" aria-label="Every day you did something, last ${WEEKS} weeks">
-        <div class="heat-col heat-letters"><span class="heat-month"></span>${letters}</div>
-        ${columns}
-      </div>
+      ${calendar}
       ${detail}
-      ${heatKey(emails, weekly ? (week >= weekly ? "Weekly goal hit." : `${weekly - week} to go this week.`) : "Set a weekly goal on unnepo.com.")}
+      <div class="heat-foot">
+        <button type="button" class="heat-how-toggle" id="heat-how" aria-expanded="${keyOpen}"><span aria-hidden="true">${keyOpen ? "▾" : "▸"}</span> How it works</button>
+        ${goalsUrl ? `<a class="heat-goals" href="${escape(goalsUrl)}" target="_blank" rel="noreferrer">${weekly ? "Edit goals" : "Set a goal"} ↗</a>` : ""}
+        <span class="range" role="group" aria-label="Show">${ranges}</span>
+      </div>
+      ${keyOpen ? heatKey(emails, weekly ? (week >= weekly ? "Weekly goal hit." : `${weekly - week} to go this week.`) : "No weekly goal yet. Set one with Set a goal.", rangeLabel) : ""}
     </section>
     ${typeof under === "function" ? under(friends) : `${under}${friends}`}`;
 }
@@ -132,11 +150,10 @@ let keyOpen = false;
  * The calendar's key: each square is a day, darker for nothing done and brighter the more happened (applying,
  * emailing someone, a follow-up, an interview, an offer or a no each count as one), plus today's ring.
  */
-function heatKey(emails: number, goal: string) {
+function heatKey(emails: number, goal: string, rangeLabel: string) {
   const steps = ["0", "1", "2", "3", "4", "5", "6", "7", "8+"];
   return `
-      <details class="heat-how" id="heat-how" ${keyOpen ? "open" : ""}>
-        <summary>How it works</summary>
+      <div class="heat-how">
         <div class="heat-key" aria-label="Key: darker squares are days with less done, brighter ones more">
           <span class="small">Less</span>
           ${steps.map((label, index) => `<span class="heat-key-step"><span class="heat-key-swatch" style="background:${ACTIVITY_HEAT_FINE[index]}"></span><span class="heat-key-num">${label}</span></span>`).join("")}
@@ -144,13 +161,18 @@ function heatKey(emails: number, goal: string) {
           <span class="heat-key-step today-key"><span class="heat-key-swatch today"></span><span class="heat-key-num">Today</span></span>
         </div>
         <p class="small heat-key-note">${escape(goal)} ${emails} ${emails === 1 ? "email" : "emails"} sent this week.</p>
-        <p class="small heat-key-note">Each square is a day over the last ${WEEKS} weeks. The brighter it is, the more you did that day: each application, email, follow-up, interview, offer or no counts as one, up to 8 or more. Tap a day to see what happened.</p>
-      </details>`;
+        <p class="small heat-key-note">Each square is a day (${escape(rangeLabel.toLowerCase())}). The brighter it is, the more you did that day: each application, email, follow-up, interview, offer or no counts as one, up to 8 or more. Tap a day to see what happened. 1W, 1M and 3M change how far back it shows.</p>
+      </div>`;
 }
 
 export function wireWeek(root: HTMLElement) {
-  const how = root.querySelector<HTMLDetailsElement>("#heat-how");
-  how?.addEventListener("toggle", () => { keyOpen = how.open; });
+  root.querySelector("#heat-how")?.addEventListener("click", () => { keyOpen = !keyOpen; redraw(); });
+  root.querySelectorAll<HTMLButtonElement>("[data-graph-range]").forEach((button) => button.addEventListener("click", () => {
+    range = button.dataset.graphRange as Range;
+    pickedDay = "";
+    void chrome.storage.local.set({ graphRange: range });
+    redraw();
+  }));
   root.querySelectorAll<HTMLButtonElement>("[data-week-day]").forEach((button) => button.addEventListener("click", () => {
     const key = button.dataset.weekDay!;
     pickedDay = key && key !== pickedDay ? key : "";

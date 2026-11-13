@@ -123,8 +123,10 @@ const speech = (() => {
 function goalToday(state: PanelState) {
   const now = new Date();
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // The daily goal set on Goals, or else a fifth of the weekly one.
   const weekly = state.me?.goal?.weekly ?? null;
-  return { done: (state.me?.goal?.appliedAt ?? []).filter((at) => new Date(at) >= dayStart).length, target: weekly ? Math.ceil(weekly / 5) : null };
+  const daily = state.me?.goal?.daily ?? null;
+  return { done: (state.me?.goal?.appliedAt ?? []).filter((at) => new Date(at) >= dayStart).length, target: daily || (weekly ? Math.ceil(weekly / 5) : null) };
 }
 
 function goalLine(state: PanelState) {
@@ -236,7 +238,7 @@ function homeLists(state: PanelState) {
   const nudge = noEmail ? `<button type="button" class="email-nudge" data-show-jobs="reach"><span>${noEmail} ${noEmail === 1 ? "job needs" : "jobs need"} a first email</span><span aria-hidden="true">See →</span></button>` : "";
   // The job list scrolls inside its own box, so the calendar stays on screen above it.
   const list = (friends: string) => jobsList(nudge, `<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>${friends}`);
-  return `${boardCard(state)}${startCard(state)}${weekView(new Date(), list)}`;
+  return `${boardCard(state)}${startCard(state)}${weekView(new Date(), list, `${state.apiBase}/home?tab=goals`)}`;
 }
 
 /** "Bring in": on a job board's applications page, the ones Unnepo missed, saved in one press. */
