@@ -9,7 +9,7 @@ import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { dataDir, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, LETTER_FORMATS, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
-import { answerMaybe, companyMissing, contactBounced, createApplication, findPeopleOnApply, markApplied, setReachedOut, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, retryContacts, revealContact, runContext, runLater, setOutcome, student, summary, titleMissing, updateOutreach, writeContactEmail } from "@/lib/apply/service";
+import { answerMaybe, companyMissing, contactBounced, createApplication, findPeopleOnApply, markApplied, setReachedOut, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, retryContacts, revealContact, runContext, runLater, setOutcome, setJobHidden, student, summary, titleMissing, updateOutreach, writeContactEmail } from "@/lib/apply/service";
 import { postingLink } from "@/lib/apply/applied-list";
 import { extractJob, findPostedRecruiter, isJobSiteName } from "@/lib/apply/extract";
 import { buildMapping, claudeAsk, greenhouseSchema, knownAnswers, logTimings } from "@/lib/apply/fast/pipeline";
@@ -270,7 +270,7 @@ function trackerJob(app: JobApplication, people: ApplicationContact[]) {
     postedRecruiter: app.postedRecruiter ? { name: app.postedRecruiter.name, title: app.postedRecruiter.title, email: app.postedRecruiter.email, linkedinUrl: app.postedRecruiter.linkedinUrl } : null,
     fillReport: report ? {
       outcome: report.outcome ?? null, statusHistory: report.statusHistory, lastEmailAt: report.lastEmailAt, emailedAt: report.emailedAt, reachedOut: report.reachedOut,
-      notCounted: report.notCounted, peopleReveals: report.peopleReveals ?? 0, peopleLinks: report.peopleLinks,
+      notCounted: report.notCounted, jobHidden: report.jobHidden === true, peopleReveals: report.peopleReveals ?? 0, peopleLinks: report.peopleLinks,
       peoplePreview: report.peoplePreview ? { rows: report.peoplePreview.rows } : undefined,
     } : null,
     /** People on the list Unnepo can still look up ("Show person"), by lowercase name. */
@@ -306,7 +306,8 @@ export async function extensionPeople(userId: string, raw: unknown) {
 
 /** A job's status from the extension: applied (the student says so), or what happened after (interviewing, rejected…). */
 export async function extensionStatus(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; applied?: unknown; outcome?: unknown; reachedOut?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; applied?: unknown; outcome?: unknown; reachedOut?: unknown; hidden?: unknown };
+  if (typeof body.hidden === "boolean") return setJobHidden(userId, { applicationId: body.applicationId, hidden: body.hidden });
   if (body.reachedOut !== undefined && body.reachedOut !== null) return setReachedOut(userId, { applicationId: body.applicationId, count: body.reachedOut });
   if (body.applied === true) return markApplied(userId, { applicationId: body.applicationId });
   return setOutcome(userId, { applicationId: body.applicationId, outcome: body.outcome || null });

@@ -515,3 +515,6 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .person.compact .person-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Beside Show person on Free: it's a Pro feature. */
 .pro-tag { flex: none; height: 18px; padding: 0 6px; border: 1px solid var(--accent); border-radius: 5px; color: var(--accent); font: 600 10px var(--mono); letter-spacing: .6px; text-transform: uppercase; display: inline-flex; align-items: center; }
+.hidden-jobs > summary { list-style: none; cursor: pointer; }
+.hidden-jobs > summary::-webkit-details-marker { display: none; }
+.hidden-jobs:not([open]) { gap: 0; }

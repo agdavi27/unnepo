@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { composeLink } from "@/lib/apply/compose-link";
+import { Popup } from "@/components/unnepo/popup";
 import type { TrackerJob } from "@/lib/extension/service";
 
 /**
@@ -28,10 +29,23 @@ const secondary = "inline-flex h-9 items-center justify-center rounded-lg border
 const quiet = "text-[13px] text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline disabled:opacity-50";
 const eyebrow = "m-0 font-mono text-[11px] uppercase tracking-[1.4px] text-[#8B8B94]";
 
-function Avatar() {
+const AVATAR = ["#3D8BFF", "#8B5CF6", "#EC4899", "#14B8A6", "#F59E0B", "#22C55E", "#EF4444", "#06B6D4"];
+
+/** A person's icon: their initials on a color picked from their name, or a silhouette while the name is hidden. */
+function Avatar({ name, size = 40 }: { name?: string; size?: number }) {
+  const words = (name ?? "").replace(/[^\p{L}\s]/gu, "").trim().split(/\s+/).filter(Boolean);
+  const initials = words.length ? (words[0][0] + (words.length > 1 ? words[words.length - 1][0] : "")).toUpperCase() : "";
+  if (!initials) {
+    return (
+      <span aria-hidden className="grid flex-none place-items-end overflow-hidden rounded-full bg-[#26262C]" style={{ width: size, height: size }}>
+        <svg viewBox="0 0 24 24" fill="currentColor" className="text-[#8B8B94]" style={{ width: size * 0.78, height: size * 0.78 }}><circle cx="12" cy="9" r="4.2" /><path d="M3.5 24c.8-5 4.2-8 8.5-8s7.7 3 8.5 8z" /></svg>
+      </span>
+    );
+  }
+  const color = AVATAR[[...(name ?? "")].reduce((sum, char) => sum + char.charCodeAt(0), 0) % AVATAR.length];
   return (
-    <span aria-hidden className="grid h-9 w-9 flex-none place-items-end overflow-hidden rounded-full bg-[#26262C]">
-      <svg viewBox="0 0 24 24" fill="currentColor" className="h-7 w-7 text-[#8B8B94]"><circle cx="12" cy="9" r="4.2" /><path d="M3.5 24c.8-5 4.2-8 8.5-8s7.7 3 8.5 8z" /></svg>
+    <span aria-hidden className="grid flex-none place-items-center rounded-full font-semibold" style={{ width: size, height: size, fontSize: size * 0.38, color, background: `${color}22`, boxShadow: `inset 0 0 0 1.5px ${color}66` }}>
+      {initials}
     </span>
   );
 }
@@ -64,6 +78,8 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   /** People whose email was just opened in Gmail, for "Sent it?" (true: it was a follow-up). */
   const [opened, setOpened] = useState<Record<string, boolean>>({});
+  /** The person whose popup is open. */
+  const [focus, setFocus] = useState<string | null>(null);
 
   const searching = job.contactsStatus === "finding" || job.contactsStatus === "writing";
   const stale = searching && Date.now() - Date.parse(job.updatedAt) > 2 * 60 * 1000;
@@ -113,6 +129,15 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
       void navigator.clipboard.writeText(draft.body).catch(() => undefined);
       say("The email was too long for the link, so it's copied. Paste it into Gmail.");
     }
+    setOpened((all) => ({ ...all, [person.id]: person.outreachStatus === "emailed" || person.outreachStatus === "no_response" }));
+    if (drafts[person.id]) void save(person);
+  };
+  // Copies the whole email, then opens Gmail to them with just the subject: paste it in (keeps long emails whole).
+  const copyIntoGmail = (person: Person) => {
+    const draft = draftOf(person);
+    const link = composeLink("gmail", person.email!, draft.subject, "");
+    window.open(link.url, "_blank", "noopener,noreferrer");
+    void navigator.clipboard.writeText(draft.body).then(() => say("Copied. Paste it into the Gmail tab."), () => say("Couldn't copy. Select the text and copy it."));
     setOpened((all) => ({ ...all, [person.id]: person.outreachStatus === "emailed" || person.outreachStatus === "no_response" }));
     if (drafts[person.id]) void save(person);
   };
@@ -208,89 +233,136 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
 
   const firstWithEmail = job.contacts.find((person) => person.email)?.id;
   const revealsLeft = (job.fillReport?.peopleReveals ?? 0) < MAX_REVEALS;
+  const isHiddenPerson = (person: Person) => !person.email && job.hidden.includes(person.name.toLowerCase());
+  const focused = focus ? job.contacts.find((person) => person.id === focus) ?? null : null;
+
+  /** Everything about one person, in their popup: their email, the draft, and what happened. */
+  const details = (person: Person) => {
+    const hidden = isHiddenPerson(person);
+    const draft = draftOf(person);
+    const dirty = Boolean(drafts[person.id]);
+    const isBusy = (what: string) => busy.has(`${what}:${person.id}`);
+    const contacted = person.outreachStatus === "emailed" || person.outreachStatus === "no_response";
+    const source = person.email && person.emailSource ? EMAIL_SOURCE[person.emailSource] : "";
+    const unsure = person.emailSource === "likely" || person.emailSource === "guess";
+    return (
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center gap-3 pr-8">
+          <Avatar name={person.name} size={52} />
+          <div className="min-w-0 flex-1">
+            <h2 className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-lg font-semibold tracking-tight">
+              <span className="truncate">{person.name}</span>
+              <span className="rounded-full border border-[#26262C] px-1.5 font-mono text-[10px] font-normal text-[#B4B4BC]">{ROLE_LABEL[person.role] ?? person.role}</span>
+            </h2>
+            <p className="m-0 truncate text-sm text-[#8B8B94]">{[person.title, company].filter(Boolean).join(" · ")}</p>
+          </div>
+        </div>
+
+        {person.email && (
+          <div className="flex items-center gap-2 rounded-xl border border-[#1F1F24] bg-[#0A0A0C] px-3 py-2.5">
+            <GmailIcon />
+            <span className="min-w-0 flex-1">
+              <span className="block select-all truncate font-mono text-[13px] text-[#D4D4DA]">{person.email}</span>
+              {source && <span className={`block text-[11px] ${unsure ? "text-[#F5A524]" : "text-[#8B8B94]"}`}>{source}</span>}
+            </span>
+            <button type="button" onClick={() => void navigator.clipboard.writeText(person.email!).then(() => say("Copied the address."), () => say("Couldn't copy."))} className="flex-none text-xs text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline">Copy</button>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          {PERSON_STATUS[person.outreachStatus] && <span className={`font-mono text-[11px] uppercase ${person.outreachStatus === "replied" ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{PERSON_STATUS[person.outreachStatus]}</span>}
+          {person.linkedinUrl && <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="text-[13px] underline underline-offset-4">LinkedIn ↗</a>}
+        </div>
+        {errorLine}
+
+        {hidden && (revealsLeft
+          ? <div><button type="button" disabled={isBusy("reveal")} onClick={() => void run(`reveal:${person.id}`, { action: "reveal", contactId: person.id }, `Looked up ${person.name.split(" ")[0]}.`)} className={primary}>{isBusy("reveal") ? "Looking…" : "Show person"}</button></div>
+          : <p className="m-0 text-[13px] text-muted">You&apos;ve shown {MAX_REVEALS} people for this job.</p>)}
+        {!hidden && !person.email && <p className="m-0 text-[13px] text-muted">No email found.</p>}
+
+        {person.email && !hidden && (
+          <div className="flex flex-col gap-2">
+            {draft.body ? (
+              <>
+                <input value={draft.subject} onChange={(event) => edit(person, { subject: event.target.value })} maxLength={200} aria-label={`Subject of the email to ${person.name}`} placeholder="Subject" className="h-9 w-full rounded-lg border border-[#26262C] bg-[#0A0A0C] px-3 text-sm font-medium focus:border-[#3D8BFF] focus:outline-none" />
+                <textarea value={draft.body} onChange={(event) => edit(person, { body: event.target.value })} rows={9} aria-label={`Email to ${person.name}`} className="w-full resize-y rounded-lg border border-[#26262C] bg-[#0A0A0C] px-3 py-2 text-sm leading-relaxed focus:border-[#3D8BFF] focus:outline-none" />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button type="button" onClick={() => sendInGmail(person)} className={primary}><GmailIcon />Send in Gmail ↗</button>
+                  <button type="button" onClick={() => copyIntoGmail(person)} className={secondary} title="Copies the email, then opens Gmail to them so you paste it in"><GmailIcon />Copy into Gmail</button>
+                  <button type="button" onClick={() => copy(person)} className={quiet}>Copy</button>
+                  {dirty && <button type="button" disabled={isBusy("save")} onClick={() => void save(person)} className={secondary}>{isBusy("save") ? "Saving…" : "Save edits"}</button>}
+                  <button type="button" disabled={isBusy("write")} onClick={() => void write(person, false)} className={quiet}>{isBusy("write") ? "Writing…" : "Write it again"}</button>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-start gap-2">
+                <button type="button" disabled={isBusy("write")} onClick={() => void write(person, false)} className={primary}>{isBusy("write") ? "Writing your email…" : "Write email"}</button>
+                <span className="text-[12px] text-[#8B8B94]">Written from your resume and this job. You read it before it goes.</span>
+              </div>
+            )}
+
+            {person.id in opened && (
+              <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-[#2A3A5A] bg-[#3D8BFF]/[0.06] px-3 py-2">
+                <span className="mr-auto text-[13px]">{opened[person.id] ? "Sent the follow-up?" : "Sent it?"}</span>
+                <button type="button" disabled={isBusy("status")} onClick={() => void markSent(person)} className={primary}>{opened[person.id] ? "I sent the follow-up" : "I emailed them"}</button>
+                <button type="button" onClick={() => setOpened((all) => { const { [person.id]: gone, ...rest } = all; void gone; return rest; })} className={quiet}>Not yet</button>
+              </div>
+            )}
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[#1F1F24] pt-3">
+              {contacted && (free
+                ? <a href="/home?tab=pro" className={quiet}>Write follow-up (Pro)</a>
+                : <button type="button" disabled={isBusy("write")} onClick={() => void write(person, true)} className={quiet}>Write follow-up</button>)}
+              {contacted && <button type="button" disabled={isBusy("status")} onClick={() => void setStatus(person, "replied", `${person.name.split(" ")[0]} replied. Nice.`)} className={quiet}>They replied</button>}
+              {person.outreachStatus === "emailed" && <button type="button" disabled={isBusy("status")} onClick={() => void setStatus(person, "no_response", "Marked as no reply.")} className={quiet}>No reply</button>}
+              {person.outreachStatus === "not_contacted" && !(person.id in opened) && <button type="button" disabled={isBusy("status")} onClick={() => void setStatus(person, "emailed", `Marked ${person.name.split(" ")[0]} as emailed.`)} className={quiet}>Already emailed them</button>}
+              <button type="button" disabled={isBusy("bounced")} onClick={() => void bounced(person)} className={quiet}>It bounced</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="flex flex-col gap-2">
       {head}
-      {errorLine}
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">
+      {!focused && errorLine}
+      <ul className="m-0 grid list-none grid-cols-1 gap-2 p-0 sm:grid-cols-2">
         {job.contacts.map((person) => {
-          const hidden = !person.email && job.hidden.includes(person.name.toLowerCase());
+          const hidden = isHiddenPerson(person);
           if (free && hidden) return locked(person.id, person.name, person.title || ROLE_LABEL[person.role] || "");
-          const draft = draftOf(person);
-          const dirty = Boolean(drafts[person.id]);
-          const isBusy = (what: string) => busy.has(`${what}:${person.id}`);
-          const contacted = person.outreachStatus === "emailed" || person.outreachStatus === "no_response";
-          const source = person.email && person.emailSource ? EMAIL_SOURCE[person.emailSource] : "";
-          const unsure = person.emailSource === "likely" || person.emailSource === "guess";
+          const start = person.id === firstWithEmail;
+          const status = PERSON_STATUS[person.outreachStatus];
+          const written = Boolean(person.emailBody);
           return (
-            <li key={person.id} className={`flex flex-col gap-3 rounded-xl border px-3 py-3 sm:px-4 ${person.id === firstWithEmail ? "border-[#2A3A5A]" : "border-[#1F1F24]"}`}>
-              <div className="flex items-start gap-3">
-                <Avatar />
-                <div className="min-w-0 flex-1">
-                  <p className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
-                    <span className="truncate">{person.name}</span>
-                    <span className="rounded-full border border-[#26262C] px-1.5 font-mono text-[10px] font-normal text-[#B4B4BC]">{ROLE_LABEL[person.role] ?? person.role}</span>
-                    {person.id === firstWithEmail && <span className="font-mono text-[10px] font-normal uppercase tracking-[.6px] text-[#3D8BFF]">★ Start here</span>}
-                  </p>
-                  {person.title && <p className="m-0 truncate text-xs text-[#8B8B94]">{person.title}</p>}
-                  {person.email && <p className="m-0 mt-1 select-all truncate font-mono text-xs text-[#D4D4DA]">{person.email}</p>}
-                  {source && <p className={`m-0 text-[11px] ${unsure ? "text-[#F5A524]" : "text-[#8B8B94]"}`}>{source}</p>}
-                </div>
-                <div className="flex flex-none flex-col items-end gap-1.5">
-                  {PERSON_STATUS[person.outreachStatus] && <span className={`font-mono text-[10.5px] uppercase ${person.outreachStatus === "replied" ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{PERSON_STATUS[person.outreachStatus]}</span>}
-                  {person.linkedinUrl && <a href={person.linkedinUrl} target="_blank" rel="noreferrer" className="text-xs underline underline-offset-4">LinkedIn ↗</a>}
-                </div>
-              </div>
-
-              {hidden && (revealsLeft
-                ? <div><button type="button" disabled={isBusy("reveal")} onClick={() => void run(`reveal:${person.id}`, { action: "reveal", contactId: person.id }, `Looked up ${person.name.split(" ")[0]}.`)} className={primary}>{isBusy("reveal") ? "Looking…" : "Show person"}</button></div>
-                : <p className="m-0 text-[13px] text-muted">You&apos;ve shown {MAX_REVEALS} people for this job.</p>)}
-              {!hidden && !person.email && <p className="m-0 text-[13px] text-muted">No email found.</p>}
-
-              {person.email && !hidden && (
-                <div className="flex flex-col gap-2">
-                  {draft.body ? (
-                    <>
-                      <input value={draft.subject} onChange={(event) => edit(person, { subject: event.target.value })} maxLength={200} aria-label={`Subject of the email to ${person.name}`} placeholder="Subject" className="h-9 w-full rounded-lg border border-[#26262C] bg-[#0C0C0E] px-3 text-sm font-medium focus:border-[#3D8BFF] focus:outline-none" />
-                      <textarea value={draft.body} onChange={(event) => edit(person, { body: event.target.value })} rows={8} aria-label={`Email to ${person.name}`} className="w-full resize-y rounded-lg border border-[#26262C] bg-[#0C0C0E] px-3 py-2 text-sm leading-relaxed focus:border-[#3D8BFF] focus:outline-none" />
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button type="button" onClick={() => sendInGmail(person)} className={primary}><GmailIcon />Send in Gmail ↗</button>
-                        <button type="button" onClick={() => copy(person)} className={secondary}>Copy</button>
-                        {dirty && <button type="button" disabled={isBusy("save")} onClick={() => void save(person)} className={secondary}>{isBusy("save") ? "Saving…" : "Save edits"}</button>}
-                        <button type="button" disabled={isBusy("write")} onClick={() => void write(person, false)} className={quiet}>{isBusy("write") ? "Writing…" : "Write it again"}</button>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button type="button" disabled={isBusy("write")} onClick={() => void write(person, false)} className={primary}>{isBusy("write") ? "Writing your email…" : "Write email"}</button>
-                      <span className="text-[12px] text-[#8B8B94]">Written from your resume and this job. You read it before it goes.</span>
-                    </div>
-                  )}
-
-                  {person.id in opened && (
-                    <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-[#2A3A5A] bg-[#3D8BFF]/[0.06] px-3 py-2">
-                      <span className="mr-auto text-[13px]">{opened[person.id] ? "Sent the follow-up?" : "Sent it?"}</span>
-                      <button type="button" disabled={isBusy("status")} onClick={() => void markSent(person)} className={primary}>{opened[person.id] ? "I sent the follow-up" : "I emailed them"}</button>
-                      <button type="button" onClick={() => setOpened((all) => { const { [person.id]: gone, ...rest } = all; void gone; return rest; })} className={quiet}>Not yet</button>
-                    </div>
-                  )}
-
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-[#1F1F24] pt-2">
-                    {contacted && (free
-                      ? <a href="/home?tab=pro" className={quiet}>Write follow-up (Pro)</a>
-                      : <button type="button" disabled={isBusy("write")} onClick={() => void write(person, true)} className={quiet}>Write follow-up</button>)}
-                    {contacted && <button type="button" disabled={isBusy("status")} onClick={() => void setStatus(person, "replied", `${person.name.split(" ")[0]} replied. Nice.`)} className={quiet}>They replied</button>}
-                    {person.outreachStatus === "emailed" && <button type="button" disabled={isBusy("status")} onClick={() => void setStatus(person, "no_response", "Marked as no reply.")} className={quiet}>No reply</button>}
-                    {person.outreachStatus === "not_contacted" && !(person.id in opened) && <button type="button" disabled={isBusy("status")} onClick={() => void setStatus(person, "emailed", `Marked ${person.name.split(" ")[0]} as emailed.`)} className={quiet}>Already emailed them</button>}
-                    <button type="button" disabled={isBusy("bounced")} onClick={() => void bounced(person)} className={quiet}>It bounced</button>
-                  </div>
-                </div>
-              )}
+            <li key={person.id}>
+              <button type="button" onClick={() => setFocus(person.id)} aria-label={`Open ${person.name}`}
+                className={`group flex w-full items-center gap-3 rounded-xl border bg-[#0A0A0C] px-3 py-3 text-left transition-colors hover:border-[#3A3A42] hover:bg-white/[0.03] ${start ? "border-[#2A3A5A]" : "border-[#1F1F24]"}`}>
+                <Avatar name={person.name} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="truncate text-sm font-semibold">{person.name}</span>
+                    {start && <span className="flex-none font-mono text-[10px] uppercase tracking-[.6px] text-[#3D8BFF]">★ Start</span>}
+                  </span>
+                  <span className="block truncate text-xs text-[#8B8B94]">{person.title || ROLE_LABEL[person.role] || ""}</span>
+                  <span className="mt-1 flex items-center gap-1.5 text-xs">
+                    {person.email
+                      ? <><GmailIcon /><span className="truncate font-mono text-[#D4D4DA]">{person.email}</span></>
+                      : <span className="text-[#8B8B94]">{hidden ? "Tap to show who it is" : "No email found"}</span>}
+                  </span>
+                </span>
+                <span className="flex flex-none flex-col items-end gap-1">
+                  {status
+                    ? <span className={`font-mono text-[10px] uppercase ${person.outreachStatus === "replied" ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{status}</span>
+                    : written ? <span className="font-mono text-[10px] uppercase text-[#3D8BFF]">Written</span> : null}
+                  <span aria-hidden className="text-[#5C5C66] transition-transform group-hover:translate-x-0.5 group-hover:text-white">›</span>
+                </span>
+              </button>
             </li>
           );
         })}
       </ul>
+      {focused && <Popup label={focused.name} onClose={() => setFocus(null)} width="max-w-xl">{details(focused)}</Popup>}
     </div>
   );
 }

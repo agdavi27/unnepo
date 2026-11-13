@@ -78,6 +78,19 @@ const STAGE_LABEL: Record<string, string> = {
 };
 export const stageLabel = (job: TrackerJob) => STAGE_LABEL[stageOf(job as never)] ?? "Applied";
 export const isAppliedJob = (job: TrackerJob) => job.status === "submitted" || job.status === "applied_manual";
+/** Hidden by the student: off the lists, still counted as applied. */
+export const isHiddenJob = (job: TrackerJob) => job.fillReport?.jobHidden === true;
+const visibleJobs = () => (store.tracker?.jobs ?? []).filter((job) => !isHiddenJob(job));
+
+/** Hides a job from the lists, or shows it again. Shown at once; the tracker is read again behind it. */
+async function setHidden(jobId: string, hidden: boolean) {
+  const job = jobById(jobId);
+  if (job) job.fillReport = { ...(job.fillReport ?? { outcome: null, peopleReveals: 0 }), jobHidden: hidden };
+  host.redraw();
+  const result = await ask<{ ok: boolean; error?: string }>({ type: "job-status", applicationId: jobId, hidden }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  store.notes[jobId] = result.ok ? (hidden ? "Hidden from your lists. It still counts as applied." : "") : result.error ?? "Couldn't change it.";
+  await loadTracker(true);
+}
 /** How many people were emailed about a job: the student's own count, or the people on the list marked emailed. */
 export const emailedCount = (job: TrackerJob) => Math.max(job.fillReport?.reachedOut?.count ?? 0, job.contacts.filter((person) => person.outreachStatus !== "not_contacted").length);
 /** Applied, still in the running, and nobody emailed yet: the Follow up tab's list. */
@@ -181,6 +194,7 @@ export function jobPage(job: TrackerJob, focus?: string) {
       <div class="links">
         ${job.url ? `<a class="link" href="${escape(job.url)}" target="_blank" rel="noreferrer">Job posting ↗</a>` : ""}
         ${editing.jobId === job.id ? "" : `<button type="button" class="link" data-edit-job="${job.id}">Edit job info</button>`}
+        ${applied ? `<button type="button" class="link" data-hide-job="${job.id}" data-hide="${isHiddenJob(job) ? "0" : "1"}">${isHiddenJob(job) ? "Show job again" : "Hide job"}</button>` : ""}
         <button type="button" class="link" data-delete-job="${job.id}">Delete job</button>
       </div>
       ${note ? `<p class="small" role="status">${escape(note)}</p>` : ""}
@@ -393,6 +407,10 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     editing.jobId = "";
     store.notes[job.id] = Object.keys(changes).length ? "Saved." : "";
     await loadTracker(true);
+  });
+  root.querySelector<HTMLButtonElement>("[data-hide-job]")?.addEventListener("click", (event) => {
+    const button = event.currentTarget as HTMLButtonElement;
+    void setHidden(job.id, button.dataset.hide === "1");
   });
   root.querySelector<HTMLButtonElement>("[data-delete-job]")?.addEventListener("click", async () => {
     if (!confirm(`Delete ${job.title} at ${job.company} from your tracker? Its people go too.`)) return;
@@ -638,7 +656,7 @@ export async function refreshDetected() {
 
 /** The newest jobs, each opening its page. */
 export function recentJobs(limit = 5) {
-  const jobs = store.tracker?.jobs ?? [];
+  const jobs = visibleJobs();
   if (!jobs.length) return "";
   return `<ul class="jobs-list">${jobs.slice(0, limit).map((job) => `
     <li><button type="button" class="job-row" data-open-job="${job.id}">
@@ -662,6 +680,7 @@ function bubble(job: TrackerJob, index: number, extra = "", actions?: string) {
     ${extra}
     <span class="bubble-actions">${actions ?? `
       <button type="button" class="bubble-btn" data-bubble-open="${job.id}">See info</button>
+      ${isAppliedJob(job) ? `<button type="button" class="bubble-btn" data-bubble-hide="${job.id}" data-hide="${isHiddenJob(job) ? "0" : "1"}">${isHiddenJob(job) ? "Show" : "Hide"}</button>` : ""}
       <button type="button" class="bubble-btn danger" data-bubble-delete="${job.id}" ${busy ? "disabled" : ""}>${busy ? "Deleting…" : "Delete"}</button>`}
     </span>
     ${store.notes[`delete:${job.id}`] ? `<span class="small" role="status">${escape(store.notes[`delete:${job.id}`])}</span>` : ""}
@@ -673,15 +692,22 @@ const loadingNote = () => `<p class="note">${escape(store.error || "Loading your
 /** The Jobs tab: every job as a bubble, applied ones first, then the ones not applied to yet. */
 export function jobBubbles() {
   if (!store.tracker) return loadingNote();
-  const jobs = store.tracker.jobs;
+  const jobs = visibleJobs();
   const applied = jobs.filter(isAppliedJob);
   const saved = jobs.filter((job) => !isAppliedJob(job));
+  const hidden = store.tracker.jobs.filter(isHiddenJob);
   const group = (label: string, list: TrackerJob[], empty: string) => `
     <section class="page" aria-label="${label}">
       <div class="row-between"><span class="eyebrow">${label}</span><span class="mono">${list.length} ${list.length === 1 ? "JOB" : "JOBS"}</span></div>
       ${list.length ? `<ul class="bubbles">${list.map((job, index) => bubble(job, index)).join("")}</ul>` : `<p class="note">${empty}</p>`}
     </section>`;
-  return group("Applied", applied, "Every job you apply to floats here.") + (saved.length ? group("Not applied yet", saved, "") : "");
+  const hiddenGroup = hidden.length ? `
+    <details class="page hidden-jobs" aria-label="Hidden jobs">
+      <summary class="row-between"><span class="eyebrow">Hidden</span><span class="mono">${hidden.length} ${hidden.length === 1 ? "JOB" : "JOBS"}</span></summary>
+      <p class="small">Still counted as applied, for your goals and spiders.</p>
+      <ul class="bubbles">${hidden.map((job, index) => bubble(job, index)).join("")}</ul>
+    </details>` : "";
+  return group("Applied", applied, "Every job you apply to floats here.") + (saved.length ? group("Not applied yet", saved, "") : "") + hiddenGroup;
 }
 
 /**
@@ -690,7 +716,7 @@ export function jobBubbles() {
  */
 export function followUpView() {
   if (!store.tracker) return loadingNote();
-  const jobs = store.tracker.jobs;
+  const jobs = visibleJobs();
   const todo = jobs.filter(needsFirstEmail).sort((a, b) => Date.parse(a.submittedAt ?? a.createdAt) - Date.parse(b.submittedAt ?? b.createdAt));
   const waiting = jobs.filter((job) => isAppliedJob(job) && emailedCount(job) > 0 && !["rejected", "offer"].includes(stageOf(job as never)));
   const due = new Set(followUpsDue(jobs as never).map((item) => item.applicationId));
@@ -729,10 +755,11 @@ export function followUpView() {
 }
 
 /** How many applied jobs have nobody emailed yet, for the tab's count. */
-export const firstEmailCount = () => (store.tracker?.jobs ?? []).filter(needsFirstEmail).length;
+export const firstEmailCount = () => visibleJobs().filter(needsFirstEmail).length;
 
 export function wireBubbles(root: HTMLElement) {
   root.querySelectorAll<HTMLButtonElement>("[data-bubble-open]").forEach((button) => button.addEventListener("click", () => host.openJob(button.dataset.bubbleOpen!)));
+  root.querySelectorAll<HTMLButtonElement>("[data-bubble-hide]").forEach((button) => button.addEventListener("click", () => void setHidden(button.dataset.bubbleHide!, button.dataset.hide === "1")));
   root.querySelectorAll<HTMLButtonElement>("[data-bubble-delete]").forEach((button) => button.addEventListener("click", async () => {
     const job = jobById(button.dataset.bubbleDelete!);
     if (!job || !confirm(`Delete ${job.title} at ${job.company} from your tracker? Its people go too.`)) return;

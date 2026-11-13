@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { PeoplePanel } from "@/components/unnepo/people-panel";
+import { Popup } from "@/components/unnepo/popup";
 import { H, ON_DARK, W, spiderRects } from "@/extension/src/shared/sprite";
 import { STEPS, STEP_LABEL, progressOf, type Progress } from "@/lib/apply/progress";
 import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
@@ -19,11 +19,15 @@ import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid, activityOf, 
 
 type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free?: boolean; peopleBadge?: string; peopleNote?: string };
 type Row = { job: TrackerJob; progress: Progress };
-type Filter = "all" | "reach" | "waiting" | "follow" | "interview";
-const FILTERS: Array<[Filter, string]> = [["all", "All"], ["reach", "Reach out"], ["waiting", "Waiting"], ["follow", "Follow up"], ["interview", "Interview"]];
+type Filter = "all" | "reach" | "waiting" | "follow" | "interview" | "hidden";
+const FILTERS: Array<[Filter, string]> = [["all", "All"], ["reach", "Reach out"], ["waiting", "Waiting"], ["follow", "Follow up"], ["interview", "Interview"], ["hidden", "Hidden"]];
 const isApplied = (job: TrackerJob) => job.status === "submitted" || job.status === "applied_manual";
+/** Hidden by the student: off every list but "Hidden", still counted as applied. */
+const isHidden = (job: TrackerJob) => job.fillReport?.jobHidden === true;
 
 function matches({ job, progress }: Row, filter: Filter) {
+  if (filter === "hidden") return isHidden(job);
+  if (isHidden(job)) return false;
   if (filter === "all") return true;
   if (progress.ended === "Rejected" || !isApplied(job)) return false;
   if (filter === "reach") return progress.done === 1;
@@ -158,29 +162,25 @@ function StepsLine({ progress }: { progress: Progress }) {
   );
 }
 
-/** A popup over the blurred page. Escape or a click outside closes it. */
-function Popup({ label, onClose, children, width = "max-w-lg" }: { label: string; onClose: () => void; children: ReactNode; width?: string }) {
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = overflow; };
-  }, [onClose]);
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-3 backdrop-blur-md sm:items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div role="dialog" aria-modal="true" aria-label={label} className={`relative max-h-[90vh] w-full ${width} overflow-y-auto rounded-2xl border border-line bg-[#0C0C0E] p-5 text-[#F7F7F8] shadow-[0_30px_80px_-20px_rgba(0,0,0,.9)] sm:p-6`}>
-        <button type="button" aria-label="Close" onClick={onClose} className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-lg text-lg leading-none text-[#8B8B94] hover:bg-white/5 hover:text-white">×</button>
-        {children}
-      </div>
-    </div>,
-    document.body,
+/** Hides a job from the lists, or shows it again. */
+async function setJobHidden(jobId: string, hidden: boolean) {
+  const response = await fetch("/api/apply/hide-job", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId: jobId, hidden }) }).catch(() => null);
+  const body = await response?.json().catch(() => ({}));
+  if (!response?.ok) throw new Error(body?.error || "Couldn't change it. Try again.");
+}
+
+function EyeIcon({ off }: { off: boolean }) {
+  return (
+    <svg aria-hidden viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1.5 8S4 3.5 8 3.5 14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8z" /><circle cx="8" cy="8" r="2" />
+      {off && <path d="M2.5 2.5l11 11" />}
+    </svg>
   );
 }
 
 /* ───────────── Popups ───────────── */
 
-function InfoPopup({ row, now, tracker, onClose, onDelete, onChanged, reload, say }: { row: Row; now: Date; tracker: Tracker; onClose: () => void; onDelete: () => void; onChanged: (note: string) => void; reload: () => Promise<void>; say: (message: string) => void }) {
+function InfoPopup({ row, now, tracker, onClose, onDelete, onHide, onChanged, reload, say }: { row: Row; now: Date; tracker: Tracker; onClose: () => void; onDelete: () => void; onHide: () => void; onChanged: (note: string) => void; reload: () => Promise<void>; say: (message: string) => void }) {
   const { job, progress } = row;
   const events = eventsOf(job);
   return (
@@ -213,7 +213,8 @@ function InfoPopup({ row, now, tracker, onClose, onDelete, onChanged, reload, sa
         <PeoplePanel job={job} free={Boolean(tracker.free)} badge={tracker.peopleBadge} note={tracker.peopleNote} reload={reload} say={say} />
         <div className="flex flex-wrap items-center gap-3 border-t border-[#1F1F24] pt-4">
           {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-4">Job posting ↗</a>}
-          <button type="button" onClick={onDelete} className="ml-auto h-9 rounded-xl border border-[#3A2020] px-3 text-sm text-[#F87171] hover:bg-[#2A1A1A]">Delete job</button>
+          {isApplied(job) && <button type="button" onClick={onHide} className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-xl border border-line px-3 text-sm text-[#B4B4BC] hover:bg-white/5 hover:text-white"><EyeIcon off={!isHidden(job)} />{isHidden(job) ? "Show job" : "Hide job"}</button>}
+          <button type="button" onClick={onDelete} className={`${isApplied(job) ? "" : "ml-auto "}h-9 rounded-xl border border-[#3A2020] px-3 text-sm text-[#F87171] hover:bg-[#2A1A1A]`}>Delete job</button>
           <button type="button" autoFocus onClick={onClose} className="h-9 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-zinc-200">Done</button>
         </div>
       </div>
@@ -377,6 +378,19 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
     try { setTracker(await load()); } catch { /* the list stays as it was */ }
   }, [load]);
 
+  /** Hide or show a job: moved at once, saved behind it. */
+  const toggleHidden = async (job: TrackerJob) => {
+    const hidden = !isHidden(job);
+    const flip = (list: Tracker | null, value: boolean) => (list ? { ...list, jobs: list.jobs.map((item) => (item.id === job.id ? { ...item, fillReport: { ...(item.fillReport ?? { outcome: null, peopleReveals: 0 }), jobHidden: value } as TrackerJob["fillReport"] } : item)) } : list);
+    setTracker((list) => flip(list, hidden));
+    setOpen(null);
+    setToast(hidden ? `Hid ${companyOf(job)}. It's under Hidden and still counts as applied.` : `${companyOf(job)} is back on your list.`);
+    try { await setJobHidden(job.id, hidden); } catch (reason) {
+      setTracker((list) => flip(list, !hidden));
+      setToast(reason instanceof Error ? reason.message : "Couldn't change it.");
+    }
+  };
+
   const refresh = async (message: string) => {
     setOpen(null);
     setToast(message);
@@ -473,7 +487,7 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
       <div className="flex flex-col gap-3">
         <input id="jobs-search" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search jobs or companies" aria-label="Search jobs or companies" className="h-11 w-full rounded-xl border border-[#26262C] bg-[#0C0C0E] px-4 text-sm text-[#F7F7F8] placeholder:text-[#8B8B94] focus:border-[#3D8BFF] focus:outline-none" />
         <div role="group" aria-label="Show" className="flex flex-wrap gap-2">
-          {FILTERS.map(([value, label]) => (
+          {FILTERS.filter(([value]) => value !== "hidden" || filter === "hidden" || rows.some((row) => isHidden(row.job))).map(([value, label]) => (
             <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)} className={`h-8 rounded-full border px-3 text-[13px] font-medium ${filter === value ? "border-[#F7F7F8] bg-[#F7F7F8] text-[#070708]" : "border-[#26262C] text-[#B4B4BC] hover:text-white"}`}>
               {label} <b className="font-mono text-[11px] opacity-70">{rows.filter((row) => matches(row, value)).length}</b>
             </button>
@@ -494,6 +508,11 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
               </div>
               <span className="hidden sm:block"><Status row={row} /></span>
               <button type="button" onClick={() => setOpen({ kind: "info", id: row.job.id })} className="h-9 flex-none rounded-lg border border-line px-3 text-[13px] font-medium hover:border-[#F7F7F8] hover:bg-white/5">More info</button>
+              {isApplied(row.job) && (
+                <button type="button" title={isHidden(row.job) ? "Show job" : "Hide job"} aria-label={`${isHidden(row.job) ? "Show" : "Hide"} ${companyOf(row.job)}, ${titleOf(row.job)}`} onClick={() => void toggleHidden(row.job)} className="grid h-9 w-9 flex-none place-items-center rounded-lg text-[#5C5C66] hover:bg-white/5 hover:text-white">
+                  <EyeIcon off={!isHidden(row.job)} />
+                </button>
+              )}
               <button type="button" aria-label={`Delete ${companyOf(row.job)}, ${titleOf(row.job)}`} onClick={() => setOpen({ kind: "delete", id: row.job.id })} className="grid h-9 w-9 flex-none place-items-center rounded-lg text-[#5C5C66] hover:bg-[#2A1A1A] hover:text-[#F87171]">
                 <svg aria-hidden viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v4.5M9.2 6.5v4.5" /></svg>
               </button>
@@ -503,13 +522,13 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
       ) : (
         <div className="flex flex-col items-center gap-3 rounded-2xl border border-[#1F1F24] bg-[#0C0C0E] px-5 py-10 text-center">
           <Spider />
-          <p className="m-0 text-sm text-[#9A9AA3]">{rows.length ? "No jobs match that." : "No jobs yet. Apply somewhere with the extension open, or add one here."}</p>
+          <p className="m-0 text-sm text-[#9A9AA3]">{filter === "hidden" ? "No hidden jobs." : rows.length ? "No jobs match that." : "No jobs yet. Apply somewhere with the extension open, or add one here."}</p>
           {!rows.length && <button type="button" onClick={() => setOpen({ kind: "add" })} className="h-9 rounded-xl bg-white px-4 text-sm font-semibold text-black">+ Add job</button>}
         </div>
       )}
 
       {open?.kind === "add" && <AddPopup onCancel={() => setOpen(null)} onAdded={(company) => { setDay(null); void refresh(`Added ${company}.`); }} />}
-      {open?.kind === "info" && current && <InfoPopup row={current} now={now} tracker={tracker} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} onChanged={(note) => { void load().then(setTracker, () => undefined); setToast(note); }} reload={reload} say={setToast} />}
+      {open?.kind === "info" && current && <InfoPopup row={current} now={now} tracker={tracker} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} onHide={() => void toggleHidden(current.job)} onChanged={(note) => { void load().then(setTracker, () => undefined); setToast(note); }} reload={reload} say={setToast} />}
       {open?.kind === "delete" && current && (
         <DeletePopup job={current.job} onCancel={() => setOpen(null)} onDeleted={() => {
           setTracker((list) => (list ? { ...list, jobs: list.jobs.filter((job) => job.id !== current.job.id) } : list));

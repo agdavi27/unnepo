@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { applicationStats } from "@/lib/apply/stats";
 import type { JobApplication } from "@/lib/apply/types";
-import { SKINS, schoolStyle, skinUnlocked, spiderSvg, wornSkin, type SkinId } from "@/lib/spiders";
+import { SKINS, schoolStyle, nextSkin, skinUnlocked, spiderSvg, wornSkin, type SkinId } from "@/lib/spiders";
 
 const card = "rounded-2xl border border-line bg-panel p-5";
 const sectionTitle = "text-xs font-semibold uppercase tracking-wider text-faint";
@@ -22,6 +22,10 @@ export function SpiderSettings() {
   const school = data.school;
   const worn = wornSkin(data.profile.spiderSkin ?? null, applied);
   const style = schoolStyle(school);
+  const next = nextSkin(applied);
+  // The bar runs from the last spider unlocked to the next one.
+  const from = next ? Math.max(0, ...SKINS.filter((skin) => skin.unlockAt <= applied).map((skin) => skin.unlockAt)) : 0;
+  const percent = next ? Math.min(100, Math.round(((applied - from) / (next.skin.unlockAt - from)) * 100)) : 100;
   async function pick(skin: SkinId) {
     if (!data || skin === worn) return;
     setState("Saving…");
@@ -40,6 +44,20 @@ export function SpiderSettings() {
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className={sectionTitle}>Your spiders</h2>
         <p className="text-xs text-faint" role="status">{state || "Pick one to wear in the extension."}</p>
+      </div>
+      <div className="mt-4 flex items-center gap-4 rounded-xl border border-line bg-[#0C0C0E] p-3 sm:p-4">
+        {next && <span aria-hidden className="block flex-none" dangerouslySetInnerHTML={{ __html: spiderSvg({ skin: next.skin.id, school }, { size: 52, grey: true }) }} />}
+        <div className="min-w-0 flex-1">
+          <p className="m-0 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-sm">
+            {next
+              ? <span><b className="font-semibold tabular-nums">{next.left}</b> {next.left === 1 ? "application" : "applications"} away from the <b className="font-semibold" style={{ color: next.skin.color }}>{next.skin.name}</b> spider</span>
+              : <span className="font-semibold">Every spider unlocked. Legend.</span>}
+            <span className="font-mono text-[11px] tabular-nums text-faint">{next ? `${applied} / ${next.skin.unlockAt}` : `${applied} applied`}</span>
+          </p>
+          <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-[#1F1F24]" role="progressbar" aria-label={next ? `Progress to the ${next.skin.name} spider` : "Every spider unlocked"} aria-valuemin={from} aria-valuemax={next?.skin.unlockAt ?? applied} aria-valuenow={applied}>
+            <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${Math.max(percent, applied > from ? 3 : 0)}%`, background: next?.skin.color ?? "#F2B227" }} />
+          </div>
+        </div>
       </div>
       <ul className="mt-4 grid list-none grid-cols-3 gap-3 p-0 sm:grid-cols-7">
         {SKINS.map((skin) => {

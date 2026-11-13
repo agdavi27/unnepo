@@ -142,7 +142,7 @@ export type TrackerJob = {
   fillReport: {
     outcome: "follow_up" | "assessment" | "interviewing" | "offer" | "rejected" | null;
     statusHistory?: Array<{ at: string; status: string; source: string; summary: string }>;
-    lastEmailAt?: string; emailedAt?: Record<string, string>; reachedOut?: { count: number; at: string }; notCounted?: boolean; peopleReveals: number;
+    lastEmailAt?: string; emailedAt?: Record<string, string>; reachedOut?: { count: number; at: string }; notCounted?: boolean; jobHidden?: boolean; peopleReveals: number;
     peopleLinks?: Record<string, Array<{ label: string; url: string }>>;
     peoplePreview?: { rows: Array<{ role: string; title: string }> };
   } | null;
