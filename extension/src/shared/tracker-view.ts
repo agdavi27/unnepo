@@ -133,6 +133,17 @@ const ROLE_LABEL: Record<string, string> = { alumni: "Alum", recruiter: "Recruit
 /** A blank profile photo, for people Free doesn't show yet. */
 const AVATAR = `<span class="avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="9" r="4.2"/><path d="M3.5 24c.8-5 4.2-8 8.5-8s7.7 3 8.5 8z"/></svg></span>`;
 
+const AVATAR_COLORS = ["#3D8BFF", "#8B5CF6", "#EC4899", "#14B8A6", "#F59E0B", "#22C55E", "#EF4444", "#06B6D4"];
+/** A person's icon: their initials on a color picked from their name, like the website. */
+function initialsAvatar(name: string) {
+  const words = name.replace(/[^\p{L}\s]/gu, "").trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return AVATAR;
+  const initials = (words[0][0] + (words.length > 1 ? words[words.length - 1][0] : "")).toUpperCase();
+  const color = AVATAR_COLORS[[...name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % AVATAR_COLORS.length];
+  return `<span class="avatar initials" aria-hidden="true" style="color:${color};background:${color}22;box-shadow:inset 0 0 0 1.5px ${color}66">${escape(initials)}</span>`;
+}
+const GMAIL = `<svg class="gmail" aria-hidden="true" viewBox="0 0 24 18"><path fill="#4285F4" d="M1.6 18h3.8V8.7L0 4.6v11.8C0 17.3.7 18 1.6 18z"/><path fill="#34A853" d="M18.6 18h3.8c.9 0 1.6-.7 1.6-1.6V4.6l-5.4 4.1z"/><path fill="#FBBC04" d="M18.6 1.6v7.1L24 4.6V2.4C24 .4 21.7-.7 20.1.5z"/><path fill="#EA4335" d="M5.4 8.7V1.6L12 6.5l6.6-4.9v7.1L12 13.6z"/><path fill="#C5221F" d="M0 2.4v2.2l5.4 4.1V1.6L3.9.5C2.3-.7 0 .4 0 2.4z"/></svg>`;
+
 /** One tight row on Free: blank photo, who they are, and Show person, which opens Upgrade to Pro on the website. No name yet: the title leads. */
 function freeRow(name: string | null, title: string, role: string) {
   const label = ROLE_LABEL[role] ?? role;
@@ -308,40 +319,46 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
   const link = person.email && draft.body ? composeLink(store.mailer, person.email, draft.subject, draft.body) : null;
   const followUp = person.outreachStatus === "emailed" || person.outreachStatus === "no_response";
   const status = { not_contacted: "", emailed: "Emailed", replied: "Replied", no_response: "No reply" }[person.outreachStatus];
-  // The address is the link: it opens the email, written and filled in, ready to send.
-  const address = person.email
+  // The main button opens the email, written and filled in, ready to send (or writes it first).
+  const send = person.email
     ? link
-      ? `<a class="email-link" href="${escape(link.url)}" ${link.url.startsWith("mailto:") ? "" : 'target="_blank" rel="noreferrer"'} data-email-link="${person.id}" data-cut="${link.cut}" title="Open this email in ${MAILER_NAME[store.mailer]}">${escape(person.email)} ↗</a>`
-      : `<button type="button" class="email-link" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""} title="Write the email, then open it in ${MAILER_NAME[store.mailer]}">${busy("write") ? "Writing your email…" : `${escape(person.email)} ↗`}</button>`
+      ? `<a class="solid send-mail" href="${escape(link.url)}" ${link.url.startsWith("mailto:") ? "" : 'target="_blank" rel="noreferrer"'} data-email-link="${person.id}" data-cut="${link.cut}">${store.mailer === "gmail" ? GMAIL : ""}${followUp ? "Open again" : "Send"} in ${MAILER_NAME[store.mailer]} ↗</a>`
+      : `<button type="button" class="solid send-mail" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing your email…" : "Write email"}</button>`
     : hidden
       ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>` : `<span class="small">You've shown 3 people for this job.</span>`
-      : `<span class="small">No email found</span>`;
+      : `<span class="small">No email found.</span>`;
+  const tag = status
+    ? `<span class="card-tag${person.outreachStatus === "replied" ? " ok" : ""}">${status}</span>`
+    : person.emailBody ? `<span class="card-tag written">Written</span>` : "";
   return `
-    <li class="person${first ? " first" : ""}">
-      <div class="row-between"><span class="person-name">${escape(person.name)} <span class="role">${escape(ROLE_LABEL[person.role] ?? person.role)}</span></span>${status ? `<span class="status${person.outreachStatus === "replied" ? " done" : ""}">${status}</span>` : ""}</div>
-      ${person.title ? `<span class="sub">${escape(person.title)}</span>` : ""}
-      ${first ? `<span class="small start-here">★ Start here</span>` : ""}
-      <div class="person-line">${address}${person.linkedinUrl ? `<a class="link" href="${escape(person.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</div>
-      ${person.emailSource && person.email ? `<span class="small"${person.emailSource === "likely" || person.emailSource === "guess" ? ' style="color: var(--warn)"' : ""}>${escape(EMAIL_SOURCE[person.emailSource] ?? "")}</span>` : ""}
-      ${justOpened.has(person.id) ? `
-        <div class="sent-check" role="status"><span class="small">${justOpened.get(person.id) ? "Sent the follow-up?" : "Sent it?"}</span>
-          <button type="button" class="solid" data-sent="${person.id}" data-follow="${justOpened.get(person.id)}">${justOpened.get(person.id) ? "I sent the follow-up" : "I emailed them"}</button></div>` : ""}
-      ${person.email && !hidden ? `
-        <details class="q-answer" data-person="${person.id}" ${open ? "open" : ""}><summary>${draft.body ? "The email" : "Write the email first"}</summary>
-          <div class="letter-form flat">
-            ${draft.body ? `<input class="field" data-subject="${person.id}" value="${escape(draft.subject)}" aria-label="Subject" maxlength="200">
-            <textarea class="field letter-input" rows="7" data-body="${person.id}" aria-label="Email to ${escape(person.name)}">${escape(draft.body)}</textarea>` : ""}
-            <div class="links">
-              <button type="button" class="link" data-write="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing…" : draft.body ? "Write it again" : "Write email"}</button>
-              ${drafts[person.id] ? `<button type="button" class="link" data-save-draft="${person.id}">Save my edits</button>` : ""}
-              ${draft.body ? `<button type="button" class="link" data-copy-email="${person.id}">Copy</button>` : ""}
-              <button type="button" class="link" data-bounced="${person.id}">It bounced</button>
-            </div>
-          </div>
-        </details>` : ""}
-      ${person.email && !hidden ? `<div class="links">
-        ${person.outreachStatus === "not_contacted" ? `<button type="button" class="quiet-link" data-status="${person.id}" data-value="emailed">I emailed them</button>` : ""}
-        ${followUp && due ? `${followUps < MAX_FOLLOW_UPS ? `<button type="button" class="quiet-link" data-follow-up="${person.id}" ${busy("follow") ? "disabled" : ""}>${busy("follow") ? "Writing…" : "Write follow-up"}</button>` : ""}<button type="button" class="quiet-link" data-status="${person.id}" data-value="replied">They replied</button><button type="button" class="quiet-link" data-status="${person.id}" data-value="no_response">No reply, stop</button>` : ""}
+    <li class="person card${first ? " first" : ""}${open ? " open" : ""}">
+      <button type="button" class="person-head" data-person-toggle="${person.id}" aria-expanded="${open}" aria-label="${escape(person.name)}">
+        ${initialsAvatar(person.name)}
+        <span class="person-text">
+          <span class="person-top"><span class="person-name">${escape(person.name)}</span>${first ? `<span class="start-here">★ Start</span>` : ""}</span>
+          <span class="sub">${escape(person.title || ROLE_LABEL[person.role] || "")}</span>
+          <span class="person-mail">${person.email ? `${GMAIL}<span class="mail-text">${escape(person.email)}</span>` : `<span class="muted">${hidden ? "Tap to show who it is" : "No email found"}</span>`}</span>
+        </span>
+        <span class="person-side">${tag}<span class="chev" aria-hidden="true">›</span></span>
+      </button>
+      ${open ? `<div class="person-body">
+        ${justOpened.has(person.id) ? `
+          <div class="sent-check" role="status"><span class="small">${justOpened.get(person.id) ? "Sent the follow-up?" : "Sent it?"}</span>
+            <button type="button" class="solid" data-sent="${person.id}" data-follow="${justOpened.get(person.id)}">${justOpened.get(person.id) ? "I sent the follow-up" : "I emailed them"}</button></div>` : ""}
+        ${person.email && !hidden && draft.body ? `<div class="letter-form flat">
+            <input class="field" data-subject="${person.id}" value="${escape(draft.subject)}" aria-label="Subject" maxlength="200">
+            <textarea class="field letter-input" rows="7" data-body="${person.id}" aria-label="Email to ${escape(person.name)}">${escape(draft.body)}</textarea>
+          </div>` : ""}
+        <div class="person-line">${send}${person.linkedinUrl ? `<a class="link" href="${escape(person.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</div>
+        ${person.emailSource && person.email ? `<span class="small"${person.emailSource === "likely" || person.emailSource === "guess" ? ' style="color: var(--warn)"' : ""}>${escape(EMAIL_SOURCE[person.emailSource] ?? "")}</span>` : ""}
+        ${person.email && !hidden ? `<div class="links">
+          ${draft.body ? `<button type="button" class="quiet-link" data-write="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing…" : "Write it again"}</button>` : ""}
+          ${drafts[person.id] ? `<button type="button" class="quiet-link" data-save-draft="${person.id}">Save my edits</button>` : ""}
+          ${draft.body ? `<button type="button" class="quiet-link" data-copy-email="${person.id}">Copy</button>` : ""}
+          ${person.outreachStatus === "not_contacted" && !justOpened.has(person.id) ? `<button type="button" class="quiet-link" data-status="${person.id}" data-value="emailed">I emailed them</button>` : ""}
+          ${followUp && due ? `${followUps < MAX_FOLLOW_UPS ? `<button type="button" class="quiet-link" data-follow-up="${person.id}" ${busy("follow") ? "disabled" : ""}>${busy("follow") ? "Writing…" : "Write follow-up"}</button>` : ""}<button type="button" class="quiet-link" data-status="${person.id}" data-value="replied">They replied</button><button type="button" class="quiet-link" data-status="${person.id}" data-value="no_response">No reply, stop</button>` : ""}
+          <button type="button" class="quiet-link" data-bounced="${person.id}">It bounced</button>
+        </div>` : ""}
       </div>` : ""}
     </li>`;
 }
@@ -434,9 +451,11 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     if (host.upgradeUrl()) window.open(host.upgradeUrl(), "_blank", "noreferrer");
   }));
   root.querySelectorAll<HTMLButtonElement>("[data-reveal]").forEach((button) => button.addEventListener("click", () => void run("reveal", button.dataset.reveal!, { action: "reveal" })));
-  root.querySelectorAll<HTMLDetailsElement>("details[data-person]").forEach((box) => box.addEventListener("toggle", () => {
-    if (box.open) openPeople.add(box.dataset.person!);
-    else openPeople.delete(box.dataset.person!);
+  root.querySelectorAll<HTMLButtonElement>("[data-person-toggle]").forEach((button) => button.addEventListener("click", () => {
+    const id = button.dataset.personToggle!;
+    if (openPeople.has(id)) openPeople.delete(id);
+    else openPeople.add(id);
+    host.redraw();
   }));
   root.querySelectorAll<HTMLButtonElement>("[data-write]").forEach((button) => button.addEventListener("click", async () => {
     delete drafts[button.dataset.write!];
