@@ -111,14 +111,23 @@ body { font-family: var(--font-geist-sans), sans-serif; }
 .people-float { animation: people-float 3.2s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .dash-bob, .dash-pulse, .people-float { animation: none; } }
 
-/* The spider dancing after someone joins the waitlist. */
-@keyframes spider-dance {
-  0%, 100% { transform: translateY(0) rotate(0) scale(1.06, .94); }
-  25% { transform: translateY(-18px) rotate(-10deg) scale(.96, 1.05); }
-  50% { transform: translateY(0) rotate(0) scale(1.06, .94); }
-  75% { transform: translateY(-18px) rotate(10deg) scale(.96, 1.05); }
+/* The spider breakdancing after someone joins the waitlist: toprock, drop, headspin, windmill, freeze. */
+@keyframes spider-breakdance {
+  0% { transform: translateY(0) rotate(0) scale(1.06, .94); }
+  8% { transform: translateX(-14px) translateY(-10px) rotate(-12deg); }
+  16% { transform: translateX(14px) translateY(-10px) rotate(12deg); }
+  24% { transform: translateY(6px) rotate(0) scale(1.12, .84); }
+  32% { transform: translateY(-34px) rotate(180deg) scale(1); }
+  40% { transform: translateY(-34px) rotate(540deg); }
+  48% { transform: translateY(-34px) rotate(900deg); }
+  56% { transform: translateY(-10px) translateX(-16px) rotate(990deg) scale(.95, 1.05); }
+  64% { transform: translateY(-10px) translateX(16px) rotate(1170deg) scale(.95, 1.05); }
+  72% { transform: translateY(-10px) translateX(0) rotate(1260deg); }
+  80% { transform: translateY(-4px) rotate(1425deg); }
+  86%, 92% { transform: translateY(-4px) rotate(1425deg) scale(1.04); }
+  100% { transform: translateY(0) rotate(1440deg) scale(1.06, .94); }
 }
 @keyframes spider-dance-note { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: 1; } 100% { transform: translateY(-46px) rotate(18deg); opacity: 0; } }
-.spider-dance { animation: spider-dance .9s ease-in-out infinite; transform-origin: 50% 100%; }
+.spider-breakdance { animation: spider-breakdance 3.6s cubic-bezier(.45,.05,.55,.95) infinite; transform-origin: 50% 55%; }
 .spider-dance-note { animation: spider-dance-note 1.8s ease-out infinite; }
-@media (prefers-reduced-motion: reduce) { .spider-dance, .spider-dance-note { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .spider-breakdance, .spider-dance-note { animation: none; } }

@@ -3,9 +3,12 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { DancingSpider } from "@/components/marketing/spider-dialogue";
 
+const SONG = "/audio/find-my-way-home.mp3";
+const SONG_START = 24;
+
 /**
  * The landing page's "Join the waitlist" button. It opens a popup asking for a name, an email and, if they like, a
- * phone number. Once it's saved, the spider dances.
+ * phone number. Once it's saved, the spider breakdances to a song that starts 24 seconds in, until the popup closes.
  */
 export function WaitlistButton({ label = "Join the waitlist", className }: { label?: string; className?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -17,12 +20,27 @@ export function WaitlistButton({ label = "Join the waitlist", className }: { lab
   const [problem, setProblem] = useState("");
   const [joined, setJoined] = useState<string | null>(null);
 
+  const song = useRef<HTMLAudioElement | null>(null);
+
   useEffect(() => {
     const el = dialog.current;
-    const reset = () => setProblem("");
+    const reset = () => {
+      setProblem("");
+      song.current?.pause();
+    };
     el?.addEventListener("close", reset);
     return () => el?.removeEventListener("close", reset);
   }, []);
+
+  /** Starts the song 24 seconds in. A browser that blocks it just leaves the spider dancing in silence. */
+  function playSong() {
+    const audio = song.current ?? new Audio(SONG);
+    song.current = audio;
+    audio.loop = true;
+    try { audio.currentTime = SONG_START; } catch { /* not loaded yet; the listener below sets it */ }
+    if (audio.readyState < 1) audio.addEventListener("loadedmetadata", () => { audio.currentTime = SONG_START; }, { once: true });
+    audio.play().catch(() => {});
+  }
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -33,6 +51,7 @@ export function WaitlistButton({ label = "Join the waitlist", className }: { lab
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Couldn't save that. Try again.");
       setJoined(body.firstName || name.split(" ")[0]);
+      playSong();
     } catch (reason) {
       setProblem(reason instanceof Error ? reason.message : "Couldn't save that. Try again.");
     } finally {
@@ -55,14 +74,14 @@ export function WaitlistButton({ label = "Join the waitlist", className }: { lab
           <button type="button" aria-label="Close" onClick={() => dialog.current?.close()} className="absolute right-3 top-3 rounded-lg px-2 py-1 text-xl leading-none text-[#8B8B94] hover:text-white">×</button>
           {joined ? (
             <div className="flex flex-col items-center gap-4 py-2 text-center" role="status">
-              <div className="relative w-[160px] pt-6">
+              <div className="relative w-[160px] pb-2 pt-12">
                 <span aria-hidden className="spider-dance-note absolute left-0 top-6 text-2xl text-[#3D8BFF]">♪</span>
                 <span aria-hidden className="spider-dance-note absolute right-1 top-2 text-xl text-[#F7F7F8] [animation-delay:.9s]">♫</span>
-                <DancingSpider className="spider-dance" />
+                <DancingSpider className="spider-breakdance" />
                 <div aria-hidden className="mx-auto mt-1 h-2 w-24 rounded-[50%] bg-[#3D8BFF]/25" />
               </div>
               <h2 id={titleId} className="m-0 text-2xl font-bold tracking-[-0.6px]">You&apos;re on the list{joined ? `, ${joined}` : ""}!</h2>
-              <p className="m-0 max-w-[320px] text-sm leading-relaxed text-[#9A9AA3]">We&apos;ll let you know the moment Unnepo launches. The spider is very excited.</p>
+              <p className="m-0 max-w-[320px] text-sm leading-relaxed text-[#9A9AA3]">We&apos;ll let you know the moment Unnepo launches.</p>
               <button type="button" onClick={() => dialog.current?.close()} className="mt-1 min-h-[46px] w-full rounded-[10px] bg-[#3D8BFF] text-sm font-semibold text-bg hover:bg-[#5A9DFF]">Done</button>
             </div>
           ) : (
