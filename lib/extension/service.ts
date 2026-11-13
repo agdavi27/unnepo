@@ -295,6 +295,7 @@ function trackerJob(app: JobApplication, people: ApplicationContact[]) {
       outcome: report.outcome ?? null, statusHistory: report.statusHistory, lastEmailAt: report.lastEmailAt, emailedAt: report.emailedAt, reachedOut: report.reachedOut,
       notCounted: report.notCounted, jobHidden: report.jobHidden === true, peopleReveals: report.peopleReveals ?? 0, peopleLinks: report.peopleLinks,
       peoplePreview: report.peoplePreview ? { rows: report.peoplePreview.rows } : undefined,
+      peopleLocked: report.peopleLocked ?? 0,
     } : null,
     /** People on the list Unnepo can still look up ("Show person"), by lowercase name. */
     hidden: Object.keys(report?.peopleHidden ?? {}),

@@ -501,16 +501,17 @@ describe("plan limits", () => {
     await repo.setAccountForTests(userId, { balance: 5 });
     const { token } = await issueExtensionToken(userId);
     const { usage } = await (await call("GET", "me", token)).json();
-    // 5 letters (2 credits each), 5 answers (1 each), and this week's company plus 5 left from the trial (5 each).
-    expect(usage.credits).toBe(45);
+    // 5 letters (2 credits each), 5 answers (1 each), and 5 lists of people left from the trial (5 each).
+    expect(usage.credits).toBe(40);
     // Each tool's box shows what's left today in its corner.
     expect(usage.letters).toMatchObject({ left: 5, badge: "5 left today", note: "" });
     expect(usage.autofills).toMatchObject({ left: 5, basic: false, badge: "5 left today" });
-    expect(usage.people).toMatchObject({ left: 6, note: "", badge: "6 left" });
+    expect(usage.people).toMatchObject({ left: 5, note: "", badge: "5 left" });
     await repo.setAccountForTests(userId, { balance: 0 });
     const low = (await (await call("GET", "me", token)).json()).usage;
-    expect(low.credits).toBe(20);
-    expect(low.people).toMatchObject({ left: 1, badge: "1 left this week" });
+    // Free still sees one person at each job, which isn't counted.
+    expect(low.credits).toBe(15);
+    expect(low.people).toMatchObject({ left: 0, badge: "1 person per job" });
   });
 
   it("keeps a short answer to two sentences unless the student asks for a longer one", async () => {

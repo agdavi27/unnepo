@@ -52,7 +52,7 @@ const PRO_REASONS: Array<[string, string]> = [
   ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 5 a day."],
   ["Unlimited autofill that answers the questions too", "Free has 5 full autofills a day, then fills your basic details."],
   ["Follow-up emails written for you", "A short note to each person, ready to send from Gmail or Outlook."],
-  ["Names and emails at every company you apply to", "Free shows them at 1 company a week."],
+  ["Names and emails at every company you apply to", "Free shows 1 person at each job, with an email that isn't checked."],
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 

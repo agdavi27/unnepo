@@ -680,45 +680,52 @@ describe("people after applying", () => {
     expect(application.fillReport?.peopleLinks?.["sam l."]?.[0]?.label).toBe("LinkedIn");
   });
 
-  it("counts a job's people once (Free's weekly company before any credit), shows only who's there with none left, and never stops Pro", async () => {
-    const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : []);
+  it("spends a credit once for a whole list, shows Free one unchecked person (the posting's first) with none left, and never stops Pro", async () => {
+    const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []);
     const { userId, application, contacts, searches } = await appliedWith(found, { verified: ["a1"] });
-    expect(contacts.length).toBeGreaterThan(0);
+    expect(contacts.length).toBeGreaterThan(1);
     const debits = async () => (await repo.listLedger(userId)).filter((entry) => entry.entryType === "unlock_debit").reduce((sum, entry) => sum - entry.amount, 0);
-    // The week's free company paid for it, not a credit.
-    expect(await debits()).toBe(0);
-    expect((await planUsage(userId)).people).toMatchObject({ used: 1, allowance: 0 });
+    // A credit from the trial paid for the whole list, once: searching again is free.
+    expect(await debits()).toBe(1);
     await applications.update(userId, application.id, { contactsStatus: "idle" });
     await runContactDiscovery(userId, application.id);
-    expect(await debits()).toBe(0);
-    expect((await planUsage(userId)).people.used).toBe(1);
+    expect(await debits()).toBe(1);
 
-    const another = async (n: number) => (await applications.insert({
+    const another = async (n: number, postedRecruiter: JobApplication["postedRecruiter"] = null) => (await applications.insert({
       userId, jobKey: `url:acme.com/job/${n}`, jobUrl: `https://acme.com/job/${n}`, ats: "other", title: "Analyst", company: "Acme Corp", companyDomain: "acme.com", department: null, location: null,
-      description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
+      description: "", requirements: [], applicationUrl: null, postedRecruiter, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null,
       confirmation: null, submittedAt: null, contactsStatus: "idle", contactsMessage: "", charged: true, attempts: 0,
     })).app;
+    const enriched = async () => (await repo.snapshot()).usage.filter((row) => row.operation === "enrich").length;
 
-    // Another job with this week's company used and no credits left, on Free: who's there, from the free
-    // searches, kept as roles and titles only (no names, no emails), and nothing spent.
+    // No credits left: one person, with an email that isn't checked, and the rest kept back for Pro. Nothing paid.
     await repo.setAccountForTests(userId, { balance: 0, allowanceBalance: 0, purchasedBalance: 0 });
+    const enrichBefore = await enriched();
     const app = await another(2);
     await runContactDiscovery(userId, app.id);
-    expect(await applicationContacts.list(userId, [app.id])).toEqual([]);
-    const preview = (await applications.get(userId, app.id))?.fillReport?.peoplePreview;
-    expect(preview?.rows).toEqual([{ role: "alumni", title: "Product Manager" }]);
-    expect(JSON.stringify(preview)).not.toContain("Casey");
-    expect(await debits()).toBe(0);
-    expect((await planUsage(userId)).people.note).toMatch(/this week's free company/);
+    const one = await applicationContacts.list(userId, [app.id]);
+    expect(one).toHaveLength(1);
+    expect(one[0].email).toMatch(/@acme\.com$/);
+    expect(["likely", "guess", "cant_check"]).toContain(one[0].emailSource);
+    expect((await applications.get(userId, app.id))?.fillReport?.peopleLocked).toBe(1);
+    expect(await enriched()).toBe(enrichBefore);
+    expect(await debits()).toBe(1);
+    expect((await planUsage(userId)).people).toMatchObject({ left: 0, note: "", badge: "1 person per job" });
+
+    // The person the posting names comes first, with the posting's own address.
+    const posted = await another(3, { name: "Jordan Smith", title: "Recruiter", email: "jordan.smith@acme.com", linkedinUrl: null });
+    await runContactDiscovery(userId, posted.id);
+    expect((await applicationContacts.list(userId, [posted.id])).map((row) => [row.name, row.email, row.emailSource])).toEqual([["Jordan Smith", "jordan.smith@acme.com", "job_posting"]]);
+    expect((await applications.get(userId, posted.id))?.fillReport?.peopleLocked).toBe(2);
 
     // Pro has no limit, even with no credits: the people are looked up, and nothing is spent.
     await repo.setAccountForTests(userId, { plan: "pro" });
-    const paid = await another(3);
+    const paid = await another(4);
     const searchesBefore = searches.length;
     await runContactDiscovery(userId, paid.id);
     expect(searches.length).toBeGreaterThan(searchesBefore);
     expect((await applicationContacts.list(userId, [paid.id])).length).toBeGreaterThan(0);
-    expect(await debits()).toBe(0);
+    expect(await debits()).toBe(1);
     expect((await planUsage(userId)).people.badge).toBe("Unlimited");
   });
 
