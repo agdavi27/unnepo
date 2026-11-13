@@ -686,7 +686,7 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
 
   const notes: string[] = [];
   const apolloFailed = search.steps.some((step) => step.error && step.step !== "Full names");
-  if (!domains.length && !people.length) notes.push(`Couldn't find ${app.company}'s website or anyone there. Add its website below, or try LinkedIn.`);
+  if (!domains.length && !people.length) notes.push("Couldn't find the company's website or anyone there. Add the website below, or try LinkedIn.");
   else if (!people.length) notes.push(`${apolloFailed ? "The people search had trouble just now, and nobody else knows" : "None of the sources Unnepo checks know anyone at"} ${app.company}${domains.length ? ` (${domains.join(", ")})` : ""}. Check the website below, or try LinkedIn.`);
   else if (people.some((person) => person.emailSource === "likely" || person.emailSource === "guess")) notes.push(format?.pattern ? `Emails marked as not checked follow ${app.company}'s usual format (${format.pattern.replace(/[{}]/g, "")}@${domain}).` : `Couldn't learn ${app.company}'s email format, so some emails are a best guess (first.last).`);
   if (over()) notes.push("This search ran out of time, so it shows what it found. Search again for more.");
