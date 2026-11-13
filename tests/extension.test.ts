@@ -982,7 +982,7 @@ describe("the side panel's goal and pasted questions", () => {
     expect(model.lastPrompt).not.toContain("Applying to:");
     await expect(extensionWrite(userId, { question: "" })).rejects.toThrow(/Which question/);
 
-    expect((await extensionMe(userId)).goal).toEqual({ weekly: null, appliedAt: [] });
+    expect((await extensionMe(userId)).goal).toEqual({ weekly: null, daily: null, appliedAt: [] });
     await applications.insert({ userId, jobKey: "a", jobUrl: "https://example.com/a", ats: "other", title: "Analyst", company: "Acme", companyDomain: null, department: null, location: null, description: "", requirements: [], applicationUrl: null, postedRecruiter: null, status: "applied_manual", statusMessage: "", questions: [], browserSessionId: null, fillReport: null, confirmation: null, submittedAt: new Date().toISOString(), contactsStatus: "idle", contactsMessage: "", charged: false, attempts: 0 });
     expect((await extensionMe(userId)).goal?.appliedAt).toHaveLength(1);
     delete process.env.ANTHROPIC_API_KEY;

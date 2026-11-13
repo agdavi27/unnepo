@@ -82,7 +82,7 @@ export async function extensionMe(userId: string) {
   const weekAgo = Date.now() - 8 * 86_400_000;
   return {
     // The panel's Day / Week goal. The panel counts them, so "today" is the student's own day.
-    goal: { weekly: stored?.weeklyGoal ?? null, appliedAt: applied.filter((app) => !app.notCounted).map((app) => app.submittedAt ?? app.createdAt).filter((at) => Date.parse(at) >= weekAgo) },
+    goal: { weekly: stored?.weeklyGoal ?? null, daily: stored?.dailyGoal ?? null, appliedAt: applied.filter((app) => !app.notCounted).map((app) => app.submittedAt ?? app.createdAt).filter((at) => Date.parse(at) >= weekAgo) },
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: credits?.balance ?? 0,
     unlimitedCredits: usage.unlimited,

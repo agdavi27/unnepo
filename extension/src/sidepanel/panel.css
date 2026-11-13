@@ -741,3 +741,19 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .me-hero { padding-top: 0; }
 .me-hero ~ .settings-card { padding: 12px 16px; gap: 6px; }
 .me-hero ~ .settings-card .set-row { min-height: 44px; padding: 4px 0; }
+
+/* Under the calendar: How it works, Edit goals, and how far back it shows. */
+.heat.roomy { justify-content: center; }
+.heat-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.heat-week-day { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.heat-week-day .heat-day { display: grid; place-items: center; border-radius: 6px; font: 600 12px var(--mono); color: #fff; }
+.heat-week-day > span:last-child { font: 9px var(--mono); color: var(--muted-2); }
+.heat-foot { display: flex; align-items: center; gap: 12px; }
+.heat-how-toggle { padding: 0; border: 0; background: transparent; color: var(--muted-2); font: 11px Geist, sans-serif; cursor: pointer; white-space: nowrap; }
+.heat-how-toggle:hover, .heat-goals:hover { color: var(--fg); }
+.heat-goals { color: var(--accent); font-size: 11px; text-decoration: none; white-space: nowrap; }
+.range { margin-left: auto; display: inline-flex; padding: 2px; border-radius: 8px; background: #111114; border: 1px solid var(--line-2); }
+.range-btn { height: 22px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: 600 10px var(--mono); cursor: pointer; }
+.range-btn:hover { color: var(--fg); }
+.range-btn.on { background: var(--control); color: var(--fg); }
+.heat-how { display: flex; flex-direction: column; gap: 6px; }
