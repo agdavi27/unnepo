@@ -65,10 +65,10 @@ export function Landing() {
               <GetExtension
                 href={cta}
                 external={Boolean(EXTENSION_URL)}
-                label="Start 7 days of Pro free"
+                label="Start free"
                 className="mt-1 inline-flex min-h-[54px] items-center justify-center rounded-[10px] bg-[#3D8BFF] px-[26px] py-3.5 text-base font-semibold text-bg transition-colors hover:bg-[#5A9DFF]"
               />
-              <p className="m-0 text-[13px] text-[#9A9AA3]">7 days of Pro free, no card. The tracker is free and unlimited. Some schools cover Pro.</p>
+              <p className="m-0 text-[13px] text-[#9A9AA3]">Free for students, no card. The tracker is free and unlimited. Pro is $25 a month or $75 a semester, and some schools cover it.</p>
             </div>
             <div className="flex min-w-0 flex-[1_1_480px] flex-col items-center gap-[22px]">
               <SpiderDialogue />
