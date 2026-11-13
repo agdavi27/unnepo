@@ -178,11 +178,60 @@ function EyeIcon({ off }: { off: boolean }) {
   );
 }
 
+/** "Edit job info" in a job's popup: its title, company, location and posting link. Only what changed is sent. */
+function EditJob({ job, onCancel, onSaved }: { job: TrackerJob; onCancel: () => void; onSaved: (note: string) => void }) {
+  const [title, setTitle] = useState(job.titleMissing ? "" : job.title);
+  const [company, setCompany] = useState(job.companyMissing ? "" : job.company);
+  const [location, setLocation] = useState(job.location ?? "");
+  const [url, setUrl] = useState(job.url ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const [t, c, l, u] = [title.trim(), company.trim(), location.trim(), url.trim()];
+    if (t.length < 2) return setError("Type the job title.");
+    if (c.length < 2) return setError("Type the company's name.");
+    if (u && !/^https:\/\/\S+\.\S+/i.test(u)) return setError("The link should start with https://.");
+    const changes = {
+      ...(t !== job.title || job.titleMissing ? { title: t } : {}),
+      ...(c !== job.company || job.companyMissing ? { company: c } : {}),
+      ...(l !== (job.location ?? "") ? { location: l } : {}),
+      ...(u !== (job.url ?? "") ? { url: u } : {}),
+    };
+    if (!Object.keys(changes).length) return onCancel();
+    setBusy(true);
+    setError("");
+    const response = await fetch("/api/apply/details", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId: job.id, ...changes }) }).catch(() => null);
+    const body = await response?.json().catch(() => ({}));
+    setBusy(false);
+    if (!response?.ok) return setError(body?.error || "Couldn't save it. Try again.");
+    onSaved("company" in changes ? "Saved. A new company means a new search for its people." : "Saved.");
+  };
+  const label = "flex flex-col gap-1.5 text-[13px] text-[#B4B4BC]";
+  return (
+    <form onSubmit={(event) => void submit(event)} className="flex flex-col gap-3 rounded-xl border border-[#1F1F24] bg-[#0A0A0C] p-4" aria-label="Edit job info">
+      <p className="m-0 font-mono text-[11px] uppercase tracking-[1.4px] text-[#8B8B94]">Edit job info</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className={label}>Job title<input autoFocus required maxLength={200} value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Software Engineering Intern" className="field" /></label>
+        <label className={label}>Company<input required maxLength={200} value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Stripe" className="field" /></label>
+        <label className={label}>Location<input maxLength={200} value={location} onChange={(event) => setLocation(event.target.value)} placeholder="New York, NY (optional)" className="field" /></label>
+        <label className={label}>Job link<input type="url" maxLength={2000} value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://… (optional)" className="field" /></label>
+      </div>
+      {error && <p role="alert" className="m-0 text-sm text-[#F87171]">{error}</p>}
+      <div className="flex gap-2">
+        <button type="button" onClick={onCancel} className="h-9 rounded-xl border border-line px-4 text-sm hover:bg-white/5">Cancel</button>
+        <button type="submit" disabled={busy} className="h-9 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{busy ? "Saving…" : "Save"}</button>
+      </div>
+    </form>
+  );
+}
+
 /* ───────────── Popups ───────────── */
 
 function InfoPopup({ row, now, tracker, onClose, onDelete, onHide, onChanged, reload, say }: { row: Row; now: Date; tracker: Tracker; onClose: () => void; onDelete: () => void; onHide: () => void; onChanged: (note: string) => void; reload: () => Promise<void>; say: (message: string) => void }) {
   const { job, progress } = row;
   const events = eventsOf(job);
+  const [editing, setEditing] = useState(false);
   return (
     <Popup label={`${companyOf(job)}, ${titleOf(job)}`} onClose={onClose} width="max-w-2xl">
       <div className="flex flex-col gap-5">
@@ -193,6 +242,7 @@ function InfoPopup({ row, now, tracker, onClose, onDelete, onHide, onChanged, re
             <p className="m-0 truncate text-sm text-muted">{companyOf(job)} · {isApplied(job) ? `applied ${short(appliedOn(job as never))}` : "not applied yet"}{job.location ? ` · ${job.location}` : ""}</p>
           </div>
         </div>
+        {editing && <EditJob job={job} onCancel={() => setEditing(false)} onSaved={(note) => { setEditing(false); onChanged(note); }} />}
         <div className="flex flex-wrap items-center gap-3"><StatusMenu row={row} onChanged={onChanged} /><span className={`text-sm ${progress.due ? "text-[#F5A524]" : "text-[#B4B4BC]"}`}>{progress.next}</span></div>
         {isApplied(job) && <StepsLine progress={progress} />}
         {events.length > 0 && (
@@ -213,6 +263,7 @@ function InfoPopup({ row, now, tracker, onClose, onDelete, onHide, onChanged, re
         <PeoplePanel job={job} free={Boolean(tracker.free)} badge={tracker.peopleBadge} note={tracker.peopleNote} reload={reload} say={say} />
         <div className="flex flex-wrap items-center gap-3 border-t border-[#1F1F24] pt-4">
           {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-4">Job posting ↗</a>}
+          {!editing && <button type="button" onClick={() => { setEditing(true); document.querySelector("[role=dialog]")?.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-sm text-[#B4B4BC] underline underline-offset-4 hover:text-white">Edit job info</button>}
           {isApplied(job) && <button type="button" onClick={onHide} className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-xl border border-line px-3 text-sm text-[#B4B4BC] hover:bg-white/5 hover:text-white"><EyeIcon off={!isHidden(job)} />{isHidden(job) ? "Show job" : "Hide job"}</button>}
           <button type="button" onClick={onDelete} className={`${isApplied(job) ? "" : "ml-auto "}h-9 rounded-xl border border-[#3A2020] px-3 text-sm text-[#F87171] hover:bg-[#2A1A1A]`}>Delete job</button>
           <button type="button" autoFocus onClick={onClose} className="h-9 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-zinc-200">Done</button>
