@@ -84,7 +84,7 @@ const OUTCOME_LABEL: Array<[string, string]> = [["submitted", "Applied"], ["foll
  * The job's status as a menu, in its popup: Not applied (until it is), Applied, then what happened after. A job not
  * applied to yet is marked applied first; "Applied" clears an outcome. The list is read again after each change.
  */
-function StatusMenu({ row, onChanged }: { row: Row; onChanged: (note: string) => void }) {
+function StatusMenu({ row, onChanged, wide = false }: { row: Row; onChanged: (note: string) => void; wide?: boolean }) {
   const { job } = row;
   const applied = isApplied(job);
   const current = applied ? job.fillReport?.outcome ?? "submitted" : "not_applied";
@@ -111,13 +111,13 @@ function StatusMenu({ row, onChanged }: { row: Row; onChanged: (note: string) =>
     }
   };
   return (
-    <span className="inline-flex flex-col gap-1">
+    <span className={`${wide ? "flex" : "inline-flex"} flex-col gap-1`}>
       <select
         aria-label="Status"
         value={current}
         disabled={busy}
         onChange={(event) => void change(event.target.value)}
-        className="h-8 cursor-pointer rounded-full border bg-[#0C0C0E] px-3 text-[13px] font-medium disabled:opacity-60"
+        className={`cursor-pointer border bg-[#0C0C0E] font-medium disabled:opacity-60 ${wide ? "h-10 w-full rounded-xl px-3 text-sm" : "h-8 rounded-full px-3 text-[13px]"}`}
         style={{ color, borderColor: `${color}66` }}
       >
         {!applied && <option value="not_applied">Not applied</option>}
@@ -144,17 +144,25 @@ function Spider({ size = 44 }: { size?: number }) {
   );
 }
 
-function StepsLine({ progress }: { progress: Progress }) {
+/** The five steps down the side, each with the day it happened, and NOW (or DUE) on the one it's on. */
+function StepsList({ job, progress }: { job: TrackerJob; progress: Progress }) {
+  const events = eventsOf(job);
+  const on = (kind: string) => events.find((event) => event.kind === kind)?.at ?? null;
+  const dates = [appliedOn(job as never), on("emailed"), null, on("follow_up"), on("interview")];
   return (
-    <ol aria-label="Progress" className={`m-0 flex list-none p-0 ${progress.ended === "Rejected" ? "opacity-45" : ""}`}>
+    <ol aria-label="Progress" className={`m-0 flex list-none flex-col p-0 ${progress.ended === "Rejected" ? "opacity-50" : ""}`}>
       {STEPS.map((step, index) => {
         const state = index < progress.done ? "done" : index === progress.done && !progress.ended ? (progress.due ? "due" : "now") : "";
-        const dot = state === "done" ? "border-[#4ADE80] bg-[#4ADE80] text-[#052E14]" : state === "now" ? "border-[#3D8BFF] bg-[#0C0C0E] shadow-[0_0_0_4px_rgba(61,139,255,.18)]" : state === "due" ? "border-[#F5A524] bg-[#0C0C0E] shadow-[0_0_0_4px_rgba(245,165,36,.18)]" : "border-[#26262C] bg-[#0C0C0E]";
+        const date = state === "done" ? dates[index] : null;
         return (
-          <li key={step} aria-current={state === "now" || state === "due" ? "step" : undefined} className={`relative flex min-w-0 flex-1 flex-col items-center gap-1.5 text-center text-[11px] ${state ? "text-[#F7F7F8]" : "text-[#8B8B94]"}`}>
-            {index < STEPS.length - 1 && <span aria-hidden className={`absolute left-1/2 top-[10px] h-[1.5px] w-full ${index < progress.done ? "bg-[#4ADE80]" : "bg-[#26262C]"}`} />}
-            <i aria-hidden className={`relative z-10 grid h-5 w-5 place-items-center rounded-full border-[1.5px] text-[11px] font-semibold not-italic ${dot}`}>{state === "done" ? "✓" : ""}</i>
-            {step}
+          <li key={step} aria-current={state === "now" || state === "due" ? "step" : undefined} className="relative flex items-center gap-3 pb-3 text-sm last:pb-0">
+            {index < STEPS.length - 1 && <i aria-hidden className={`absolute left-[9px] top-5 h-[calc(100%-8px)] w-px ${index < progress.done ? "bg-[#4ADE80]/60" : "bg-[#1F1F24]"}`} />}
+            {state === "done" ? <span className="relative grid h-5 w-5 flex-none place-items-center rounded-full bg-[#4ADE80] text-[11px] text-[#052E14]">✓</span>
+              : state === "now" ? <span className="relative h-5 w-5 flex-none rounded-full border-2 border-[#3D8BFF] bg-[#0C0C0E] shadow-[0_0_0_4px_rgba(61,139,255,.15)]" />
+              : state === "due" ? <span className="relative h-5 w-5 flex-none rounded-full border-2 border-[#F5A524] bg-[#0C0C0E] shadow-[0_0_0_4px_rgba(245,165,36,.15)]" />
+              : <span className="relative h-5 w-5 flex-none rounded-full border border-[#26262C] bg-[#0C0C0E]" />}
+            <span className={state === "now" ? "font-semibold text-[#8DB8FF]" : state === "due" ? "font-semibold text-[#F5A524]" : state === "done" ? "" : "text-[#5C5C66]"}>{step}</span>
+            <span className={`ml-auto font-mono text-[11px] ${state === "now" ? "text-[#8DB8FF]" : state === "due" ? "text-[#F5A524]" : "text-[#5C5C66]"}`}>{state === "now" ? "NOW" : state === "due" ? "DUE" : date ? short(date) : ""}</span>
           </li>
         );
       })}
@@ -232,42 +240,79 @@ function InfoPopup({ row, now, tracker, onClose, onDelete, onHide, onChanged, re
   const { job, progress } = row;
   const events = eventsOf(job);
   const [editing, setEditing] = useState(false);
+  const label = "m-0 font-mono text-[11px] uppercase tracking-[1.4px] text-[#5C5C66]";
+  const action = "flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-sm";
   return (
-    <Popup label={`${companyOf(job)}, ${titleOf(job)}`} onClose={onClose} width="max-w-2xl">
-      <div className="flex flex-col gap-5">
-        <div className="flex items-center gap-3 pr-8">
-          <Tile name={companyOf(job)} size={40} />
-          <div className="min-w-0">
-            <h2 className="m-0 truncate text-lg font-semibold tracking-tight">{titleOf(job)}</h2>
-            <p className="m-0 truncate text-sm text-muted">{companyOf(job)} · {isApplied(job) ? `applied ${short(appliedOn(job as never))}` : "not applied yet"}{job.location ? ` · ${job.location}` : ""}</p>
+    <Popup label={`${companyOf(job)}, ${titleOf(job)}`} onClose={onClose} width="max-w-4xl" bare>
+      <div className="grid md:grid-cols-[minmax(0,1fr)_300px]">
+        {/* The job and its people. */}
+        <div className="flex min-w-0 flex-col gap-7 p-5 sm:p-7">
+          <div className="flex items-start gap-4 pr-8 md:pr-0">
+            <Tile name={companyOf(job)} size={56} />
+            <div className="min-w-0 flex-1">
+              <p className="m-0 truncate font-mono text-[11px] uppercase tracking-[1.6px] text-[#8B8B94]">{companyOf(job)}</p>
+              {job.titleMissing ? (
+                <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-dashed border-[#F5A524]/50 bg-[#F5A524]/[0.06] px-3 py-2">
+                  <span aria-hidden className="font-semibold text-[#F5A524]">!</span>
+                  <span className="text-sm text-[#F5D79A]">The job title didn&apos;t come through.</span>
+                  <button type="button" onClick={() => setEditing(true)} className="ml-auto flex-none text-sm font-semibold text-[#F5A524] underline underline-offset-4">Add it</button>
+                </div>
+              ) : (
+                <h2 className="m-0 mt-1 text-xl font-semibold leading-snug tracking-tight sm:text-2xl">{job.title}</h2>
+              )}
+            </div>
           </div>
+          {editing && <EditJob job={job} onCancel={() => setEditing(false)} onSaved={(note) => { setEditing(false); onChanged(note); }} />}
+          <PeoplePanel job={job} free={Boolean(tracker.free)} badge={tracker.peopleBadge} note={tracker.peopleNote} reload={reload} say={say} />
         </div>
-        {editing && <EditJob job={job} onCancel={() => setEditing(false)} onSaved={(note) => { setEditing(false); onChanged(note); }} />}
-        <div className="flex flex-wrap items-center gap-3"><StatusMenu row={row} onChanged={onChanged} /><span className={`text-sm ${progress.due ? "text-[#F5A524]" : "text-[#B4B4BC]"}`}>{progress.next}</span></div>
-        {isApplied(job) && <StepsLine progress={progress} />}
-        {events.length > 0 && (
+
+        {/* Where it is, its details, and what to do with it. */}
+        <aside className="flex flex-col gap-6 border-t border-[#1F1F24] bg-[#08080A] p-5 sm:p-6 md:border-l md:border-t-0 md:pt-14">
           <div className="flex flex-col gap-2">
-            <p className="m-0 font-mono text-[11px] uppercase tracking-[1.4px] text-[#8B8B94]">What happened</p>
-            <ol className="m-0 flex list-none flex-col p-0">
-              {events.map((event, index) => (
-                <li key={`${event.day}-${event.kind}`} className="relative flex items-center gap-3 py-1.5 text-sm">
-                  {index < events.length - 1 && <i aria-hidden className="absolute left-[9px] top-[22px] h-full w-px bg-[#1F1F24]" />}
-                  <span className="relative z-10 grid h-5 w-5 place-items-center rounded-full bg-[#141416] text-[11px]" style={{ color: MARK[event.kind].color }}>{MARK[event.kind].glyph}</span>
-                  <span className="flex-1">{MARK[event.kind].label}</span>
-                  <span className="font-mono text-[11px] text-[#8B8B94]">{short(event.at)} · {ago(event.at, now)}</span>
-                </li>
-              ))}
-            </ol>
+            <p className={label}>Status</p>
+            <StatusMenu row={row} onChanged={onChanged} wide />
+            <p className={`m-0 text-[13px] ${progress.due ? "text-[#F5A524]" : "text-[#9A9AA3]"}`}>{progress.next}</p>
           </div>
-        )}
-        <PeoplePanel job={job} free={Boolean(tracker.free)} badge={tracker.peopleBadge} note={tracker.peopleNote} reload={reload} say={say} />
-        <div className="flex flex-wrap items-center gap-3 border-t border-[#1F1F24] pt-4">
-          {job.url && <a href={job.url} target="_blank" rel="noreferrer" className="text-sm underline underline-offset-4">Job posting ↗</a>}
-          {!editing && <button type="button" onClick={() => { setEditing(true); document.querySelector("[role=dialog]")?.scrollTo({ top: 0, behavior: "smooth" }); }} className="text-sm text-[#B4B4BC] underline underline-offset-4 hover:text-white">Edit job info</button>}
-          {isApplied(job) && <button type="button" onClick={onHide} className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-xl border border-line px-3 text-sm text-[#B4B4BC] hover:bg-white/5 hover:text-white"><EyeIcon off={!isHidden(job)} />{isHidden(job) ? "Show job" : "Hide job"}</button>}
-          <button type="button" onClick={onDelete} className={`${isApplied(job) ? "" : "ml-auto "}h-9 rounded-xl border border-[#3A2020] px-3 text-sm text-[#F87171] hover:bg-[#2A1A1A]`}>Delete job</button>
-          <button type="button" autoFocus onClick={onClose} className="h-9 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-zinc-200">Done</button>
-        </div>
+          {isApplied(job) && (
+            <div className="flex flex-col gap-3">
+              <p className={label}>Progress</p>
+              <StepsList job={job} progress={progress} />
+            </div>
+          )}
+          <div className="flex flex-col gap-2">
+            <p className={label}>Details</p>
+            <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+              <dt className="text-[#5C5C66]">Applied</dt><dd className="m-0 truncate text-right">{isApplied(job) ? `${short(appliedOn(job as never))}, ${ago(appliedOn(job as never), now)}` : "Not yet"}</dd>
+              <dt className="text-[#5C5C66]">Location</dt><dd className={`m-0 truncate text-right ${job.location ? "" : "text-[#5C5C66]"}`}>{job.location || "—"}</dd>
+              <dt className="text-[#5C5C66]">Posting</dt><dd className="m-0 text-right">{job.url ? <a href={job.url} target="_blank" rel="noreferrer" className="underline underline-offset-4">Open ↗</a> : <span className="text-[#5C5C66]">—</span>}</dd>
+            </dl>
+          </div>
+          {events.length > 1 && (
+            <div className="flex flex-col gap-2">
+              <p className={label}>What happened</p>
+              <ol className="m-0 flex list-none flex-col gap-1.5 p-0">
+                {events.map((event) => (
+                  <li key={`${event.day}-${event.kind}`} className="flex items-center gap-2 text-[13px]">
+                    <span className="w-4 flex-none text-center" style={{ color: MARK[event.kind].color }}>{MARK[event.kind].glyph}</span>
+                    <span className="min-w-0 flex-1 truncate">{MARK[event.kind].label}</span>
+                    <span className="font-mono text-[11px] text-[#5C5C66]">{short(event.at)}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          )}
+          <div className="mt-auto flex flex-col gap-0.5 border-t border-[#1F1F24] pt-4">
+            {!editing && (
+              <button type="button" onClick={() => setEditing(true)} className={`${action} text-[#B4B4BC] hover:bg-white/5 hover:text-white`}>
+                <svg aria-hidden viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M11 2.5l2.5 2.5L6 12.5H3.5V10z" /></svg>Edit job info
+              </button>
+            )}
+            {isApplied(job) && <button type="button" onClick={onHide} className={`${action} text-[#B4B4BC] hover:bg-white/5 hover:text-white`}><EyeIcon off={!isHidden(job)} />{isHidden(job) ? "Show job" : "Hide job"}</button>}
+            <button type="button" onClick={onDelete} className={`${action} text-[#F87171] hover:bg-[#2A1A1A]`}>
+              <svg aria-hidden viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4" /></svg>Delete job
+            </button>
+          </div>
+        </aside>
       </div>
     </Popup>
   );

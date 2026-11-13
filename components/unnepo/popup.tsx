@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 const stack: Array<object> = [];
 
 /** A popup over the blurred page. Escape or a click outside closes it. */
-export function Popup({ label, onClose, children, width = "max-w-lg" }: { label: string; onClose: () => void; children: ReactNode; width?: string }) {
+export function Popup({ label, onClose, children, width = "max-w-lg", bare = false }: { label: string; onClose: () => void; children: ReactNode; width?: string; bare?: boolean }) {
   const me = useRef({});
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; }, [onClose]);
@@ -27,8 +27,8 @@ export function Popup({ label, onClose, children, width = "max-w-lg" }: { label:
   }, []);
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-3 backdrop-blur-md sm:items-center sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div role="dialog" aria-modal="true" aria-label={label} className={`relative max-h-[90vh] w-full ${width} overflow-y-auto rounded-2xl border border-line bg-[#0C0C0E] p-5 text-[#F7F7F8] shadow-[0_30px_80px_-20px_rgba(0,0,0,.9)] sm:p-6`}>
-        <button type="button" aria-label="Close" onClick={onClose} className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-lg text-lg leading-none text-[#8B8B94] hover:bg-white/5 hover:text-white">×</button>
+      <div role="dialog" aria-modal="true" aria-label={label} className={`relative max-h-[90vh] w-full ${width} overflow-y-auto border border-line bg-[#0C0C0E] text-[#F7F7F8] shadow-[0_30px_80px_-20px_rgba(0,0,0,.9)] ${bare ? "rounded-3xl" : "rounded-2xl p-5 sm:p-6"}`}>
+        <button type="button" aria-label="Close" onClick={onClose} className="absolute right-3 top-3 z-10 grid h-8 w-8 place-items-center rounded-lg text-lg leading-none text-[#8B8B94] hover:bg-white/5 hover:text-white">×</button>
         {children}
       </div>
     </div>,

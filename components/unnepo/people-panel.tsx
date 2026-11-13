@@ -62,6 +62,20 @@ function GmailIcon() {
   );
 }
 
+/** Who Unnepo looks for, as empty spots until it finds them. */
+function Spots({ searching = false }: { searching?: boolean }) {
+  return (
+    <div className="grid grid-cols-3 gap-2">
+      {["Recruiter", "Hiring manager", "Someone on the team"].map((role) => (
+        <div key={role} className="flex flex-col items-center gap-2 rounded-2xl border border-dashed border-[#26262C] px-2 py-4 text-center">
+          <span aria-hidden className={`grid h-11 w-11 place-items-center rounded-full bg-[#141418] text-[#5C5C66] ${searching ? "animate-pulse" : ""}`}>?</span>
+          <span className="text-xs leading-tight text-[#5C5C66]">{role}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 async function post(body: Record<string, unknown>) {
   const response = await fetch("/api/app/people", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
   const payload = await response?.json().catch(() => ({}));
@@ -159,15 +173,15 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
 
   const head = (
     <div className="flex items-center justify-between gap-3">
-      <p className={eyebrow}>People at {company}{job.contacts.length ? ` · ${job.contacts.length}` : ""}</p>
+      <p className={eyebrow}>People{job.contacts.length ? ` · ${job.contacts.length}` : ""}</p>
       {badge && isApplied(job) && <span className={`rounded-full border px-2 py-0.5 font-mono text-[10.5px] uppercase ${/^0 /.test(badge) ? "border-[#3A2020] text-[#F87171]" : "border-[#26262C] text-[#9A9AA3]"}`}>{badge}</span>}
     </div>
   );
   const errorLine = error ? <p role="alert" className="m-0 text-[13px] text-[#F87171]">{error}</p> : null;
-  const linkedIn = (label: string, keywords: string) => <a href={`https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords })}`} target="_blank" rel="noreferrer" className="text-[13px] underline underline-offset-4">{label} on LinkedIn ↗</a>;
+  const linkedIn = (label: string, keywords: string) => <a href={`https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords })}`} target="_blank" rel="noreferrer" className="text-[#F7F7F8] underline underline-offset-4">{label}</a>;
 
   if (!isApplied(job)) {
-    return <div className="flex flex-col gap-2">{head}<p className="m-0 text-sm text-muted">Once you apply, Unnepo finds who to email here: recruiters, the hiring manager, and the team.</p></div>;
+    return <div className="flex flex-col gap-3">{head}<Spots /><p className="m-0 text-sm text-muted">Once you apply, Unnepo finds who to email here.</p></div>;
   }
 
   const preview = !job.contacts.length && job.contactsStatus === "done" ? job.fillReport?.peoplePreview?.rows ?? [] : [];
@@ -197,8 +211,11 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
     return (
       <div className="flex flex-col gap-3">
         {head}
-        <p className="m-0 text-sm text-muted">Recruiters, the team, and people you have something in common with, with their work emails.</p>
-        <div><button type="button" onClick={() => void find()} disabled={busy.has("find")} className={primary}>{busy.has("find") ? "Starting…" : "Find people"}</button></div>
+        <Spots />
+        <div className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] bg-[#0A0A0C] p-4">
+          <p className="m-0 text-sm text-[#B4B4BC]">Unnepo finds recruiters, the team, and people you have something in common with, with their work emails.</p>
+          <div><button type="button" onClick={() => void find()} disabled={busy.has("find")} className={primary}>{busy.has("find") ? "Starting…" : "Find people"}</button></div>
+        </div>
         {note && <p className="m-0 text-[13px] text-[#F5A524]">{note}</p>}
         {errorLine}
       </div>
@@ -209,6 +226,7 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
     return (
       <div className="flex flex-col gap-2">
         {head}
+        <Spots searching />
         <p role="status" className="m-0 flex items-center gap-2 text-sm text-muted"><span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-[#3D8BFF]" />{job.contactsMessage || `Searching for people at ${company}…`}</p>
       </div>
     );
@@ -218,13 +236,15 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
     return (
       <div className="flex flex-col gap-3">
         {head}
-        {job.contactsMessage && <p className="m-0 text-[13px] text-muted">{job.contactsMessage}</p>}
-        <p className="m-0 text-sm text-muted">{stale || job.contactsStatus === "failed" ? "That search didn't finish." : `No one found at ${company} yet.`}</p>
-        <div className="flex flex-wrap gap-4">{linkedIn("Recruiters", `recruiter ${job.company}`)}{linkedIn("The team", `${job.department || job.title} ${job.company}`)}</div>
-        <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void find(); }}>
-          <input value={website} onChange={(event) => setWebsite(event.target.value)} placeholder="Company website, like acme.com" aria-label="Company website" className="h-9 min-w-0 flex-1 basis-48 rounded-lg border border-[#26262C] bg-[#0C0C0E] px-3 text-sm placeholder:text-[#8B8B94] focus:border-[#3D8BFF] focus:outline-none" />
-          <button type="submit" disabled={busy.has("find")} className={secondary}>{busy.has("find") ? "Starting…" : "Search again"}</button>
-        </form>
+        <Spots />
+        <div className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] bg-[#0A0A0C] p-4">
+          <p className="m-0 text-sm text-[#B4B4BC]">{stale || job.contactsStatus === "failed" ? "That search didn't finish." : "No one found yet."} Add the company&apos;s website and Unnepo looks again.</p>
+          <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void find(); }}>
+            <input value={website} onChange={(event) => setWebsite(event.target.value)} placeholder="Company website, like acme.com" aria-label="Company website" className="h-10 min-w-0 flex-1 basis-48 rounded-xl border border-[#26262C] bg-[#0C0C0E] px-3 text-sm placeholder:text-[#5C5C66] focus:border-[#3D8BFF] focus:outline-none" />
+            <button type="submit" disabled={busy.has("find")} className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{busy.has("find") ? "Starting…" : "Search"}</button>
+          </form>
+          <p className="m-0 text-[13px] text-[#8B8B94]">Or look yourself: {linkedIn("recruiters", `recruiter ${job.company}`)} · {linkedIn("the team", `${job.department || job.title} ${job.company}`)} on LinkedIn ↗</p>
+        </div>
         {note && <p className="m-0 text-[13px] text-[#F5A524]">{note}</p>}
         {errorLine}
       </div>
