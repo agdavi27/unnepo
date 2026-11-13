@@ -1006,6 +1006,24 @@ export const repo = {
       return row;
     });
   },
+  /** Adds someone to the launch waitlist. The same email twice updates the first entry instead of adding another. */
+  async joinWaitlist(entry: { name: string; email: string; phone?: string }) {
+    return withLock((db) => {
+      db.waitlist = db.waitlist ?? [];
+      const existing = db.waitlist.find((item) => item.email === entry.email);
+      if (existing) {
+        existing.name = entry.name;
+        if (entry.phone) existing.phone = entry.phone;
+        return existing;
+      }
+      const row = { ...entry, id: id(), createdAt: nowIso() };
+      db.waitlist.push(row);
+      return row;
+    });
+  },
+  async listWaitlist() {
+    return withLock((db) => db.waitlist ?? []);
+  },
   async recordWebhook(provider: string, eventId: string) {
     return withLock((db) => {
       if (db.webhooks.some((item) => item.provider === provider && item.eventId === eventId)) return false;
