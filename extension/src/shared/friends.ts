@@ -3,11 +3,12 @@ import { escape, redraw } from "./tracker-view";
 
 /**
  * Friends, in the side panel. On Week, once there's a friend: each friend and how many jobs they applied to this
- * week. On Me: add a friend by email, answer requests, and remove friends. Only the count
- * is shared, and only once the friend accepts.
+ * week. On Me: add a friend by email, answer requests, and remove friends; tapping a friend shows this week's
+ * points against them. Only counts are shared (never who or where), and only once the friend accepts.
  */
 
-type Friend = { id: string; name: string; applied: number };
+type Stats = { applied: number; emails: number; followUps: number; letters: number; replies: number; interviews: number };
+type Friend = { id: string; name: string; applied: number; stats?: Stats; points?: number };
 type Incoming = { id: string; name: string; email: string };
 type Outgoing = { id: string; email: string };
 
@@ -15,6 +16,8 @@ const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Prom
 
 const friends = {
   list: null as Friend[] | null, incoming: [] as Incoming[], outgoing: [] as Outgoing[],
+  /** The student's own week, and what each thing is worth. */
+  me: null as { stats: Stats; points: number } | null, weights: null as Stats | null,
   error: "", loading: false, loadedAt: 0,
   /** What happened after Add, Accept or Remove. */
   note: "", noteBad: false, busy: false, email: "",
@@ -23,7 +26,7 @@ const friends = {
 export async function loadFriends() {
   if (friends.loading) return;
   friends.loading = true;
-  type Answer = { ok: boolean; error?: string; friends?: Friend[]; incoming?: Incoming[]; outgoing?: Outgoing[] };
+  type Answer = { ok: boolean; error?: string; friends?: Friend[]; incoming?: Incoming[]; outgoing?: Outgoing[]; me?: { stats: Stats; points: number }; points?: Stats };
   const result = await ask<Answer>({ type: "friends", since: weekStart(new Date()).toISOString() }).catch((): Answer => ({ ok: false, error: "Couldn't reach Unnepo." }));
   friends.loading = false;
   friends.loadedAt = Date.now();
@@ -31,6 +34,8 @@ export async function loadFriends() {
     friends.list = result.friends ?? [];
     friends.incoming = result.incoming ?? [];
     friends.outgoing = result.outgoing ?? [];
+    friends.me = result.me ?? null;
+    friends.weights = result.points ?? null;
     friends.error = "";
   } else friends.error = result.error ?? "Couldn't load your friends.";
   redraw();
@@ -99,7 +104,7 @@ export function friendPopup(key: string): { title: string; body: string } | null
   const head = (name: string, sub: string, mark = "") => `<div class="account-head"><span class="friend-av big${mark}" aria-hidden="true">${escape(initials(name))}</span><span class="account-text"><span class="account-name">${escape(name)}</span><span class="sub">${escape(sub)}</span></span></div>`;
   if (key === "add") {
     return { title: "Add a friend", body: `
-      <p class="small">Once they accept, you each see how many jobs the other applied to this week. Nothing else is shared.</p>
+      <p class="small">Once they accept, you each see what the other did this week: applications, emails, follow-ups, cover letters, replies and interviews. Never who you emailed or where you applied.</p>
       <form class="add-row" id="friend-form">
         <input class="field" id="friend-email" type="email" placeholder="friend@school.edu" aria-label="Friend's email" value="${escape(friends.email)}" autocomplete="off" required>
         <button type="submit" class="btn accent" ${busy}>${friends.busy ? "Adding…" : "Add"}</button>
@@ -108,14 +113,35 @@ export function friendPopup(key: string): { title: string; body: string } | null
   const [kind, id] = key.split(":");
   if (kind === "in") {
     const item = friends.incoming.find((entry) => entry.id === id);
-    return item ? { title: "Friend request", body: `${head(item.name, item.email, " asking")}<p class="small">${escape(item.name.split(" ")[0]!)} wants to compare weekly applications with you.</p><div class="add-row"><button type="button" class="btn primary grow" data-friend-accept="${item.id}" ${busy}>Accept</button><button type="button" class="btn" data-friend-decline="${item.id}" ${busy}>Decline</button></div>` } : null;
+    return item ? { title: "Friend request", body: `${head(item.name, item.email, " asking")}<p class="small">${escape(item.name.split(" ")[0]!)} wants to compete with you each week: applications, emails, follow-ups, cover letters, replies and interviews.</p><div class="add-row"><button type="button" class="btn primary grow" data-friend-accept="${item.id}" ${busy}>Accept</button><button type="button" class="btn" data-friend-decline="${item.id}" ${busy}>Decline</button></div>` } : null;
   }
   if (kind === "f") {
     const item = friends.list?.find((entry) => entry.id === id);
-    return item ? { title: item.name, body: `${head(item.name, `${item.applied} ${item.applied === 1 ? "job" : "jobs"} this week`)}<button type="button" class="btn" data-friend-remove="${item.id}" ${busy}>Remove friend</button>` } : null;
+    return item ? { title: `You vs ${item.name.split(" ")[0]}`, body: `${scoreCard(item)}<button type="button" class="btn quiet-remove" data-friend-remove="${item.id}" ${busy}>Remove friend</button>` } : null;
   }
   const item = friends.outgoing.find((entry) => entry.id === id);
   return item ? { title: "Request sent", body: `${head(item.email, "Waiting for them to accept", " waiting")}<button type="button" class="btn" data-friend-remove="${item.id}" ${busy}>Cancel request</button>` } : null;
+}
+
+const ROWS: Array<[keyof Stats, string]> = [["applied", "Applied"], ["emails", "Email sent"], ["followUps", "Follow-up"], ["letters", "Cover letter"], ["replies", "Reply"], ["interviews", "Interview"]];
+
+/** This week's points against one friend: both totals, who's ahead, and where each point came from. */
+function scoreCard(friend: Friend) {
+  const mine = friends.me;
+  const weights = friends.weights;
+  if (!mine || !friend.stats || !weights) return `<p class="small">${friend.applied} ${friend.applied === 1 ? "job" : "jobs"} this week.</p>`;
+  const theirs = friend.points ?? 0;
+  const gap = mine.points - theirs;
+  const first = friend.name.split(" ")[0]!;
+  const lead = gap > 0 ? `<span class="score-pill ahead">+${gap} ahead</span>` : gap < 0 ? `<span class="score-pill behind">${gap} behind</span>` : `<span class="score-pill">Tied</span>`;
+  const side = (label: string, mark: string, points: number, win: boolean, who: string) => `<div class="score-side${win ? " win" : ""} ${who}"><span class="friend-av" aria-hidden="true">${escape(mark)}</span><span class="score-num">${points}</span><span class="sub">${escape(label)}</span></div>`;
+  const rows = ROWS.map(([key, label]) => {
+    const [a, b] = [mine.stats[key] * weights[key], friend.stats![key] * weights[key]];
+    return `<tr><td>${label}</td><td class="pts">${weights[key]} each</td><td class="${a > b ? "win me" : ""}">${a}</td><td class="${b > a ? "win them" : ""}">${b}</td></tr>`;
+  }).join("");
+  return `<div class="score-top">${side("You", "★", mine.points, gap > 0, "me")}${lead}${side(first, initials(friend.name), theirs, gap < 0, "them")}</div>
+    <table class="score-table"><thead><tr><th>Action</th><th class="pts">Points</th><th>You</th><th>${escape(first)}</th></tr></thead><tbody>${rows}</tbody></table>
+    <p class="small">Replies and interviews are worth the most, so reaching out pays.</p>`;
 }
 
 async function act(body: Record<string, unknown>, done: (result: { status?: string; emailed?: boolean }) => string) {

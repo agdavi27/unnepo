@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applications } from "@/lib/apply/store";
+import { applicationContacts, applications } from "@/lib/apply/store";
+import { updateOutreach } from "@/lib/apply/service";
 import { progressOf } from "@/lib/apply/progress";
 import { signUp } from "@/lib/services/auth";
 import { friendAction, inviteFriend, listFriends } from "@/lib/social/friends";
@@ -26,8 +27,9 @@ describe("friends", () => {
       const pat = await student("pat.doe@colby.edu", "Pat Doe");
       const since = new Date(Date.now() - 3 * 86_400_000).toISOString();
       const { friends } = await listFriends(admin, since);
-      expect(friends).toEqual([{ id: "demo-brody", name: "Brody", applied: expect.any(Number) }]);
+      expect(friends).toEqual([{ id: "demo-brody", name: "Brody", applied: expect.any(Number), stats: expect.objectContaining({ emails: expect.any(Number), interviews: expect.any(Number) }), points: expect.any(Number) }]);
       expect(friends[0].applied).toBeGreaterThan(2);
+      expect(friends[0].points).toBeGreaterThan(friends[0].applied * 3);
       expect((await listFriends(pat, since)).friends).toEqual([]);
       // Removing him does nothing harmful: he's back next time.
       expect(await friendAction(admin, { action: "remove", id: "demo-brody" })).toMatchObject({ ok: true });
@@ -58,6 +60,21 @@ describe("friends", () => {
     expect(after.friends).toEqual([expect.objectContaining({ name: "Sam Roe", applied: 2 })]);
     expect(after.outgoing).toEqual([]);
     expect((await listFriends(sam, since)).friends).toEqual([expect.objectContaining({ name: "Pat Doe", applied: 0 })]);
+
+    // Emails, a follow-up and a reply count too, once each, and turn into points: 2 applied (3 each), an email (2),
+    // a follow-up (2) and a reply (5).
+    const job = (await applications.list(sam)).find((app) => app.jobKey === "url:acme.com/job/1")!;
+    await applicationContacts.replace(sam, job.id, [{ rank: 1, role: "recruiter", name: "Avery Kim", title: "Recruiter", email: "avery.kim@acme.com", emailSource: "likely", relevance: "", linkedinUrl: null, photoUrl: null, applicationId: job.id, userId: sam, emailSubject: null, emailBody: null }]);
+    const [avery] = await applicationContacts.list(sam, [job.id]);
+    await updateOutreach(sam, { contactId: avery.id, status: "emailed" });
+    await updateOutreach(sam, { contactId: avery.id, status: "emailed" });
+    await updateOutreach(sam, { contactId: avery.id, status: "emailed", followedUp: true });
+    await updateOutreach(sam, { contactId: avery.id, status: "replied" });
+    await updateOutreach(sam, { contactId: avery.id, status: "replied" });
+    const scored = (await listFriends(pat, since)).friends[0];
+    expect(scored.stats).toEqual({ applied: 2, emails: 1, followUps: 1, letters: 0, replies: 1, interviews: 0 });
+    expect(scored.points).toBe(6 + 2 + 2 + 5);
+    expect((await listFriends(sam, since)).me).toEqual({ stats: scored.stats, points: 15 });
   });
 
   it("waits for an email with no account, and accepts when the other side asked first", async () => {

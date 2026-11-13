@@ -167,6 +167,12 @@ export async function assertUseAllowed(userId: string, kind: UsageKind) {
   if (usage[kind].left === 0) throw new ServiceError(usage[kind].note, kind, usage.free ? 402 : 429);
 }
 
+/** This week's counts (from Monday, Eastern time): cover letters written, and the rest. */
+export async function weekUses(userId: string): Promise<UsageCounts> {
+  const uses = (await applicationProfiles.get(userId))?.uses;
+  return uses?.week === weekKey() ? uses.weekly ?? {} : {};
+}
+
 /** After a use that worked: one more, in the day's, week's and month's counts. Edits the student types themselves don't count. */
 export async function countUse(userId: string, kind: CountedKind) {
   // An account with no saved profile yet still counts, or it would never run out: its profile is built from the
