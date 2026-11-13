@@ -627,3 +627,16 @@ body.contained { height: 100vh; min-height: 0; }
 .two-up { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .two-up .question { min-width: 0; }
 .tools:has(.tiles) { padding-top: 0; }
+
+/* Add a job popup: one detected job at a time, and a form short enough to see without scrolling. */
+.pager { display: inline-flex; align-items: center; gap: 6px; }
+.pager .mono { font-size: 11px; }
+.pager-btn { width: 26px; height: 26px; padding: 0; border: 1px solid var(--control); border-radius: 999px; background: transparent; color: var(--fg); font-size: 15px; line-height: 1; cursor: pointer; }
+.pager-btn:disabled { opacity: .3; cursor: default; }
+.detected-inline .detected { padding: 4px 0 0; border-top: 0; }
+.detected-inline .detected-desc { max-height: 110px; }
+.add-form { gap: 8px; }
+.add-form .field { height: 38px; font-size: 13px; }
+.add-row { display: flex; gap: 8px; }
+.add-row .field { flex: 1; min-width: 0; }
+.add-row .btn { flex: none; width: auto; min-height: 38px; height: 38px; padding: 0 14px; font-size: 13px; }

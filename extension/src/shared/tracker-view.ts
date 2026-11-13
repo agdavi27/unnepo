@@ -658,6 +658,13 @@ export function wireReminders(root: HTMLElement) {
 
 const SURE: Record<Detected["sure"], string> = { confirmed: "Confirmed", likely: "Likely", pressed: "Pressed Apply", viewed: "Viewed" };
 let detectedOpen = false;
+/** Which detected job the Add a job popup shows: one at a time, by id. */
+let detectedShown = "";
+/** Back to the first job still waiting for an answer, each time the popup opens. */
+export function resetDetectedPager() {
+  const list = (store.detected ?? []).slice(0, 5);
+  detectedShown = (list.find((item) => item.state === "ask") ?? list[0])?.id ?? "";
+}
 const ago = (at: number) => {
   const minutes = Math.round((Date.now() - at) / 60_000);
   if (minutes < 1) return "just now";
@@ -700,11 +707,16 @@ export function detectedMenu(inline = false) {
         <div class="detected-actions">${actions}</div>
       </li>`;
   };
-  if (inline) return `
+  if (inline) {
+    const shown = list.slice(0, 5);
+    const at = Math.max(0, shown.findIndex((item) => item.id === detectedShown));
+    const arrow = (to: number, label: string, glyph: string) => `<button type="button" class="pager-btn" data-detected-page="${shown[to]?.id ?? ""}" aria-label="${label}" ${shown[to] ? "" : "disabled"}>${glyph}</button>`;
+    return `
     <div class="add-part detected-inline">
-      <div class="row-between"><span class="eyebrow">Detected${asking ? ` <span class="count">${asking}</span>` : ""}</span><span class="mono">LAST ${Math.min(5, list.length) || 5}</span></div>
-      ${list.length ? `<ul class="detected-list">${list.slice(0, 5).map(row).join("")}</ul>` : `<p class="small">Jobs you open or apply to show up here. Ones the site confirms are saved by themselves.</p>`}
+      <div class="row-between"><span class="eyebrow">Detected${asking ? ` <span class="count">${asking}</span>` : ""}</span>${shown.length > 1 ? `<span class="pager">${arrow(at - 1, "Newer job", "‹")}<span class="mono">${at + 1} of ${shown.length}</span>${arrow(at + 1, "Older job", "›")}</span>` : ""}</div>
+      ${shown.length ? `<ul class="detected-list">${row(shown[at])}</ul>` : `<p class="small">Jobs you open or apply to show up here. Ones the site confirms are saved by themselves.</p>`}
     </div>`;
+  }
   return `
     <details class="detected-menu" id="detected-menu" ${detectedOpen ? "open" : ""}>
       <summary><span>Detected jobs${asking ? ` <span class="count">${asking}</span>` : ""}</span><span class="mono">LAST ${Math.min(5, list.length) || 5}</span></summary>
@@ -725,6 +737,7 @@ export function wireDetected(root: HTMLElement) {
   root.querySelectorAll<HTMLButtonElement>("[data-detected-yes]").forEach((button) => button.addEventListener("click", () => { button.disabled = true; void act({ type: "detected-answer", id: button.dataset.detectedYes, applied: true }, item(button.dataset.detectedYes!)); }));
   root.querySelectorAll<HTMLButtonElement>("[data-detected-no]").forEach((button) => button.addEventListener("click", () => void act({ type: "detected-answer", id: button.dataset.detectedNo, applied: false })));
   root.querySelectorAll<HTMLButtonElement>("[data-detected-undo]").forEach((button) => button.addEventListener("click", () => void act({ type: "detected-undo", id: button.dataset.detectedUndo })));
+  root.querySelectorAll<HTMLButtonElement>("[data-detected-page]").forEach((button) => button.addEventListener("click", () => { detectedShown = button.dataset.detectedPage!; host.redraw(); }));
   root.querySelector<HTMLButtonElement>("#detected-clear")?.addEventListener("click", () => void act({ type: "detected-clear" }));
   root.querySelectorAll<HTMLButtonElement>(".detected-title[data-open-job]").forEach((button) => button.addEventListener("click", () => host.openJob(button.dataset.openJob!)));
 }
