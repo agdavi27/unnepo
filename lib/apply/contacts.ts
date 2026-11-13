@@ -375,7 +375,7 @@ const roleForTitle = (title: string): ContactRole => (RECRUITING.test(title) ? "
  * soon as one person has a usable email: the rest of the list is revealed when the student asks.
  * Every person comes from one of these sources. Nobody is invented. Each search is recorded, so a result can be traced.
  */
-export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; facts?: StudentFacts; known?: KnownEmail[]; progress?: Progress; /** Free's preview: the free searches only, no emails, nothing paid. */ preview?: boolean } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch; hidden: Record<string, HiddenPerson>; reveals: number }> {
+export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; facts?: StudentFacts; known?: KnownEmail[]; progress?: Progress; /** Free: one person, with an email built from the format and never checked, and no paid reveal. */ one?: boolean } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch; hidden: Record<string, HiddenPerson>; reveals: number; locked: number }> {
   const started = Date.now();
   const spentBefore = await spentTodayCents(userId).catch(() => 0);
   const over = () => Date.now() - started > TIME_BUDGET_MS;
@@ -481,11 +481,40 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
     });
   }
 
-  // Free's preview stops here: who's there, from the free searches, with no emails and nothing paid for.
-  if (options.preview) {
+  // Free stops here with one person: the one the posting names, or else the most relevant one. Their email is the
+  // posting's, or built from the company's format, never checked; the rest of the list stays with Pro.
+  if (options.one) {
     search.listed = listed.length;
-    const people = listed.map((row, index): ListedPerson => ({ rank: index + 1, role: row.role, name: row.name, title: row.title, email: null, emailSource: null, relevance: row.relevance, linkedinUrl: null, photoUrl: null, links: [] }));
-    return { people, domain: winner ?? domains[0] ?? null, notes: [], search, hidden: {}, reveals: 0 };
+    const pick = listed[0];
+    if (!pick) {
+      const notes = [domains.length ? `Couldn't find anyone at ${app.company} right now. Try LinkedIn.` : "Couldn't find the company's website or anyone there. Add the website below, or try LinkedIn."];
+      return { people: [], domain: winner ?? domains[0] ?? null, notes, search, hidden: {}, reveals: 0, locked: 0 };
+    }
+    const place = winner ?? domains[0] ?? null;
+    if (pick.name.includes("*") && !over()) {
+      await say(`Looking up ${pick.name.split(" ")[0]}'s full name…`);
+      const [first, ...rest] = pick.name.trim().split(/\s+/);
+      const names = await withLimit(lastNamesFromWeb(userId, trimmedCompany, [{ first, last: rest.join(" "), title: pick.title }]), 20_000, [] as string[]);
+      const match = unblur(pick.name, names.map((name) => ({ name, email: "" })));
+      if (match) pick.name = match.name;
+    }
+    if (pick.name.includes("*")) {
+      pick.name = pick.name.replace(/\s(\S)\S*\*\S*$/, (_, initial: string) => ` ${initial.toUpperCase()}.`);
+      if (!pick.linkedinUrl) pick.links.push({ label: "Find on LinkedIn", url: linkedinSearch(`${pick.name.split(" ")[0]} ${app.company}`) });
+    } else if (!pick.email && place && fullName(pick.name)) {
+      const format = await withLimit(learnFormat(userId, place, [], [pick.name], { useHunter: false }).catch(() => null), 15_000, null);
+      const built = format?.pattern ? buildEmail(format.pattern, pick.name, place) : null;
+      const fallback = buildEmail("{first}.{last}", pick.name, place);
+      if (built) [pick.email, pick.emailSource] = [built, format?.acceptAll ? "cant_check" : "likely"];
+      else if (fallback) [pick.email, pick.emailSource] = [fallback, "guess"];
+    }
+    const { guess, source, maybe, base, history, checked, ...rest } = pick;
+    void guess; void source; void maybe; void base; void history; void checked;
+    search.chosen = { name: pick.name, role: pick.role, email: Boolean(pick.email) };
+    search.withEmail = pick.email ? 1 : 0;
+    search.verified = 0;
+    search.costCents = Math.max(0, Math.round(((await spentTodayCents(userId).catch(() => spentBefore)) - spentBefore) * 10) / 10);
+    return { people: [{ ...rest, rank: 1 }], domain: place, notes: [], search, hidden: {}, reveals: 0, locked: listed.length - 1 };
   }
 
   // Free again: addresses published on the company's own pages, when Apollo has no one.
@@ -692,7 +721,7 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   else if (people.some((person) => person.emailSource === "likely" || person.emailSource === "guess")) notes.push(format?.pattern ? `Emails marked as not checked follow ${app.company}'s usual format (${format.pattern.replace(/[{}]/g, "")}@${domain}).` : `Couldn't learn ${app.company}'s email format, so some emails are a best guess (first.last).`);
   if (over()) notes.push("This search ran out of time, so it shows what it found. Search again for more.");
   if (hiddenCount && reveal.error) notes.push(`Apollo didn't reveal ${hiddenCount === 1 ? "1 person's last name" : `${hiddenCount} people's last names`}, so they show by first name with no email. Find them on LinkedIn. Apollo said: ${reveal.error.replace(/^Apollo bulk match failed /, "").slice(0, 160)}`);
-  return { people, domain: proven, notes, search, hidden, reveals };
+  return { people, domain: proven, notes, search, hidden, reveals, locked: 0 };
 }
 
 /** "Show person": pays to reveal one person on the list, then finds and checks their email. Null if they've left. */

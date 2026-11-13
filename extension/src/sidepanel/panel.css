@@ -757,3 +757,11 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .range-btn:hover { color: var(--fg); }
 .range-btn.on { background: var(--control); color: var(--fg); }
 .heat-how { display: flex; flex-direction: column; gap: 6px; }
+
+/* Free: the row under the one person shown, which opens Upgrade to Pro. */
+.unlock-row { border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); background: transparent; }
+.unlock-plus { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); font-weight: 600; }
+.person.compact.unlock-row .person-name, .person.compact.unlock-row .sub { white-space: normal; overflow: visible; }
+/* The name never shrinks to nothing next to its tags: the tags wrap under it instead. */
+.person-top { flex-wrap: wrap; row-gap: 2px; }
+.person-head .person-top .person-name { flex: 0 1 auto; min-width: 0; max-width: 100%; }

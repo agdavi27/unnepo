@@ -195,6 +195,9 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
   );
 
   const firstWithEmail = job.contacts.find((person) => person.email)?.id;
+  // Free shows one person; the rest of who the search found (and checked emails) come with Pro.
+  const moreFound = job.fillReport?.peopleLocked ?? 0;
+  const unlockLine = moreFound ? `${moreFound} more ${moreFound === 1 ? "person" : "people"} at ${company}, with checked emails` : "Recruiters, the team and alumni, with checked emails";
   const revealsLeft = (job.fillReport?.peopleReveals ?? 0) < MAX_REVEALS;
   const isHiddenPerson = (person: Person) => !person.email && job.hidden.includes(person.name.toLowerCase());
   const focused = focus ? job.contacts.find((person) => person.id === focus) ?? null : null;
@@ -322,6 +325,16 @@ export function PeoplePanel({ job, free, badge, note, reload, say }: { job: Trac
           </li>
         );
       })}
+      {free && job.contacts.length > 0 && (
+        <li className="flex items-center gap-3 rounded-xl border border-dashed border-[#2A3A5A] px-3 py-3">
+          <span aria-hidden className="grid h-9 w-9 flex-none place-items-center rounded-full bg-[#3D8BFF]/10 text-[#3D8BFF]">+</span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm font-semibold">Unlock more people</span>
+            <span className="block truncate text-xs text-[#8B8B94]">{unlockLine}</span>
+          </span>
+          <a href="/home?tab=pro" className="flex-none rounded-lg bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200">Upgrade to Pro</a>
+        </li>
+      )}
     </ul>
   );
   const popup = focused ? <Popup label={focused.name} onClose={() => setFocus(null)} width="max-w-xl">{details(focused)}</Popup> : null;

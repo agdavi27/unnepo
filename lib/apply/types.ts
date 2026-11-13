@@ -96,6 +96,8 @@ export type FillReport = {
    * with an upgrade. Cleared when a real search runs.
    */
   peoplePreview?: { at: string; company: string; rows: Array<{ role: ContactRole; title: string }> };
+  /** Free: how many more people the search found beyond the one shown, which Pro unlocks. */
+  peopleLocked?: number;
   peopleReveals?: number;
   /** When the student marked each person (by contact id) as emailed, for follow-up reminders. */
   emailedAt?: Record<string, string>;

@@ -313,7 +313,7 @@ function peopleCard(job: TrackerJob) {
   const posted = job.postedRecruiter && !job.contacts.some((person) => person.role === "job_poster")
     ? `<p class="small">Posted by <strong>${escape(job.postedRecruiter.name)}</strong>${job.postedRecruiter.title ? `, ${escape(job.postedRecruiter.title)}` : ""}${job.postedRecruiter.linkedinUrl ? ` · <a href="${escape(job.postedRecruiter.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</p>`
     : "";
-  // The corner says how many companies' people are left: "1 left this week" on Free, "Unlimited" on Pro.
+  // The corner says how many companies' people are left: "1 person per job" on Free, "Unlimited" on Pro.
   const badge = store.tracker?.peopleBadge;
   const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${job.contacts.length ? ` · ${job.contacts.length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
   if (!isAppliedJob(job)) {
@@ -355,7 +355,17 @@ function peopleCard(job: TrackerJob) {
 function peopleList(job: TrackerJob) {
   return `<ul class="people-list">${job.contacts.map((person, index) => store.tracker?.free && !person.email && job.hidden.includes(person.name.toLowerCase())
     ? freeRow(person.name, person.title, person.role)
-    : personRow(job, person, index === job.contacts.findIndex((other) => other.email))).join("")}</ul>`;
+    : personRow(job, person, index === job.contacts.findIndex((other) => other.email))).join("")}${store.tracker?.free ? unlockRow(job) : ""}</ul>`;
+}
+
+/** Free shows one person: the rest of who the search found, and checked emails, come with Pro. */
+function unlockRow(job: TrackerJob) {
+  const more = job.fillReport?.peopleLocked ?? 0;
+  const company = job.companyMissing ? "this company" : short(job.company, 24);
+  const line = more ? `${more} more ${more === 1 ? "person" : "people"} at ${company}, with checked emails` : "Recruiters, the team and alumni, with checked emails";
+  return `<li class="person compact unlock-row"><span class="unlock-plus" aria-hidden="true">+</span>
+    <div class="person-text"><span class="person-name">Unlock more people</span><span class="sub" title="${escape(line)}">${escape(line)}</span></div>
+    <button type="button" class="solid" data-upgrade>Upgrade to Pro</button></li>`;
 }
 
 function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {

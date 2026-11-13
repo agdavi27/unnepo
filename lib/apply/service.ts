@@ -710,9 +710,8 @@ async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof stu
 export async function findPeopleOnApply(userId: string, applicationId: string) {
   const [app, plan, stored] = await Promise.all([applications.get(userId, applicationId), planState(userId), applicationProfiles.get(userId)]);
   if (!app || app.contactsStatus !== "idle" || (app.status !== "submitted" && app.status !== "applied_manual")) return false;
-  // Free with no company left this week still gets the preview (who's there, blurred), which costs nothing.
-  const previewOnly = plan.free && !(await peopleAccess(userId));
-  const on = !plan.free ? stored?.autoFindPeople !== false : stored?.autoFindPeople === true || previewOnly;
+  // Free looks only when the student turned it on (or presses Find people).
+  const on = !plan.free ? stored?.autoFindPeople !== false : stored?.autoFindPeople === true;
   if (!on || companyMissing(app)) return false;
   await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: `Searching for relevant people at ${app.company}…` });
   startContacts(userId, app.id, true);
@@ -787,8 +786,8 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const alreadyPaid = Boolean(app.fillReport?.personCharged);
   const way = alreadyPaid ? null : await peopleAccess(userId);
   if (!alreadyPaid && !way) {
-    // Free: who's there, blurred, from the free searches. Pro shows them.
-    if (await isFree(userId)) return previewPeople(userId, app);
+    // Free (and a trial with its credits spent): one person, not checked. Pro unlocks the rest.
+    if (!(await planUsage(userId)).people.paid) return onePerson(userId, app);
     await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: await peopleNote(userId) });
     return;
   }
@@ -827,24 +826,26 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const latest = (await applications.get(userId, app.id)) ?? app;
   const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
   // Emails are written only when the student asks, one person at a time.
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, peoplePreview: undefined, ...(charged ? { personCharged: true } : {}) } });
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, peoplePreview: undefined, peopleLocked: undefined, ...(charged ? { personCharged: true } : {}) } });
 }
 
 /**
- * Free with no people searches left: the free part of the search runs, and the job keeps only who it found by role
- * and title ("3 recruiters and 2 alumni"), never a name or an email. The page shows them blurred, with Pro to see them.
+ * Free: one person, the one the posting names or else the most relevant, with an email built from the company's
+ * format and never checked. Nothing paid is looked up, so nothing is counted. The rest wait for Pro.
  */
-async function previewPeople(userId: string, app: JobApplication) {
+async function onePerson(userId: string, app: JobApplication) {
   try {
     const info = await student(userId);
-    const found = await findPeopleForApplication(userId, app, { school: info.context.school, preview: true, progress: async (text) => { await applications.update(userId, app.id, { contactsMessage: text }); } });
+    const found = await findPeopleForApplication(userId, app, { school: info.context.school, one: true, progress: async (text) => { await applications.update(userId, app.id, { contactsMessage: text }); } });
+    await applicationContacts.replace(userId, app.id, found.people.map((person) => ({ rank: person.rank, role: person.role, name: person.name, title: person.title, email: person.email, emailSource: person.emailSource, relevance: person.relevance, linkedinUrl: person.linkedinUrl, photoUrl: person.photoUrl, applicationId: app.id, userId, emailSubject: null, emailBody: null })));
     const latest = (await applications.get(userId, app.id)) ?? app;
     const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
-    const rows = found.people.map((person) => ({ role: person.role, title: person.title.slice(0, 120) }));
+    const peopleLinks = Object.fromEntries(found.people.filter((person) => person.links.length).map((person) => [person.name.toLowerCase(), person.links]));
     await applications.update(userId, app.id, {
+      ...(found.domain ? { companyDomain: found.domain } : {}),
       contactsStatus: "done",
-      contactsMessage: rows.length ? "" : `Couldn't find anyone at ${app.company} right now.`,
-      fillReport: { ...report, peopleSearch: found.search, peoplePreview: { at: nowIso(), company: app.company, rows } },
+      contactsMessage: found.notes.join(" "),
+      fillReport: { ...report, peopleSearch: found.search, peopleLinks, peopleHidden: {}, peoplePreview: undefined, peopleLocked: found.locked },
     });
   } catch {
     await applications.update(userId, app.id, { contactsStatus: "failed", contactsMessage: "Couldn't look up people right now. Try again." });

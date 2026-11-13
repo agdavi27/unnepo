@@ -1,4 +1,4 @@
-import { CREDIT_COST, FREE_LIMITS, FREE_PEOPLE_PER_WEEK, serverConfig } from "@/lib/config";
+import { CREDIT_COST, FREE_LIMITS, serverConfig } from "@/lib/config";
 import { repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import type { UsageCounts } from "@/lib/apply/types";
@@ -7,8 +7,8 @@ import { effectivePlan, trialEndedAt, trialFor, type StoredPlan } from "@/lib/pl
 import { isAdminEmail } from "@/lib/services/auth";
 
 /**
- * Plan limits. Free has a few cover letters, answers and full autofills each day, and one company's people a week
- * (plus anything the trial left); Pro has no limits, only hidden monthly guards (PRO_AI_LIMIT, PRO_PEOPLE_LIMIT)
+ * Plan limits. Free has a few cover letters, answers and full autofills each day, and one person at each job, with an
+ * email that isn't checked (plus full lists from anything the trial left); Pro has no limits, only hidden monthly guards (PRO_AI_LIMIT, PRO_PEOPLE_LIMIT)
  * against scripts. Days, weeks (from Monday) and months are counted in Eastern time, so they turn over at midnight
  * for most students.
  * Accounts listed in UNLIMITED_CREDIT_EMAILS (comma-separated, set in Vercel) never run out of credits and
@@ -17,7 +17,7 @@ import { isAdminEmail } from "@/lib/services/auth";
 
 /** Writing and autofill, which Free counts by the day. */
 export type UsageKind = keyof typeof FREE_LIMITS;
-/** Everything counted: people too, which Free counts by the week. */
+/** Everything counted: people too, which only paid plans and credits count. */
 export type CountedKind = UsageKind | "people";
 
 export async function hasUnlimitedCredits(userId: string) {
@@ -83,7 +83,6 @@ function usesNote(kind: CountedKind, left: number, free: boolean, cap: number) {
   const [one, many] = NAMES[kind];
   if (left > 0) return free && left === 1 && kind !== "people" ? `Only 1 ${one} left today` : "";
   if (!free) return `That's a lot of ${many} this month (${cap}). More on the 1st, or write to us if you need more sooner.`;
-  if (kind === "people") return "You've seen this week's free company. More on Monday, or Pro shows everyone at every company.";
   if (kind === "autofills") return `Today's ${FREE_LIMITS.autofills} full autofills are used. Autofill still fills your basic details; Pro answers the questions too, with no limit.`;
   return `No ${many} left today. More tomorrow, or Pro has no limit.`;
 }
@@ -94,8 +93,8 @@ export async function planUsage(userId: string) {
   const { account, free } = state;
   // Previewing Free shows Free's limits; credits still aren't charged (reveals read the real setting).
   const shownUnlimited = unlimited && state.preview !== "free";
-  // Paying (or an admin previewing Pro): unlimited. The trial works as Pro for writing, but its people come from
-  // the trial's credits and Free's weekly company, since each costs real money.
+  // Paying (or an admin previewing Pro): unlimited. The trial works as Pro for writing, but its full lists come from
+  // the trial's credits, since each costs real money; after them it gets Free's one person at each job.
   const paid = !free && (state.stored !== "free" || state.preview === "pro");
   const config = serverConfig();
   const fairUse = state.plan === "premium" ? config.premiumAiLimit : config.proAiLimit;
@@ -121,9 +120,8 @@ export async function planUsage(userId: string) {
       const left = Math.max(0, config.proPeopleLimit - monthly("people"));
       return { used: monthly("people"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, config.proPeopleLimit), badge: "Unlimited" };
     }
-    const allowance = Math.max(0, FREE_PEOPLE_PER_WEEK - weekly("people"));
-    const left = allowance + credits;
-    return { used: weekly("people"), left, allowance, credits, paid: false, note: usesNote("people", left, true, 0), badge: credits ? `${left} left` : `${left} left this week` };
+    // Free's one person at each job costs nothing to count; only the trial's or a pack's credits show whole lists.
+    return { used: weekly("people"), left: credits, allowance: 0, credits, paid: false, note: "", badge: credits ? `${credits} left` : "1 person per job" };
   })();
   const writing = free ? letters.left * CREDIT_COST.letters + answers.left * CREDIT_COST.answers : 0;
   return {
@@ -134,14 +132,13 @@ export async function planUsage(userId: string) {
   };
 }
 
-/** How a people search would be paid for: Pro's plan, Free's weekly company, or a credit from the trial or a pack. */
+/** How a whole list of people would be paid for: Pro's plan, or a credit from the trial or a pack. Null: Free's one person. */
 export type PeopleWay = "unlimited" | "plan" | "credit";
 
 export async function peopleAccess(userId: string): Promise<PeopleWay | null> {
   if (await hasUnlimitedCredits(userId)) return "unlimited";
   const { people } = await planUsage(userId);
   if (people.paid) return people.left > 0 ? "plan" : null;
-  if (people.allowance > 0) return "plan";
   return people.credits > 0 ? "credit" : null;
 }
 

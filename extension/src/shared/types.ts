@@ -147,12 +147,14 @@ export type TrackerJob = {
     lastEmailAt?: string; emailedAt?: Record<string, string>; reachedOut?: { count: number; at: string }; notCounted?: boolean; jobHidden?: boolean; peopleReveals: number;
     peopleLinks?: Record<string, Array<{ label: string; url: string }>>;
     peoplePreview?: { rows: Array<{ role: string; title: string }> };
+    /** Free: more people found than the one shown, which Pro unlocks. */
+    peopleLocked?: number;
   } | null;
   hidden: string[];
   contacts: TrackerContact[];
 };
 
-export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boolean; peopleNote: string; /** The People box's corner: "1 left this week", "Unlimited". */ peopleBadge?: string };
+export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boolean; peopleNote: string; /** The People box's corner: "1 person per job", "Unlimited". */ peopleBadge?: string };
 
 /**
  * A job the extension caught being applied to, for Home's "Detected jobs" menu (the last 5, newest first).
