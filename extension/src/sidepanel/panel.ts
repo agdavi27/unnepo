@@ -236,7 +236,25 @@ function homeLists(state: PanelState) {
   const nudge = noEmail ? `<button type="button" class="note warn nudge" data-show-jobs="reach">${noEmail} ${noEmail === 1 ? "job you applied to has" : "jobs you applied to have"} no email sent yet. See them →</button>` : "";
   // A clear line between the calendar and the job list, so the tab reads as two parts.
   const list = `<div class="section-divider" role="separator"><span>Your jobs</span></div>${nudge}${jobsList()}<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>`;
-  return `${startCard(state)}${weekView(new Date(), list)}`;
+  return `${boardCard(state)}${startCard(state)}${weekView(new Date(), list)}`;
+}
+
+/** "Bring in": on a job board's applications page, the ones Unnepo missed, saved in one press. */
+const boardImport = { busy: false, note: "" };
+function boardCard(state: PanelState) {
+  const list = state.boardList;
+  if (!list) return boardImport.note ? `<p class="note ok" role="status">${escape(boardImport.note)}</p>` : "";
+  if (!list.missing.length) return `<section class="page" aria-label="Your applications on ${escape(list.site)}"><p class="note ok">All ${list.total} applications on this page are in Unnepo.</p></section>`;
+  const shown = list.missing.slice(0, 4).map((item) => `<li><span class="detected-title">${escape(item.title)}</span><span class="sub">${escape(item.company)}${item.day ? ` · applied ${escape(new Date(`${item.day}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" }))}` : ""}</span></li>`).join("");
+  const n = list.missing.length;
+  return `
+    <section class="page" aria-label="Applications Unnepo missed">
+      <div class="row-between"><span class="eyebrow">On ${escape(list.site)}</span><span class="mono">${n} MISSING</span></div>
+      <p class="small">${n} ${n === 1 ? "application" : "applications"} on this page ${n === 1 ? "isn't" : "aren't"} in Unnepo yet. Bring them in as applied, on the day ${escape(list.site)} shows.</p>
+      <ul class="detected-list">${shown}</ul>${n > 4 ? `<p class="small">And ${n - 4} more.</p>` : ""}
+      <button type="button" class="btn primary" id="board-import" ${boardImport.busy ? "disabled" : ""}>${boardImport.busy ? "Bringing them in…" : `Bring in ${n} ${n === 1 ? "application" : "applications"}`}</button>
+      ${boardImport.note ? `<p class="small" role="status">${escape(boardImport.note)}</p>` : ""}
+    </section>`;
 }
 
 /**
@@ -1824,6 +1842,16 @@ function draw(state: PanelState): boolean {
   wireJobRows(app);
   app.querySelectorAll<HTMLButtonElement>("[data-open-saved]").forEach((button) => button.addEventListener("click", () => openJob(button.dataset.openSaved!)));
   if (state.connected) {
+    app.querySelector<HTMLButtonElement>("#board-import")?.addEventListener("click", async () => {
+      boardImport.busy = true;
+      boardImport.note = "";
+      void render();
+      const result = await ask<{ ok: boolean; added?: number; failed?: number; error?: string }>({ type: "board-import", tabId: state.tab?.id }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }) as { ok: boolean; added?: number; failed?: number; error?: string });
+      boardImport.busy = false;
+      boardImport.note = result.ok ? `Brought in ${result.added} ${result.added === 1 ? "application" : "applications"}.${result.failed ? ` ${result.failed} couldn't be saved.` : ""}` : result.error ?? "Couldn't bring them in.";
+      await loadTracker(true);
+      void render();
+    });
     wireDetected(app);
     wireReminders(app);
     wireBubbles(app);

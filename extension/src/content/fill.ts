@@ -5,6 +5,7 @@ import { fillGeneric, uploadCoverLetterNow, uploadResumeNow } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, openedJob, scanFields, scanPage } from "./scan";
 import { watchEdits } from "./edits";
+import { appliedStatus } from "./board-status";
 import { keptByStudent } from "./kept";
 import { fieldControl, markNeeds, reviewLeft, type CheckItem } from "./needs";
 import { celebrateSpiders, startSpiders, stopSpiders } from "./spiders";
@@ -268,7 +269,8 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
       const buttons = [...new Set(Array.from(document.querySelectorAll("button, [role=button], a.btn, a[class*=button], input[type=submit]")).filter(visible).map(label).filter((text) => text && text.length <= 40))].slice(0, 30);
       const headings = Array.from(document.querySelectorAll("h1, h2")).filter(visible).map(label).filter(Boolean).slice(0, 4).map((text) => text.slice(0, 80));
       const posting = scanPage();
-      reply({ path: location.pathname.slice(0, 120), title: document.title.slice(0, 120), headings, buttons, postingData: Boolean(posting.description), job: { title: posting.title.slice(0, 120), company: posting.company.slice(0, 80) } });
+      const dialog = Boolean(document.querySelector("[role=dialog], [aria-modal='true'], dialog[open]"));
+      reply({ path: location.pathname.slice(0, 120), title: document.title.slice(0, 120), headings, buttons, postingData: Boolean(posting.description), job: { title: posting.title.slice(0, 120), company: posting.company.slice(0, 80) }, status: appliedStatus()?.text ?? "", dialog });
       return false;
     }
     if (message?.type === "focus-field") {
