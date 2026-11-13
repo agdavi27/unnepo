@@ -33,9 +33,9 @@ type Workspace = {
 
 // The tracker, reminders, people and follow-ups live in the Chrome extension. The site keeps the profile and the
 // plans, and shows the jobs applied to.
-type View = "home" | "jobs" | "goals" | "settings" | "pro";
+// Jobs is the first page; what the old Home page said about the extension now sits at the top of Settings.
+type View = "jobs" | "goals" | "settings" | "pro";
 const VIEWS: { id: View; label: string }[] = [
-  { id: "home", label: "Home" },
   { id: "jobs", label: "Jobs" },
   // What the student is aiming for; the extension's "Edit goals" opens it (/home?tab=goals).
   { id: "goals", label: "Goals" },
@@ -54,7 +54,7 @@ const PRO_REASONS: Array<[string, string]> = [
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 
-export function AppHome({ start = "home" }: { start?: View } = {}) {
+export function AppHome({ start = "jobs" }: { start?: View } = {}) {
   const router = useRouter();
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
@@ -64,7 +64,6 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [extension, setExtension] = useState<boolean | null>(null);
-  /** A job to open on the Jobs tab, from Home's "Email someone". */
   const menu = useRef<HTMLDivElement>(null);
   // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans, ?tab=jobs the Jobs tab, ?tab=goals Goals.
   useEffect(() => {
@@ -290,10 +289,10 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
           onFree ? <UpgradePage busy={billingBusy} admin={admin} onUpgrade={(billing) => (admin ? void switchPlanView("pro") : void goToBilling("checkout", { plan: "pro", billing }))} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />
             : <p className="text-sm text-muted">You&apos;re on Pro. Your plan is under <button type="button" onClick={() => setView("settings")} className="underline underline-offset-4 hover:text-white">Settings and plans</button>.</p>
         )}
-        {data && !showOnboarding && view === "home" && <ExtensionHome installed={extension} completeness={data.completeness} onEdit={() => { setEditing(true); window.scrollTo({ top: 0 }); }} />}
         {data && !showOnboarding && view === "settings" && (
           <>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Settings</h1>
+            <ExtensionHome installed={extension} onEdit={() => { setEditing(true); window.scrollTo({ top: 0 }); }} />
             <section className="grid gap-4 md:grid-cols-2">
               <div className="rounded-2xl border border-line bg-panel p-5">
                 <h2 className={sectionTitle}>Account</h2>
@@ -306,11 +305,6 @@ export function AppHome({ start = "home" }: { start?: View } = {}) {
                 <h2 className={sectionTitle}>Profile</h2>
                 <p className="mt-3 text-sm text-muted">Your profile is {data.completeness}% ready. It&apos;s what every application is filled from: contact details, schools, jobs, projects, skills, and your answers to common questions.</p>
                 <button type="button" onClick={() => { setEditing(true); window.scrollTo({ top: 0 }); }} className="mt-4 rounded-xl bg-white px-3 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">Edit profile</button>
-              </div>
-              <div className="rounded-2xl border border-line bg-panel p-5">
-                <h2 className={sectionTitle}>Chrome extension</h2>
-                <p className="mt-3 text-sm text-muted">The extension fills applications from your profile in your own browser and logs each one you submit. Your job-site passwords stay in the extension.</p>
-                <a href="/extension/connect" className="mt-4 inline-flex rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5">Connect the extension</a>
               </div>
             </section>
             <SpiderSettings />
@@ -453,14 +447,14 @@ function TrialBanner({ usage, onPlans }: { usage: PlanUsage; onPlans: () => void
 }
 
 /**
- * Home on the site: everything day to day happens in the extension (the tracker, reminders, the people at each
- * company, follow-ups), so this says where to find it, with the profile it all runs on.
+ * The top of Settings: everything day to day happens in the extension (the tracker, reminders, the people at each
+ * company, follow-ups), so this says where to find it. It used to be the site's Home page; Jobs is first now.
  */
-function ExtensionHome({ installed, completeness, onEdit }: { installed: boolean | null; completeness: number; onEdit: () => void }) {
+function ExtensionHome({ installed, onEdit }: { installed: boolean | null; onEdit: () => void }) {
   const card = "rounded-2xl border border-line bg-panel p-5 sm:p-6";
   return (
-    <section className="flex max-w-3xl flex-col gap-5">
-      <h1 className="m-0 text-3xl font-bold tracking-tight md:text-4xl">Home</h1>
+    <section className="flex max-w-3xl flex-col gap-4">
+      <h2 className="m-0 text-xl font-semibold tracking-tight">The Chrome extension</h2>
       <p className="m-0 text-[15px] leading-[1.6] text-muted">The extension fills applications and logs each one you submit. Your jobs, the people at each company and follow-ups are here and in its side panel.</p>
       <div className={card}>
         <ul className="m-0 flex list-none flex-col gap-3 p-0 text-sm text-[#B4B4BC]">
@@ -473,7 +467,6 @@ function ExtensionHome({ installed, completeness, onEdit }: { installed: boolean
           <button type="button" onClick={onEdit} className="rounded-xl border border-line px-4 py-2 text-sm hover:bg-white/5">Edit my info</button>
         </div>
       </div>
-      <p className="m-0 text-xs text-faint">Your profile is {completeness}% ready. The extension applies with it.</p>
     </section>
   );
 }
