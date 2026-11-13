@@ -4,7 +4,7 @@ import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
-import { detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
+import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { friendRequests, friendsSettingsCard, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
@@ -397,7 +397,7 @@ const PLUS = `<svg class="big-tool-icon" width="20" height="20" viewBox="0 0 24 
  */
 function addJobPopup(state: PanelState) {
   const onTab = jobFound(state) ? `<div class="add-part">${hereLinks()}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}</div>` : "";
-  return popupShell("Add a job", `${onTab}${detectedMenu(true)}<div class="add-part"><span class="eyebrow">Not here? Add it yourself</span>${manualJobFields()}</div>`, 0, 0, "mini");
+  return popupShell("Add a job", `${onTab}${detectedMenu(true)}<div class="add-part"><span class="eyebrow">Add one yourself</span>${manualJobFields()}</div>`, 0, 0, "mini");
 }
 
 /**
@@ -950,7 +950,7 @@ function focusPopup() {
 function wirePopup() {
   app.querySelectorAll<HTMLButtonElement>("[data-popup]").forEach((button) => button.addEventListener("click", () => {
     popup = { kind: button.dataset.popup as "cover" | "answer" | "addjob", step: 0 };
-    if (popup.kind === "addjob" && lastState) { startManualJob(lastState); manualJob.note = ""; }
+    if (popup.kind === "addjob" && lastState) { startManualJob(lastState); manualJob.note = ""; resetDetectedPager(); }
     void render();
   }));
   document.getElementById("popup-close")?.addEventListener("click", closePopup);
@@ -1522,20 +1522,15 @@ function startManualJob(state: PanelState) {
   const url = /^https:\/\//.test(key) ? key : "";
   Object.assign(manualJob, { key, title: parts.length >= 2 ? parts[0] : "", company: parts.length >= 3 ? parts[1] : "", url, note: "", saving: false, readFor: "", description: "" });
 }
-/** The form in the Add a job popup. */
+/** The form in the Add a job popup: short enough to see whole, the labels inside the boxes. */
 function manualJobFields() {
   const ready = manualJob.title.trim().length >= 2 && manualJob.company.trim().length >= 2;
   const stage = (value: string, label: string) => `<option value="${value}"${manualJob.stage === value ? " selected" : ""}>${label}</option>`;
   return `
-    <div class="letter-form flat" id="add-job-form">
-      <label class="question"><span class="q-label">Job link</span><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="https://…"></label>
-      <div class="links"><button type="button" class="link" id="mj-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading the link…" : "Fill in from the link"}</button></div>
-      <div class="two-up">
-        <label class="question"><span class="q-label">Job title</span><input class="field" id="mj-title" value="${escape(manualJob.title)}" maxlength="200" placeholder="Growth Intern"></label>
-        <label class="question"><span class="q-label">Company</span><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="MealPal"></label>
-      </div>
-      <label class="question"><span class="q-label">Status</span><select class="field" id="mj-stage">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("follow_up", "Follow up")}${stage("interviewing", "Interviewing")}${stage("rejected", "Rejected")}</select></label>
-      <button type="button" class="btn primary" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add to tracker"}</button>
+    <div class="letter-form flat add-form" id="add-job-form">
+      <div class="add-row"><input class="field" id="mj-url" value="${escape(manualJob.url)}" maxlength="2000" placeholder="Job link (optional)" aria-label="Job link"><button type="button" class="btn" id="mj-fill" ${linkReading ? "disabled" : ""}>${linkReading ? "Reading…" : "Fill in"}</button></div>
+      <div class="two-up"><input class="field" id="mj-title" value="${escape(manualJob.title)}" maxlength="200" placeholder="Job title" aria-label="Job title"><input class="field" id="mj-company" value="${escape(manualJob.company)}" maxlength="200" placeholder="Company" aria-label="Company"></div>
+      <div class="add-row"><select class="field" id="mj-stage" aria-label="Status">${stage("applied", "Applied")}${stage("in_progress", "Not applied yet")}${stage("follow_up", "Follow up")}${stage("interviewing", "Interviewing")}${stage("rejected", "Rejected")}</select><button type="button" class="btn primary" id="mj-save" ${ready && !manualJob.saving ? "" : "disabled"}>${manualJob.saving ? "Adding…" : "Add job"}</button></div>
       ${manualJob.note ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
     </div>`;
 }
