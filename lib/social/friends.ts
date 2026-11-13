@@ -5,6 +5,7 @@ import type { Friendship } from "@/lib/db/types";
 import { appOrigin, sendFriendInviteEmail } from "@/lib/email/transactional";
 import { ServiceError } from "@/lib/errors";
 import { normalizeEmail } from "@/lib/schools";
+import { isAdminEmail } from "@/lib/services/auth";
 
 /**
  * Friends: a student adds a friend by email, and once the friend accepts, each sees how many jobs the other
@@ -17,6 +18,14 @@ const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const involves = (row: Friendship, userId: string, email: string) => row.fromUserId === userId || row.toUserId === userId || (!row.toUserId && row.toEmail === email);
 const otherOf = (row: Friendship, userId: string) => (row.fromUserId === userId ? row.toUserId : row.fromUserId);
+/** A made-up friend admins see, to check what competing with a friend looks like. Never a real account. */
+export const DEMO_FRIEND_ID = "demo-brody";
+function demoFriend(since: number) {
+  // Climbs through the week: a couple by Monday night, about 2 a day after that.
+  const days = Math.max(0, (Date.now() - since) / 86_400_000);
+  return { id: DEMO_FRIEND_ID, name: "Brody", applied: 2 + Math.floor(days * 1.8) };
+}
+
 const shownName = (user: { name: string; email: string } | null) => user?.name?.trim() || user?.email.split("@")[0] || "A friend";
 
 async function me(userId: string) {
@@ -58,8 +67,9 @@ export async function listFriends(userId: string, sinceRaw: unknown) {
     return from && !from.deletedAt ? { id: row.id, name: shownName(from), email: from.email } : null;
   }));
   const outgoing = rows.filter((row) => row.status === "pending" && row.fromUserId === userId).map((row) => ({ id: row.id, email: row.toEmail }));
+  const demo = (await isAdminEmail(user)) ? [demoFriend(since)] : [];
   return {
-    friends: friends.filter((friend) => friend !== null).sort((a, b) => b.applied - a.applied || a.name.localeCompare(b.name)),
+    friends: [...friends.filter((friend) => friend !== null), ...demo].sort((a, b) => b.applied - a.applied || a.name.localeCompare(b.name)),
     incoming: incoming.filter((item) => item !== null),
     outgoing,
   };
@@ -130,6 +140,7 @@ export async function respondToFriend(userId: string, friendshipId: unknown, acc
 
 /** Removes a friend, or cancels a request the student sent. */
 export async function removeFriend(userId: string, friendshipId: unknown) {
+  if (friendshipId === DEMO_FRIEND_ID) return { ok: true };
   await me(userId);
   return withLock((db) => {
     const before = (db.friendships ?? []).length;

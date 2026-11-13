@@ -589,7 +589,7 @@ describe("people after applying", () => {
     return { userId, application: (await applications.get(userId, application.id))!, contacts: await applicationContacts.list(userId, [application.id]), searches };
   }
 
-  it("lists up to 5 people, most relevant first, on the company's real website, with emails in the company's format", async () => {
+  it("lists up to 3 people, most relevant first, on the company's real website, with emails in the company's format", async () => {
     // An old wrong match for Acme is tried first and turns up no one; it's replaced by the site that does.
     await repo.setCompanyDomains("Acme Corp", ["acme.org"]);
     const { userId, application, contacts, searches } = await appliedWith((search) => {
@@ -598,16 +598,13 @@ describe("people after applying", () => {
       if (search.person_titles?.includes("recruiter")) return [person("r1", "Avery", "Kim", "Senior Recruiter"), person("r2", "Sam", "Lee", "University Recruiter"), person("c1", "Pat", "Doe", "Chief People Officer")];
       return [person("t1", "Riley", "Chen", "Product Lead"), person("t2", "Jo", "Ray", "Analyst")];
     }, { verified: ["a1"] });
-    // The posting's recruiter first, then campus recruiters, recruiters, then the school and a hiring manager; executives last. Five in all.
+    // The posting's recruiter first, then campus recruiters, then recruiters; the school, the team and executives
+    // come after them, so they're left off a list of three.
     expect(contacts.map((item) => [item.rank, item.role, item.name, item.email, item.emailSource])).toEqual([
       [1, "job_poster", "Jordan Smith", "jordan.smith@acme.com", "job_posting"],
       [2, "recruiter", "Sam Lee", "sam.lee@acme.com", "likely"],
       [3, "recruiter", "Avery Kim", "avery.kim@acme.com", "likely"],
-      [4, "alumni", "Casey Park", "casey.park@acme.com", "likely"],
-      [5, "team_member", "Riley Chen", "riley.chen@acme.com", "likely"],
     ]);
-    expect(contacts[3].relevance).toContain("Colby College");
-    expect(contacts[3].linkedinUrl).toBe("https://linkedin.com/in/a1");
     // No email is written until the student asks, then just that person's, which they can edit.
     expect(contacts.every((item) => item.emailBody === null)).toBe(true);
     model.replies.push(JSON.stringify({ emails: [{ index: 1, subject: "Hello", body: "Hi Jordan, I applied to the Product Analyst Intern role." }] }));
