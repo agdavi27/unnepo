@@ -322,26 +322,50 @@ const outsideDialog = (el: Element) => !el.closest("[role=dialog], [role=alertdi
  */
 export function handshakeJob(where: { hostname: string; pathname: string } = window.location): { title: string; company: string; description: string } | null {
   if (!/(^|\.)joinhandshake\.com$/.test(where.hostname) || !JOB_LINK.test(where.pathname)) return null;
-  // Handshake's apply pop-up ("Apply to Acme", "Details from Acme") sits over the job: never read from it. The
-  // Apply button the student pressed (still on the page behind the pop-up) says which job it is.
-  const marked = document.querySelector<HTMLElement>("[data-unnepo-pressed]");
-  const pressed = marked && outsideDialog(marked) && Date.now() - Number(marked.dataset.unnepoPressed) < 10 * 60_000 ? marked : null;
-  const apply = pressed ?? Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button]"))
-    .find((el) => visible(el) && outsideDialog(el) && /^(apply|apply now|apply externally|quick apply|easy apply|applied)$/i.test(clean(el.textContent)));
-  const start = apply ?? Array.from(document.querySelectorAll<HTMLElement>("h1, h2")).find((el) => visible(el) && outsideDialog(el));
-  if (!start) return null;
-  // The results list links to many jobs; the details pane links to at most one (its own).
-  const jobLinks = (el: Element) => Array.from(el.querySelectorAll<HTMLAnchorElement>("a[href]")).filter((a) => JOB_LINK.test(a.pathname)).length;
-  let pane: HTMLElement = start;
-  while (pane.parentElement && pane.parentElement !== document.body && jobLinks(pane.parentElement) <= 1) pane = pane.parentElement;
-  // The job's name is the pane's top heading: an h1 if it has one, else an h2, else an h3.
-  // Never a status line Handshake shows once you've applied ("Applied on November 2, 2026").
-  const heading = ["h1", "h2", "h3"].map((tag) => Array.from(pane.querySelectorAll<HTMLElement>(tag)).find((el) => visible(el) && outsideDialog(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !notJobTitle(clean(el.textContent)))).find(Boolean);
+  const pane = handshakePane();
+  if (!pane) return null;
+  const heading = jobHeading(pane);
   const title = clean(heading?.textContent);
-  // The employer is a link to its Handshake page, or failing that the logo's alt text.
-  const description = (pane.innerText || "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
   if (!title) return null;
-  return { title: title.slice(0, 200), company: employerIn(pane, heading ?? null, title).slice(0, 200), description };
+  const description = (pane.innerText || "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
+  // The employer is a link to its Handshake page (/e/<id>), or failing that the logo's alt text.
+  return { title: title.slice(0, 200), company: employerIn(pane, heading, title).slice(0, 200), description };
+}
+
+/** The job's name in a pane: its first h1 that's a job's name, else its first such h2. Never "Jobs", never "Applied on…". */
+function jobHeading(box: Element): HTMLElement | null {
+  for (const tag of ["h1", "h2"]) {
+    const found = Array.from(box.querySelectorAll<HTMLElement>(tag)).find((el) => {
+      const text = clean(el.textContent);
+      return visible(el) && outsideDialog(el) && text.length >= 3 && text.length <= 150 && !notJobTitle(text) && !NOT_JOB_NAME.test(text);
+    });
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Handshake's open job. On search (/job-search/<id>) it's the right-hand pane, which also lists Similar Jobs, so
+ * counting job links can't find its edge; on a job's own page (/jobs/<id>) there's no such pane. Either way: from
+ * the Apply button (the one pressed, else the job's own, never "Apply filters"), the smallest box that holds the
+ * job's name. The apply pop-up ("Apply to Acme") sits over it and is never read.
+ */
+function handshakePane(): HTMLElement | null {
+  const right = Array.from(document.querySelectorAll<HTMLElement>("[data-hook='right-content']")).find((el) => visible(el) && jobHeading(el));
+  if (right) return right;
+  const marked = document.querySelector<HTMLElement>("[data-unnepo-pressed]");
+  const pressed = marked && marked.isConnected && outsideDialog(marked) && Date.now() - Number(marked.dataset.unnepoPressed) < 10 * 60_000 ? marked : null;
+  const apply = pressed ?? Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button]"))
+    .find((el) => visible(el) && outsideDialog(el) && !/filter/i.test(el.getAttribute("aria-label") ?? "") && /^(apply|apply now|apply externally|quick apply|easy apply|applied)$/i.test(clean(el.textContent)));
+  let box: HTMLElement | null = apply ?? null;
+  while (box && box !== document.body && !jobHeading(box)) box = box.parentElement;
+  if (box && box !== document.body) return box;
+  // No Apply button (closed, or the page is still drawing): the box around the job's own heading and its employer.
+  const heading = jobHeading(document.body);
+  if (!heading) return null;
+  box = heading;
+  for (let i = 0; i < 8 && box.parentElement && box.parentElement !== document.body && !box.querySelector("a[href*='/e/']"); i += 1) box = box.parentElement;
+  return box;
 }
 
 const LINKEDIN_HOST = /(^|\.)linkedin\.com$/;
@@ -651,8 +675,11 @@ export const distinctJobLinks = (root: Element) => {
   const seen = new Set<string>();
   const links = [...(root.matches("a[href]") ? [root as HTMLAnchorElement] : []), ...Array.from(root.querySelectorAll<HTMLAnchorElement>("a[href]"))];
   for (const a of links) {
+    // "#" and "Skip to content" point back at this page; "/job-search" alone is the search, not a job.
+    if ((a.getAttribute("href") ?? "").startsWith("#")) continue;
     try {
       const url = new URL(a.href);
+      if (!/\d/.test(`${url.pathname}${url.search}`)) continue;
       if (JOB_HREF.test(`${url.pathname}${url.search}`)) seen.add(`${url.pathname}?${["jk", "vjk", "jid", "jl", "jobListingId", "currentJobId", "jobId"].map((key) => url.searchParams.get(key) ?? "").join("|")}`);
     } catch {
       // Not a link Unnepo can read.
@@ -675,6 +702,9 @@ export function jobLink(href: string) {
     const url = new URL(href);
     const indeedJob = /(^|\.)indeed\.com$/.test(url.hostname) ? url.searchParams.get("jk") ?? url.searchParams.get("vjk") : null;
     if (indeedJob) return `${url.origin}/viewjob?jk=${indeedJob}`;
+    // Handshake's search keeps the open job in /job-search/<id>; its own page is /jobs/<id>.
+    const handshake = /(^|\.)joinhandshake\.com$/.test(url.hostname) ? url.pathname.match(/^\/(?:stu\/)?(?:job-search|jobs)\/(\d+)/)?.[1] : null;
+    if (handshake) return `${url.origin}/jobs/${handshake}`;
     // LinkedIn's search keeps the open job in `currentJobId`; its own page is /jobs/view/<id>/.
     const linkedin = linkedinJobId(url.href);
     if (linkedin) return `https://www.linkedin.com/jobs/view/${linkedin}/`;
@@ -810,6 +840,10 @@ function findOpenedJob(given?: Element | null): OpenedJob | null {
  * list beside it is left out. Never inside a pop-up. The whole page on a job's own page.
  */
 export function jobPane(): HTMLElement {
+  if (/(^|\.)joinhandshake\.com$/.test(window.location.hostname)) {
+    const pane = handshakePane();
+    if (pane) return pane;
+  }
   const marked = document.querySelector<HTMLElement>("[data-unnepo-pressed]");
   const pressed = marked && marked.isConnected && visible(marked) && outsideDialog(marked) && Date.now() - Number(marked.dataset.unnepoPressed) < 10 * 60_000 ? marked : null;
   const button = pressed ?? Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button]"))

@@ -1,4 +1,5 @@
 import { notJobTitle } from "@/lib/apply/job-title";
+import { APPLIED_BARE, APPLIED_LINE, appliedDay } from "../shared/applied-line";
 import { APPLY_LABEL, JOB_HREF, distinctJobLinks, employerOf, jobLink, jobPane } from "./scan";
 
 /**
@@ -8,50 +9,10 @@ import { APPLY_LABEL, JOB_HREF, distinctJobLinks, employerOf, jobLink, jobPane }
  * Reads the page only; the extension decides what to save.
  */
 
+export { APPLIED_LINE, appliedDay };
+
 const clean = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").trim();
 const shown = (el: Element) => (el as HTMLElement).getBoundingClientRect().height > 0;
-
-const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-const MONTH = "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\\.?";
-const WHEN = `(${MONTH} \\d{1,2}(?:st|nd|rd|th)?(?:,? \\d{4})?|\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?|\\d{4}-\\d{2}-\\d{2}|\\d+ ?(?:s|sec|seconds?|m|mins?|minutes?|h|hrs?|hours?|d|days?|w|wks?|weeks?|mo|months?) ago|today|yesterday|just now)`;
-/**
- * A board's line saying the student applied, with when: "Applied on November 12, 2026", "Applied 3 days ago",
- * "✓ Applied · Nov 2", "Application submitted on 11/02/2026", "You applied today". A title like "Applied
- * Scientist" never matches: the line has to end with the time.
- */
-export const APPLIED_LINE = new RegExp(`^([✓✔☑]\\s*)?(you )?(applied|application (?:submitted|sent|received)|submitted)[\\s:·•,-]*(on\\s+)?${WHEN}\\.?$`, "i");
-/** A bare "Applied" is only believed on a button or a status badge (the Apply button turned into it). */
-const APPLIED_BARE = /^([✓✔☑]\s*)?(applied|already applied|you(?:'|’)ve applied|application (submitted|sent))!?$/i;
-
-/** The day (YYYY-MM-DD, local) a "when" part names; "" when it can't tell. */
-export function appliedDay(text: string, now = new Date()): string {
-  const iso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-  const lower = text.toLowerCase();
-  if (/\b(today|just now|\d+ ?(s|sec|seconds?|m|mins?|minutes?|h|hrs?|hours?) ago)\b/.test(lower)) return iso(now);
-  if (/\byesterday\b/.test(lower)) return iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
-  const ago = lower.match(/\b(\d+) ?(d|days?|w|wks?|weeks?|mo|months?) ago\b/);
-  if (ago) {
-    const n = Number(ago[1]);
-    const days = /^d/.test(ago[2]) ? n : /^w/.test(ago[2]) ? n * 7 : n * 30;
-    return iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() - days));
-  }
-  const isoDay = lower.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
-  if (isoDay) return `${isoDay[1]}-${isoDay[2]}-${isoDay[3]}`;
-  const named = lower.match(new RegExp(`\\b${MONTH} (\\d{1,2})(?:st|nd|rd|th)?(?:,? (\\d{4}))?`));
-  if (named) {
-    const month = MONTHS.indexOf(named[1].slice(0, 3));
-    let date = new Date(named[3] ? Number(named[3]) : now.getFullYear(), month, Number(named[2]));
-    // "Nov 30" with no year, read in early November, was last year.
-    if (!named[3] && date.getTime() > now.getTime() + 86_400_000) date = new Date(now.getFullYear() - 1, month, Number(named[2]));
-    return iso(date);
-  }
-  const slash = lower.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/);
-  if (slash) {
-    const year = slash[3] ? (slash[3].length === 2 ? 2000 + Number(slash[3]) : Number(slash[3])) : now.getFullYear();
-    return iso(new Date(year, Number(slash[1]) - 1, Number(slash[2])));
-  }
-  return "";
-}
 
 /** The board's "you applied" line in `root` (the open job's pane), and the day it names, or null. */
 export function appliedStatus(root: ParentNode = jobPane()): { text: string; day: string } | null {
@@ -70,7 +31,7 @@ export function appliedStatus(root: ParentNode = jobPane()): { text: string; day
 /** The boards' pages that list the student's applications. */
 export function isAppliedListPage(where: { hostname: string; pathname: string; search: string } = window.location) {
   const { hostname: host, pathname: path, search } = where;
-  if (/(^|\.)joinhandshake\.com$/.test(host)) return /^\/(stu\/)?applications\b/.test(path);
+  if (/(^|\.)joinhandshake\.com$/.test(host)) return /^\/(stu\/)?(applications|apps|job-tracker)\b/.test(path) && !/status=saved/i.test(search);
   if (/(^|\.)linkedin\.com$/.test(host)) return (/^\/my-items\/saved-jobs/.test(path) && /cardType=APPLIED/i.test(search)) || (/^\/jobs-tracker/.test(path) && /stage=applied/i.test(search));
   if (/(^|\.)ziprecruiter\.com$/.test(host)) return /^\/(candidate\/)?(my-jobs|applications|applied)/.test(path);
   if (/(^|\.)indeed\.com$/.test(host)) return /^myjobs\./.test(host) || /^\/myjobs/.test(path);
@@ -85,6 +46,8 @@ export type ListedApplication = { title: string; company: string; url: string; d
  * says it was applied. Cards are the largest box around a job link that holds no other job.
  */
 export function appliedList(): ListedApplication[] {
+  const table = handshakeTracker();
+  if (table.length) return table;
   const out: ListedApplication[] = [];
   const seen = new Set<string>();
   for (const link of Array.from(document.querySelectorAll<HTMLAnchorElement>("a[href]"))) {
@@ -106,6 +69,24 @@ export function appliedList(): ListedApplication[] {
     seen.add(url);
     out.push({ title: title.slice(0, 200), company: company.slice(0, 200), url, day: line ? appliedDay(line) : "" });
     if (out.length >= 100) break;
+  }
+  return out;
+}
+
+/**
+ * Handshake's Job Tracker: a table, one row per job, with Company, Role, Date updated and Status cells. Saved
+ * jobs weren't applied to and are left out; Applied, Interviewing, Hired and Declined all were.
+ */
+function handshakeTracker(): ListedApplication[] {
+  const out: ListedApplication[] = [];
+  for (const row of Array.from(document.querySelectorAll<HTMLTableRowElement>("tr"))) {
+    const cell = (name: string) => clean(row.querySelector(`td[headers='${name}']`)?.textContent);
+    const link = row.querySelector<HTMLAnchorElement>("a[href*='/jobs/']");
+    const company = clean(row.querySelector("td[headers='company'] [title]")?.getAttribute("title")) || cell("company");
+    const title = cell("role");
+    const status = cell("status");
+    if (!link || !title || !company || !status || /^(saved|not interested)$/i.test(status)) continue;
+    out.push({ title: title.slice(0, 200), company: company.slice(0, 200), url: jobLink(link.href), day: appliedDay(cell("date")) });
   }
   return out;
 }

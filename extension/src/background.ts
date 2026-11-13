@@ -5,6 +5,7 @@ import { QUICK_BOARDS } from "./content/quick-apply";
 import { isJobPage, sendsApplication } from "./shared/job-page";
 import { dueCount, reminders } from "./shared/reminders";
 import { notJobTitle } from "@/lib/apply/job-title";
+import { APPLIED_LINE, appliedDay } from "./shared/applied-line";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -1336,7 +1337,18 @@ const boardKey = (job: { url: string; title: string; company: string }) => `${jo
 const appliedInTracker = (tracked: Tracker | undefined, job: { title: string; company: string }) =>
   Boolean(tracked?.jobs.some((item) => (item.status === "submitted" || item.status === "applied_manual") && !item.titleMissing && sameJobTitle(item, job)));
 
+/** Tabs whose board line is being saved right now: the line and the Apply watch both report it, once. */
+const boardBusy = new Set<number>();
 async function boardApplied(tabId: number, text: string, day: string) {
+  if (boardBusy.has(tabId)) return;
+  boardBusy.add(tabId);
+  try {
+    await saveBoardApplied(tabId, text, day);
+  } finally {
+    boardBusy.delete(tabId);
+  }
+}
+async function saveBoardApplied(tabId: number, text: string, day: string) {
   const scan = await look(tabId).catch(() => null);
   if (!scan || /^job title missing$/i.test(scan.title) || notJobTitle(scan.title) || !scan.company.trim()) return void log(`The page says "${text.slice(0, 50)}", but the job's name couldn't be read.`);
   const job = { url: scan.jobUrl || scan.url, title: scan.title, company: scan.company };
@@ -2014,6 +2026,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "applied-detected":
         if (tabId === undefined) return reply({ ok: false });
         void log(`The page changed to "${String(message.text ?? "Applied").slice(0, 60)}" after Apply.`);
+        // A board's own dated line ("Applied on November 12, 2026", Handshake's pane once the pop-up's Submit
+        // went through) is the board saying so: saved like any board line, under the job's name.
+        if (sender.tab?.url && QUICK_BOARDS.test(new URL(sender.tab.url).hostname) && APPLIED_LINE.test(String(message.text ?? ""))) {
+          void boardApplied(tabId, String(message.text).slice(0, 120), appliedDay(String(message.text))).catch(() => undefined);
+          return reply({ ok: true });
+        }
         void recordSeen(tabId, String(message.text ?? "The job site shows you applied."), "button_changed").catch(() => undefined);
         return reply({ ok: true });
       case "received-page": {
