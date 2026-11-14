@@ -25,7 +25,7 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     title: "Who can use Unnepo",
     body: (
       <ul>
-        <li>Unnepo is for college and university students. You need a school email address to sign up.</li>
+        <li>Unnepo is built for college and university students and recent graduates. You can sign up with any email address.</li>
         <li>You must be at least 16 years old, and old enough to agree to these terms where you live.</li>
         <li>One account per person. Give accurate information and keep it up to date.</li>
       </ul>

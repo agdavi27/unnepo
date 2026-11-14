@@ -3,7 +3,7 @@ import { serverConfig } from "@/lib/config";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import type { User } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
-import { isSchoolEmail, normalizeEmail } from "@/lib/schools";
+import { normalizeEmail } from "@/lib/schools";
 import { randomToken, referralCode, sha256 } from "@/lib/security";
 import { appOrigin, sendPasswordResetEmail } from "@/lib/email/transactional";
 
@@ -12,9 +12,8 @@ const SESSION_DAYS = 30;
 export async function signUp(input: { email: string; password: string; name: string }) {
   const email = input.email.trim().toLowerCase();
   const emailNormalized = normalizeEmail(email);
-  if (!isSchoolEmail(email)) {
-    throw new ServiceError("Use a school email address. Personal inboxes such as Gmail are not eligible.", "school_email");
-  }
+  // Any email works; a school address only matters for checking whether the school pays for Pro.
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ServiceError("That email doesn't look right.", "email");
   if (input.password.length < 8) throw new ServiceError("Use at least 8 characters for your password.", "password");
   if (!input.name.trim()) throw new ServiceError("Add your name so outreach can be signed.", "name");
   if (await repo.getUserByEmail(emailNormalized)) {
@@ -79,7 +78,7 @@ export async function login(email: string, password: string) {
   if (!user?.passwordHash) throw new ServiceError("Email or password is incorrect.", "credentials", 401);
   const matches = await bcrypt.compare(password, user.passwordHash);
   if (!matches) throw new ServiceError("Email or password is incorrect.", "credentials", 401);
-  if (!user.schoolEmailVerifiedAt) throw new ServiceError("Verify your school email before signing in.", "unverified", 403);
+  if (!user.schoolEmailVerifiedAt) throw new ServiceError("Verify your email before signing in.", "unverified", 403);
   const token = randomToken();
   await repo.createSession({
     id: id(),
@@ -93,9 +92,6 @@ export async function login(email: string, password: string) {
 
 export async function loginWithOAuth(input: { email: string; name: string; provider: "google" | "microsoft"; emailVerified: boolean }) {
   const email = input.email.trim().toLowerCase();
-  if (!isSchoolEmail(email)) {
-    throw new ServiceError("Sign in with the school email on your Google or Microsoft account.", "school_email");
-  }
   if (!input.emailVerified) throw new ServiceError("That provider did not confirm the email address.", "unverified");
   let user = await repo.getUserByEmail(normalizeEmail(email));
   if (!user) {

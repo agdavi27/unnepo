@@ -34,7 +34,7 @@ const TRACKER = [
 ];
 
 const STEPS = [
-  ["Add the extension", "Sign up free with your school email and add your resume."],
+  ["Add the extension", "Sign up free with any email and add your resume."],
   ["Apply anywhere", "Use your letter and answers on a job board, or press Fill on the company's site."],
   ["Track and follow up", "The job goes in your tracker, with people to email and a draft for each."],
 ];

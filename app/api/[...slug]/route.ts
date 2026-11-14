@@ -11,6 +11,7 @@ import { ServiceError } from "@/lib/errors";
 import { nowIso } from "@/lib/db/file-store";
 import { usingDefaultSecret } from "@/lib/security";
 import { integrations } from "@/lib/integrations/flags";
+import { SITE_URL } from "@/lib/config";
 import { dismissRecommendedJob, generateWorkspaceCoverLetter, rewriteWorkspaceLetterPart, listRecommendedJobs, jobPreferences, saveJobPreferences, saveRecommendedJob, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
@@ -147,19 +148,34 @@ async function handle(request: Request, slug: string[]) {
 
   // Sign in with Google or Microsoft.
   if (root === "oauth" && request.method === "GET" && (action === "google" || action === "microsoft") && slug[2] !== "callback") {
-    if (action === "google" && !integrations.googleSignIn) throw new ServiceError("Signing in with Google is off for now. Use your school email and a password.", "oauth_unconfigured", 400);
+    if (action === "google" && !integrations.googleSignIn) throw new ServiceError("Signing in with Google is off for now. Sign up with your email and a password.", "oauth_unconfigured", 400);
+    // In production Google sign-in always runs on www.unnepo.com: it's the address registered with Google, and
+    // where the session cookie has to end up. Starting anywhere else (a Vercel address) hops there first.
+    if (process.env.NODE_ENV === "production" && publicOrigin(request) !== SITE_URL) return Response.redirect(`${SITE_URL}/api/oauth/${action}`);
     const session = await readSession();
     return Response.redirect(await beginOAuth(action, session?.user.id ?? null, publicOrigin(request)));
   }
   if (root === "oauth" && slug[2] === "callback" && request.method === "GET") {
     const url = new URL(request.url);
     const providerError = url.searchParams.get("error_description") || url.searchParams.get("error");
-    if (providerError) return Response.redirect(oauthReturnUrl(request, "Sign-in was canceled. Try Google or Microsoft again."));
     if (action !== "google" && action !== "microsoft") throw new ServiceError("Unknown sign-in provider.", "oauth_state");
-    const result = await finishOAuth(action, url.searchParams.get("code") || "", url.searchParams.get("state") || "", publicOrigin(request));
+    if (providerError) {
+      console.error("oauth_provider_error", action, providerError);
+      const canceled = url.searchParams.get("error") === "access_denied";
+      return Response.redirect(oauthReturnUrl(request, canceled ? `${providerName(action)} sign-in was canceled. ${OAUTH_TRY_LATER}` : oauthTryLater(action)));
+    }
+    let result: Awaited<ReturnType<typeof finishOAuth>>;
+    try {
+      result = await finishOAuth(action, url.searchParams.get("code") || "", url.searchParams.get("state") || "", publicOrigin(request));
+    } catch (error) {
+      // Anything that goes wrong on the way back from Google lands on the sign-up page with a plain message, never an error page.
+      console.error("oauth_callback_failed", action, error instanceof Error ? error.message : error);
+      const message = error instanceof ServiceError && error.code === "oauth_state" ? error.message : oauthTryLater(action);
+      return Response.redirect(oauthReturnUrl(request, message));
+    }
     await setSessionCookie(result.token);
     const dest = ONBOARDING_INCOMPLETE.has(result.user.onboardingStep) ? "/onboarding" : "/home";
-    return Response.redirect(new URL(dest, request.url));
+    return Response.redirect(new URL(dest, publicOrigin(request)));
   }
 
   if (root === "billing" && action === "webhook" && request.method === "POST") {
@@ -498,6 +514,17 @@ function withExtensionCors(request: Request, response: Response) {
   return new Response(response.body, { status: response.status, headers });
 }
 
+const OAUTH_TRY_LATER = "Try again another time, or sign up with your email and a password below.";
+
+function providerName(provider: string) {
+  return provider === "microsoft" ? "Microsoft" : "Google";
+}
+
+/** What a student sees when sign-in with Google or Microsoft fails for a reason that isn't theirs to fix. */
+function oauthTryLater(provider: string) {
+  return `${providerName(provider)} sign-in isn't working right now. ${OAUTH_TRY_LATER}`;
+}
+
 function oauthReturnUrl(request: Request, message: string) {
   const current = new URL(request.url);
   let path = "/signup";
@@ -522,8 +549,10 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
   try {
     return await handle(request, slug);
   } catch (error) {
-    if (slug[0] === "oauth" && error instanceof ServiceError) {
-      return Response.redirect(oauthReturnUrl(request, error.message));
+    if (slug[0] === "oauth") {
+      if (!(error instanceof ServiceError)) console.error("oauth_failed", error instanceof Error ? error.message : error);
+      if (error instanceof ServiceError) console.error("oauth_failed", error.code, error.message);
+      return Response.redirect(oauthReturnUrl(request, error instanceof ServiceError && error.code === "oauth_state" ? error.message : oauthTryLater(slug[1] ?? "google")));
     }
     return errorResponse(error);
   }
