@@ -9,7 +9,9 @@ window.addEventListener("message", (event) => {
   const data = event.data as { type?: unknown; token?: unknown; requestId?: unknown; jobs?: unknown } | null;
   try {
     if (data?.type === "unnepo:extension-token" && typeof data.token === "string" && data.token.startsWith("unx_")) {
-      void chrome.runtime.sendMessage({ type: "connect", token: data.token, origin: window.location.origin }).catch(() => undefined);
+      void chrome.runtime.sendMessage({ type: "connect", token: data.token, origin: window.location.origin })
+        .then((answer) => { if ((answer as { ok?: boolean } | undefined)?.ok) window.postMessage({ type: "unnepo:extension-connected" }, window.location.origin); })
+        .catch(() => undefined);
     } else if (data?.type === "unnepo:ping") {
       window.postMessage({ type: "unnepo:pong" }, window.location.origin);
     } else if (data?.type === "unnepo:read-links" && Array.isArray(data.jobs)) {

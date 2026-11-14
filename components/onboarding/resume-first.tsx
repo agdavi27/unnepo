@@ -93,6 +93,32 @@ function Tags({ title, values, onChange, placeholder, tag = false }: { title: st
   );
 }
 
+/** Roles that fit the resume, as bubbles to tap into "Roles you want". Asked for once per visit. */
+function RoleIdeas({ taken, onPick }: { taken: string[]; onPick: (role: string) => void }) {
+  const [ideas, setIdeas] = useState<{ roles: string[]; ai: boolean } | null>(null);
+  useEffect(() => {
+    let live = true;
+    api<{ roles: string[]; ai: boolean }>("/roles").then((result) => { if (live) setIdeas(result); }).catch(() => { if (live) setIdeas({ roles: [], ai: false }); });
+    return () => { live = false; };
+  }, []);
+  const left = (ideas?.roles ?? []).filter((role) => !taken.some((other) => other.toLowerCase() === role.toLowerCase()));
+  if (ideas && !left.length) return null;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-[#8B8B94]">{ideas ? (ideas.ai ? "✦ Suggested from your resume and past experience. Tap to add." : "Suggested from your resume. Tap to add.") : "✦ Finding roles that fit your experience…"}</p>
+      <div className="flex flex-wrap gap-2">
+        {ideas
+          ? left.map((role) => (
+              <button key={role} type="button" onClick={() => onPick(role)} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-dashed border-[#3D8BFF]/60 bg-[#3D8BFF]/10 px-3 text-[13px] text-[#BFD6FF] hover:border-[#3D8BFF] hover:bg-[#3D8BFF]/20">
+                <span aria-hidden="true">+</span>{role}
+              </button>
+            ))
+          : [0, 1, 2, 3].map((n) => <span key={n} className="h-9 w-28 animate-pulse rounded-full bg-[#17171B]" />)}
+      </div>
+    </div>
+  );
+}
+
 function Area({ title, value, onChange, placeholder, tag = false }: { title: string; value: string | undefined; onChange: (value: string) => void; placeholder?: string; tag?: boolean }) {
   const id = useId();
   return (
@@ -267,6 +293,7 @@ function GapFields({ id, profile, set }: { id: GapId; profile: StudentProfile; s
       return (
         <div className="space-y-4">
           <Tags title="Roles you want" values={p.preferences.roles ?? []} onChange={(values) => set({ ...p, preferences: { ...p.preferences, roles: values } })} placeholder="e.g. Data analyst, Product intern" />
+          <RoleIdeas taken={p.preferences.roles ?? []} onPick={(role) => set({ ...p, preferences: { ...p.preferences, roles: [...(p.preferences.roles ?? []), role] } })} />
           <div className="grid gap-3 sm:grid-cols-2">
             <Tags title="Industries" values={p.preferences.industries ?? []} onChange={(values) => set({ ...p, preferences: { ...p.preferences, industries: values } })} placeholder="e.g. Fintech, Climate" />
             <Tags title="Locations" values={p.preferences.locations ?? []} onChange={(values) => set({ ...p, preferences: { ...p.preferences, locations: values } })} placeholder="e.g. Boston, New York" />
@@ -290,8 +317,9 @@ function GapFields({ id, profile, set }: { id: GapId; profile: StudentProfile; s
     case "essays":
       return (
         <div className="space-y-4">
-          <Area title="About you, in 2–3 sentences" value={p.essays.aboutMe} onChange={(value) => set({ ...p, essays: { ...p.essays, aboutMe: value } })} />
-          <Area title="Why you're interested in your field" value={p.essays.whyField} onChange={(value) => set({ ...p, essays: { ...p.essays, whyField: value } })} />
+          <p className="text-xs text-[#8B8B94]">Both are optional. Skip either one, or both.</p>
+          <Area title="About you, in 2–3 sentences (optional)" value={p.essays.aboutMe} onChange={(value) => set({ ...p, essays: { ...p.essays, aboutMe: value } })} />
+          <Area title="Why you're interested in your field (optional)" value={p.essays.whyField} onChange={(value) => set({ ...p, essays: { ...p.essays, whyField: value } })} />
         </div>
       );
     case "account":
@@ -313,6 +341,10 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
   const [problem, setProblem] = useState("");
   const [note, setNote] = useState("");
   const [drag, setDrag] = useState(false);
+  /** Gap cards answered on this visit, newest last, so Back can open them again. */
+  const [history, setHistory] = useState<Gap[]>([]);
+  /** A gap card opened again with Back, shown instead of the next one missing. */
+  const [revisit, setRevisit] = useState<Gap | null>(null);
 
   const take = useCallback((next: State) => {
     setState(next);
@@ -365,11 +397,43 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
   }
 
   if (!state || !draft) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <SpiderLoader label="Loading your profile…" />;
-  const gap = state.missing[0];
+  const gap = revisit ?? state.missing[0];
+
+  /** Saves the gap card showing (answered or skipped) and moves to the next one. */
+  async function finishGap(current: Gap) {
+    const next = await save({ done: [...new Set([...draft!.done, current.id])] });
+    if (!next) return;
+    setHistory((list) => [...list.filter((item) => item.id !== current.id), current]);
+    setRevisit(null);
+    if (!next.missing.length) setStep("extension");
+  }
+
+  /** Back: the card before this one, the gap cards answered on this visit one at a time. */
+  function goBack() {
+    setProblem("");
+    if (step === "finish") return setStep("extension");
+    if (step === "confirm") return setStep("upload");
+    if (step === "gaps" || step === "extension") {
+      const previous = history[history.length - 1];
+      if (previous) {
+        setHistory(history.slice(0, -1));
+        setRevisit(previous);
+        setStep("gaps");
+      } else {
+        setRevisit(null);
+        setStep("confirm");
+      }
+    }
+  }
 
   return (
     <section className="mx-auto w-full max-w-3xl space-y-8">
       <div className="space-y-4">
+        {mode === "onboarding" && step !== "upload" && (
+          <button type="button" onClick={goBack} disabled={Boolean(busy)} className="-ml-1 inline-flex min-h-9 items-center gap-1.5 rounded-lg px-1 text-sm text-[#9A9AA3] hover:text-white disabled:opacity-40">
+            <span aria-hidden="true">←</span> Back
+          </button>
+        )}
         <p className={eyebrow}>{mode === "edit" ? "Your profile" : step === "upload" ? "Step 1 of 4" : step === "confirm" ? "Step 2 of 4" : step === "gaps" ? "Step 3 of 4" : step === "extension" ? "Step 4 of 4" : "All set"}</p>
         <h1 className="text-[32px] font-bold leading-tight tracking-[-1.2px] sm:text-[40px] sm:tracking-[-1.4px]">
           {mode === "edit" ? "Everything Unnepo applies with" : step === "upload" ? "Start with your resume" : step === "confirm" ? "Check what we found" : step === "gaps" ? (gap?.title ?? "Almost done") : step === "extension" ? "Add the Unnepo extension" : "You're ready"}
@@ -411,10 +475,10 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
       {step === "gaps" && mode === "onboarding" && gap && (
         <div className="space-y-6 rounded-2xl border border-[#17171B] bg-[#0C0C0E] p-5 sm:p-6">
           <p className="text-sm text-[#9A9AA3]">{gap.why}</p>
-          <GapFields id={gap.id} profile={draft} set={setDraft} />
+          <GapFields key={gap.id} id={gap.id} profile={draft} set={setDraft} />
           <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className={primary} disabled={Boolean(busy)} onClick={async () => { const next = await save({ done: [...draft.done, gap.id] }); if (next && !next.missing.length) setStep("extension"); }}>{busy === "save" ? "Saving…" : "Save and continue"}</button>
-            {gap.optional && <button type="button" className={secondary} disabled={Boolean(busy)} onClick={async () => { const next = await save({ done: [...draft.done, gap.id] }); if (next && !next.missing.length) setStep("extension"); }}>Skip</button>}
+            <button type="button" className={primary} disabled={Boolean(busy)} onClick={() => void finishGap(gap)}>{busy === "save" ? "Saving…" : "Save and continue"}</button>
+            {gap.optional && <button type="button" className={secondary} disabled={Boolean(busy)} onClick={() => void finishGap(gap)}>Skip</button>}
             <span className="text-xs text-[#8B8B94]">{state.missing.length} left</span>
           </div>
         </div>

@@ -6,7 +6,7 @@ import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
 import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
-import { friendPopup, friendRequests, friendsStrip, wireFriends } from "../shared/friends";
+import { friendAsks, friendPopup, friendRequests, friendsStrip, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
 import { UPGRADE_URL } from "@/lib/plan";
 
@@ -28,7 +28,8 @@ const planBadge = document.getElementById("plan-badge")!;
 /** The three tabs along the bottom (home = Jobs, jobs = Tools, settings = Me; shown under those names), and the pages opened from them. */
 type View = "home" | "jobs" | "feedback" | "settings" | "job";
 const TABS: View[] = ["home", "jobs", "settings"];
-let view: View = "home";
+// The panel opens on Tools.
+let view: View = "jobs";
 /** The job open on the "job" page, and the person to show on it. */
 let openedJob = { id: "", contact: "" };
 /** The tab a job's page was opened from, where Back goes. */
@@ -1791,7 +1792,7 @@ function draw(state: PanelState): boolean {
   dressSpider(state.me?.spider);
   const said = lines(state);
   speech(said.lines, said.alert);
-  if (!state.connected) view = "home";
+  if (!state.connected) view = "jobs";
   if (state.job?.running && fillPending === state.tab?.id) fillPending = null;
   tabBar.hidden = !state.connected;
   // Beside the logo: Upgrade to Pro on Free (the Upgrade to Pro page on the website), a Pro tag otherwise.
@@ -1831,7 +1832,7 @@ function draw(state: PanelState): boolean {
   if (shown) popup = null;
   // The job list scrolls in its own box: keep where it was scrolled to across redraws.
   const listAt = app.querySelector(".jobs-scroll")?.scrollTop ?? 0;
-  app.innerHTML = !state.connected ? connectView(state) : `${view === "home" ? homeView(state) : pageView(state)}${popupView(state)}`;
+  app.innerHTML = !state.connected ? connectView(state) : `${friendAsks()}${view === "home" ? homeView(state) : pageView(state)}${popupView(state)}`;
   const listBox = app.querySelector<HTMLElement>(".jobs-scroll");
   // With the job list on screen the panel fits the window: the calendar stays put and the spider hangs onto it.
   document.body.classList.toggle("contained", Boolean(listBox));

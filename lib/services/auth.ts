@@ -9,6 +9,17 @@ import { appOrigin, sendPasswordResetEmail } from "@/lib/email/transactional";
 
 const SESSION_DAYS = 30;
 
+/** A new account becomes friends with everyone who invited its email. Loaded late: friends.ts imports this file. */
+async function friendsFromInvites(userId: string, emailNormalized: string) {
+  try {
+    const { claimInvites } = await import("@/lib/social/friends");
+    await claimInvites(userId, emailNormalized);
+  } catch (error) {
+    // Never blocks signing up; listing friends claims them later anyway.
+    console.error("friend_invite_claim_failed", error);
+  }
+}
+
 export async function signUp(input: { email: string; password: string; name: string }) {
   const email = input.email.trim().toLowerCase();
   const emailNormalized = normalizeEmail(email);
@@ -40,6 +51,7 @@ export async function signUp(input: { email: string; password: string; name: str
   });
 
   const token = await issueToken(user.id, "verify_email");
+  await friendsFromInvites(user.id, user.emailNormalized);
   await repo.insertAudit({ userId: user.id, action: "signup", metadata: { provider: "password" } });
   await repo.insertAnalytics({ userId: user.id, name: "signup", properties: { provider: "password" } });
   return { user: publicUser(user), verifyToken: exposeDevToken(token) };
@@ -121,6 +133,7 @@ export async function loginWithOAuth(input: { email: string; name: string; provi
       idempotencyKey: `signup:${user.id}`,
       includedAllowance: serverConfig().signupCredits,
     });
+    await friendsFromInvites(user.id, user.emailNormalized);
   } else if (!user.schoolEmailVerifiedAt) {
     user = (await repo.updateUser(user.id, { schoolEmailVerifiedAt: nowIso() }))!;
     await repo.grantCreditsOnce({

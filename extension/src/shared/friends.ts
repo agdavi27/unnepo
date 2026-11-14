@@ -21,6 +21,8 @@ const friends = {
   error: "", loading: false, loadedAt: 0,
   /** What happened after Add, Accept or Remove. */
   note: "", noteBad: false, busy: false, email: "",
+  /** A line in the top banner after answering a request there, gone after a few seconds. */
+  flash: "",
 };
 
 export async function loadFriends() {
@@ -50,6 +52,26 @@ export function ensureFriends(maxAge = 60_000) {
 export const friendRequests = () => friends.incoming.length;
 
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]!.toUpperCase()).join("") || "?";
+
+/**
+ * At the top of the panel on every tab: each request waiting on the student, as a gold profile picture with
+ * "… added you" and Yes / No.
+ */
+export function friendAsks() {
+  ensureFriends();
+  const flash = friends.flash ? `<p class="friend-ask-flash" role="status">${escape(friends.flash)}</p>` : "";
+  if (!friends.incoming.length) return flash;
+  const busy = friends.busy ? "disabled" : "";
+  return `${friends.incoming.slice(0, 3).map((item) => `
+    <section class="friend-ask" aria-label="Friend request from ${escape(item.name)}">
+      <span class="friend-av gold" aria-hidden="true">${escape(initials(item.name))}</span>
+      <span class="friend-ask-text"><strong>${escape(item.name)}</strong> added you<span class="sub">Accept and compete each week?</span></span>
+      <span class="friend-ask-btns">
+        <button type="button" class="solid" data-ask-accept="${item.id}" data-ask-name="${escape(item.name)}" ${busy}>Yes</button>
+        <button type="button" class="link" data-ask-decline="${item.id}" ${busy}>No</button>
+      </span>
+    </section>`).join("")}${flash}`;
+}
 
 /** Week's friends box: each friend's applications this week, most first. Shown only once a friend is added. */
 export function friendsWeekCard(myWeek: number) {
@@ -84,7 +106,7 @@ export function friendsStrip() {
   const person = (key: string, label: string, sub: string, kind: string, name: string) => `<button type="button" class="strip-person ${kind}" data-friend-open="${key}" aria-label="${escape(name)}"><span class="friend-av" aria-hidden="true">${escape(label)}</span><span class="strip-sub">${escape(sub)}</span></button>`;
   const people = [
     `<button type="button" class="strip-person add" data-friend-open="add" aria-label="Add a friend"><span class="friend-av" aria-hidden="true">+</span><span class="strip-sub">Add</span></button>`,
-    ...friends.incoming.map((item) => person(`in:${item.id}`, initials(item.name), "Accept", "asking", `${item.name} wants to be friends`)),
+    ...friends.incoming.map((item) => person(`in:${item.id}`, initials(item.name), "Accept", "asking gold", `${item.name} added you`)),
     ...list.map((item) => person(`f:${item.id}`, initials(item.name), String(item.applied), "", `${item.name}: ${item.applied} this week`)),
     ...friends.outgoing.map((item) => person(`out:${item.id}`, initials(item.email.split("@")[0]!.replace(/[._-]+/g, " ")), "Sent", "waiting", `Request sent to ${item.email}`)),
   ].join("");
@@ -113,7 +135,7 @@ export function friendPopup(key: string): { title: string; body: string } | null
   const [kind, id] = key.split(":");
   if (kind === "in") {
     const item = friends.incoming.find((entry) => entry.id === id);
-    return item ? { title: "Friend request", body: `${head(item.name, item.email, " asking")}<p class="small">${escape(item.name.split(" ")[0]!)} wants to compete with you each week: applications, emails, follow-ups, cover letters, replies and interviews.</p><div class="add-row"><button type="button" class="btn primary grow" data-friend-accept="${item.id}" ${busy}>Accept</button><button type="button" class="btn" data-friend-decline="${item.id}" ${busy}>Decline</button></div>` } : null;
+    return item ? { title: "Friend request", body: `${head(item.name, item.email, " asking gold")}<p class="small">${escape(item.name.split(" ")[0]!)} added you and wants to compete with you each week: applications, emails, follow-ups, cover letters, replies and interviews.</p><div class="add-row"><button type="button" class="btn primary grow" data-friend-accept="${item.id}" ${busy}>Accept</button><button type="button" class="btn" data-friend-decline="${item.id}" ${busy}>Decline</button></div>` } : null;
   }
   if (kind === "f") {
     const item = friends.list?.find((entry) => entry.id === id);
@@ -173,6 +195,15 @@ export function wireFriends(root: HTMLElement) {
       return result.emailed ? `Sent. ${email} got an email inviting them to compete.` : `Saved, but the email to ${email} didn't go out. They'll see your request under Me once they sign up.`;
     });
   });
+  const answer = (id: string, accept: boolean, name = "") => {
+    void act({ action: "respond", id, accept }, () => (accept ? "You're friends now." : "Declined.")).then(() => {
+      friends.flash = accept ? `You and ${name || "your friend"} are friends now.` : "";
+      redraw();
+      if (friends.flash) setTimeout(() => { friends.flash = ""; redraw(); }, 4000);
+    });
+  };
+  root.querySelectorAll<HTMLButtonElement>("[data-ask-accept]").forEach((button) => button.addEventListener("click", () => answer(button.dataset.askAccept!, true, button.dataset.askName)));
+  root.querySelectorAll<HTMLButtonElement>("[data-ask-decline]").forEach((button) => button.addEventListener("click", () => answer(button.dataset.askDecline!, false)));
   root.querySelectorAll<HTMLButtonElement>("[data-friend-accept]").forEach((button) => button.addEventListener("click", () => void act({ action: "respond", id: button.dataset.friendAccept, accept: true }, () => "You're friends now.")));
   root.querySelectorAll<HTMLButtonElement>("[data-friend-decline]").forEach((button) => button.addEventListener("click", () => void act({ action: "respond", id: button.dataset.friendDecline, accept: false }, () => "Declined.")));
   root.querySelectorAll<HTMLButtonElement>("[data-friend-remove]").forEach((button) => button.addEventListener("click", () => void act({ action: "remove", id: button.dataset.friendRemove }, () => "Removed.")));

@@ -238,8 +238,8 @@ export function jobPage(job: TrackerJob, focus?: string) {
       </div>
       ${note ? `<p class="small" role="status">${escape(note)}</p>` : ""}
     </section>
-    ${peopleCard(job)}
-    ${applied ? `<section class="page" aria-label="People you emailed">${reachPicker(job)}</section>` : ""}`;
+    ${applied ? `<section class="page" aria-label="People you emailed">${reachPicker(job)}</section>` : ""}
+    ${peopleCard(job)}`;
 }
 
 // A click anywhere outside the ⋯ menu closes it.
@@ -373,9 +373,23 @@ function unlockCard(job: TrackerJob) {
   const faces = ["#3D8BFF", "#A78BFA", "#34D399"].map((color) => `<span class="unlock-face" style="background:${color}33;box-shadow:inset 0 0 0 1.5px ${color}88"></span>`).join("");
   return `<div class="unlock-card">
     <div class="unlock-top"><span class="unlock-faces" aria-hidden="true">${faces}<span class="unlock-lock">${LOCK}</span></span>
-      <div class="unlock-copy"><strong>${escape(title)}</strong><span>Recruiters, the team and alumni at ${escape(company)}, with checked emails.</span></div></div>
+      <div class="unlock-copy"><strong>${escape(title)}</strong><span>Recruiters, the team and alumni at ${escape(company)}, with checked emails. Find people from your own school or schools like it.</span></div></div>
     <button type="button" class="unlock-btn" data-upgrade>Upgrade to Pro <span aria-hidden="true">→</span></button>
   </div>`;
+}
+
+/**
+ * A line about who they are, from what the search already found (no extra lookups): their role at the company,
+ * and why they're worth emailing, like going to the student's school or working where the student did.
+ */
+function personInfo(person: TrackerContact) {
+  const role = person.title && ROLE_LABEL[person.role] && person.role !== "job_poster" ? ROLE_LABEL[person.role] : "";
+  const why = (person.relevance ?? "").replace(/\s+/g, " ").trim();
+  // A why that only repeats their title says nothing new.
+  const useful = why && !(person.title && why.toLowerCase().startsWith(person.title.toLowerCase()) && why.length < person.title.length + 25) ? why : "";
+  const shared = /^(Also|May have) /.test(useful);
+  if (!role && !useful) return "";
+  return `<span class="person-info">${role ? `<span class="role-chip">${escape(role)}</span>` : ""}${useful ? `<span class="why${shared ? " shared" : ""}">${escape(short(useful, 120))}</span>` : ""}</span>`;
 }
 
 function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
@@ -408,6 +422,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
         <span class="person-text">
           <span class="person-top"><span class="person-name">${escape(person.name)}</span>${first ? `<span class="start-here">★ Start</span>` : ""}${person.role === "job_poster" ? `<span class="posted-tag">Shown on job posting</span>` : ""}</span>
           <span class="sub">${escape(person.title || ROLE_LABEL[person.role] || "")}</span>
+          ${personInfo(person)}
           <span class="person-mail">${person.email ? `${GMAIL}<span class="mail-text">${escape(person.email)}</span>` : `<span class="muted">${hidden ? "Tap to show who it is" : "No email found"}</span>`}</span>
           ${store.tracker?.free && person.email ? `<span class="unverified-tag">Unverified email</span>` : ""}
         </span>
