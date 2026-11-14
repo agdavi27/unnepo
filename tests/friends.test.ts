@@ -107,6 +107,25 @@ describe("friends", () => {
     expect(String(sent[0].html)).toContain("/email/spider-angry.gif");
   });
 
+  it("links the invite to www.unnepo.com in production, even when APP_URL is a Vercel address", async () => {
+    const pat = await student("pat.doe@colby.edu", "Pat Doe");
+    process.env.RESEND_API_KEY = "test-key";
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("APP_URL", "https://unnepo-abc123.vercel.app");
+    const sent: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      if (url.includes("resend")) sent.push(JSON.parse(String(init.body)));
+      return new Response("{}", { status: 200 });
+    });
+    try {
+      await inviteFriend(pat, "lee.kay@gmail.com");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(String(sent[0].html)).toContain("https://www.unnepo.com/signup?email=lee.kay%40gmail.com");
+    expect(String(sent[0].html)).not.toContain("vercel.app");
+  });
+
   it("tries the email again when a request is re-added after email wasn't set up", async () => {
     const pat = await student("pat.doe@colby.edu", "Pat Doe");
     const first = await inviteFriend(pat, "lee.kay@colby.edu");

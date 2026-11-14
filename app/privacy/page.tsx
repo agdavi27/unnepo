@@ -24,7 +24,7 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     title: "Information you give us",
     body: (
       <ul>
-        <li><strong>Account details:</strong> your name, school email address, and a password (stored only as a secure hash).</li>
+        <li><strong>Account details:</strong> your name, email address, and a password (stored only as a secure hash).</li>
         <li><strong>Profile:</strong> your school, majors, graduation year, roles, companies, locations, interests, and anything else you enter during onboarding or in Settings.</li>
         <li><strong>Resume:</strong> the file you upload and the text we read from it, used to build your profile and prepare application answers, email drafts, and cover letters.</li>
         <li><strong>Job applications:</strong> the job links you paste, the answers you give or approve, and the status of each application.</li>

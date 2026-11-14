@@ -1,4 +1,4 @@
-import { CONTACT_EMAIL, serverConfig } from "@/lib/config";
+import { CONTACT_EMAIL, serverConfig, SITE_URL } from "@/lib/config";
 
 export async function sendPasswordResetEmail(to: string, resetUrl: string) {
   const key = process.env.RESEND_API_KEY;
@@ -32,8 +32,13 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string) {
   return response.ok;
 }
 
+/**
+ * Where links in emails point. In production that's always the public site (www.unnepo.com), never the Vercel
+ * deployment address that APP_URL may hold; locally it's the dev server.
+ */
 export function appOrigin(origin?: string) {
-  return (origin || serverConfig().appUrl).replace(/\/$/, "");
+  if (origin) return origin.replace(/\/$/, "");
+  return (process.env.NODE_ENV === "production" ? SITE_URL : serverConfig().appUrl).replace(/\/$/, "");
 }
 
 /**
@@ -59,7 +64,7 @@ export async function sendFriendInviteEmail(input: { to: string; fromName: strin
     : `I'm the ref. Nobody's thrown a punch yet. First one to apply takes the lead.`;
   const how = input.hasAccount
     ? "Open the Unnepo extension and go to Me to accept."
-    : "Sign up with your school email, add the Chrome extension, and accept under Me. It's free.";
+    : "Sign up with any email, add the Chrome extension, and accept under Me. It's free.";
   /** Why Unnepo, for someone who hasn't heard of it: the fighter's training kit. */
   const perks = input.hasAccount ? [] : [
     "Autofills job applications from your resume, so each one takes minutes",

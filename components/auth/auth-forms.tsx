@@ -6,14 +6,12 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Check } from "lucide-react";
-import { isSchoolEmail } from "@/lib/schools";
 import { CONTACT_EMAIL } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 
 const signupSchema = z.object({
   name: z.string().min(1, "Add your name"),
-  email: z.string().email("Enter a valid email").refine(isSchoolEmail, "Use a school email such as name@college.edu. Gmail and Outlook.com are not eligible."),
+  email: z.string().email("Enter a valid email"),
   password: z.string().min(8, "Use at least 8 characters"),
 });
 
@@ -72,12 +70,12 @@ export function SignupForm({ google = false }: { google?: boolean }) {
   }
 
   return (
-    <AuthShell title="Create your account" subtitle="Use a school email such as name@college.edu. Personal addresses like Gmail are not eligible.">
+    <AuthShell title="Create your account" subtitle="Use any email. Free to start, no card.">
       {google ? <GoogleButton /> : null}
       <form method="post" action="/api/auth/signup" onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
         <input className="field" placeholder="Full name" autoComplete="name" suppressHydrationWarning {...form.register("name")} />
         {form.formState.errors.name ? <p className="text-sm text-red-300">{form.formState.errors.name.message}</p> : null}
-        <SchoolEmailField value={form.watch("email")} placeholder="School email" autoComplete="email" {...form.register("email")} />
+        <EmailField placeholder="Email" autoComplete="email" {...form.register("email")} />
         {form.formState.errors.email ? <p className="text-sm text-red-300">{form.formState.errors.email.message}</p> : null}
         <input className="field" type="password" placeholder="Password (8+ characters)" autoComplete="new-password" suppressHydrationWarning {...form.register("password")} />
         {form.formState.errors.password ? <p className="text-sm text-red-300">{form.formState.errors.password.message}</p> : null}
@@ -121,7 +119,7 @@ export function LoginForm({ google = false }: { google?: boolean }) {
     const resentData = await resent.json();
     if (!resentData.devToken) {
       setBusy(false);
-      setError("Check the school inbox for the verification link, then log in.");
+      setError("Check your inbox for the verification link, then log in.");
       return;
     }
     const verified = await fetch("/api/auth/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: resentData.devToken }) });
@@ -139,10 +137,10 @@ export function LoginForm({ google = false }: { google?: boolean }) {
   }
 
   return (
-    <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your monthly credits are ready." : params.get("reset") ? "Password updated. Sign in with the new password." : "Sign in with the school email you used to sign up."}>
+    <AuthShell title="Welcome back" subtitle={params.get("verified") ? "Email verified. Your monthly credits are ready." : params.get("reset") ? "Password updated. Sign in with the new password." : "Sign in with the email you used to sign up."}>
       {google ? <GoogleButton /> : null}
       <form onSubmit={submit} className="space-y-3">
-        <SchoolEmailField placeholder="School email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+        <EmailField placeholder="Email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         <input className="field" type="password" placeholder="Password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} suppressHydrationWarning />
         <div className="flex justify-end">
           <Link href="/reset" className="text-sm text-white hover:underline">Forgot password?</Link>
@@ -150,13 +148,13 @@ export function LoginForm({ google = false }: { google?: boolean }) {
         {error ? <p className="text-sm text-red-300">{error}</p> : null}
         <button type="submit" disabled={busy} className="h-11 w-full rounded-xl bg-white font-semibold text-black disabled:opacity-60">{busy ? "Working…" : "Log in"}</button>
       </form>
-      {unverified ? <button type="button" onClick={verifyAndLogin} disabled={busy} className="mt-3 h-11 w-full rounded-xl border border-line">Verify school email and continue</button> : null}
+      {unverified ? <button type="button" onClick={verifyAndLogin} disabled={busy} className="mt-3 h-11 w-full rounded-xl border border-line">Verify email and continue</button> : null}
       <p className="mt-4 text-center text-sm text-muted">Need an account? <Link href="/signup" className="text-white">Create one</Link></p>
     </AuthShell>
   );
 }
 
-/** Sign in, or make an account, with the school Google account. A plain link: the server sends it to Google. */
+/** Sign in, or make an account, with any Google account. A plain link: the server sends it to Google. */
 function GoogleButton() {
   return (
     <>
@@ -182,14 +180,8 @@ export function GoogleMark() {
   );
 }
 
-function SchoolEmailField({ value, ref, ...props }: { value: string; ref?: React.Ref<HTMLInputElement> } & React.InputHTMLAttributes<HTMLInputElement>) {
-  const recognized = isSchoolEmail(value || "");
-  return (
-    <div className="relative">
-      <input {...props} ref={ref} value={value} className="field pr-10" suppressHydrationWarning />
-      {recognized ? <Check className="pointer-events-none absolute top-1/2 right-3 h-5 w-5 -translate-y-1/2 text-emerald-400" aria-hidden={false} aria-label="School email looks right" /> : null}
-    </div>
-  );
+function EmailField({ ref, ...props }: { ref?: React.Ref<HTMLInputElement> } & React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input type="email" {...props} ref={ref} className="field" suppressHydrationWarning />;
 }
 
 export function ResetForm() {
@@ -260,9 +252,9 @@ export function ResetForm() {
   }
 
   return (
-    <AuthShell title="Forgot password" subtitle="Enter the school email on the account. We send a reset link only if that address already exists.">
+    <AuthShell title="Forgot password" subtitle="Enter the email on the account. We send a reset link only if that address already exists.">
       <form onSubmit={request} className="space-y-3">
-        <SchoolEmailField placeholder="School email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+        <EmailField placeholder="Email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         {error ? <p className="text-sm text-red-300">{error}</p> : null}
         {message ? <p className="text-sm text-cream">{message}</p> : null}
         {resetUrl ? (
