@@ -13,6 +13,7 @@ import { JobsView } from "@/components/unnepo/jobs-view";
 import { GoalsView } from "@/components/unnepo/goals-view";
 import { extensionHere } from "@/lib/extension-bridge";
 import { trialLeftLabel } from "@/lib/plan";
+import { WALKTHROUGH_SEEN, Walkthrough } from "@/components/unnepo/walkthrough";
 
 type PlanUsage = Awaited<ReturnType<typeof planUsage>>;
 
@@ -64,6 +65,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [extension, setExtension] = useState<boolean | null>(null);
+  const [tour, setTour] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
   // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans, ?tab=jobs the Jobs tab, ?tab=goals Goals.
   useEffect(() => {
@@ -76,6 +78,9 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
     } else if (tab === "settings" || tab === "jobs" || tab === "goals" || tab === "pro") {
       setView(tab);
       window.history.replaceState(null, "", "/home" + window.location.hash);
+    } else if (params.get("connected")) {
+      // Straight from connecting the extension.
+      window.history.replaceState(null, "", "/home");
     } else if (params.get("billing")) {
       // Coming back from Stripe. The plan changes when Stripe's webhook arrives, usually within seconds.
       setView("settings");
@@ -195,6 +200,20 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
 
   const showOnboarding = !data?.ready || editing;
 
+  // The first time the dashboard shows (onboarding done), "How it works" opens by itself.
+  const dashboardShown = Boolean(data) && !showOnboarding;
+  useEffect(() => {
+    if (!dashboardShown) return;
+    let seen = true;
+    try { seen = Boolean(localStorage.getItem(WALKTHROUGH_SEEN)); } catch { /* storage blocked: don't nag */ }
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- once, the first time the dashboard shows
+    if (!seen) setTour(true);
+  }, [dashboardShown]);
+  const closeTour = useCallback(() => {
+    setTour(false);
+    try { localStorage.setItem(WALKTHROUGH_SEEN, new Date().toISOString()); } catch { /* fine */ }
+  }, []);
+
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
 
   const admin = Boolean(data?.admin);
@@ -252,7 +271,8 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
                     <div className="my-1.5 h-px bg-[#1F1F24]" />
                     {!showOnboarding && <button type="button" onClick={() => { setView("settings"); setMenuOpen(false); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Settings and plans</button>}
                     {!showOnboarding && <button type="button" onClick={() => { setEditing(true); setMenuOpen(false); window.scrollTo({ top: 0 }); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Edit my info</button>}
-                    <a href="/demo" className="rounded-lg px-2.5 py-2 text-[#F7F7F8] hover:bg-white/5">See how it works</a>
+                    {!showOnboarding && <button type="button" onClick={() => { setTour(true); setMenuOpen(false); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">How it works</button>}
+                    <a href="/demo" className="rounded-lg px-2.5 py-2 text-[#F7F7F8] hover:bg-white/5">See a demo</a>
                     <button type="button" onClick={logout} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Log out</button>
                   </div>
                 )}
@@ -283,6 +303,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
             onDone={() => { setEditing(false); void load(); }}
           />
         )}
+        <Walkthrough open={tour && dashboardShown} installed={extension} onClose={closeTour} />
         {data && !showOnboarding && view === "jobs" && <JobsView />}
         {data && !showOnboarding && view === "goals" && <GoalsView />}
         {data && !showOnboarding && view === "pro" && (

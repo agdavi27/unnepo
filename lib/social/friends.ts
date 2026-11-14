@@ -11,8 +11,9 @@ import { isAdminEmail } from "@/lib/services/auth";
 /**
  * Friends: a student adds a friend by email, and once the friend accepts, each sees what the other did this week:
  * jobs applied to, emails and follow-ups sent, cover letters written, replies and interviews, as counts and points.
- * Never who they emailed or where they applied. A request can go to an email with no account yet; it waits until
- * someone signs up with that email.
+ * Never who they emailed or where they applied. A request can go to an email with no account yet: when someone
+ * signs up with that email (from the invite's link or not), they're friends straight away. A request to someone who
+ * already has an account waits for them to accept.
  */
 
 export const MAX_FRIENDS = 50;
@@ -24,6 +25,26 @@ const otherOf = (row: Friendship, userId: string) => (row.fromUserId === userId 
 export const POINTS = { applied: 3, emails: 2, followUps: 2, letters: 1, replies: 5, interviews: 10 } as const;
 export type WeekStats = Record<keyof typeof POINTS, number>;
 export const pointsOf = (stats: WeekStats) => (Object.keys(POINTS) as Array<keyof typeof POINTS>).reduce((sum, key) => sum + stats[key] * POINTS[key], 0);
+
+/**
+ * Requests sent to this email before it had an account become friendships: the sender already chose them, and the
+ * new student signed up. Run on signing up, and again whenever friends are listed, in case signing up missed it.
+ */
+export async function claimInvites(userId: string, emailNormalized: string) {
+  return withLock((db) => {
+    let claimed = 0;
+    for (const row of db.friendships ?? []) {
+      if (row.toUserId || row.toEmail !== emailNormalized || row.fromUserId === userId) continue;
+      row.toUserId = userId;
+      if (row.status === "pending") {
+        row.status = "accepted";
+        row.acceptedAt = nowIso();
+      }
+      claimed += 1;
+    }
+    return claimed;
+  });
+}
 
 /** One student's week since `since`. Cover letters count from Monday (Eastern), as Free's limits do. */
 async function weekStats(userId: string, since: number): Promise<WeekStats> {
@@ -83,11 +104,8 @@ export async function listFriends(userId: string, sinceRaw: unknown) {
   const parsed = Date.parse(String(sinceRaw ?? ""));
   // Up to eight days back: a week, from any time zone.
   const since = Number.isFinite(parsed) && parsed > Date.now() - 8 * 86_400_000 ? parsed : Date.now() - 7 * 86_400_000;
-  const rows = await withLock((db) => {
-    const mine = (db.friendships ?? []).filter((row) => involves(row, userId, email));
-    for (const row of mine) if (!row.toUserId && row.toEmail === email) row.toUserId = userId;
-    return mine;
-  });
+  await claimInvites(userId, email);
+  const rows = await withLock((db) => (db.friendships ?? []).filter((row) => involves(row, userId, email)));
   const accepted = rows.filter((row) => row.status === "accepted");
   const friends = await Promise.all(accepted.map(async (row) => {
     const otherId = otherOf(row, userId)!;

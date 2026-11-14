@@ -77,15 +77,25 @@ describe("friends", () => {
     expect((await listFriends(sam, since)).me).toEqual({ stats: scored.stats, points: 15 });
   });
 
-  it("waits for an email with no account, and accepts when the other side asked first", async () => {
+  it("makes friends as soon as an invited email with no account signs up", async () => {
     const pat = await student("pat.doe@colby.edu", "Pat Doe");
     await friendAction(pat, { action: "invite", email: "lee.kay@colby.edu" });
     const lee = await student("lee.kay@colby.edu", "Lee Kay");
+    const leeSees = await listFriends(lee, "");
+    expect(leeSees.incoming).toHaveLength(0);
+    expect(leeSees.friends.map((friend) => friend.name)).toEqual(["Pat Doe"]);
+    expect((await listFriends(pat, "")).friends.map((friend) => friend.name)).toEqual(["Lee Kay"]);
+    expect((await inviteFriend(pat, "lee.kay@colby.edu")).status).toBe("already");
+  });
+
+  it("asks someone who already has an account, and accepts when the other side asked first", async () => {
+    const pat = await student("pat.doe@colby.edu", "Pat Doe");
+    const lee = await student("lee.kay@colby.edu", "Lee Kay");
+    await friendAction(pat, { action: "invite", email: "lee.kay@colby.edu" });
     expect((await listFriends(lee, "")).incoming).toHaveLength(1);
     // Lee adding Pat back is a yes.
     expect((await inviteFriend(lee, "pat.doe@colby.edu")).status).toBe("accepted");
     expect((await listFriends(pat, "")).friends.map((friend) => friend.name)).toEqual(["Lee Kay"]);
-    expect((await inviteFriend(pat, "lee.kay@colby.edu")).status).toBe("already");
   });
 
   it("emails the invite from contact@unnepo.com as a challenge, with a sign-up link", async () => {

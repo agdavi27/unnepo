@@ -2,13 +2,26 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Logo } from "@/components/brand/logo";
+import { extensionHere } from "@/lib/extension-bridge";
+
+/** Resolves true once the extension's script on this page posts `type`, false after `ms`. */
+function waitFor(type: string, ms: number) {
+  return new Promise<boolean>((resolve) => {
+    const done = (answer: boolean) => { window.removeEventListener("message", listen); clearTimeout(timer); resolve(answer); };
+    const listen = (event: MessageEvent) => { if (event.source === window && (event.data as { type?: unknown } | null)?.type === type) done(true); };
+    const timer = setTimeout(() => done(false), ms);
+    window.addEventListener("message", listen);
+  });
+}
 
 /**
  * Links the Chrome extension to the signed-in account. The extension's content script listens on this
  * page for the token; if it isn't installed yet, the student can copy the code into the extension instead.
  */
 export function ConnectExtension() {
+  const router = useRouter();
   const [state, setState] = useState<"idle" | "busy" | "done">("idle");
   const [code, setCode] = useState("");
   const [problem, setProblem] = useState("");
@@ -27,7 +40,15 @@ export function ConnectExtension() {
       if (!response.ok) throw new Error(body.error || "Couldn't connect the extension.");
       setCode(body.token);
       // Only this page's own origin receives the message; the extension's content script runs here.
+      const installed = await extensionHere(800);
+      const connected = waitFor("unnepo:extension-connected", 2500);
       window.postMessage({ type: "unnepo:extension-token", token: body.token, expiresAt: body.expiresAt }, window.location.origin);
+      if (installed) {
+        // The extension has the token: straight to the dashboard. Older extensions don't say so, so it waits a moment.
+        await connected;
+        router.push("/home?connected=1");
+        return;
+      }
       setState("done");
     } catch (reason) {
       setProblem(reason instanceof Error ? reason.message : "Couldn't connect the extension.");
@@ -51,7 +72,7 @@ export function ConnectExtension() {
           </button>
         ) : (
           <div className="space-y-3 rounded-2xl border border-[#17171B] bg-[#0C0C0E] p-5">
-            <p className="text-sm">If the extension is installed, it&apos;s connected now. If it asks for a code, paste this one:</p>
+            <p className="text-sm">Unnepo couldn&apos;t find the extension in this browser. Add it, then press Connect on Unnepo in its panel, or paste this code there:</p>
             <div className="flex flex-wrap items-center gap-2">
               <code className="min-w-0 flex-1 truncate rounded-lg border border-[#26262C] px-3 py-2 font-mono text-xs text-[#B4B4BC]">{code}</code>
               <button type="button" className="min-h-10 rounded-lg border border-[#26262C] px-3 text-sm hover:bg-white/5" onClick={() => void navigator.clipboard.writeText(code).then(() => setCopied(true))}>{copied ? "Copied" : "Copy code"}</button>

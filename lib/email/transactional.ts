@@ -64,7 +64,7 @@ export async function sendFriendInviteEmail(input: { to: string; fromName: strin
     : `I'm the ref. Nobody's thrown a punch yet. First one to apply takes the lead.`;
   const how = input.hasAccount
     ? "Open the Unnepo extension and go to Me to accept."
-    : "Sign up with any email, add the Chrome extension, and accept under Me. It's free.";
+    : "Sign up with this email address and you're friends automatically. Then add the Chrome extension. It's free.";
   /** Why Unnepo, for someone who hasn't heard of it: the fighter's training kit. */
   const perks = input.hasAccount ? [] : [
     "Autofills job applications from your resume, so each one takes minutes",

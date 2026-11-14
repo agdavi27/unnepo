@@ -15,6 +15,7 @@ import { SITE_URL } from "@/lib/config";
 import { dismissRecommendedJob, generateWorkspaceCoverLetter, rewriteWorkspaceLetterPart, listRecommendedJobs, jobPreferences, saveJobPreferences, saveRecommendedJob, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
+import { roleSuggestions } from "@/lib/profile/role-suggestions";
 import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
@@ -306,6 +307,10 @@ async function handle(request: Request, slug: string[]) {
     if (!action && request.method === "GET") return json(await profileState(user.id));
     if (!action && request.method === "PUT") return json(await saveStudentProfile(user.id, await request.json()));
     if (action === "missing" && request.method === "GET") return json({ missing: (await profileState(user.id)).missing });
+    if (action === "roles" && request.method === "GET") {
+      if (!rateLimit(`profile-roles:${user.id}`, 20, 60 * 60 * 1000)) return json({ roles: [], ai: false });
+      return json(await roleSuggestions(user.id, (await profileState(user.id)).profile));
+    }
     if (action === "resume" && request.method === "POST") {
       const form = await request.formData();
       const file = form.get("file");
