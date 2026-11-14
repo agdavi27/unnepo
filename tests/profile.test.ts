@@ -123,7 +123,7 @@ describe("structured profile", () => {
   });
 
   it("offers Free and Pro, monthly or by the semester, with Free counted by the day and Pro unlimited", () => {
-    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 1], ["pro", "$25", "or $75 a semester", 20]]);
+    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 1], ["pro", "$29.99", "or $100 a semester, through May", 20]]);
     expect(creditMath(1)).toBe("People at 1 company");
     expect(creditMath(40)).toBe("People at 40 companies");
     const saved = process.env.SIGNUP_CREDITS;
@@ -139,8 +139,8 @@ describe("structured profile", () => {
     expect(serverConfig().packCredits).toBe(15);
     process.env.PACK_CREDITS = pack;
     expect(serverConfig().packPriceCents).toBe(1500);
-    expect(serverConfig().proPriceCents).toBe(2500);
-    expect(serverConfig().proSemesterPriceCents).toBe(7500);
+    expect(serverConfig().proPriceCents).toBe(2999);
+    expect(serverConfig().proSemesterPriceCents).toBe(10000);
     expect(serverConfig().premiumPriceCents).toBe(3900);
     expect(serverConfig().premiumSemesterPriceCents).toBe(11700);
     expect(serverConfig().proAiLimit).toBe(1000);
