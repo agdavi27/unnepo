@@ -8,6 +8,9 @@ function intEnv(name: string, fallback: number) {
 /** Where students, schools and anyone else can reach Unnepo. */
 export const CONTACT_EMAIL = "contact@unnepo.com";
 
+/** The public site, for canonical URLs, the sitemap, RSS and structured data. */
+export const SITE_URL = "https://www.unnepo.com";
+
 /** Pricing, credit rules, and spend caps. All of these are environment-configurable. */
 export function serverConfig() {
   return {

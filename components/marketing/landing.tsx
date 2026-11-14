@@ -181,7 +181,7 @@ export function Landing() {
         </main>
 
         <footer className="border-t border-[#17171B] py-7 text-[13px] text-[#9A9AA3]">
-          Unnepo · Built for students · <Link href="/story" className="underline-offset-4 hover:text-white hover:underline">Our story</Link> · <Link href="/privacy" className="underline-offset-4 hover:text-white hover:underline">Privacy Policy</Link> · <Link href="/terms" className="underline-offset-4 hover:text-white hover:underline">Terms of Service</Link> · Contact <a href={`mailto:${CONTACT_EMAIL}`} className="underline-offset-4 hover:text-white hover:underline">{CONTACT_EMAIL}</a>
+          Unnepo · Built for students · <Link href="/story" className="underline-offset-4 hover:text-white hover:underline">Our story</Link> · <Link href="/guides" className="underline-offset-4 hover:text-white hover:underline">Guides</Link> · <Link href="/privacy" className="underline-offset-4 hover:text-white hover:underline">Privacy Policy</Link> · <Link href="/terms" className="underline-offset-4 hover:text-white hover:underline">Terms of Service</Link> · Contact <a href={`mailto:${CONTACT_EMAIL}`} className="underline-offset-4 hover:text-white hover:underline">{CONTACT_EMAIL}</a>
         </footer>
       </div>
     </div>

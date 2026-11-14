@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Caveat, Geist, Geist_Mono, Press_Start_2P } from "next/font/google";
 import "./globals.css";
+import { SITE_URL } from "@/lib/config";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
@@ -9,6 +10,8 @@ const caveat = Caveat({ variable: "--font-caveat", subsets: ["latin"] });
 const pixel = Press_Start_2P({ variable: "--font-pixel", weight: "400", subsets: ["latin"] });
 
 export const metadata: Metadata = {
+  // Makes canonical, Open Graph and share-image URLs absolute.
+  metadataBase: new URL(SITE_URL),
   title: "Unnepo — Apply faster. Follow up smarter. Get hired.",
   description: "A Chrome extension that fills job and internship applications for you, then finds the recruiters behind the role. Free to start.",
 };
