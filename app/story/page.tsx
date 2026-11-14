@@ -139,6 +139,10 @@ export default function StoryPage() {
           </div>
         </article>
 
+        <p className="mt-10 text-[15px] text-[#4A463F]">
+          More from Unnepo: <Link href="/guides" className="font-semibold text-[#1B1B1F] underline underline-offset-4">free job and internship guides for students</Link>.
+        </p>
+
         <section aria-label="Reposting this article" className="mt-12 border-t border-[#E2DDD4] pt-6 text-[14px] leading-relaxed text-[#6B665E]">
           <p className="m-0 font-semibold text-[#1B1B1F]">For career centers, newsletters and student groups</p>
           <p className="m-0 mt-1">

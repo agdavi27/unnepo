@@ -1007,13 +1007,15 @@ export const repo = {
     });
   },
   /** Adds someone to the launch waitlist. The same email twice updates the first entry instead of adding another. */
-  async joinWaitlist(entry: { name: string; email: string; phone?: string }) {
+  async joinWaitlist(entry: { name: string; email: string; phone?: string; source?: string }) {
     return withLock((db) => {
       db.waitlist = db.waitlist ?? [];
       const existing = db.waitlist.find((item) => item.email === entry.email);
       if (existing) {
         existing.name = entry.name;
         if (entry.phone) existing.phone = entry.phone;
+        // Keep the page that first brought them in.
+        if (entry.source && !existing.source) existing.source = entry.source;
         return existing;
       }
       const row = { ...entry, id: id(), createdAt: nowIso() };

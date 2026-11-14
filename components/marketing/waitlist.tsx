@@ -8,9 +8,9 @@ const SONG_START = 24;
 
 /**
  * The landing page's "Join the waitlist" button. It opens a popup asking for a name, an email and, if they like, a
- * phone number. Once it's saved, the spider breakdances to a song that starts 24 seconds in, until the popup closes.
+ * phone number, plus `source` (where on the site they signed up, like "guide/<slug>"). Once it's saved, the spider breakdances to a song that starts 24 seconds in, until the popup closes.
  */
-export function WaitlistButton({ label = "Join the waitlist", className }: { label?: string; className?: string }) {
+export function WaitlistButton({ label = "Join the waitlist", className, source }: { label?: string; className?: string; source?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [name, setName] = useState("");
@@ -47,7 +47,7 @@ export function WaitlistButton({ label = "Join the waitlist", className }: { lab
     setBusy(true);
     setProblem("");
     try {
-      const response = await fetch("/api/waitlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, phone }) });
+      const response = await fetch("/api/waitlist", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, email, phone, source }) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(body.error || "Couldn't save that. Try again.");
       setJoined(body.firstName || name.split(" ")[0]);

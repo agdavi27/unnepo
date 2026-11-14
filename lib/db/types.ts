@@ -614,7 +614,8 @@ export type Database = {
   waitlist?: WaitlistEntry[];
 };
 
-export type WaitlistEntry = { id: string; name: string; email: string; phone?: string; createdAt: string };
+/** `source` is where they joined from, like "guide/how-to-follow-up-on-a-job-application". */
+export type WaitlistEntry = { id: string; name: string; email: string; phone?: string; source?: string; createdAt: string };
 
 export function emptyDatabase(): Database {
   return {
