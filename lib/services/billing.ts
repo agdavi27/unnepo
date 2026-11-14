@@ -1,4 +1,4 @@
-import { PUBLIC_PLANS, SEMESTER_MONTHS, serverConfig } from "@/lib/config";
+import { PUBLIC_PLANS, SEMESTER_MONTHS, semesterEndsAt, serverConfig } from "@/lib/config";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 
@@ -218,6 +218,16 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
       kind: String(metadata.kind ?? nested.kind ?? "") || undefined,
       stripeCustomerId: idOf(object.customer) || undefined,
     });
+    // A Pro semester ends at the end of May, with no renewal and no proration.
+    const kindName = String(metadata.kind ?? nested.kind ?? "");
+    if (billingReason === "subscription_create" && kindName === "pro_semester") {
+      try {
+        const stripe = await stripeClient();
+        await stripe?.subscriptions.update(subscriptionId, { cancel_at: Math.floor(semesterEndsAt().getTime() / 1000), proration_behavior: "none" });
+      } catch (error) {
+        console.error("stripe_semester_end_not_set", subscriptionId, error instanceof Error ? error.message : error);
+      }
+    }
     // Switching plans: the new one is paid for, so the old one stops billing.
     const replaces = String(metadata.replaces ?? nested.replaces ?? "");
     if (billingReason === "subscription_create" && replaces && replaces !== subscriptionId) {
@@ -284,7 +294,9 @@ type CheckoutKind = "grind" | "pack" | "pro" | "premium" | "pro_semester" | "pre
 /** A semester plan bills every SEMESTER_MONTHS months and grants that many months of credits each time. */
 function checkoutOffer(kind: CheckoutKind, config: ReturnType<typeof serverConfig>) {
   if (kind === "premium_semester") return { credits: config.premiumMonthlyCredits * SEMESTER_MONTHS, amount: config.premiumSemesterPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium (semester)", priceId: process.env.STRIPE_PRICE_PREMIUM_SEMESTER, recurring: true, months: SEMESTER_MONTHS };
-  if (kind === "pro_semester") return { credits: config.proSemesterCredits, amount: config.proSemesterPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro (semester)", priceId: process.env.STRIPE_PRICE_PRO_SEMESTER, recurring: true, months: SEMESTER_MONTHS };
+  // A Pro semester runs until the end of May (see semesterEndsAt), not a fixed four months: it bills on a yearly
+  // interval so it can never renew first, and the subscription is set to cancel on May 31 once it's paid.
+  if (kind === "pro_semester") return { credits: config.proSemesterCredits, amount: config.proSemesterPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro (semester, through May)", priceId: process.env.STRIPE_PRICE_PRO_SEMESTER, recurring: true, months: 12 };
   if (kind === "premium") return { credits: config.premiumMonthlyCredits, amount: config.premiumPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium", priceId: process.env.STRIPE_PRICE_PREMIUM, recurring: true };
   if (kind === "pro") return { credits: config.proMonthlyCredits, amount: config.proPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro", priceId: process.env.STRIPE_PRICE_PRO, recurring: true };
   if (kind === "grind") return { credits: config.grindMonthlyCredits, amount: config.grindPriceCents, bucket: "allowance" as const, plan: "grind" as const, name: "Unnepo The Grind", priceId: process.env.STRIPE_PRICE_GRIND, recurring: true };
@@ -305,8 +317,8 @@ export function checkoutKind(plan: unknown, billing: unknown): CheckoutKind {
 function advertisedCents(kind: CheckoutKind) {
   const plan = PUBLIC_PLANS.find((item) => item.id === kind.replace("_semester", ""));
   const label = kind.endsWith("_semester") ? plan?.semesterLabel : plan?.priceLabel;
-  const dollars = /\$(\d+)/.exec(label ?? "")?.[1];
-  return dollars ? Number(dollars) * 100 : null;
+  const dollars = /\$(\d+(?:\.\d{1,2})?)/.exec(label ?? "")?.[1];
+  return dollars ? Math.round(Number(dollars) * 100) : null;
 }
 
 /** The student's live Stripe subscription: the one on record, else one Stripe has under their account id. */

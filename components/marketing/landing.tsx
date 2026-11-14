@@ -62,7 +62,7 @@ export function Landing() {
                 label="Join the waitlist"
                 className="mt-1 inline-flex min-h-[54px] items-center justify-center rounded-[10px] bg-[#3D8BFF] px-[26px] py-3.5 text-base font-semibold text-bg transition-colors hover:bg-[#5A9DFF]"
               />
-              <p className="m-0 text-[13px] text-[#9A9AA3]">Get notified at launch. Free for students, no card. The tracker is free and unlimited. Pro is $25 a month or $75 a semester, and some schools cover it.</p>
+              <p className="m-0 text-[13px] text-[#9A9AA3]">Get notified at launch. Free for students, no card. The tracker is free and unlimited. Pro is $29.99 a month or $100 a semester (through May), and some schools cover it.</p>
             </div>
             <div className="flex min-w-0 flex-[1_1_480px] flex-col items-center gap-[22px]">
               <SpiderDialogue />

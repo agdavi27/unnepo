@@ -102,7 +102,7 @@ export default function StoryPage() {
               <dt className="font-semibold">What it is</dt><dd className="m-0 text-[#4A463F]">A Chrome extension and website for job and internship applications</dd>
               <dt className="font-semibold">Fills out</dt><dd className="m-0 text-[#4A463F]">Applications on job boards and company career sites, stopping at Submit</dd>
               <dt className="font-semibold">Finds</dt><dd className="m-0 text-[#4A463F]">A person to email at each company, with a draft written for you</dd>
-              <dt className="font-semibold">Cost</dt><dd className="m-0 text-[#4A463F]">Free for students. Pro is $25 a month or $75 a semester.</dd>
+              <dt className="font-semibold">Cost</dt><dd className="m-0 text-[#4A463F]">Free for students. Pro is $29.99 a month or $100 a semester, through May.</dd>
             </dl>
           </aside>
 

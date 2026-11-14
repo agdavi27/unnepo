@@ -23,11 +23,11 @@ export function serverConfig() {
     grindMonthlyCredits: intEnv("GRIND_MONTHLY_CREDITS", 30),
     packPriceCents: intEnv("PACK_PRICE_CENTS", 1500),
     packCredits: intEnv("PACK_CREDITS", 15),
-    proPriceCents: intEnv("PRO_PRICE_CENTS", 2500),
+    proPriceCents: intEnv("PRO_PRICE_CENTS", 2999),
     proMonthlyCredits: intEnv("PRO_MONTHLY_CREDITS", 20),
     /** People searches a Pro semester (4 months, paid up front) comes with: fewer than 4 months, since it costs less a month. */
     proSemesterCredits: intEnv("PRO_SEMESTER_CREDITS", 70),
-    proSemesterPriceCents: intEnv("PRO_SEMESTER_PRICE_CENTS", 7500),
+    proSemesterPriceCents: intEnv("PRO_SEMESTER_PRICE_CENTS", 10000),
     premiumPriceCents: intEnv("PREMIUM_PRICE_CENTS", 3900),
     premiumMonthlyCredits: intEnv("PREMIUM_MONTHLY_CREDITS", 75),
     premiumSemesterPriceCents: intEnv("PREMIUM_SEMESTER_PRICE_CENTS", 11700),
@@ -71,6 +71,19 @@ export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIM
 /** A semester plan: four months paid up front, with four months of credits at once. */
 export const SEMESTER_MONTHS = 4;
 
+/**
+ * When a Pro semester ends: May 31 (end of day, Eastern), the next one to come. PRO_SEMESTER_ENDS_AT (an ISO date)
+ * overrides it while it's still in the future. A semester bought in the summer runs to the following May.
+ */
+export function semesterEndsAt(now = Date.now()) {
+  const set = typeof process !== "undefined" ? Date.parse(process.env.PRO_SEMESTER_ENDS_AT ?? "") : NaN;
+  if (!Number.isNaN(set) && set > now) return new Date(set);
+  const year = new Date(now).getUTCFullYear();
+  // 23:59:59 on May 31 in New York (EDT) is 03:59:59 UTC on June 1.
+  const thisMay = Date.UTC(year, 5, 1, 3, 59, 59);
+  return new Date(thisMay > now ? thisMay : Date.UTC(year + 1, 5, 1, 3, 59, 59));
+}
+
 /** "40 jobs' people lists" */
 export function creditMath(credits: number) {
   return credits === 1 ? "People at 1 company" : `People at ${credits} companies`;
@@ -95,8 +108,8 @@ export const PUBLIC_PLANS = [
   {
     id: "pro" as const,
     name: "Pro",
-    priceLabel: "$25",
-    semesterLabel: "or $75 a semester",
+    priceLabel: "$29.99",
+    semesterLabel: "or $100 a semester, through May",
     cadence: "Billed monthly or each semester",
     blurb: "Unlimited everything",
     cta: "Choose Pro",

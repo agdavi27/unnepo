@@ -3,12 +3,14 @@ import { POST } from "@/app/api/[...slug]/route";
 import { repo } from "@/lib/db/file-store";
 import { applyVerifiedStripeEvent, checkoutKind, createBillingPortal, createStripeCheckout } from "@/lib/services/billing";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
+import { semesterEndsAt } from "@/lib/config";
 import { useTempDb } from "./helpers";
 
 const api = vi.hoisted(() => ({
   checkout: vi.fn(),
   portal: vi.fn(),
   cancel: vi.fn(),
+  update: vi.fn(),
   retrieve: vi.fn(),
   search: vi.fn(),
   price: vi.fn(),
@@ -25,7 +27,7 @@ vi.mock("stripe", async (importOriginal) => {
     default: class {
       checkout = { sessions: { create: api.checkout } };
       billingPortal = { sessions: { create: api.portal } };
-      subscriptions = { cancel: api.cancel, retrieve: api.retrieve, search: api.search };
+      subscriptions = { cancel: api.cancel, update: api.update, retrieve: api.retrieve, search: api.search };
       prices = { retrieve: api.price };
       invoicePayments = { list: api.invoicePayments };
       webhooks = signing;
@@ -97,16 +99,31 @@ describe("checkout", () => {
     expect(session.customer_email).toBe(user.email);
     expect(session.success_url).toBe(`${ORIGIN}/home?billing=success`);
     expect(session.cancel_url).toBe(`${ORIGIN}/home?billing=cancelled`);
-    expect(session.line_items[0].price_data).toMatchObject({ unit_amount: 2500, recurring: { interval: "month", interval_count: 1 } });
+    expect(session.line_items[0].price_data).toMatchObject({ unit_amount: 2999, recurring: { interval: "month", interval_count: 1 } });
     expect(session.subscription_data.metadata).toMatchObject({ userId: user.id, kind: "pro", plan: "pro", credits: "20" });
   });
 
-  it("bills a semester every four months with a semester of credits", async () => {
+  it("charges $100 for a semester with a semester of credits, on an interval that can't renew before May", async () => {
     const user = await student();
     await createStripeCheckout(user, "pro_semester", ORIGIN);
     const [pro] = api.checkout.mock.calls.map((call) => call[0]);
-    expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 7500, recurring: { interval: "month", interval_count: 4 } });
+    expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 10000, recurring: { interval: "month", interval_count: 12 } });
     expect(pro.metadata.credits).toBe("70");
+  });
+
+  it("ends a paid semester on May 31 without proration, and leaves monthly Pro alone", async () => {
+    const user = await student();
+    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro_semester", subscription: "sub_sem", credits: "70" }));
+    expect(api.update).toHaveBeenCalledWith("sub_sem", { cancel_at: Math.floor(semesterEndsAt().getTime() / 1000), proration_behavior: "none" });
+    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro_semester", subscription: "sub_sem", reason: "subscription_cycle" }));
+    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro", subscription: "sub_month" }));
+    expect(api.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts the semester's end at the next May 31, Eastern", () => {
+    expect(semesterEndsAt(Date.parse("2026-11-14T12:00:00Z")).toISOString()).toBe("2027-06-01T03:59:59.000Z");
+    expect(semesterEndsAt(Date.parse("2027-02-01T12:00:00Z")).toISOString()).toBe("2027-06-01T03:59:59.000Z");
+    expect(semesterEndsAt(Date.parse("2027-06-02T12:00:00Z")).toISOString()).toBe("2028-06-01T03:59:59.000Z");
   });
 
   it("won't charge a price that differs from the page", async () => {
@@ -118,7 +135,7 @@ describe("checkout", () => {
     api.price.mockResolvedValueOnce({ unit_amount: 2400 });
     await expect(createStripeCheckout(user, "pro", ORIGIN)).rejects.toThrow("price is being updated");
     expect(api.checkout).not.toHaveBeenCalled();
-    api.price.mockResolvedValueOnce({ unit_amount: 2500 });
+    api.price.mockResolvedValueOnce({ unit_amount: 2999 });
     await createStripeCheckout(user, "pro", ORIGIN);
     expect(api.checkout.mock.calls[0][0].line_items).toEqual([{ price: "price_old", quantity: 1 }]);
   });

@@ -1,5 +1,5 @@
 /**
- * "Used by students from" strip under the hero. Schools are set as type, not their official logos,
+ * "Prelaunch v1 used by students from" strip under the hero. Schools are set as type, not their official logos,
  * so nothing here suggests the school itself endorses Unnepo.
  */
 
@@ -28,9 +28,9 @@ export function Schools() {
           id="schools-title"
           className="absolute -top-[26px] left-4 m-0 border-4 border-bg bg-[#3D8BFF] px-3.5 pb-2 pt-2.5 font-[family-name:var(--font-pixel)] text-[11px] leading-normal text-white shadow-[0_0_0_4px_#F7F7F8] sm:left-6 sm:text-[13px]"
         >
-          USED BY STUDENTS FROM
+          PRELAUNCH V1 USED BY STUDENTS FROM
         </h2>
-        <ul className="grid grid-cols-2 gap-x-3 gap-y-8 px-3 pb-10 pt-14 sm:grid-cols-[repeat(auto-fit,minmax(140px,1fr))] sm:gap-x-6 sm:gap-y-10 sm:px-10 lg:px-14">
+        <ul className="grid grid-cols-2 gap-x-3 gap-y-8 px-3 pb-10 pt-20 sm:pt-14 sm:grid-cols-[repeat(auto-fit,minmax(140px,1fr))] sm:gap-x-6 sm:gap-y-10 sm:px-10 lg:px-14">
           {SCHOOLS.map((school) => (
             <li key={school.name} className={`flex items-center justify-center whitespace-nowrap text-center leading-none text-[#C9C9D0] ${school.style}`}>
               {school.name}
