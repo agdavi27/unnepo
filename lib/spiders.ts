@@ -119,8 +119,23 @@ export const ART_H = 30;
 
 export type SpiderLook = { skin: SkinId; school?: string | null };
 
-/** The colors for each pixel key, from the skin (and the school, for the school spider). */
-export function spiderPalette(look: SpiderLook) {
+/**
+ * On a light background (Light mode): a soft dark-plum outline instead of black, and the body and legs a step
+ * lighter, so the spider reads as a clean drawing rather than a dark smudge. Eyes, mouth and letters stay.
+ */
+export function onLight(palette: Record<string, string>) {
+  const light: Record<string, string> = { ...palette, o: "#2E2638" };
+  for (const key of ["b", "d", "h", "k", "K", "l", "L"]) if (palette[key]) light[key] = shade(palette[key], 0.15);
+  return light;
+}
+
+/** The colors for each pixel key, from the skin (and the school, for the school spider); `light` for Light mode. */
+export function spiderPalette(look: SpiderLook, light = false): Record<string, string> {
+  const palette = darkPalette(look);
+  return light ? onLight(palette) : palette;
+}
+
+function darkPalette(look: SpiderLook) {
   // The Unnepo spider: the same colors as the one hanging on the website's front page.
   if (look.skin === "classic") {
     return {

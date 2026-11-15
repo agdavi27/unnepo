@@ -5,9 +5,9 @@ import { ART_H, ART_W, artRects, spiderArt, spiderPalette, type SpiderLook } fro
  * with an open-mouth frame for when he talks and an angry one for when he's poked.
  */
 
-/** The spider as an SVG with both mouth frames; toggle the "talking" class to open his mouth. */
-export function heroSpiderSvg(look: SpiderLook = { skin: "classic" }) {
-  const palette = spiderPalette(look);
+/** The spider as an SVG with both mouth frames; toggle the "talking" class to open his mouth. `light` for Light mode. */
+export function heroSpiderSvg(look: SpiderLook = { skin: "classic" }, light = false) {
+  const palette = spiderPalette(look, light);
   return `<svg viewBox="0 0 ${ART_W} ${ART_H}" width="80" height="60" shape-rendering="crispEdges" aria-hidden="true"><g class="mouth-shut">${artRects(spiderArt(false, look), palette)}</g><g class="mouth-open">${artRects(spiderArt(true, look), palette)}</g><g class="mouth-angry">${artRects(spiderArt(true, look, true), { ...palette, R: "#FF4D4D" })}</g></svg>`;
 }
 
@@ -19,8 +19,8 @@ const LAPTOP = [[13, 27, 34, 16, "#000000"], [14, 28, 32, 14, "#C9CDD6"], [14, 2
   .map(([x, y, w, h, fill]) => `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${fill}"/>`).join("");
 
 /** The spider typing on a laptop. Whoever shows it animates its classes: spider, foot left, foot right, logo and glow. */
-export function typingSpiderSvg(width: number, look: SpiderLook = { skin: "classic" }) {
-  const palette = spiderPalette(look);
+export function typingSpiderSvg(width: number, look: SpiderLook = { skin: "classic" }, light = false) {
+  const palette = spiderPalette(look, light);
   return `<svg viewBox="0 0 ${TYPING_W} ${TYPING_H}" width="${width}" height="${Math.round((width * TYPING_H) / TYPING_W)}" shape-rendering="crispEdges" aria-hidden="true" style="color:${palette.l}">`
     + `<g transform="translate(${(TYPING_W - ART_W) / 2} 1)"><g class="spider">${artRects(spiderArt(false, look), palette)}</g></g>`
     + `<rect x="18" y="26" width="24" height="2" fill="#3D8BFF" opacity=".35" class="glow"/>`
