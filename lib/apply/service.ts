@@ -85,6 +85,7 @@ export async function student(userId: string) {
     monthlyInterviewGoal: stored?.monthlyInterviewGoal,
     streakGoal: stored?.streakGoal,
     spiderSkin: stored?.spiderSkin,
+    theme: stored?.theme,
     autoFindPeople: stored?.autoFindPeople,
     maybeApplied: stored?.maybeApplied,
     session: stored?.session,
@@ -641,6 +642,10 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     const applied = (await applications.list(userId)).filter((app) => isApplied(app.status)).length;
     if (!skinUnlocked(skin, applied)) throw new ServiceError(`That spider unlocks after ${skin.unlockAt} applications.`, "spider", 403);
     next.spiderSkin = skin.id;
+  }
+  if (body.theme !== undefined) {
+    if (body.theme !== "light" && body.theme !== "dark") throw new ServiceError("Pick light or dark.", "theme", 400);
+    next.theme = body.theme;
   }
   if (body.savedAnswer && typeof body.savedAnswer === "object") {
     const given = body.savedAnswer as { key?: unknown; answer?: unknown };

@@ -419,12 +419,13 @@ function parseEmailJson(text: string) {
 }
 
 export async function workspaceState(userId: string) {
-  const [user, document, credits, resume, student] = await Promise.all([
+  const [user, document, credits, resume, student, stored] = await Promise.all([
     repo.getUserById(userId),
     repo.getProfileDocument(userId),
     repo.getAccount(userId),
     repo.getLatestResume(userId),
     profileState(userId),
+    applicationProfiles.get(userId),
   ]);
   const studentFacts = document ? profileIntelligence.approvedForOutreach(document.facts, document.form.excludedTopics) : [];
   return {
@@ -439,5 +440,7 @@ export async function workspaceState(userId: string) {
     highlights: document?.highlights ?? [],
     resume: resume ? { id: resume.id, fileName: resume.fileName, byteSize: resume.byteSize } : null,
     integrations: { apollo: integrations.apollo, anthropic: integrations.anthropic, stripeBilling: integrations.stripeBilling },
+    // Light or dark, the same here and in the extension's panel.
+    theme: stored?.theme ?? "dark",
   };
 }

@@ -8,8 +8,11 @@ import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobBy
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { friendAsks, friendPopup, friendRequests, friendsStrip, giveawayPopup, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
+import { accountTheme, chooseTheme, startTheme, theme } from "../shared/theme";
 import { UPGRADE_URL } from "@/lib/plan";
 import { startWalkthrough, walkthroughOnce } from "./walkthrough";
+
+startTheme();
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
@@ -1622,6 +1625,7 @@ function trackingSettings(state: PanelState) {
       <div class="set-rows">
         ${toggle("auto-save", "Save jobs automatically", tracking.autoDetect === "auto" ? "When a site confirms it" : "Off: Unnepo asks first", tracking.autoDetect === "auto")}
         ${toggle("notify", "Follow-up reminders", "Once a day, when due", tracking.notify)}
+        ${toggle("light-mode", "Light mode", "Here and on unnepo.com", theme() === "light")}
         ${toggle("pause", `Stop at Submit <span class="beta">Beta</span>`, "Autofill waits for you to check", !state.autoSubmit)}
         <label class="set-row"><span class="set-text"><span>Email links open in</span></span><select class="field set-select" id="mailer">${mail("gmail", "Gmail")}${mail("outlook", "Outlook")}${mail("mailto", "Mail app")}</select></label>
       </div>
@@ -1644,6 +1648,9 @@ function wireTracking() {
   document.getElementById("notify")?.addEventListener("change", (event) => {
     tracking!.notify = (event.target as HTMLInputElement).checked;
     void chrome.storage.local.set({ notify: tracking!.notify });
+  });
+  document.getElementById("light-mode")?.addEventListener("change", (event) => {
+    chooseTheme((event.target as HTMLInputElement).checked ? "light" : "dark");
   });
 }
 
@@ -1793,6 +1800,7 @@ function draw(state: PanelState): boolean {
     letterFor = letterJob;
   }
   dressSpider(state.me?.spider);
+  accountTheme(state.me?.theme);
   const said = lines(state);
   speech(said.lines, said.alert);
   if (!state.connected) view = "jobs";

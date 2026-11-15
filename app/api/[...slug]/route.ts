@@ -427,6 +427,10 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   if (action === "maybe" && method === "POST") return json(await extensionMaybe(user.id, await request.json()));
   if (action === "session" && method === "POST") return json(await setSession(user.id, Boolean((await request.json())?.start)));
   if (action === "profile" && method === "GET") return json(await extensionProfile(user.id));
+  if (action === "theme" && method === "POST") {
+    const { profile } = await saveApplicationProfile(user.id, { theme: (await request.json())?.theme });
+    return json({ ok: true, theme: profile.theme ?? "dark" });
+  }
   if (action === "resume" && method === "POST") {
     if (!rateLimit(`extension-resume:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of uploads in an hour. Try again later.", "rate_limited", 429);
     const form = await request.formData();
