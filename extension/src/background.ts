@@ -340,6 +340,12 @@ async function rememberSeen(tabId: number, scan: Scan) {
   const form = scan.fields.length >= 3;
   // The company's application form knows less than the posting it came from: keep the posting's details.
   const other = Boolean(before && otherLinkedInJob(before.url, scan.jobUrl || scan.url));
+  // Indeed Apply's form (smartapply.indeed.com) is the posting seen before it, in this tab or the one it opened from:
+  // its pages are steps ("Add your contact information"), never a job of their own.
+  if (before && /^smartapply\.indeed\.com$/i.test(new URL(scan.url).hostname)) {
+    if (!before.form) { all[tabId] = { ...before, form: true }; await chrome.storage.session.set({ seen: all }); }
+    return;
+  }
   if (before?.description && !scan.description && sameCompany(before.company, scan.company) && !other) {
     if (form && !before.form) { all[tabId] = { ...before, form: true }; await chrome.storage.session.set({ seen: all }); }
     return;
@@ -488,7 +494,7 @@ function sameJobPage(a: string, b: string) {
   try {
     const [x, y] = [new URL(a), new URL(b)];
     if (x.hostname !== y.hostname || x.pathname.replace(/\/$/, "") !== y.pathname.replace(/\/$/, "")) return false;
-    return ["jid", "currentJobId", "jobId", "job_id", "id", "lvk"].every((key) => x.searchParams.get(key) === y.searchParams.get(key));
+    return ["jid", "currentJobId", "jobId", "job_id", "id", "lvk", "jk", "vjk", "jl", "jobListingId"].every((key) => x.searchParams.get(key) === y.searchParams.get(key));
   } catch {
     return false;
   }
@@ -1308,8 +1314,24 @@ chrome.webRequest.onCompleted.addListener((details) => {
  * "?submitted=true") right after its form was in this tab: the site's own word that it went through.
  */
 const CONFIRM_URL = /\/(confirmation|confirmed|thank-?you|thanks|application-?(submitted|complete|received)|submitted|success)(\/|\?|#|$)|[?&](submitted|success|applied|application_submitted)=(true|1)\b/i;
+// Indeed Apply (Indeed's own form, which Glassdoor's Easy Apply also uses) ends on smartapply.indeed.com/…/post-apply
+// once Indeed has the application: the board's own word, saved like LinkedIn Easy Apply. Once per tab and job.
+const INDEED_APPLY_HOST = /^smartapply\.indeed\.com$/i;
+const INDEED_DONE_PATH = /\/post-?apply\b/i;
+const indeedDone = new Map<number, string>();
 async function confirmationPage(details: { tabId: number; frameId: number; url: string }) {
-  if (details.frameId !== 0 || details.tabId < 0 || !CONFIRM_URL.test(details.url)) return;
+  if (details.frameId !== 0 || details.tabId < 0) return;
+  let address: URL | null = null;
+  try { address = new URL(details.url); } catch { /* not a page address */ }
+  if (address && INDEED_APPLY_HOST.test(address.hostname) && INDEED_DONE_PATH.test(address.pathname)) {
+    const seen = (await seenJobs())[details.tabId];
+    const key = seen ? boardKey(seen) : details.url;
+    if (indeedDone.get(details.tabId) === key) return;
+    indeedDone.set(details.tabId, key);
+    void log("Indeed Apply moved to its \"application submitted\" page.");
+    return recordSeen(details.tabId, "Indeed Apply sent your application.", "board_saved");
+  }
+  if (!CONFIRM_URL.test(details.url)) return;
   const [job, seen] = [(await jobs())[details.tabId], (await seenJobs())[details.tabId]];
   if (job?.applicationId && !job.submission && (job.clickedAt || job.report?.filled.length)) return void record(details.tabId, "confirmed", "The site's confirmation page opened.", "site_confirmed");
   if (!job?.submission && (seen?.form || seen?.sent)) {
@@ -2225,6 +2247,7 @@ chrome.runtime.onInstalled.addListener(() => void jobSitePassword());
 chrome.tabs.onRemoved.addListener((tabId) => {
   runs.delete(tabId);
   applyClicks.delete(tabId);
+  indeedDone.delete(tabId);
   formFrame.delete(tabId);
   void saveApplying(tabId, null);
   void tabGone(tabId);

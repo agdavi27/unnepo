@@ -21,6 +21,9 @@ export function isJobPage(page: JobPageSigns): boolean {
   if (page.ats && page.ats !== "other") return true;
   // LinkedIn is mostly a feed and searches: only a job it has open (/jobs/view/<id>, or a search's currentJobId).
   if (/(^|\.)linkedin\.com$/i.test(url.hostname)) return /\/jobs\/view\/|[?&]currentJobId=\d/.test(url.pathname + url.search);
+  // Indeed is mostly searches, company reviews and salaries: only a job it has open (/viewjob?jk=, a search's vjk,
+  // a sponsored job's /rc/clk or /pagead/clk link) or Indeed Apply's own form.
+  if (/(^|\.)indeed\.com$/i.test(url.hostname)) return /^smartapply\./i.test(url.hostname) || /\/(viewjob|rc\/clk|pagead\/clk|m\/viewjob)\b|[?&](jk|vjk)=\w/i.test(url.pathname + url.search);
   if (JOB_HOSTS.test(url.hostname)) return true;
   // A posting read from the page (schema.org JobPosting, Handshake's pane) is a job wherever it is.
   if ((page.description ?? "").trim().length >= 200) return true;
@@ -36,5 +39,5 @@ export function isJobPage(page: JobPageSigns): boolean {
  */
 export function sendsApplication(label: string): boolean {
   const text = label.replace(/\s+/g, " ").trim();
-  return /^(1-click apply|one-click apply|quick apply|easy apply|instant apply|submit( my)? application|send( my)? application|apply with (my )?(profile|resume))$/i.test(text);
+  return /^(1-click apply|one-click apply|quick apply|easy apply|instant apply|submit( my| your)? application|send( my| your)? application|apply with (my )?(profile|resume))$/i.test(text);
 }

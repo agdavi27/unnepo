@@ -785,6 +785,80 @@ export function openedJob(pressed?: Element | null): OpenedJob {
   return { title: page.title, company: page.company, description: page.description ?? "", url: address, from: "page" };
 }
 
+/**
+ * The job boards students apply through most, read by the names they give the parts of their open job: Indeed's
+ * search pane and job page, Glassdoor's, SimplyHired's and Dice's. Their markup changes now and then, so each part
+ * has a few known names, and anything not found falls back to the general reading below (null here).
+ */
+type BoardParts = { host: RegExp; pane: string[]; title: string[]; company: string[]; description: string[] };
+const BOARD_PARTS: BoardParts[] = [
+  {
+    host: /(^|\.)indeed\.com$/i,
+    pane: ["#jobsearch-ViewjobPaneWrapper", ".jobsearch-ViewJobLayout-jobDisplay", ".jobsearch-JobComponent", "#viewJobSSRRoot"],
+    title: ["[data-testid='jobsearch-JobInfoHeader-title']", ".jobsearch-JobInfoHeader-title", "h1[class*='JobInfoHeader-title']", "h2[class*='JobInfoHeader-title']"],
+    company: ["[data-testid='inlineHeader-companyName']", "[data-company-name='true']", "[data-testid='jobsearch-CompanyInfoContainer'] a", "[data-testid='jobsearch-CompanyInfoContainer'] [data-testid*='companyName' i]"],
+    description: ["#jobDescriptionText", "[data-testid='jobsearch-JobComponent-description']"],
+  },
+  {
+    host: /(^|\.)glassdoor\.[a-z.]+$/i,
+    pane: ["[class*='JobDetails_jobDetailsContainer']", "[data-test='job-details']", "#JDCol"],
+    title: ["h1[id^='jd-job-title']", "[data-test='job-title']", "[class*='JobDetails_jobTitle']", "[class*='JobDetails_header'] h1"],
+    company: ["[data-test='employer-name']", "[class*='EmployerProfile_employerNameHeading']", "[class*='EmployerProfile_compactEmployerName']", "[class*='EmployerProfile_profileContainer'] h4", "[class*='EmployerProfile_profileContainer'] a"],
+    description: ["[class*='JobDetails_jobDescription']", "[data-test='jobDescriptionContent']", ".jobDescriptionContent"],
+  },
+  {
+    host: /(^|\.)simplyhired\.[a-z.]+$/i,
+    pane: ["[data-testid='viewJob']", "[data-testid='viewJobContainer']"],
+    title: ["[data-testid='viewJobTitle']"],
+    company: ["[data-testid='viewJobCompanyName']"],
+    description: ["[data-testid='viewJobBodyJobFullDescriptionContent']", "[data-testid='viewJobBodyJobFullDescription']"],
+  },
+  {
+    host: /(^|\.)dice\.com$/i,
+    pane: ["[data-testid='job-detail-container']", "main"],
+    title: ["[data-cy='jobTitle']", "h1[data-testid='job-detail-header-title']", "[data-testid='jobTitle']"],
+    company: ["[data-cy='companyNameLink']", "[data-cy='companyName']", "[data-testid='companyName']", "a[href*='/company-profile/']"],
+    description: ["[data-testid='jobDescriptionHtml']", "#jobDescription", "[data-cy='jobDescription']"],
+  },
+];
+
+/** A job's name as a board shows it, without the words it adds for screen readers: Indeed's "Analyst - job post". */
+export function boardJobName(text: string) {
+  return clean(text).replace(/\s*[-–—]\s*job post$/i, "").replace(/^(new|promoted|sponsored|easy apply)\s+/i, "").trim();
+}
+
+/** An employer's line as a board shows it, without its rating beside it: "Initech 4.1 ★" or "Initech\n4.1 out of 5 stars". */
+export function boardEmployerName(text: string) {
+  const first = (text ?? "").split("\n").map((line) => clean(line)).find(Boolean) ?? "";
+  return cleanCompanyName(first.replace(/\s+\d(\.\d)?\s*(★|☆|out of 5( stars)?)?\s*$/i, "").replace(/\s*(★|☆)\s*$/, "").trim());
+}
+
+export function boardJob(): { title: string; company: string; description: string; pane: HTMLElement } | null {
+  const parts = BOARD_PARTS.find((board) => board.host.test(window.location.hostname));
+  if (!parts) return null;
+  const first = (selectors: string[], root: ParentNode) => {
+    for (const selector of selectors) {
+      const found = Array.from(root.querySelectorAll<HTMLElement>(selector)).find((el) => visible(el) && outsideDialog(el) && clean(el.textContent).length >= 2);
+      if (found) return found;
+    }
+    return null;
+  };
+  const known = first(parts.pane, document);
+  const heading = first(parts.title, known ?? document);
+  if (!heading) return null;
+  const title = boardJobName(heading.innerText || heading.textContent || "");
+  if (title.length < 3 || title.length > 150 || notJobTitle(title) || NOT_JOB_NAME.test(title)) return null;
+  // The pane: the board's own box for it, else up from the job's name to the largest box with at most one job in it.
+  let pane: HTMLElement = known && known.contains(heading) ? known : heading;
+  if (pane === heading) while (pane.parentElement && pane.parentElement !== document.body && distinctJobLinks(pane.parentElement) <= 1) pane = pane.parentElement;
+  const named = first(parts.company, pane) ?? first(parts.company, document);
+  const fromBoard = boardEmployerName(named?.innerText || named?.textContent || named?.getAttribute("aria-label") || "");
+  const company = goodEmployer(fromBoard, title) ? fromBoard : employerIn(pane, heading, title);
+  const text = first(parts.description, pane) ?? first(parts.description, document);
+  const description = ((text ?? pane).innerText || "").replace(/\n{3,}/g, "\n\n").trim().slice(0, 8000);
+  return { title: title.slice(0, 200), company: company.slice(0, 200), description, pane };
+}
+
 /** The open job from its pane, posting data or the selected result; null when the page doesn't show which. */
 function findOpenedJob(given?: Element | null): OpenedJob | null {
   // The Apply button the student pressed in the last few minutes, marked by the page watcher.
@@ -798,6 +872,13 @@ function findOpenedJob(given?: Element | null): OpenedJob | null {
   if (linkedin?.waiting) return { title: "", company: "", description: "", url: address, from: "details pane" };
   if (linkedin?.title) return { title: linkedin.title, company: linkedin.company, description: linkedin.description, url: address, from: "details pane" };
   const postings = structuredJobs();
+  // Indeed, Glassdoor, SimplyHired, Dice: their own names for the open job's parts.
+  const board = boardJob();
+  if (board) {
+    const matching = postings.find((posting) => sameName(posting.title, board.title));
+    const company = board.company || (matching?.company && goodEmployer(matching.company, board.title) ? matching.company : "");
+    return { title: board.title, company, description: board.description || matching?.description || "", url: address, from: "details pane" };
+  }
   const buttons = pressed ? [pressed as HTMLElement] : Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button], input[type=submit]"))
     .filter((el) => visible(el) && APPLY_LABEL.test(clean(el.textContent || (el as HTMLInputElement).value || el.getAttribute("aria-label"))));
   // The pane around each Apply button; the one with the most to read is the open job (a results card's
@@ -812,7 +893,7 @@ function findOpenedJob(given?: Element | null): OpenedJob | null {
   if (pane && (pressed || (pane.innerText || "").length > 200)) {
     const heading = ["h1", "h2", "h3"].map((tag) => Array.from(pane.querySelectorAll<HTMLElement>(tag))
       .find((el) => visible(el) && clean(el.textContent).length >= 3 && clean(el.textContent).length <= 150 && !NOT_JOB_NAME.test(clean(el.textContent)) && !notJobTitle(clean(el.textContent)))).find(Boolean);
-    const title = clean(heading?.textContent);
+    const title = boardJobName(heading?.textContent ?? "");
     if (title) {
       const matching = postings.find((posting) => sameName(posting.title, title));
       const company = (matching?.company && goodEmployer(matching.company, title) ? matching.company : "") || employerIn(pane, heading ?? null, title);
@@ -845,6 +926,8 @@ export function jobPane(): HTMLElement {
     const pane = handshakePane();
     if (pane) return pane;
   }
+  const board = boardJob();
+  if (board) return board.pane;
   const marked = document.querySelector<HTMLElement>("[data-unnepo-pressed]");
   const pressed = marked && marked.isConnected && visible(marked) && outsideDialog(marked) && Date.now() - Number(marked.dataset.unnepoPressed) < 10 * 60_000 ? marked : null;
   const button = pressed ?? Array.from(document.querySelectorAll<HTMLElement>("button, a, [role=button]"))

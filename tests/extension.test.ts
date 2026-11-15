@@ -14,7 +14,7 @@ import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
-import { jobLink, titleParts } from "@/extension/src/content/scan";
+import { boardEmployerName, boardJobName, jobLink, titleParts } from "@/extension/src/content/scan";
 import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
 import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromDescription } from "@/lib/apply/extract";
@@ -854,6 +854,14 @@ describe("applying activity", () => {
 });
 
 describe("one link per job", () => {
+  it("reads job boards' names for a job and its employer without what they add beside them", () => {
+    expect(boardJobName("Software Engineer Intern - job post")).toBe("Software Engineer Intern");
+    expect(boardJobName("  Data Analyst  ")).toBe("Data Analyst");
+    expect(boardEmployerName("Initech\n4.1 out of 5 stars")).toBe("Initech");
+    expect(boardEmployerName("Globex 4.2 ★")).toBe("Globex");
+    expect(boardEmployerName("3M")).toBe("3M");
+  });
+
   it("turns Indeed's search with a job open into that job's own page, and leaves other links alone", () => {
     expect(jobLink("https://www.indeed.com/jobs?q=intern&l=Boston&vjk=9f8e7d6c5b4a3210")).toBe("https://www.indeed.com/viewjob?jk=9f8e7d6c5b4a3210");
     expect(jobLink("https://www.indeed.com/viewjob?jk=abc123&from=serp")).toBe("https://www.indeed.com/viewjob?jk=abc123");

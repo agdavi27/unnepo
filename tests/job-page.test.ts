@@ -16,6 +16,16 @@ describe("isJobPage", () => {
     expect(isJobPage({ url: "https://example.com/page", ats: "lever" })).toBe(true);
   });
 
+  it("on Indeed, only a job it has open or Indeed Apply's form", () => {
+    expect(isJobPage({ url: "https://www.indeed.com/viewjob?jk=9f8e7d6c5b4a3210" })).toBe(true);
+    expect(isJobPage({ url: "https://www.indeed.com/jobs?q=intern&l=Boston&vjk=9f8e7d6c5b4a3210" })).toBe(true);
+    expect(isJobPage({ url: "https://www.indeed.com/rc/clk?jk=abc123&from=serp" })).toBe(true);
+    expect(isJobPage({ url: "https://smartapply.indeed.com/beta/indeedapply/form/contact-info" })).toBe(true);
+    expect(isJobPage({ url: "https://www.indeed.com/jobs?q=intern&l=Boston" })).toBe(false);
+    expect(isJobPage({ url: "https://www.indeed.com/cmp/Initech/reviews", description: "x".repeat(400) })).toBe(false);
+    expect(isJobPage({ url: "https://www.indeed.com/career/salaries" })).toBe(false);
+  });
+
   it("accepts any page with a posting read from it", () => {
     expect(isJobPage({ url: "https://www.acme.com/team", description: "We're hiring an analyst. ".repeat(12) })).toBe(true);
   });
@@ -35,7 +45,7 @@ describe("isJobPage", () => {
 
 describe("sendsApplication", () => {
   it("counts presses that send the application", () => {
-    for (const label of ["1-Click Apply", "Easy Apply", "Submit application", "Apply with profile"]) expect(sendsApplication(label)).toBe(true);
+    for (const label of ["1-Click Apply", "Easy Apply", "Submit application", "Submit your application", "Apply with profile"]) expect(sendsApplication(label)).toBe(true);
   });
   it("doesn't count bare Apply or Submit (filters, newsletters)", () => {
     for (const label of ["Apply", "Apply now", "Submit", "Apply filters"]) expect(sendsApplication(label)).toBe(false);
