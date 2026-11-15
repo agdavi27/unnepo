@@ -9,6 +9,7 @@ import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/
 import { friendAsks, friendPopup, friendRequests, friendsStrip, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
 import { UPGRADE_URL } from "@/lib/plan";
+import { startWalkthrough, walkthroughOnce } from "./walkthrough";
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
@@ -579,6 +580,7 @@ function pageView(state: PanelState) {
     settings: () => `${profileCard(state)}
       ${friendsStrip()}
       ${trackingSettings(state)}
+      <button type="button" class="btn me-tour" id="show-tour">Show me how it works</button>
       <div class="me-foot">
         <span><button type="button" class="quiet" data-popup="activity">Activity</button><span aria-hidden="true">·</span><button type="button" class="quiet" data-go="feedback">Feedback</button></span>
         <span><button type="button" class="quiet" id="disconnect">Sign out</button><span class="mono">V${escape(extensionVersion())}</span></span>
@@ -1933,6 +1935,9 @@ function draw(state: PanelState): boolean {
   document.getElementById("start-resume")?.addEventListener("click", () => resumeInput.click());
   wireIssues();
   wireManualJob(state);
+  document.getElementById("show-tour")?.addEventListener("click", () => startWalkthrough(go));
+  // The first time the panel opens signed in: how it works, once.
+  if (state.connected) void walkthroughOnce(go);
   document.getElementById("pause")?.addEventListener("change", (event) => void ask({ type: "set-auto-submit", value: !(event.target as HTMLInputElement).checked }));
   return true;
 }
