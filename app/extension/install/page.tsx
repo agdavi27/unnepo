@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { InstallExtension } from "@/components/extension/install";
-import manifest from "@/extension/manifest.json";
+import { CHROME_STORE_URL } from "@/lib/config";
 
 export const metadata: Metadata = { title: "Get the extension · Unnepo" };
 
 export default function Page() {
-  return <InstallExtension storeUrl={process.env.NEXT_PUBLIC_CHROME_EXTENSION_URL || null} version={manifest.version_name ?? manifest.version} />;
+  return <InstallExtension storeUrl={CHROME_STORE_URL} />;
 }

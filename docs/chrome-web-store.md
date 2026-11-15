@@ -16,10 +16,10 @@ To upload an update: `npm run push` (raises the version), then `npm run extensio
 
 **Language:** English (United States)
 
-**Description:**
+**Description:** (Don't list job sites or other companies' names. On Nov 14, 2026 a submission was rejected for "Keyword Spam" over "Workday, Greenhouse, Lever, Ashby, LinkedIn, Handshake, Indeed".)
 
 ```
-Unnepo is a job search sidekick for college students. It lives in Chrome's side panel and works on the job sites you already use: Workday, Greenhouse, Lever, Ashby, LinkedIn, Handshake, Indeed and hundreds more.
+Unnepo is a job search sidekick for college students. It lives in Chrome's side panel, right beside the job boards and company career sites where you already apply.
 
 TRACK EVERY APPLICATION, AUTOMATICALLY
 When a page says your application went through, Unnepo saves the job to your tracker: the title, the company, the link and the date. No spreadsheet to keep up.
@@ -105,4 +105,4 @@ Unnepo reads only the job pages you're on, to save jobs and fill forms you open.
 
 ## After approval
 
-Point the site's "Get the extension" button at the store link (`https://chromewebstore.google.com/detail/<item id>`).
+The site already links to `https://chromewebstore.google.com/detail/loheheacekocdbngdoehppjhdmdcingb` (`CHROME_STORE_URL` in `lib/config.ts`; `NEXT_PUBLIC_CHROME_EXTENSION_URL` overrides it). There is no zip download on the site any more.

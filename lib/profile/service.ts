@@ -1,3 +1,4 @@
+import { CHROME_STORE_URL } from "@/lib/config";
 import { nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { applicationProfiles } from "@/lib/apply/store";
@@ -60,7 +61,7 @@ export async function profileState(userId: string) {
     missing: missingGaps(student),
     ready,
     resume: resume ? { id: resume.id, fileName: resume.fileName } : null,
-    extensionUrl: process.env.NEXT_PUBLIC_CHROME_EXTENSION_URL || null,
+    extensionUrl: CHROME_STORE_URL,
   };
 }
 
