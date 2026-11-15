@@ -1,7 +1,7 @@
 /** Job boards where applying is often one press, with no confirmation page: Handshake, LinkedIn (Easy Apply), ZipRecruiter, Indeed… */
 export const QUICK_BOARDS = /(^|\.)((joinhandshake|linkedin|ziprecruiter|indeed|simplyhired|wellfound|glassdoor|dice|builtin|monster|careerbuilder|wayup)\.com|simplify\.jobs|idealist\.org|usajobs\.gov)$/;
 // An Apply press. `FINAL` ones send the application right away; plain "Apply" may open a form first.
-const APPLY_PRESS = /^(1-click apply|one-click apply|quick apply|easy apply|instant apply|apply|apply now|submit( my)? application|send( my)? application|submit|apply with (my )?(profile|resume))$/i;
+const APPLY_PRESS = /^(1-click apply|one-click apply|quick apply|easy apply|instant apply|apply|apply now|submit( my| your)? application|send( my| your)? application|submit|apply with (my )?(profile|resume))$/i;
 const FINAL_PRESS = /1-click|one-click|quick apply|instant apply|submit|send|apply with/i;
 // Apply buttons that go to the company's own site: that site's page is where the applying happens.
 const ELSEWHERE = /externally|company('|’)?s? (site|website)|employer('|’)?s? (site|website)|on company site/i;

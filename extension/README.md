@@ -102,6 +102,17 @@ like a job posting or an application. Clicking it opens the side panel; its × h
 the browser session. It never shows on LinkedIn or on Unnepo itself, and it reads nothing but whether
 the page looks like a job page (`src/content/launcher.ts`).
 
+## Job boards (Indeed, Glassdoor, SimplyHired, Dice)
+
+- The open job is read by the board's own names for its parts (`BOARD_PARTS` in `src/content/scan.ts`): title,
+  employer (without its star rating) and description, with Indeed's hidden "- job post" taken off the title. When
+  the board renames them, the general reading takes over.
+- On Indeed, only a job it has open counts as a job page (`/viewjob?jk=`, a search's `vjk`, `/rc/clk`), never a
+  search, reviews or salaries. Two jobs on one search page are told apart by `jk`/`vjk` (and Glassdoor's `jl`).
+- Indeed Apply (also Glassdoor's Easy Apply) runs on smartapply.indeed.com, which keeps the posting it came from.
+  Reaching its `post-apply` page is Indeed's own word that it went, so the job saves itself like LinkedIn Easy Apply.
+  "Submit your application" counts as a press that sends it.
+
 ## Uploads and hard-to-read forms
 
 - Upload boxes are filled before anything else, and the extension waits (up to six seconds) while a site
