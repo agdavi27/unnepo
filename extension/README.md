@@ -53,6 +53,8 @@ and **See my job dashboard**, **Settings**, credits left and **Upgrade plan** al
   (click to copy, **Change** to type or make a new one). The line at the top says how it went.
   Reloading the page after an error brings Autofill back.
 
+**How Unnepo works** (`src/sidepanel/walkthrough.ts`): the first time the panel opens signed in, it dims and an arrow points at the spider, then the Tools, Jobs and Me tabs, one step each. Once only; Me → **Show me how it works** brings it back. The website has no tour.
+
 Settings has the profile, whether to press Submit, My jobs, activity, **Feedback**, sign out and the version.
 
 ## Connect
