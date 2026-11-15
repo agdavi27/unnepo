@@ -4,13 +4,13 @@ import { Logo } from "@/components/brand/logo";
 import { Features } from "@/components/marketing/features";
 import { GetExtension } from "@/components/marketing/get-extension";
 import { ProductDemo } from "@/components/marketing/product-demo";
+import { CHROME_STORE_URL } from "@/lib/config";
 
 export const metadata: Metadata = {
   title: "See how it works · Unnepo",
   description: "Watch Unnepo fill a job application from your profile, then find people at the company to email.",
 };
 
-const EXTENSION_URL = process.env.NEXT_PUBLIC_CHROME_EXTENSION_URL || "";
 
 const STEPS = [
   ["Open any job", "On Greenhouse, Lever, Workday, Ashby, iCIMS and more, a spider drops in. Click it to open Unnepo."],
@@ -47,7 +47,7 @@ export default function DemoPage() {
           ))}
         </ol>
         <Features />
-        <GetExtension href={EXTENSION_URL || "/signup"} external={Boolean(EXTENSION_URL)} />
+        <GetExtension href={CHROME_STORE_URL} external />
       </main>
     </div>
   );

@@ -1006,7 +1006,7 @@ export const repo = {
       return row;
     });
   },
-  /** Adds someone to the launch waitlist. The same email twice updates the first entry instead of adding another. */
+  /** Adds someone to the launch waitlist (closed at launch; the list is kept for a "we're live" email). The same email twice updates the first entry instead of adding another. */
   async joinWaitlist(entry: { name: string; email: string; phone?: string; source?: string }) {
     return withLock((db) => {
       db.waitlist = db.waitlist ?? [];

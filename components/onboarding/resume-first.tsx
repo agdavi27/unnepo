@@ -10,7 +10,7 @@ import { CLASS_YEARS, EEO_OPTIONS, classYearOf, type Education, type Experience,
  */
 
 type Gap = { id: GapId; title: string; why: string; optional: boolean };
-type State = { profile: StudentProfile; missing: Gap[]; ready: boolean; resume: { id: string; fileName: string } | null; extensionUrl: string | null };
+type State = { profile: StudentProfile; missing: Gap[]; ready: boolean; resume: { id: string; fileName: string } | null; extensionUrl: string };
 
 const btn = "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40";
 const primary = `${btn} bg-white text-black hover:bg-zinc-200`;
@@ -511,7 +511,7 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
             </ol>
           </div>
           <div className="flex flex-wrap items-center gap-3 border-t border-[#17171B] pt-6">
-            <a href={state.extensionUrl ?? "/extension/install"} target="_blank" rel="noreferrer" className={primary}>Add to Chrome</a>
+            <a href={state.extensionUrl} target="_blank" rel="noreferrer" className={primary}>Add to Chrome</a>
             <a href="/extension/connect" target="_blank" rel="noreferrer" className={secondary}>Connect the extension</a>
             <button type="button" className={secondary} onClick={() => setStep("finish")}>Next</button>
           </div>
@@ -522,7 +522,7 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
         <div className="space-y-5 rounded-2xl border border-[#17171B] bg-[#0C0C0E] p-6">
           <p className="text-sm text-[#B4B4BC]">Your profile is {draft.completeness}% ready. The Unnepo Chrome extension fills applications from it, right in your own browser.</p>
           <div className="flex flex-wrap gap-3">
-            <a href={state.extensionUrl ?? "/extension/install"} target="_blank" rel="noreferrer" className={primary}>Add to Chrome</a>
+            <a href={state.extensionUrl} target="_blank" rel="noreferrer" className={primary}>Add to Chrome</a>
             <button type="button" className={secondary} onClick={onDone}>Go to Unnepo</button>
           </div>
           <p className="text-xs text-[#8B8B94]">You can change anything later in Settings, under Profile.</p>

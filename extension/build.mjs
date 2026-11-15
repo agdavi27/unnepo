@@ -42,11 +42,4 @@ if (process.argv.includes("--zip")) {
   rmSync(zip, { force: true });
   execFileSync("zip", ["-qr", zip, ".", "-x", ".*"], { cwd: out });
   console.log(`Packed it into ${path.relative(root, zip)} for the Chrome Web Store`);
-  // The website's download, for installing by hand before (or instead of) the store: /extension/install.
-  if (!/localhost/.test(api)) {
-    const site = path.join(root, "public/downloads/unnepo-extension.zip");
-    mkdirSync(path.dirname(site), { recursive: true });
-    cpSync(zip, site);
-    console.log(`Copied it to ${path.relative(root, site)} for the website's download`);
-  }
 }

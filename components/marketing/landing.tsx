@@ -2,10 +2,9 @@ import Link from "next/link";
 import type { CSSProperties } from "react";
 import { Logo } from "@/components/brand/logo";
 import { FounderLink } from "@/components/marketing/founder-note";
-import { WaitlistButton } from "@/components/marketing/waitlist";
 import { Schools } from "@/components/marketing/schools";
 import { SpiderDialogue } from "@/components/marketing/spider-dialogue";
-import { CONTACT_EMAIL, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
+import { CHROME_STORE_URL, CONTACT_EMAIL, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
 
 /**
  * --pad is the page's left edge, --gutter keeps the right side clear for the spider's web line, and --inset is how
@@ -58,11 +57,20 @@ export function Landing() {
             <div className="flex min-w-0 flex-[1_1_460px] flex-col items-start gap-5">
               <h1 className="m-0 text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Apply faster.<br />Follow up smarter.<br />Get hired.</h1>
               <p className="m-0 max-w-[500px] text-[clamp(16px,2vw,19px)] leading-normal text-[#B4B4BC]">Apply on any job board or company site. Every application lands in one place, with the people to follow up with.</p>
-              <WaitlistButton
-                label="Join the waitlist"
-                className="mt-1 inline-flex min-h-[54px] items-center justify-center rounded-[10px] bg-[#3D8BFF] px-[26px] py-3.5 text-base font-semibold text-bg transition-colors hover:bg-[#5A9DFF]"
-              />
-              <p className="m-0 text-[13px] text-[#9A9AA3]">Get notified at launch. Free for students, no card. The tracker is free and unlimited. Pro is $29.99 a month or $100 a semester (through May), and some schools cover it.</p>
+              <div className="mt-1 flex flex-wrap items-center gap-3">
+                <a
+                  href={CHROME_STORE_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex min-h-[54px] items-center justify-center rounded-[10px] bg-[#3D8BFF] px-[26px] py-3.5 text-base font-semibold text-bg transition-colors hover:bg-[#5A9DFF]"
+                >
+                  Add to Chrome, it&apos;s free
+                </a>
+                <Link href="/signup" className="inline-flex min-h-[54px] items-center justify-center rounded-[10px] border border-[#3A3A42] px-[22px] text-base font-semibold text-[#F7F7F8] transition-colors hover:bg-white/5">
+                  Sign up free
+                </Link>
+              </div>
+              <p className="m-0 text-[13px] text-[#9A9AA3]">Free for students, no card. The tracker is free and unlimited. Pro is $29.99 a month or $100 a semester (through May), and some schools cover it.</p>
             </div>
             <div className="flex min-w-0 flex-[1_1_480px] flex-col items-center gap-[22px]">
               <SpiderDialogue />
@@ -165,10 +173,12 @@ export function Landing() {
                     <ul className="m-0 flex flex-1 list-disc flex-col gap-2 pl-[18px] text-sm leading-[1.4] text-[#B4B4BC]">
                       {features.map((feature) => <li key={feature}>{feature}</li>)}
                     </ul>
-                    <WaitlistButton
-                      label={free ? "Join the waitlist" : "Get notified at launch"}
+                    <Link
+                      href="/signup"
                       className={`flex min-h-[46px] items-center justify-center rounded-[10px] text-sm font-semibold transition-colors ${free ? "bg-[#3D8BFF] text-bg hover:bg-[#5A9DFF]" : "border border-[#3A3A42] text-[#F7F7F8] hover:bg-white/5"}`}
-                    />
+                    >
+                      {plan.cta}
+                    </Link>
                   </div>
                 );
               })}

@@ -1,8 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { repo } from "@/lib/db/file-store";
+import { describe, expect, it } from "vitest";
 import { allGuides, extractFaq, getGuide, isPublished, parseBlocks, parseFrontMatter, publishedGuides, publishTime, relatedGuides } from "@/lib/guides";
-import { joinWaitlist } from "@/lib/waitlist";
-import { useTempDb } from "./helpers";
 
 describe("guide parsing", () => {
   it("reads front matter, stripping surrounding quotes but keeping inner ones", () => {
@@ -84,18 +81,5 @@ describe("the article set", () => {
   it("gives every article a unique title and search phrase", () => {
     expect(new Set(guides.map((guide) => guide.title)).size).toBe(guides.length);
     expect(new Set(guides.map((guide) => guide.keyword.toLowerCase())).size).toBe(guides.length);
-  });
-});
-
-describe("waitlist source", () => {
-  beforeEach(() => { useTempDb(); });
-
-  it("records the guide a signup came from, keeps the first one, and drops junk", async () => {
-    await joinWaitlist({ name: "Pat", email: "pat@colby.edu", source: "guide/how-to-follow-up-on-a-job-application" });
-    await joinWaitlist({ name: "Pat", email: "pat@colby.edu", source: "guide/other" });
-    await joinWaitlist({ name: "Sam", email: "sam@colby.edu", source: "<script>" });
-    const rows = await repo.listWaitlist();
-    expect(rows.find((row) => row.email === "pat@colby.edu")?.source).toBe("guide/how-to-follow-up-on-a-job-application");
-    expect(rows.find((row) => row.email === "sam@colby.edu")?.source).toBeUndefined();
   });
 });
