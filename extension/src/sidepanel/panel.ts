@@ -8,7 +8,7 @@ import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobBy
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { friendAsks, friendPopup, friendRequests, friendsStrip, giveawayPopup, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
-import { accountTheme, chooseTheme, startTheme, theme } from "../shared/theme";
+import { accountTheme, chooseTheme, onThemeChange, startTheme, theme } from "../shared/theme";
 import { UPGRADE_URL } from "@/lib/plan";
 import { startWalkthrough, walkthroughOnce } from "./walkthrough";
 
@@ -343,7 +343,7 @@ function goalBar(state: PanelState) {
 function fillingView() {
   return `
     <section class="filling" aria-label="Filling your application">
-      <div class="letter-writing">${typingSpiderSvg(120, spiderLook)}</div>
+      <div class="letter-writing">${typingSpiderSvg(120, spiderLook, theme() === "light")}</div>
       <button type="button" class="btn big stop" id="stop">Stop, I'll do it myself</button>
     </section>`;
 }
@@ -477,7 +477,7 @@ function applyingBox(state: PanelState) {
         <div class="q-head"><span class="heading">${applying.questions.length} complex ${applying.questions.length === 1 ? "question" : "questions"}</span><span class="mono">${open.length} LEFT</span></div>
         <ul class="q-list">${applying.questions.map(row).join("")}</ul>
         ${complex.busy
-          ? `<div class="letter-writing" role="status">${typingSpiderSvg(90, spiderLook)}<span class="small">Answering ${open.length} ${open.length === 1 ? "question" : "questions"}…</span></div>`
+          ? `<div class="letter-writing" role="status">${typingSpiderSvg(90, spiderLook, theme() === "light")}<span class="small">Answering ${open.length} ${open.length === 1 ? "question" : "questions"}…</span></div>`
           : open.length ? `<button type="button" class="btn primary big" id="answer-complex">${SPARK_SMALL}Answer complex questions${answersCost(open.length)}</button>${usesLine(usesNow?.answers.note)}` : ""}
         <span class="sub">Written from your resume and profile. Read each one before you submit.</span>`
         : `<p class="note">No complex questions on this page. If the form has more steps, the spiders show up there.</p>`}
@@ -877,7 +877,7 @@ function answerPopup(state: PanelState) {
     </div>${note}`);
   }
   if (answering.mode === "all") return allQuestionsPopup(state, note);
-  if (answering.busy) return popupShell("Writing your answer", `<div class="letter-writing" role="status">${typingSpiderSvg(120, spiderLook)}<span class="small">Writing your answer…</span></div>`);
+  if (answering.busy) return popupShell("Writing your answer", `<div class="letter-writing" role="status">${typingSpiderSvg(120, spiderLook, theme() === "light")}<span class="small">Writing your answer…</span></div>`);
   if (answering.answer) {
     return popupShell("Your answer", `
       <section class="letter-form flat">
@@ -894,7 +894,7 @@ function answerPopup(state: PanelState) {
 /** Every complex question on the page, each with its answer once written. */
 function allQuestionsPopup(state: PanelState, note: string) {
   const title = "Questions on this page";
-  if (answering.finding) return popupShell(title, `<div class="letter-writing" role="status">${typingSpiderSvg(110, spiderLook)}<span class="small">Looking for questions…</span></div>`, 1, 0);
+  if (answering.finding) return popupShell(title, `<div class="letter-writing" role="status">${typingSpiderSvg(110, spiderLook, theme() === "light")}<span class="small">Looking for questions…</span></div>`, 1, 0);
   const applying = state.applying;
   const questions = applying?.questions ?? [];
   if (!questions.length) {
@@ -920,7 +920,7 @@ function allQuestionsPopup(state: PanelState, note: string) {
     </li>`;
   };
   const action = complex.busy
-    ? `<div class="letter-writing" role="status">${typingSpiderSvg(90, spiderLook)}<span class="small">Answering ${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}…</span></div>`
+    ? `<div class="letter-writing" role="status">${typingSpiderSvg(90, spiderLook, theme() === "light")}<span class="small">Answering ${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}…</span></div>`
     : unanswered.length ? `<button type="button" class="btn primary big" id="answer-all">${SPARK_SMALL}Answer ${unanswered.length === questions.length ? "all " : ""}${unanswered.length} ${unanswered.length === 1 ? "question" : "questions"}${answersCost(unanswered.length)}</button>${usesLine(usesNow?.answers.note)}`
     : notPut.length > 1 ? `<button type="button" class="btn primary big" id="put-all">Put all ${notPut.length} in their boxes</button>` : "";
   return popupShell(title, `
@@ -1078,7 +1078,7 @@ const letterChoices = { format: "match", length: "standard", tone: "professional
 
 /** While the AI writes: the spider typing on his laptop. */
 const writingSpider = () => (letterStep === "writing" || letterStep === "revising"
-  ? `<div class="letter-writing" role="status">${typingSpiderSvg(150, spiderLook)}<span class="small">${letterStep === "writing" ? "Writing your cover letter…" : "Rewriting your cover letter…"}</span></div>`
+  ? `<div class="letter-writing" role="status">${typingSpiderSvg(150, spiderLook, theme() === "light")}<span class="small">${letterStep === "writing" ? "Writing your cover letter…" : "Rewriting your cover letter…"}</span></div>`
   : "");
 
 /** The letter, with Copy and PDF, and a box for edits. */
@@ -1667,14 +1667,16 @@ resumeInput.addEventListener("change", () => {
 let dressed = "";
 let spiderLook: SpiderLook | undefined;
 function dressSpider(look?: SpiderLook) {
-  const key = look ? `${look.skin}|${look.school ?? ""}` : "";
+  const key = look ? `${look.skin}|${look.school ?? ""}|${theme()}` : "";
   if (!look || key === dressed) return;
   dressed = key;
   spiderLook = look;
   const spider = document.getElementById("spider")!;
   spider.querySelector("svg")?.remove();
-  spider.insertAdjacentHTML("beforeend", heroSpiderSvg(look));
+  spider.insertAdjacentHTML("beforeend", heroSpiderSvg(look, theme() === "light"));
 }
+// Light mode switched (here, or from the website through the account): the spider's colors follow.
+onThemeChange(() => { dressed = ""; dressSpider(spiderLook ?? { skin: "classic" }); });
 
 /**
  * The spider going down his thread from the top of the panel to the laptop when a fill starts, and back up when

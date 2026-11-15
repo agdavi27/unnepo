@@ -8,10 +8,16 @@ export type Theme = "light" | "dark";
 let current: Theme = "dark";
 export const theme = () => current;
 
+const listeners: Array<() => void> = [];
+/** Runs after the theme changes, for things drawn once rather than on every redraw (the panel's spider). */
+export const onThemeChange = (listener: () => void) => { listeners.push(listener); };
+
 function apply(next: Theme) {
+  const changed = next !== current;
   current = next;
   if (next === "light") document.documentElement.dataset.theme = "light";
   else delete document.documentElement.dataset.theme;
+  if (changed) for (const listener of listeners) listener();
 }
 
 /** Puts the saved theme on the page now, and follows it when it changes anywhere (another panel, the account). */
