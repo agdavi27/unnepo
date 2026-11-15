@@ -148,7 +148,7 @@ export function friendPopup(key: string): { title: string; body: string } | null
 }
 
 /** The monthly giveaway: connect with this many friends (accepted) to be entered. */
-export const GIVEAWAY_FRIENDS = 5;
+export const GIVEAWAY_FRIENDS = 3;
 export const GIVEAWAY_PRIZE = "AirPods Max";
 const connected = () => Math.min(GIVEAWAY_FRIENDS, friends.list?.length ?? 0);
 
@@ -163,7 +163,7 @@ function giveawayRow() {
   return `<div class="giveaway-row${left ? "" : " in"}">
     <span class="giveaway-gift" aria-hidden="true">${GIFT}</span>
     <span class="giveaway-text"><span>${line}</span>
-      <span class="giveaway-sub"><span class="giveaway-pips" role="img" aria-label="${have} of ${GIVEAWAY_FRIENDS} friends">${pips}</span>${left ? `${left} more to go` : "5 friends connected ✓"}</span>
+      <span class="giveaway-sub"><span class="giveaway-pips" role="img" aria-label="${have} of ${GIVEAWAY_FRIENDS} friends">${pips}</span>${left ? `${left} more to go` : `${GIVEAWAY_FRIENDS} friends connected ✓`}</span>
     </span>
     <button type="button" class="quiet-link tight" data-giveaway>More info</button>
   </div>`;
@@ -171,130 +171,13 @@ function giveawayRow() {
 
 const GIFT = `<svg width="22" height="22" viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true"><path fill="#F5A524" d="M1 4h9v2H1zM2 6h7v4H2z"/><path fill="#3D8BFF" d="M5 4h1v6H5z"/><path fill="#F5A524" d="M3 1h1v1H3zM4 2h1v2H4zM7 1h1v1H7zM6 2h1v2H6z"/></svg>`;
 
-/**
- * AirPods Max (silver) in pixel art, after Apple's three-quarter product shot. Drawn from shapes back to front:
- * the headband and its knit canopy, the stems and steel rods, the far cup (cushion and the mesh inside), the near
- * cup's cushion, then its aluminum shell with the Digital Crown and noise button. Each shape gets a darker edge,
- * and the whole thing a dark outline.
- */
-const PODS_W = 64;
-const PODS_H = 83;
-const SILVER = {
-  outline: "#2B2F35",
-  band: ["#FBFBFC", "#EFF0F2", "#E2E4E7", "#D2D5DA"], bandEdge: "#B4B9C0",
-  knit: ["#F1F2F4", "#E6E8EB", "#DADDE1", "#CDD1D6"], knitEdge: "#C2C6CC",
-  steelLight: "#F6F7F8", steel: "#C9CED5", steelDark: "#868C96", steelEdge: "#6E747E",
-  cushion: ["#ECEEF0", "#DFE2E6", "#D0D4D9", "#BFC4CB"], cushionEdge: "#A6ABB3",
-  hole: ["#6F7580", "#828893", "#969CA6", "#AAB0B8"],
-  shell: ["#FFFFFF", "#EEF0F2", "#E0E3E7", "#D0D4D9", "#BEC2C9", "#A9AEB6"], shellEdge: "#8E949D",
-  crown: "#E4E7EA", crownRidge: "#A3A8B0", slot: "#454A52",
-};
-function podsGrid() {
-  const C = SILVER;
-  const grid: Array<Array<string | null>> = Array.from({ length: PODS_H }, () => Array(PODS_W).fill(null));
-  /** Paints every pixel where inside(x, y) holds, with color(x, y); the shape's own edge gets the edge color. */
-  const paint = (inside: (x: number, y: number) => boolean, color: (x: number, y: number) => string, edge?: string) => {
-    for (let y = 0; y < PODS_H; y++) for (let x = 0; x < PODS_W; x++) {
-      if (!inside(x, y)) continue;
-      const rim = edge && (!inside(x - 1, y) || !inside(x + 1, y) || !inside(x, y - 1) || !inside(x, y + 1));
-      grid[y]![x] = rim ? edge : color(x, y);
-    }
-  };
-  /** A tone from a ramp, light to dark, for a shade from 0 to 1, dithered in a checker where two tones meet. */
-  const tone = (ramp: string[], v: number, x: number, y: number) => {
-    const at = Math.max(0, Math.min(1, v)) * (ramp.length - 1) + ((x + y) % 2 ? 0.22 : -0.22);
-    return ramp[Math.max(0, Math.min(ramp.length - 1, Math.round(at)))]!;
-  };
-  /** Knit: faint diagonal rows a step darker. */
-  const knitted = (ramp: string[], v: number, x: number, y: number) => tone(ramp, v + ((x + 2 * y) % 4 === 0 ? 0.3 : 0), x, y);
-  /** How far (x, y) is from a squircle's middle: 0 at the center, 1 on its edge. */
-  const sq = (cx: number, cy: number, rx: number, ry: number, n = 3) => (x: number, y: number) => Math.abs((x - cx) / rx) ** n + Math.abs((y - cy) / ry) ** n;
-  const within = (shape: (x: number, y: number) => number, limit = 1) => (x: number, y: number) => shape(x, y) <= limit;
-  const ell = (cx: number, cy: number, rx: number, ry: number) => (x: number, y: number) => ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
-
-  // Headband: a tall arch with a soft white rim outside and inside, the knit canopy set between them.
-  const outer = ell(32, 40, 23, 38), inner = ell(32, 41, 15, 27);
-  const canopyOut = ell(32, 40, 20.3, 35), canopyIn = ell(32, 41, 17.6, 30);
-  const band = (x: number, y: number) => y <= 27 && outer(x, y) <= 1 && inner(x, y) > 1;
-  // The rim: lit on top and on the left, rounding off into shade.
-  paint(band, (x, y) => tone(C.band, (outer(x, y) > 0.9 ? 0.05 : 0.35) + ((x - 32) / 23) * 0.4, x, y), C.bandEdge);
-  paint((x, y) => band(x, y) && canopyOut(x, y) <= 1 && canopyIn(x, y) > 1 && y <= 25, (x, y) => knitted(C.knit, 0.2 + ((x - 32) / 23) * 0.35 + (y > 14 ? 0.15 : 0), x, y), C.knitEdge);
-
-  // Stems: white and rounded, lit on the left, down to the steel collars.
-  const stem = (x0: number) => (x: number, y: number) => x >= x0 && x <= x0 + 4 && y >= 25 && y <= 38;
-  paint(stem(10), (x, y) => tone(C.band, (x - 10) / 4.5, x, y), C.bandEdge);
-  paint(stem(50), (x, y) => tone(C.band, 0.15 + (x - 50) / 4, x, y), C.bandEdge);
-  // Steel: a collar, then a polished rod down into each cup.
-  const steelShade = (x0: number) => (x: number) => (x === x0 ? C.steelLight : x === x0 + 1 ? C.steel : C.steelDark);
-  paint((x, y) => x >= 9 && x <= 15 && y >= 38 && y <= 39, steelShade(9), C.steelEdge);
-  paint((x, y) => x >= 49 && x <= 55 && y >= 38 && y <= 39, steelShade(49), C.steelEdge);
-  paint((x, y) => x >= 11 && x <= 13 && y >= 40 && y <= 45, steelShade(11));
-  paint((x, y) => x >= 51 && x <= 53 && y >= 40 && y <= 48, steelShade(51));
-
-  // Far cup (left): its aluminum shell shows as a rim around the cushion, bright on the left.
-  const farShell = sq(15.5, 60, 15, 19.5, 2.6);
-  paint(within(farShell), (x, y) => {
-    const t = (x - 15.5) / 15, u = (y - 60) / 19.5;
-    if (t < -0.86) return C.shell[2]!;
-    if (t < -0.7) return C.shell[0]!;
-    return tone(C.shell, 0.25 + u * 0.35 + t * 0.2, x, y);
-  }, C.shellEdge);
-  // Two mic slits and a port along its bottom edge.
-  paint((x, y) => (y === 73 && x >= 7 && x <= 10) || (y === 75 && x >= 12 && x <= 14) || (y === 76 && x === 17), () => C.slot);
-  // The cushion: knit, in shadow toward the middle, around the mesh opening.
-  const farCushion = sq(18.5, 58.5, 12.5, 17.5, 2.5);
-  paint(within(farCushion), (x, y) => knitted(C.cushion, 0.15 + Math.max(0, (x - 18.5) / 12.5) * 0.5 + (y - 58.5) / 17.5 * 0.2, x, y), C.cushionEdge);
-  // The opening: the inner wall in shadow at the top left, the mesh lighter toward the bottom right.
-  const hole = sq(20, 57.5, 5.8, 10.5, 2.2);
-  paint(within(hole), (x, y) => tone(C.hole, 0.45 + ((x - 20) / 5.8) * 0.35 + ((y - 57.5) / 10.5) * 0.35 + ((x + y) % 3 ? 0 : -0.15), x, y), C.hole[0]);
-
-  // Near cup's cushion, peeking out above and left of its shell.
-  const nearCushion = sq(40, 57, 13.5, 16.5, 2.5);
-  paint(within(nearCushion), (x, y) => knitted(C.cushion, 0.3 + (x < 32 ? 0.35 : 0) + (y - 57) / 16.5 * 0.2, x, y), C.cushionEdge);
-
-  // Near cup's shell: aluminum, a bright streak down its left side, falling into shade at the bottom right.
-  const shell = sq(46, 62, 16.8, 17.8, 2.7);
-  paint(within(shell), (x, y) => {
-    const t = (x - 46) / 16.8, u = (y - 62) / 17.8;
-    if (t < -0.86) return C.shell[2]!;
-    if (t < -0.72) return C.shell[0]!;
-    if (t < -0.62) return C.shell[3]!;
-    // A soft shine high on the left.
-    if (((x - 38) / 5) ** 2 + ((y - 53) / 7) ** 2 <= 1) return tone(C.shell, 0.05, x, y);
-    return tone(C.shell, 0.3 + t * 0.35 + u * 0.4, x, y);
-  }, C.shellEdge);
-  // Where the rod meets the shell.
-  paint((x, y) => x >= 51 && x <= 53 && y === 46, () => C.slot);
-  // Digital Crown: a ridged dial sitting on top, and the noise control button to its right.
-  const crown = (x: number, y: number) => ((x - 40) / 4.6) ** 2 + ((y - 44.5) / 3.2) ** 2 <= 1;
-  paint(crown, (x, y) => (y <= 43 ? C.shell[0]! : x % 2 ? C.crownRidge : C.crown), C.steelEdge);
-  paint((x, y) => x >= 57 && x <= 60 && y >= 47 && y <= 48, () => C.crown, C.shellEdge);
-
-  // The dark outline around everything.
-  const out = grid.map((row) => [...row]);
-  for (let y = 0; y < PODS_H; y++) for (let x = 0; x < PODS_W; x++) {
-    if (grid[y]![x]) continue;
-    if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => grid[y + dy!]?.[x + dx!])) out[y]![x] = C.outline;
-  }
-  return out;
-}
-function podsSvg(size = 3) {
-  const rects = podsGrid().flatMap((row, y) => row.map((fill, x) => (fill ? `<rect x="${x}" y="${y}" width="1" height="1" fill="${fill}"/>` : ""))).join("");
-  return `<svg class="pods-sprite" width="${PODS_W * size}" height="${PODS_H * size}" viewBox="0 0 ${PODS_W} ${PODS_H}" shape-rendering="crispEdges" aria-hidden="true">${rects}</svg>`;
-}
-
-/** The More info popup: every month one student wins, the prize in pixel art, and how to get in. */
+/** The More info popup: every month one student wins, a photo of the prize, and how to get in. */
 export function giveawayPopup(): { title: string; body: string } {
   const have = connected();
   const left = GIVEAWAY_FRIENDS - have;
   const pips = Array.from({ length: GIVEAWAY_FRIENDS }, (_, at) => `<span class="${at < have ? "on" : ""}"></span>`).join("");
-  const sparkles = [[8, 18], [86, 10], [14, 70], [90, 62], [50, 4]].map(([x, y], at) => `<span class="pods-spark" style="left:${x}%;top:${y}%;animation-delay:${at * 0.37}s"></span>`).join("");
   return { title: `Win ${GIVEAWAY_PRIZE}`, body: `
-    <div class="pods-stage" role="img" aria-label="${GIVEAWAY_PRIZE}">
-      ${sparkles}
-      ${podsSvg()}
-      <div class="pods-shadow"></div>
-    </div>
+    <div class="pods-stage"><img class="pods-photo" src="../icons/airpods-max.jpg" alt="${GIVEAWAY_PRIZE} in purple" width="240" height="240"></div>
     <p class="giveaway-big">Every month, 1 student wins a pair of ${GIVEAWAY_PRIZE}.</p>
     <ol class="giveaway-steps">
       <li><strong>Connect with ${GIVEAWAY_FRIENDS} friends</strong> on Unnepo. A friend counts once they accept.</li>

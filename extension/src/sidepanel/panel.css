@@ -841,7 +841,7 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .me-tour { width: 100%; }
 @media (prefers-reduced-motion: reduce) { .tour-arrow { animation: none; } .tour-hole { transition: none; } }
 
-/* Monthly giveaway: a row next to Friends this week, and its popup with AirPods Max in pixel art. */
+/* Monthly giveaway: a row next to Friends this week, and its popup with a photo of AirPods Max. */
 .giveaway-row { box-sizing: border-box; width: 100%; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid rgba(245, 165, 36, .35); border-radius: 12px; background: rgba(245, 165, 36, .07); }
 .giveaway-row.in { border-color: rgba(74, 222, 128, .4); background: rgba(74, 222, 128, .07); }
 .giveaway-gift { flex: none; display: flex; image-rendering: pixelated; }
@@ -858,12 +858,8 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 
 .dim.blur { background: rgba(0, 0, 0, .45); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
 .sheet.giveaway { gap: 14px; }
-.pods-stage { position: relative; height: 290px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 12px; background: radial-gradient(circle at 50% 45%, rgba(61, 139, 255, .22), transparent 65%), #0B0B0E; overflow: hidden; }
-.pods-sprite { display: block; image-rendering: pixelated; }
-.pods-shadow { width: 150px; height: 10px; margin-top: 8px; border-radius: 50%; background: rgba(0, 0, 0, .7); }
-.pods-spark { position: absolute; width: 6px; height: 6px; background: #fff; box-shadow: 0 0 6px #fff; animation: pods-twinkle 1.8s steps(2, end) infinite; }
-@keyframes pods-twinkle { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .pods-spark { animation: none; } }
+.pods-stage { display: flex; justify-content: center; border-radius: 12px; background: #fff; overflow: hidden; }
+.pods-photo { display: block; width: 240px; max-width: 100%; height: auto; }
 .giveaway-big { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -.2px; text-align: center; }
 .giveaway-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.4; color: var(--muted-2); }
 .giveaway-steps strong { color: var(--fg); font-weight: 600; }
