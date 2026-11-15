@@ -6,7 +6,7 @@ import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
 import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
-import { friendAsks, friendPopup, friendRequests, friendsStrip, wireFriends } from "../shared/friends";
+import { friendAsks, friendPopup, friendRequests, friendsStrip, giveawayPopup, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
 import { UPGRADE_URL } from "@/lib/plan";
 import { startWalkthrough, walkthroughOnce } from "./walkthrough";
@@ -36,7 +36,7 @@ let openedJob = { id: "", contact: "" };
 /** The tab a job's page was opened from, where Back goes. */
 let jobFrom: View = "home";
 /** The cover letter or answer popup, and which of its questions is showing. */
-let popup: { kind: "cover" | "answer" | "addjob" | "friend" | "activity"; step: number; id?: string } | null = null;
+let popup: { kind: "cover" | "answer" | "addjob" | "friend" | "activity" | "giveaway"; step: number; id?: string } | null = null;
 
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 /** "1.001": the version name, which keeps the zeros Chrome's own version number can't have. */
@@ -813,7 +813,7 @@ let letterSource: "job" | "paste" = "job";
 function popupShell(title: string, body: string, step = 0, steps = 0, size = "") {
   const bars = steps > 1 ? `<div class="steps" role="img" aria-label="Question ${step + 1} of ${steps}">${Array.from({ length: steps }, (_, at) => `<div class="${at <= step ? "on" : ""}"></div>`).join("")}</div>` : "";
   return `
-    <div class="dim" id="popup-dim"></div>
+    <div class="dim${size.includes("blur") ? " blur" : ""}" id="popup-dim"></div>
     <section class="sheet${size ? ` ${size}` : ""}" id="popup" role="dialog" aria-modal="true" aria-label="${escape(title)}" tabindex="-1">
       <div class="popup-head"><span class="popup-title">${escape(title)}</span><button type="button" class="popup-x" id="popup-close" aria-label="Close">×</button></div>
       ${bars}
@@ -936,6 +936,7 @@ function popupView(state: PanelState) {
     if (!shown) { popup = null; return ""; }
     return popupShell(shown.title, shown.body, 0, 0, "mini");
   }
+  if (popup.kind === "giveaway") { const shown = giveawayPopup(); return popupShell(shown.title, shown.body, 0, 0, "mini giveaway blur"); }
   if (popup.kind === "activity") return popupShell("What Unnepo noticed lately", activityCard(), 0, 0, "mini");
   return popup.kind === "cover" ? coverPopup(state) : popup.kind === "addjob" ? addJobPopup(state) : answerPopup(state);
 }
@@ -1881,6 +1882,10 @@ function draw(state: PanelState): boolean {
     wireFriends(app);
     app.querySelectorAll<HTMLButtonElement>("[data-friend-open]").forEach((button) => button.addEventListener("click", () => {
       popup = { kind: "friend", step: 0, id: button.dataset.friendOpen };
+      void render();
+    }));
+    app.querySelectorAll<HTMLButtonElement>("[data-giveaway]").forEach((button) => button.addEventListener("click", () => {
+      popup = { kind: "giveaway", step: 0 };
       void render();
     }));
     wireJobsList(app);
