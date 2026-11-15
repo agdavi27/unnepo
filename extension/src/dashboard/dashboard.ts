@@ -3,11 +3,14 @@ import { UPGRADE_URL } from "@/lib/plan";
 import { stageOf } from "@/lib/apply/stats";
 import { detectedMenu, escape, isAppliedJob, isHiddenJob, jobById, jobPage, loadTracker, refreshDetected, remindersCard, setHost, stageLabel, store, wireDetected, wireJobPage, wireReminders } from "../shared/tracker-view";
 import type { TrackerJob } from "../shared/types";
+import { startTheme } from "../shared/theme";
 
 /**
  * The dashboard, opened from the panel: every job in one table (search, filter, sort), today's reminders and the
  * Detected jobs menu beside it, and the job clicked on, with the people at the company, on the right.
  */
+
+startTheme();
 
 const side = document.getElementById("side")!;
 const rows = document.getElementById("rows")!;

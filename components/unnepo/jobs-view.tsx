@@ -399,7 +399,7 @@ function AddPopup({ onCancel, onAdded }: { onCancel: () => void; onAdded: (compa
             {STAGES.map((option) => {
               const on = stage === option.id;
               return (
-                <button key={option.id} type="button" aria-pressed={on} onClick={() => setStage(option.id)} className="inline-flex h-8 items-center gap-2 rounded-full border px-3 text-[13px]" style={on ? { color: option.color, borderColor: option.color, background: `${option.color}1A` } : { color: "#B4B4BC", borderColor: "#26262C" }}>
+                <button key={option.id} type="button" aria-pressed={on} onClick={() => setStage(option.id)} className={`inline-flex h-8 items-center gap-2 rounded-full border px-3 text-[13px] ${on ? "" : "border-[#26262C] text-[#B4B4BC]"}`} style={on ? { color: option.color, borderColor: option.color, background: `${option.color}1A` } : undefined}>
                   <i className="h-2 w-2 rounded-full" style={{ background: option.color }} />{option.label}
                 </button>
               );

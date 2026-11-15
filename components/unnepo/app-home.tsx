@@ -1,7 +1,7 @@
 "use client";
 
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
@@ -29,6 +29,14 @@ type Workspace = {
   highlights: Highlight[];
   resume: { id: string; fileName: string; byteSize: number } | null;
   integrations: { apollo: boolean; anthropic: boolean };
+  theme?: Theme;
+};
+
+type Theme = "light" | "dark";
+const THEME_KEY = "unnepo-theme";
+const noSubscribe = () => () => undefined;
+const readStoredTheme = (): Theme => {
+  try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch { return "dark"; }
 };
 
 // The tracker, reminders, people and follow-ups live in the Chrome extension. The site keeps the profile and the
@@ -64,6 +72,34 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [extension, setExtension] = useState<boolean | null>(null);
+  // Light or dark: what the student just picked, else the account's, else this browser's last choice (so the page
+  // opens in it before the account loads).
+  const [chosen, setChosen] = useState<Theme | null>(null);
+  const [themeNote, setThemeNote] = useState("");
+  const storedTheme = useSyncExternalStore(noSubscribe, readStoredTheme, () => "dark" as Theme);
+  const theme: Theme = chosen ?? data?.theme ?? storedTheme;
+  useEffect(() => {
+    try { localStorage.setItem(THEME_KEY, theme); } catch { /* storage blocked */ }
+  }, [theme]);
+  // On the whole page, so popups drawn outside the app's box switch too; off again when leaving /home.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === "light") root.dataset.theme = "light";
+    else delete root.dataset.theme;
+    return () => { delete root.dataset.theme; };
+  }, [theme]);
+  async function chooseTheme(next: Theme) {
+    setChosen(next);
+    setThemeNote("Saving…");
+    try {
+      const response = await fetch("/api/apply/profile", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ theme: next }) });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Couldn't save.");
+      setThemeNote("Saved. The extension switches too.");
+    } catch (reason) {
+      setThemeNote(reason instanceof Error ? reason.message : "Couldn't save.");
+    }
+  }
   const menu = useRef<HTMLDivElement>(null);
   // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans, ?tab=jobs the Jobs tab, ?tab=goals Goals.
   useEffect(() => {
@@ -217,7 +253,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
   ] : [];
   const initials = (data?.user.name || data?.user.email || "").split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
   return (
-    <div className="min-h-screen bg-bg text-ink [color-scheme:dark]">
+    <div data-theme={theme} className={`min-h-screen bg-bg text-ink ${theme === "light" ? "[color-scheme:light]" : "[color-scheme:dark]"}`}>
       <header className="z-20 border-b sm:sticky sm:top-0 border-[#17171B] bg-bg/90 backdrop-blur">
         <div className="mx-auto flex max-w-[1920px] flex-wrap items-center justify-between gap-x-4 gap-y-3 px-3 py-[14px] sm:px-5">
           <div className="flex min-w-0 flex-wrap items-center gap-x-9 gap-y-2">
@@ -309,6 +345,18 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
                 <h2 className={sectionTitle}>Profile</h2>
                 <p className="mt-3 text-sm text-muted">Your profile is {data.completeness}% ready. It&apos;s what every application is filled from: contact details, schools, jobs, projects, skills, and your answers to common questions.</p>
                 <button type="button" onClick={() => { setEditing(true); window.scrollTo({ top: 0 }); }} className="mt-4 rounded-xl bg-white px-3 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">Edit profile</button>
+              </div>
+            </section>
+            <section className="rounded-2xl border border-line bg-panel p-5" aria-label="Appearance">
+              <h2 className={sectionTitle}>Appearance</h2>
+              <div className="mt-3 flex items-center justify-between gap-4">
+                <span>
+                  <span id="light-mode-label" className="block font-medium">Light mode</span>
+                  <span className="block text-sm text-muted" role="status">{themeNote || "Here and in the extension."}</span>
+                </span>
+                <button type="button" role="switch" aria-checked={theme === "light"} aria-labelledby="light-mode-label" onClick={() => void chooseTheme(theme === "light" ? "dark" : "light")} className={`relative h-6 w-11 flex-none rounded-full transition-colors ${theme === "light" ? "bg-[#3D8BFF]" : "bg-[#26262C]"}`}>
+                  <span aria-hidden style={{ background: "#fff" }} className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full shadow transition-transform ${theme === "light" ? "translate-x-5" : ""}`} />
+                </button>
               </div>
             </section>
             <SpiderSettings />

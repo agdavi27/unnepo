@@ -111,6 +111,8 @@ export async function extensionMe(userId: string) {
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
     // The spider the student wears from the Stats page, for the panel and the crawling spiders.
     spider: { skin: wornSkin(stored?.spiderSkin, applied.length), school: state.profile.education?.[0]?.school ?? "" },
+    // Light or dark, the same here and on unnepo.com/home.
+    theme: stored?.theme ?? "dark",
   };
 }
 

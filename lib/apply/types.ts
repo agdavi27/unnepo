@@ -278,6 +278,8 @@ export type ApplicationProfile = {
   jobFeed?: { seen: Record<string, string>; dismissed: string[]; round: number; saved?: SavedFeedJob[] };
   /** The spider the student picked on the Stats page (lib/spiders.ts); worn once it's unlocked. */
   spiderSkin?: string;
+  /** Light or dark, for the extension's panel and unnepo.com/home alike. Dark when unset. */
+  theme?: "light" | "dark";
   /** CVs Unnepo has written for the student. */
   cvCount?: number;
   /** Answers the AI wrote for questions, by question and options, so the same question costs nothing next time. */

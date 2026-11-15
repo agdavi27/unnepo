@@ -1624,6 +1624,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         } catch {
           return reply({ ok: false });
         }
+      case "set-theme": {
+        if (!fromExtension(sender)) return reply({ ok: false });
+        const value = message.theme === "light" ? "light" : "dark";
+        await chrome.storage.local.set({ theme: value });
+        try {
+          return reply({ ok: true, ...(await api<Record<string, unknown>>("POST", "theme", { theme: value })) });
+        } catch (error) {
+          return reply(failed(error, "Couldn't save the theme."));
+        }
+      }
       case "set-auto-submit":
         await chrome.storage.local.set({ autoSubmit: Boolean(message.value) });
         return reply({ ok: true });
