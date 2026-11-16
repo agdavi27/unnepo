@@ -768,7 +768,8 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .me-hero ~ .settings-card .set-row { min-height: 44px; padding: 4px 0; }
 
 /* Under the calendar: How it works, Edit goals, and how far back it shows. */
-.heat.roomy { justify-content: center; }
+/* 1M: five wide columns of short days, so the graph is landscape and sits flat. */
+.heat.roomy .heat-day { aspect-ratio: auto; height: 16px; }
 .heat-week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
 .heat-week-day { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .heat-week-day .heat-day { display: grid; place-items: center; border-radius: 6px; font: 600 12px var(--mono); color: #fff; }
