@@ -44,7 +44,7 @@ export type FileData = { name: string; mime: string; base64: string };
 
 /** `password` is the student's job-site password, for account and sign-in fields. It never leaves the browser. */
 /** `dropdownFirst`: the way of choosing from dropdowns that worked on this site before, tried first. */
-export type FillPlan = { ats: Scan["ats"]; useServerSchema: boolean; answers: Answer[]; resume: FileData | null; coverLetter: FileData | null; autoSubmit: boolean; password: string | null; dropdownFirst?: DropdownMethod };
+export type FillPlan = { ats: Scan["ats"]; useServerSchema: boolean; answers: Answer[]; resume: FileData | null; coverLetter: FileData | null; autoSubmit: boolean; password: string | null; dropdownFirst?: DropdownMethod; /** One group of boxes from the page's bar: fill and return, no second look over the form. */ quick?: boolean };
 
 /** A question that didn't fill. `options`: the choices a dropdown showed when none matched, for the AI to pick from. */
 export type FillFailure = { label: string; reason: string; id?: string; options?: string[] };

@@ -440,6 +440,35 @@ function schemaFromPage(app: JobApplication, fields: PageField[]): FormSchema {
   };
 }
 
+/**
+ * The page bar's Fill for one group of boxes: answers from the student's own details, saved answers and what
+ * Unnepo wrote for the same question before, with no AI call, so it comes back at once. Nothing is counted
+ * against the plan (Free's basic fill is the same thing), and no job is added to the tracker.
+ */
+export async function extensionQuickFill(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { fields?: unknown; company?: unknown; title?: unknown };
+  const fields = Array.isArray(body.fields) ? (body.fields as PageField[]).slice(0, 40) : [];
+  if (!fields.length) return { answers: [] };
+  const company = String(body.company ?? "").slice(0, 120);
+  const page = { ats: "other", title: String(body.title ?? "").slice(0, 200), company, description: "", jobUrl: "", applicationUrl: null } as unknown as JobApplication;
+  const schema = schemaFromPage(page, fields);
+  const [info, stored] = await Promise.all([student(userId), applicationProfiles.get(userId)]);
+  const context = runContext(userId, info, page);
+  const cache = stored?.aiCache ?? {};
+  const known = knownAnswers({ answerFor: answerWith(info, company), profile: info.profile, school: info.context.school, resumeProfile: info.profile.resumeProfile });
+  const mapped = await buildMapping({
+    userId, ai: false, schema, facts: context.facts, sources: context.sources,
+    known: (field) => known(field) ?? (cache[cacheKey(field)] ? { value: cache[cacheKey(field)].values.join("\n"), source: "ai" } : null),
+    consent: Boolean(info.profile.accountConsentAt), resumeFileName: info.context.resumeFileName,
+  });
+  return {
+    answers: schema.fields.map((field) => {
+      const answer = mapped.answers.get(field.id);
+      return { id: field.id, label: field.label, type: field.type, required: field.required, values: answer?.values ?? [], source: answer?.source ?? null, why: answer?.why ?? null };
+    }),
+  };
+}
+
 const cacheKey = (field: SchemaField) => `${normalizeLabel(field.label)}|${field.options.map((option) => option.label.toLowerCase()).sort().join("/")}`.slice(0, 400);
 
 async function aiCallsToday(userId: string) {

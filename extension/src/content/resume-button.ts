@@ -27,7 +27,9 @@ function kindIn(text: string): Kind | null | "other" {
  */
 function asksFor(input: HTMLInputElement): Kind | null {
   const own = [input.getAttribute("aria-label"), input.title, ...Array.from(input.labels ?? []).map((label) => label.textContent)].filter(Boolean).join(" ");
-  if (own.trim()) { const kind = kindIn(own); return kind === "other" ? null : kind; }
+  // Its own label can be just the button's word ("Attach" on Greenhouse), which decides nothing: then the words around it do.
+  const ownKind = own.trim() ? kindIn(own) : null;
+  if (ownKind) return ownKind === "other" ? null : ownKind;
   let box: HTMLElement | null = input.parentElement;
   for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
     const text = (box.innerText || "").replace(/\s+/g, " ").trim();
@@ -40,14 +42,21 @@ function asksFor(input: HTMLInputElement): Kind | null {
   return kind === "other" ? null : kind;
 }
 
-/** The part of the page the student sees for this box: the input itself, or its nearest visible wrapper. */
+/**
+ * Where the button goes: after the upload box's own group (the site's Attach / Dropbox buttons and file types),
+ * never inside it. The input itself is often hidden (1×1), so it's the widest wrapper around it that holds no
+ * other field and stays small.
+ */
 function shownFor(input: HTMLInputElement) {
+  let best: HTMLElement | null = null;
   let el: HTMLElement | null = input;
-  for (let depth = 0; el && depth < 5; depth++, el = el.parentElement) {
+  for (let depth = 0; el && depth < 6; depth++, el = el.parentElement) {
+    if (el !== input && Array.from(el.querySelectorAll("input:not([type=hidden]), select, textarea")).some((other) => other !== input)) break;
     const rect = el.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) return rect.height < 220 ? el : null;
+    if (rect.height >= 220 || (el !== input && (el.innerText || "").length > 300)) break;
+    if (rect.width >= 40 && rect.height >= 16) best = el;
   }
-  return null;
+  return best;
 }
 
 function attachFile(input: HTMLInputElement, file: FileData) {

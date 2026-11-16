@@ -1,7 +1,7 @@
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
 import { buttonUnder, findAction, findApply, pageNotes, pressAction, SUBMIT, workdayStep } from "./actions";
 import { leave, press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
-import { fillGeneric, uploadCoverLetterNow, uploadResumeNow } from "./generic";
+import { fillGeneric, fillStopped, stopFilling, uploadCoverLetterNow, uploadResumeNow } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
 import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, openedJob, scanFields, scanPage } from "./scan";
 import { watchEdits } from "./edits";
@@ -98,8 +98,11 @@ async function fill(plan: FillPlan): Promise<FillReport> {
   result.filled.push(...kept.map((answer) => answer.label));
   result.filled.push(...fillPasswords(plan.password));
   plannedValues = new Map(plan.answers.map((answer) => [answer.label, answer.values.join(", ")]));
-  await sleep(300);
-  await recheckFlagged();
+  // A quick fill (one group of boxes from the page's bar), or Stop: no waiting to look the form over again.
+  if (!plan.quick && !fillStopped()) {
+    await sleep(300);
+    await recheckFlagged();
+  }
   // Verify: what the page itself marks required and is still empty is the student's turn.
   const missing = emptyRequired().map((field) => field.label);
   if (plan.useServerSchema) {
@@ -222,6 +225,22 @@ if (!window.__unnepo || !window.__unnepo.alive()) {
     }
     if (message?.type === "show-question") {
       reply({ ok: showQuestion(String(message.id ?? "")) });
+      return false;
+    }
+    // Stop on the page's bar: the fill stops before its next field, and any spiders leave at once.
+    if (message?.type === "stop-fill") {
+      stopFilling();
+      stopSpiders(0);
+      reply({ ok: true });
+      return false;
+    }
+    // A group of boxes picked on the page's bar (marked data-unnepo-pick): just those fields, for a quick fill.
+    if (message?.type === "scan-picked") {
+      const picked = scanFields().filter((field) => {
+        const el = findMarked(field.id);
+        return Boolean(el && (el.matches("[data-unnepo-pick]") || el.querySelector("[data-unnepo-pick]") || el.closest("[data-unnepo-pick]")));
+      });
+      reply(picked);
       return false;
     }
     if (message?.type === "stop-applying") {

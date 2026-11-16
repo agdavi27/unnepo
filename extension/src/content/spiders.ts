@@ -183,7 +183,14 @@ function stop() {
  * Spiders drop in, once per run (`drop`). Calling again while they're out just keeps them around; after a
  * new page load the same number come back already crawling, never a fresh batch dropping from the top.
  */
+/**
+ * The spiders crawling over the page while Unnepo fills, and dancing once it's sent, are off for now. The
+ * animation is all still here: set this to true to bring it back.
+ */
+export const SPIDERS_ON_PAGE = false;
+
 export function startSpiders(drop = true) {
+  if (!SPIDERS_ON_PAGE) return;
   clearTimeout(exitTimer);
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
   if (host) {
@@ -230,7 +237,7 @@ let celebrated = false;
  * off. Ones still on the screen dance where they are; with none out, a batch drops in to dance. Once a page.
  */
 export function celebrateSpiders() {
-  if (celebrated) return;
+  if (!SPIDERS_ON_PAGE || celebrated) return;
   celebrated = true;
   // Spiders already heading off come back to dance too, as long as they're still on the page.
   if (host && spiders.some((spider) => spider.phase !== "gone")) return dance();

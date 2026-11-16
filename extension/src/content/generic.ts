@@ -265,7 +265,13 @@ async function fillChecked(field: PageField, answer: Answer, files: { resume: Fi
   }
 }
 
+/** Stop pressed: the fill running now stops before its next field. Cleared when the next fill starts. */
+let stopAsked = false;
+export const stopFilling = () => { stopAsked = true; };
+export const fillStopped = () => stopAsked;
+
 export async function fillGeneric(fields: PageField[], answers: Answer[], files: { resume: FileData | null; coverLetter: FileData | null }, options: { dropdownFirst?: DropdownMethod; dropdownWays?: DropdownMethod[] } = {}) {
+  stopAsked = false;
   const filled: string[] = [];
   const failed: FillFailure[] = [];
   const attempts: FillAttempt[] = [];
@@ -287,6 +293,7 @@ export async function fillGeneric(fields: PageField[], answers: Answer[], files:
   };
   let uploaded = false;
   for (const field of ordered) {
+    if (stopAsked) break;
     if (uploaded && field.type !== "file") {
       uploaded = false;
       await settleAfterUpload();
@@ -312,8 +319,9 @@ export async function fillGeneric(fields: PageField[], answers: Answer[], files:
   }
   // A late re-render can clear what was just typed. Read everything back once more; what's gone gets the
   // next way of filling it, and only what still doesn't stick is reported.
-  if (done.length) await sleep(250);
+  if (done.length && !stopAsked) await sleep(250);
   for (const item of done) {
+    if (stopAsked) break;
     if (!readBack(item.field, item.answer)) continue;
     try {
       const { method } = await fillChecked(item.field, item.answer, files, item.way + 1);

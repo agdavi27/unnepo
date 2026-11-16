@@ -2,27 +2,41 @@ import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
 import { isComplexQuestion } from "./question-kinds";
 
 /**
- * Unnepo on an application form, like Grammarly: every box it can fill from the profile gets a soft blue
- * outline, every question that needs a written answer gets a purple one, and a bar at the bottom of the page
- * offers Autofill (the boxes) and Answer with unnepo (the questions). Boxes lose their outline once they have an
- * answer, so the outlines show what's left. Only the outlines' own style is changed (and put back); nothing is
- * filled or sent until a button is pressed. Shows only when the student is signed in, and stays off when
- * "Cards on job pages" is off. × hides it on this page.
+ * Unnepo on an application form, like Grammarly. Boxes it can fill from the profile get a soft blue outline,
+ * grouped about five at a time, each group with its own ⚡ Fill button beside it: one press fills just those, from
+ * the student's own details with no AI, so it's quick. Questions that need a written answer get a purple outline,
+ * and the bar at the bottom has "Answer with unnepo" for those. Stop (on the bar, or the group's button while it
+ * fills) stops at once. Uploads (resume, transcript, cover letter) and links keep their own buttons.
+ *
+ * Boxes lose their outline once they have an answer, so the outlines show what's left. Only the outlines' own
+ * style is changed (and put back); nothing is filled or sent until a button is pressed. Shows only when the
+ * student is signed in, and stays off when "Cards on job pages" is off. × hides it on this page.
  */
 
 const FILL = "#3D8BFF";
 const WRITE = "#8B5CF6";
 const MARK = "data-unnepo-form";
+const PICK = "data-unnepo-pick";
 const HIDDEN = "unnepoFormHidden";
+const GROUP = 5;
 const CONTROLS = "input:not([type]), input[type=text], input[type=email], input[type=tel], input[type=url], input[type=number], input[type=date], input[type=month], textarea, select";
+/** Link boxes have their own chip (link-buttons.ts), so they're left out of the groups. */
+const LINK = /linked ?in|git ?hub|portfolio|personal (web ?site|site)|\bweb ?site\b/i;
 
-type State = { ok: boolean; off?: boolean; free?: boolean; answersLeft?: number | null; autofillsLeft?: number | null; running?: boolean; step?: string; error?: string | null; profileReady?: boolean };
+type State = { ok: boolean; off?: boolean; free?: boolean; answersLeft?: number | null; profileReady?: boolean };
 type Box = { control: HTMLElement; outline: HTMLElement; kind: "fill" | "write"; label: string };
+type Group = { key: HTMLElement; boxes: Box[] };
 
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
 const clean = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").trim();
-const ours = (el: Element) => Boolean(el.closest(`[${MARK}=bar], [data-unnepo-letter], [data-unnepo-link], [data-unnepo-card], [data-unnepo-launcher]`));
+const ours = (el: Element) => Boolean(el.closest(`[${MARK}], [data-unnepo-letter], [data-unnepo-link], [data-unnepo-card], [data-unnepo-launcher]`));
 const pageKey = () => location.origin + location.pathname;
+const escapeText = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+
+/** The hidden inputs some sites keep behind their own dropdowns, only there to make the form "required". */
+const helperInput = (el: Element) => el.getAttribute("role") !== "combobox" && (el.getAttribute("aria-hidden") === "true" || (el as HTMLElement).tabIndex < 0);
+/** How many real fields are inside a wrapper (not counting those hidden helpers). */
+const fieldsIn = (box: Element) => Array.from(box.querySelectorAll(CONTROLS)).filter((el) => !helperInput(el)).length;
 
 /** The question a box asks: its label, aria text, or the short text of the wrapper around it. */
 function labelOf(el: HTMLElement) {
@@ -33,33 +47,39 @@ function labelOf(el: HTMLElement) {
   if (clean(aria)) return clean(aria);
   let box: HTMLElement | null = el.parentElement;
   for (let depth = 0; box && depth < 4; depth++, box = box.parentElement) {
-    if (box.querySelectorAll(CONTROLS).length > 1) break;
+    if (fieldsIn(box) > 1) break;
     const text = clean(box.innerText);
     if (text && text.length <= 300) return text;
   }
   return clean(input.placeholder || input.name);
 }
 
-/** What to outline: the bordered box the site draws around this field (label and all), or the field itself. */
+/**
+ * What to outline: the bordered box the site draws around this field (label and all), or the field itself. A
+ * site's own dropdown types into a tiny input inside it (3px wide on Greenhouse, with the border drawn some other
+ * way), so for those it's the dropdown's visible box.
+ */
 function outlineFor(el: HTMLElement) {
-  let best: HTMLElement = el;
+  let visible: HTMLElement | null = null;
+  const tiny = el.getBoundingClientRect().width < 20;
   let box: HTMLElement | null = el.parentElement;
-  for (let depth = 0; box && depth < 4; depth++, box = box.parentElement) {
-    if (box.querySelectorAll(CONTROLS).length > 1 || box.matches("form, fieldset, body")) break;
+  for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
+    if (fieldsIn(box) > 1 || box.matches("form, fieldset, body")) break;
     const style = getComputedStyle(box);
-    if (parseFloat(style.borderTopWidth) > 0 && style.borderTopStyle !== "none") { best = box; break; }
+    if (parseFloat(style.borderTopWidth) > 0 && style.borderTopStyle !== "none") return box;
+    // The widest wrapper that's still just the dropdown (about its own height, not its label and hints too).
+    const rect = box.getBoundingClientRect();
+    if (tiny && rect.width >= 100 && rect.height >= 24 && (!visible || rect.height <= visible.getBoundingClientRect().height * 1.6)) visible = box;
   }
-  return best;
+  return visible ?? el;
 }
 
 /** Whether a field has an answer: its value, or for a site's own dropdown, a choice shown in place of "Select…". */
 function answered(el: HTMLElement, outline: HTMLElement) {
   if (el instanceof HTMLSelectElement) return el.selectedIndex > 0 || Boolean(el.value && !/^select/i.test(el.selectedOptions[0]?.text ?? ""));
-  const value = (el as HTMLInputElement).value?.trim();
-  if (value) return true;
+  if ((el as HTMLInputElement).value?.trim()) return true;
   if (el.getAttribute("role") === "combobox" && outline !== el) {
-    const label = labelOf(el);
-    const shown = clean(outline.innerText).replace(label, "").replace(/[*\s]+/g, " ").trim();
+    const shown = clean(outline.innerText).replace(labelOf(el), "").replace(/[*\s]+/g, " ").trim();
     return Boolean(shown) && !/^select/i.test(shown);
   }
   return false;
@@ -71,53 +91,89 @@ function findBoxes(): Box[] {
   for (const el of Array.from(document.querySelectorAll<HTMLElement>(CONTROLS))) {
     const combo = el.getAttribute("role") === "combobox";
     if (ours(el) || (el as HTMLInputElement).disabled || ((el as HTMLInputElement).readOnly && !combo)) continue;
-    // The hidden inputs some sites keep behind their own dropdowns, only there to make the form "required".
-    if (!combo && (el.getAttribute("aria-hidden") === "true" || el.tabIndex < 0)) continue;
+    if (helperInput(el)) continue;
     const rect = el.getBoundingClientRect();
     if (rect.width < 2 && rect.height < 2 && !combo) continue;
     if (el.closest("header, nav, footer, [role=search]") || (el as HTMLInputElement).type === "search") continue;
     const label = labelOf(el);
     if (!label || /search/i.test(label)) continue;
     const type = el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLSelectElement ? "select" : "text";
+    const kind = isComplexQuestion(type, label) ? "write" : "fill";
+    if (kind === "fill" && LINK.test(label)) continue;
     const outline = outlineFor(el);
     if (outline.getBoundingClientRect().width < 20) continue;
-    boxes.push({ control: el, outline, kind: isComplexQuestion(type, label) ? "write" : "fill", label });
+    boxes.push({ control: el, outline, kind, label });
   }
   return boxes;
 }
 
+/**
+ * The blue boxes in page order, about five to a group. A purple question between them, or a big gap on the page
+ * (a new section), starts a new group, so a group's bracket never runs over boxes it doesn't fill.
+ */
+function groupsOf(boxes: Box[]): Group[] {
+  const groups: Group[] = [];
+  let current: Box[] = [];
+  let lastBottom = 0;
+  for (const box of boxes) {
+    if (box.kind === "write") {
+      if (current.length) { groups.push({ key: current[0].control, boxes: current }); current = []; }
+      continue;
+    }
+    const rect = box.outline.getBoundingClientRect();
+    const gap = rect.top - lastBottom;
+    if (current.length >= GROUP || (current.length >= 3 && gap > 120)) { groups.push({ key: current[0].control, boxes: current }); current = []; }
+    current.push(box);
+    lastBottom = Math.max(lastBottom, rect.bottom);
+  }
+  if (current.length) groups.push({ key: current[0].control, boxes: current });
+  return groups;
+}
+
 /* ---------- Outlines ---------- */
 
-const before = new Map<HTMLElement, { outline: string; offset: string; radius: string }>();
+const before = new Map<HTMLElement, { outline: string; offset: string }>();
 function paint(el: HTMLElement, color: string | null) {
   if (!color) {
     const was = before.get(el);
     if (was) { el.style.outline = was.outline; el.style.outlineOffset = was.offset; before.delete(el); }
     return;
   }
-  if (!before.has(el)) before.set(el, { outline: el.style.outline, offset: el.style.outlineOffset, radius: el.style.borderRadius });
+  if (!before.has(el)) before.set(el, { outline: el.style.outline, offset: el.style.outlineOffset });
   el.style.outline = `2px solid ${color}`;
   el.style.outlineOffset = "2px";
 }
 const clearAll = () => { for (const el of Array.from(before.keys())) paint(el, null); };
 
-/* ---------- The bar ---------- */
+/* ---------- The bar, and each group's Fill ---------- */
 
 export function watchForms(isJobPage: () => boolean) {
-  let hidden = false;
-  try { hidden = (JSON.parse(sessionStorage.getItem(HIDDEN) || "[]") as string[]).includes(pageKey()); } catch { /* storage off */ }
-  if (hidden) return;
+  try { if ((JSON.parse(sessionStorage.getItem(HIDDEN) || "[]") as string[]).includes(pageKey())) return; } catch { /* storage off */ }
 
   let state: State = { ok: false };
   let boxes: Box[] = [];
-  const ui = { small: false, answering: false, note: "", filling: false, shown: false };
-  let host: HTMLElement | null = null;
-  let root: ShadowRoot | null = null;
+  let groups: Group[] = [];
+  /** The group filling now (its first box), and boxes Unnepo already tried to fill (what's left is the student's). */
+  let filling: HTMLElement | null = null;
+  const tried = new WeakSet<HTMLElement>();
+  const ui = { small: false, answering: false, note: "", shown: false };
+  let bar: { host: HTMLElement; root: ShadowRoot } | null = null;
+  let layer: { host: HTMLElement; root: ShadowRoot } | null = null;
   let spider = spiderRects(0);
   void storedSpiderColors().then((colors) => { spider = spiderRects(0, colors); draw(); });
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const spiderSvg = () => `<svg viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges" aria-hidden="true"><g transform="rotate(180 ${W / 2} ${H / 2})">${spider}</g></svg>`;
 
-  const STYLE = `
+  const BUTTONS = `
+    .btn { all: unset; cursor: pointer; height: 30px; padding: 0 11px; border-radius: 9px; font: 600 12.5px system-ui, -apple-system, sans-serif; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: #fff; box-sizing: border-box; }
+    .btn.fill { background: ${FILL}; } .btn.fill:hover { background: #2F6FEB; }
+    .btn.write { background: ${WRITE}; } .btn.write:hover { background: #7C3AED; }
+    .btn.stop { background: #111114; } .btn.stop:hover { background: #2A2A30; }
+    .btn.ghost { background: #fff; color: #45454E; box-shadow: inset 0 0 0 1px #D7D7DE; font-weight: 500; cursor: default; }
+    .btn[disabled] { cursor: default; opacity: .5; }
+    .btn:focus-visible, .icon:focus-visible, .pill:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
+  `;
+  const BAR_STYLE = `
     :host { all: initial; position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 2147483645; font: 13px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif; color: #111114; }
     * { box-sizing: border-box; }
     .bar { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 12px; background: #fff; border: 1px solid #E4E4EA; border-radius: 14px; box-shadow: 0 12px 30px rgba(0,0,0,.16), 0 2px 6px rgba(0,0,0,.06); max-width: calc(100vw - 24px); }
@@ -129,137 +185,192 @@ export function watchForms(isJobPage: () => boolean) {
     .group { display: flex; align-items: center; gap: 8px; }
     .key { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: #45454E; white-space: nowrap; }
     .key i { width: 10px; height: 10px; border-radius: 3px; border: 2px solid; display: block; }
-    .btn { all: unset; cursor: pointer; height: 32px; padding: 0 12px; border-radius: 9px; font: 600 12.5px system-ui, sans-serif; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; color: #fff; }
-    .btn.fill { background: ${FILL}; } .btn.fill:hover { background: #2F6FEB; }
-    .btn.write { background: ${WRITE}; } .btn.write:hover { background: #7C3AED; }
-    .btn.ghost { background: transparent; color: #111114; box-shadow: inset 0 0 0 1px #D7D7DE; font-weight: 500; }
-    .btn[disabled] { cursor: default; opacity: .55; }
     .left { font-weight: 500; opacity: .85; }
     .icon { all: unset; cursor: pointer; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #6A6A74; font-size: 16px; flex: none; }
     .icon:hover { background: #F2F2F6; color: #111114; }
-    .btn:focus-visible, .icon:focus-visible, .pill:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
-    .note { font-size: 12px; color: #45454E; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .note.bad { color: #B45309; }
+    .note { font-size: 12px; color: #B45309; max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .done { font-size: 12px; color: #15803D; font-weight: 600; white-space: nowrap; }
     .pill { all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 12px 7px 10px; background: #fff; border: 1px solid #E4E4EA; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,.14); font-weight: 600; }
     .pill svg { width: 18px; height: ${Math.round((18 * H) / W)}px; }
     .dot { width: 8px; height: 8px; border-radius: 50%; }
     @media (max-width: 640px) { .key { display: none; } }
+    ${BUTTONS}
+  `;
+  const LAYER_STYLE = `
+    :host { all: initial; position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2147483644; font: 13px/1.3 system-ui, -apple-system, sans-serif; }
+    .bracket { position: absolute; width: 3px; border-radius: 2px; background: ${FILL}; opacity: .45; pointer-events: none; }
+    .bracket.on { opacity: 1; }
+    .tag { position: absolute; display: flex; align-items: center; gap: 6px; }
+    .btn { height: 28px; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.14); }
+    .btn .n { font-weight: 500; opacity: .85; }
+    ${BUTTONS}
   `;
 
-  const spiderSvg = () => `<svg viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges" aria-hidden="true"><g transform="rotate(180 ${W / 2} ${H / 2})">${spider}</g></svg>`;
+  const open = (box: Box) => !answered(box.control, box.outline);
+  const counts = () => ({ fill: boxes.filter((box) => box.kind === "fill" && open(box)).length, write: boxes.filter((box) => box.kind === "write" && open(box)).length });
 
-  function counts() {
-    const open = boxes.filter((box) => !answered(box.control, box.outline));
-    return { fill: open.filter((box) => box.kind === "fill").length, write: open.filter((box) => box.kind === "write").length };
-  }
-
-  function draw() {
-    if (!root) return;
+  function drawBar() {
+    if (!bar) return;
     const { fill, write } = counts();
+    const root = bar.root;
     if (ui.small) {
-      root.innerHTML = `<style>${STYLE}</style><button type="button" class="pill" data-act="grow" aria-label="Show Unnepo's form help">${spiderSvg()}${fill + write ? `${fill + write} to do` : "All filled"}${fill ? `<span class="dot" style="background:${FILL}"></span>` : ""}${write ? `<span class="dot" style="background:${WRITE}"></span>` : ""}</button>`;
+      root.innerHTML = `<style>${BAR_STYLE}</style><button type="button" class="pill" data-act="grow" aria-label="Show Unnepo's form help">${spiderSvg()}${fill + write ? `${fill + write} to do` : "All filled"}${fill ? `<span class="dot" style="background:${FILL}"></span>` : ""}${write ? `<span class="dot" style="background:${WRITE}"></span>` : ""}</button>`;
       return;
     }
-    const running = ui.filling || Boolean(state.running);
     const answersLeft = state.free && typeof state.answersLeft === "number" ? state.answersLeft : null;
-    const autofillsLeft = state.free && typeof state.autofillsLeft === "number" ? state.autofillsLeft : null;
-    const fillButton = running
-      ? `<button type="button" class="btn ghost" data-act="stop">Stop</button><span class="note">${escapeText(state.step || "Filling…")}</span>`
-      : `<button type="button" class="btn fill" data-act="fill" ${!fill || autofillsLeft === 0 || state.profileReady === false ? "disabled" : ""} title="${state.profileReady === false ? "Finish your profile in Unnepo first" : "Fills the blue boxes from your profile"}">⚡ Autofill${autofillsLeft !== null ? `<span class="left">· ${autofillsLeft} left</span>` : ""}</button>`;
-    const writeButton = ui.answering
-      ? `<button type="button" class="btn write" disabled>Writing ${write} ${write === 1 ? "answer" : "answers"}…</button>`
-      : `<button type="button" class="btn write" data-act="answer" ${!write || answersLeft === 0 ? "disabled" : ""} title="Writes the purple questions from your resume and the job">✦ Answer with unnepo${answersLeft !== null ? `<span class="left">· ${answersLeft} left</span>` : ""}</button>`;
+    const openGroups = groups.filter((group) => group.boxes.some(open)).length;
+    const fillPart = filling
+      ? `<div class="group"><span class="key"><i style="border-color:${FILL}"></i>Filling…</span><button type="button" class="btn stop" data-act="stop">■ Stop</button></div>`
+      : fill
+        ? `<span class="key"><i style="border-color:${FILL}"></i>${fill} to fill${openGroups > 1 ? ` in ${openGroups} groups` : ""} · press ⚡ Fill beside each</span>`
+        : `<span class="done">✓ Boxes filled</span>`;
+    const writePart = write || ui.answering
+      ? `<span class="sep"></span><div class="group"><span class="key"><i style="border-color:${WRITE}"></i>${write} to write</span>${ui.answering
+        ? `<button type="button" class="btn write" disabled>Writing ${write} ${write === 1 ? "answer" : "answers"}…</button>`
+        : `<button type="button" class="btn write" data-act="answer" ${!write || answersLeft === 0 ? "disabled" : ""} title="Writes the purple questions from your resume and the job">✦ Answer with unnepo${answersLeft !== null ? `<span class="left">· ${answersLeft} left</span>` : ""}</button>`}</div>`
+      : "";
     const enter = ui.shown ? "" : " enter";
     ui.shown = true;
-    root.innerHTML = `<style>${STYLE}</style>
+    root.innerHTML = `<style>${BAR_STYLE}</style>
       <div class="bar${enter}" role="region" aria-label="Unnepo form help">
         ${spiderSvg()}<span class="brand">unnepo<span>.</span></span>
         <span class="sep"></span>
-        ${fill || running ? `<div class="group"><span class="key"><i style="border-color:${FILL}"></i>${fill} to fill</span>${fillButton}</div>` : `<span class="done">✓ Boxes filled</span>`}
-        ${write || ui.answering ? `<span class="sep"></span><div class="group"><span class="key"><i style="border-color:${WRITE}"></i>${write} to write</span>${writeButton}</div>` : ""}
-        ${ui.note || state.error ? `<span class="note bad" title="${escapeText(ui.note || state.error || "")}">${escapeText(ui.note || state.error || "")}</span>` : ""}
+        ${fillPart}${writePart}
+        ${ui.note ? `<span class="note" title="${escapeText(ui.note)}">${escapeText(ui.note)}</span>` : ""}
         <button type="button" class="icon" data-act="small" aria-label="Shrink">–</button>
         <button type="button" class="icon" data-act="hide" aria-label="Hide on this page" title="Hide on this page">×</button>
       </div>`;
   }
 
-  const escapeText = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+  /** Each group's bracket down its left side, and its Fill button beside its first box. */
+  function drawLayer() {
+    if (!layer) return;
+    const x = window.scrollX;
+    const y = window.scrollY;
+    const parts: string[] = [];
+    groups.forEach((group, index) => {
+      const left = group.boxes.filter(open);
+      const busy = filling === group.key;
+      if (!left.length && !busy) return;
+      const rects = group.boxes.map((box) => box.outline.getBoundingClientRect());
+      const top = Math.min(...rects.map((rect) => rect.top));
+      const bottom = Math.max(...rects.map((rect) => rect.bottom));
+      const minLeft = Math.min(...rects.map((rect) => rect.left));
+      const first = rects[0];
+      parts.push(`<div class="bracket${busy ? " on" : ""}" style="left:${Math.max(2, minLeft - 12) + x}px;top:${top + y}px;height:${bottom - top}px"></div>`);
+      // Beside the first box on the right when there's room; else just inside its top-right corner.
+      const room = window.innerWidth - first.right > 130;
+      const place = room ? `left:${first.right + 12 + x}px;top:${first.top + y + 4}px` : `left:${first.right - 112 + x}px;top:${first.top + y - 14}px`;
+      const theirs = left.every((box) => tried.has(box.control));
+      const button = busy
+        ? `<button type="button" class="btn stop" data-act="stop">■ Stop</button>`
+        : theirs
+          ? `<span class="btn ghost" title="Unnepo doesn't have these in your profile">${left.length} for you</span>`
+          : `<button type="button" class="btn fill" data-fill="${index}" ${filling ? "disabled" : ""} aria-label="Fill these ${left.length} boxes from your profile">⚡ Fill <span class="n">${left.length}</span></button>`;
+      parts.push(`<div class="tag" style="${place}">${button}</div>`);
+    });
+    layer.root.innerHTML = `<style>${LAYER_STYLE}</style>${parts.join("")}`;
+  }
+
+  function draw() { drawBar(); drawLayer(); }
 
   function repaint() {
     const keep = new Set<HTMLElement>();
     for (const box of boxes) {
-      if (answered(box.control, box.outline)) continue;
+      if (!open(box)) continue;
       paint(box.outline, box.kind === "fill" ? `${FILL}99` : WRITE);
       keep.add(box.outline);
     }
     for (const el of Array.from(before.keys())) if (!keep.has(el)) paint(el, null);
   }
 
-  let polling = 0;
-  async function poll() {
-    window.clearTimeout(polling);
-    try { state = await ask<State>({ type: "form-page-state" }); } catch { return; }
+  function rescan() {
+    boxes = findBoxes();
+    groups = groupsOf(boxes);
+    repaint();
+  }
+
+  async function fillGroup(group: Group) {
+    if (filling) return;
+    filling = group.key;
+    ui.note = "";
+    document.querySelectorAll(`[${PICK}]`).forEach((el) => el.removeAttribute(PICK));
+    const left = group.boxes.filter(open);
+    for (const box of left) box.control.setAttribute(PICK, "");
+    draw();
+    type Filled = { ok: boolean; filled?: number; empty?: number; stopped?: boolean; error?: string };
+    const result = await ask<Filled>({ type: "form-fill-group" }).catch((): Filled => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
+    for (const box of left) { box.control.removeAttribute(PICK); tried.add(box.control); }
+    // Stop already let it go: nothing more to say.
+    if (filling !== group.key) return;
+    filling = null;
+    if (!result.ok && !result.stopped) ui.note = result.error ?? "Couldn't fill these.";
     rescan();
-    if (state.running) polling = window.setTimeout(() => void poll(), 1500);
-    else ui.filling = false;
+    draw();
+  }
+
+  async function stopNow() {
+    filling = null;
+    document.querySelectorAll(`[${PICK}]`).forEach((el) => el.removeAttribute(PICK));
+    draw();
+    await ask({ type: "form-stop" }).catch(() => undefined);
+    rescan();
     draw();
   }
 
   async function act(name: string) {
-    if (name === "small") { ui.small = true; return draw(); }
-    if (name === "grow") { ui.small = false; return draw(); }
+    if (name === "small") { ui.small = true; return drawBar(); }
+    if (name === "grow") { ui.small = false; return drawBar(); }
+    if (name === "stop") return stopNow();
     if (name === "hide") {
       try { sessionStorage.setItem(HIDDEN, JSON.stringify([...(JSON.parse(sessionStorage.getItem(HIDDEN) || "[]") as string[]), pageKey()].slice(-30))); } catch { /* storage off */ }
-      stop();
-      return;
-    }
-    if (name === "fill") {
-      ui.filling = true;
-      ui.note = "";
-      draw();
-      const result = await ask<{ ok: boolean; error?: string }>({ type: "form-autofill" }).catch(() => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
-      if (!result.ok) { ui.filling = false; ui.note = result.error ?? "Couldn't start Autofill."; draw(); return; }
-      window.setTimeout(() => void poll(), 800);
-      return;
-    }
-    if (name === "stop") {
-      await ask({ type: "form-stop" }).catch(() => undefined);
-      ui.filling = false;
-      return void poll();
+      return stop();
     }
     if (name === "answer") {
       ui.answering = true;
       ui.note = "";
-      draw();
+      drawBar();
       type Answered = { ok: boolean; written?: number; stopped?: string; error?: string; found?: number };
       const result = await ask<Answered>({ type: "form-answer" }).catch((): Answered => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
       ui.answering = false;
       ui.note = !result.ok ? result.error ?? "Couldn't write the answers." : result.stopped ? result.stopped : result.found === 0 ? "No questions to write here." : "";
-      await poll();
+      try { state = { ...state, ...(await ask<State>({ type: "form-page-state" })) }; } catch { /* keep the old count */ }
+      rescan();
+      draw();
     }
   }
 
-  function stop() {
-    observer?.disconnect();
-    window.clearTimeout(polling);
-    document.removeEventListener("input", onInput, true);
-    document.removeEventListener("change", onInput, true);
-    clearAll();
-    host?.remove();
-    host = null;
-    root = null;
-  }
-
-  function rescan() {
-    boxes = findBoxes();
-    repaint();
-  }
-
   let pending = 0;
-  const later = () => { if (!pending) pending = window.setTimeout(() => { pending = 0; rescan(); draw(); }, 600); };
+  const later = () => { if (!pending) pending = window.setTimeout(() => { pending = 0; rescan(); draw(); }, 400); };
   const onInput = (event: Event) => { if (!(event.target instanceof Element && ours(event.target))) later(); };
   let observer: MutationObserver | null = null;
+
+  function stop() {
+    observer?.disconnect();
+    document.removeEventListener("input", onInput, true);
+    document.removeEventListener("change", onInput, true);
+    window.removeEventListener("resize", later);
+    clearAll();
+    bar?.host.remove();
+    layer?.host.remove();
+    bar = null;
+    layer = null;
+  }
+
+  function mount(name: string) {
+    const host = document.createElement("div");
+    host.setAttribute(MARK, name);
+    const root = host.attachShadow({ mode: "closed" });
+    root.addEventListener("click", (event) => {
+      const target = event.target as Element;
+      const fill = target.closest<HTMLElement>("[data-fill]");
+      if (fill && !(fill as HTMLButtonElement).disabled) { const group = groups[Number(fill.dataset.fill)]; if (group) void fillGroup(group); return; }
+      const button = target.closest<HTMLElement>("[data-act]");
+      if (button && !(button as HTMLButtonElement).disabled) void act(button.dataset.act ?? "");
+    });
+    document.documentElement.append(host);
+    return { host, root };
+  }
 
   /** "never": signed out or turned off, so it stops looking; "later": not a form yet. */
   async function start(): Promise<"shown" | "later" | "never"> {
@@ -268,27 +379,21 @@ export function watchForms(isJobPage: () => boolean) {
     rescan();
     // An application form: a few boxes to fill, on a page that looks like a job application.
     if (boxes.length < 4) { clearAll(); return "later"; }
-    host = document.createElement("div");
-    host.setAttribute(MARK, "bar");
-    root = host.attachShadow({ mode: "closed" });
-    root.addEventListener("click", (event) => {
-      const button = (event.target as Element).closest<HTMLElement>("[data-act]");
-      if (button && !(button as HTMLButtonElement).disabled) void act(button.dataset.act ?? "");
-    });
-    document.documentElement.append(host);
+    layer = mount("layer");
+    bar = mount("bar");
     draw();
     document.addEventListener("input", onInput, true);
     document.addEventListener("change", onInput, true);
+    window.addEventListener("resize", later);
     observer = new MutationObserver((records) => { if (!records.every((record) => record.target instanceof Element && ours(record.target))) later(); });
     observer.observe(document.body, { childList: true, subtree: true });
-    if (state.running) void poll();
     return "shown";
   }
 
   // Job sites build their forms after loading, so it looks a few times over the first half minute.
   let tries = 0;
   const check = async () => {
-    if (host) return;
+    if (bar) return;
     if (isJobPage() && document.querySelectorAll(CONTROLS).length >= 4 && (await start()) !== "later") return;
     if (++tries < 12) window.setTimeout(() => void check(), 2500);
   };
