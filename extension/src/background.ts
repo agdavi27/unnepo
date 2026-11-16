@@ -1,6 +1,6 @@
 import { stepText, wentBack, type Step } from "./shared/steps";
 import { generatePassword, unmetRules } from "./shared/password";
-import { AUTOFILL_ENABLED, LINKEDIN, type Answer, type Applying, type BeginResult, type Detected, type JobDetails, type DropdownMethod, type FileData, type FillAttempt, type FillPlan, type FillReport, type Issue, type OpenedEmails, type PanelState, type ReminderMarks, type Scan, type Tracker } from "./shared/types";
+import { AUTOFILL_ENABLED, LINKEDIN, type Answer, type Applying, type BeginResult, type Detected, type JobDetails, type DropdownMethod, type FileData, type PageField, type FillAttempt, type FillPlan, type FillReport, type Issue, type OpenedEmails, type PanelState, type ReminderMarks, type Scan, type Tracker } from "./shared/types";
 import { QUICK_BOARDS } from "./content/quick-apply";
 import { isJobPage, sendsApplication } from "./shared/job-page";
 import { dueCount, reminders } from "./shared/reminders";
@@ -143,7 +143,7 @@ async function api<T>(method: "GET" | "POST" | "DELETE", path: string, body?: un
 type Me = NonNullable<PanelState["me"]>;
 type MeCopy = { token: string; at: number; waitForNew: boolean; me: Me };
 const ME_FRESH_MS = 20_000;
-const QUIET = new Set(["activity", "attempts", "map", "answers", "read-link", "job-info"]);
+const QUIET = new Set(["activity", "attempts", "map", "answers", "read-link", "job-info", "quick-fill"]);
 let meCalls = 0;
 let reading: { call: number; result: Promise<Me> } | null = null;
 
@@ -701,6 +701,10 @@ async function writeLetter(tabId: number, message: LetterAsk): Promise<{ ok: boo
     return { ok: false, error: error instanceof Error ? error.message : "Couldn't write the cover letter." };
   }
 }
+
+/** The page bar's quick fills, per tab: a newer fill or Stop replaces the number, and the older one gives up. */
+const quickRuns = new Map<number, number>();
+let quickCounter = 0;
 
 /** The frame the application form is in, per tab: 0 for the page itself, or an embedded form's frame. */
 const formFrame = new Map<number, number>();
@@ -2000,31 +2004,53 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "answer-complex":
         if (sender.tab) return reply({ ok: false });
         return reply(await answerComplex(Number(message.tabId), { job: message.job as Partial<JobDetails> | undefined, put: message.put === false ? false : undefined }));
-      // The bar on an application form: how many boxes Autofill can do and questions Unnepo can write, and
-      // whether Autofill is running on this tab.
+      // The bar on an application form: whether to show, and how many answers are left on Free.
       case "form-page-state": {
         if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
         const { token } = await settings();
         const me = token ? await currentMe(token) : null;
         if (!me) return reply({ ok: false });
         const { overlayOff } = await chrome.storage.local.get("overlayOff");
-        const job = (await jobs())[sender.tab.id];
         const free = Boolean(me.usage?.free && !me.unlimitedCredits);
-        return reply({ ok: true, off: overlayOff === true, free, answersLeft: free ? me.usage?.answers.left ?? null : null, autofillsLeft: free ? me.usage?.autofills.left ?? null : null, running: Boolean(job?.running && runs.has(sender.tab.id)), step: job?.step ?? "", error: job?.error ?? null, profileReady: me.profileReady });
+        return reply({ ok: true, off: overlayOff === true, free, answersLeft: free ? me.usage?.answers.left ?? null : null, profileReady: me.profileReady });
       }
-      // Its Autofill: the same fill as the Jobs tab's Autofill (Beta), on this tab.
-      case "form-autofill": {
-        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
-        const id = sender.tab.id;
-        if (sender.tab.url && LINKEDIN.test(new URL(sender.tab.url).hostname)) return reply({ ok: false, error: "Unnepo doesn't fill LinkedIn. Open the company's own application." });
-        if (!runs.has(id)) void run(id);
-        return reply({ ok: true });
-      }
+      // Stop on the page: everything filling on this tab stops now, and any spiders leave.
       case "form-stop": {
         if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
-        runs.delete(sender.tab.id);
-        await saveJob(sender.tab.id, { running: false, step: "Stopped." });
+        const id = sender.tab.id;
+        quickRuns.delete(id);
+        const wasRunning = runs.delete(id);
+        await Promise.all([
+          ...((await chrome.webNavigation.getAllFrames({ tabId: id }).catch(() => null)) ?? [{ frameId: 0 }]).map((frame) => send(id, { type: "stop-fill" }, frame.frameId).catch(() => undefined)),
+          wasRunning ? saveJob(id, { running: false, step: "Stopped." }) : Promise.resolve(),
+        ]);
         return reply({ ok: true });
+      }
+      // Fill on one group of boxes (marked data-unnepo-pick on the page): the student's own details only, no AI,
+      // so it's quick. Uploads and links have their own buttons and aren't part of it.
+      case "form-fill-group": {
+        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
+        const id = sender.tab.id;
+        const runId = ++quickCounter;
+        quickRuns.set(id, runId);
+        const stopped = () => quickRuns.get(id) !== runId;
+        try {
+          await chrome.scripting.executeScript({ target: { tabId: id, frameIds: [0] }, files: ["content/fill.js"] }).catch(() => undefined);
+          const fields = ((await send<PageField[]>(id, { type: "scan-picked" }, 0).catch(() => [])) ?? []).filter((field) => field.type !== "file");
+          if (!fields.length) return reply({ ok: true, filled: 0, empty: 0 });
+          const tracked = (await jobs())[id];
+          const known = await api<{ answers: Answer[] }>("POST", "quick-fill", { fields, company: tracked?.company ?? "", title: tracked?.title ?? "" });
+          if (stopped()) return reply({ ok: false, stopped: true });
+          const answers = known.answers.filter((answer) => answer.values.length);
+          if (!answers.length) return reply({ ok: true, filled: 0, empty: fields.length });
+          const report = await send<FillReport>(id, { type: "fill", plan: { ats: "other", useServerSchema: false, answers, resume: null, coverLetter: null, autoSubmit: false, password: null, quick: true } satisfies FillPlan }, 0);
+          if (!stopped()) quickRuns.delete(id);
+          void log(`Filled ${report.filled.length} of ${fields.length} boxes from the page's Fill button.`);
+          return reply({ ok: true, filled: report.filled.length, empty: fields.length - answers.length });
+        } catch (error) {
+          if (!stopped()) quickRuns.delete(id);
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't fill these." });
+        }
       }
       // Its Answer button: finds the written-answer questions, writes each one, and types it into its box.
       case "form-answer": {

@@ -20,7 +20,7 @@ import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { friendAction, listFriends } from "@/lib/social/friends";
-import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSaveTranscript, extensionSubmission, extensionTranscript, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
+import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionQuickFill, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSaveTranscript, extensionSubmission, extensionTranscript, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
 import { contactBounced, revealContact, applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, setJobHidden, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
@@ -496,6 +496,8 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
     return json(await addJobByHand(user.id, await request.json()));
   }
   if (action === "map" && method === "POST") return json(await extensionMap(user.id, await request.json()));
+  // The page bar's Fill for a group of boxes: the student's own details only, no AI, at once.
+  if (action === "quick-fill" && method === "POST") return json(await extensionQuickFill(user.id, await request.json()));
   if (action === "answers" && method === "POST") return json(await extensionLearn(user.id, await request.json()));
   if (action === "write" && method === "POST") {
     if (!rateLimit(`extension-write:${user.id}`, 40, 60 * 60 * 1000)) throw new ServiceError("That's a lot of answers in an hour. Try again later.", "rate_limited", 429);
