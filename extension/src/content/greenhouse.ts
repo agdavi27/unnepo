@@ -1,6 +1,6 @@
 import { bestOption, degreeAnswer } from "@/lib/apply/options";
 import type { Answer, FileData, FillAttempt, FillFailure } from "../shared/types";
-import { attachFile, chooseCustom, FillError, press, typeInto, waitFor } from "./dom";
+import { attachFile, chooseCustom, FillError, isDropdownInput, press, typeInto, waitFor } from "./dom";
 import { labelOf } from "./scan";
 
 /**
@@ -31,6 +31,8 @@ async function fillOne(answer: Answer, files: { resume: FileData | null; coverLe
     case "tel":
     case "textarea":
       if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) throw new FillError("not on the page", "not_on_page");
+      // A box that opens a list only takes a listed choice: never typed words.
+      if (isDropdownInput(el)) { await chooseCustom(el, value, { type: value }); return "dropdown"; }
       typeInto(el, value);
       return;
     case "file": {
@@ -105,7 +107,7 @@ export async function fillGreenhouse(answers: Answer[], files: { resume: FileDat
   for (const answer of answers) {
     if (!["text", "email", "tel", "textarea"].includes(answer.type) || !filled.includes(answer.label) || greenhouseValue(answer.id, answer.type)) continue;
     const el = byId(answer.id);
-    if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) typeInto(el, answer.values[0]);
+    if ((el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) && !isDropdownInput(el)) typeInto(el, answer.values[0]);
   }
   return { filled, failed, attempts };
 }

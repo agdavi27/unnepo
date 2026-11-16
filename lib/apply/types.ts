@@ -241,6 +241,8 @@ export type UsageCounts = { letters?: number; answers?: number; autofills?: numb
 /** Reusable answers for application forms. Only what the student typed or what appears in their resume. */
 export type ApplicationProfile = {
   firstName: string;
+  /** Optional: only forms that ask for a middle name (or initial) get it. */
+  middleName?: string;
   lastName: string;
   email: string;
   phone: string;

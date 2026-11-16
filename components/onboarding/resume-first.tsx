@@ -161,6 +161,7 @@ function Sections({ profile, set }: { profile: StudentProfile; set: (next: Stude
         <h3 className={eyebrow}>Contact</h3>
         <div className="grid gap-3 sm:grid-cols-2">
           <Text title="First name" value={profile.contact.firstName} onChange={contact("firstName")} tag={tag("contact.firstName")} />
+          <Text title="Middle name (optional)" value={profile.contact.middleName} onChange={contact("middleName")} />
           <Text title="Last name" value={profile.contact.lastName} onChange={contact("lastName")} tag={tag("contact.lastName")} />
           <Text title="Preferred name (optional)" value={profile.contact.preferredName} onChange={contact("preferredName")} />
           <Text title="Email" type="email" value={profile.contact.email} onChange={contact("email")} tag={tag("contact.email")} />

@@ -1,7 +1,7 @@
 import { isComplexQuestion } from "./question-kinds";
 import type { BeginResult, ComplexQuestion, FileData, JobDetails, PageField } from "../shared/types";
 import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
-import { typeInto } from "./dom";
+import { isDropdownInput, typeInto } from "./dom";
 import { uploadResumeNow } from "./generic";
 import { findMarked, isEmpty, linkedinJob, openedJob, scanFields, scanPage, structuredJobs } from "./scan";
 
@@ -230,6 +230,7 @@ export function beginApplying(resume: FileData | null, changed: (result: BeginRe
 export function putAnswer(id: string, text: string, replace = false) {
   const control = controlFor(id);
   if (!(control instanceof HTMLTextAreaElement || control instanceof HTMLInputElement)) return { ok: false, reason: "That question isn't on the page any more." };
+  if (isDropdownInput(control)) return { ok: false, reason: "That question is a list to choose from: pick an option on the page." };
   if (!replace && control.value.trim()) return { ok: false, reason: "That box already has an answer." };
   typeInto(control, text);
   unmarkQuestion(id);

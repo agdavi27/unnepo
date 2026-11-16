@@ -26,7 +26,7 @@ export type Project = { name: string; role?: string; url?: string; bullets: stri
 export type YesNo = boolean | null;
 
 export type StudentProfile = {
-  contact: { firstName: string; lastName: string; preferredName?: string; email: string; phone?: string; city?: string; state?: string; country?: string; zip?: string; willingToRelocate?: YesNo };
+  contact: { firstName: string; middleName?: string; lastName: string; preferredName?: string; email: string; phone?: string; city?: string; state?: string; country?: string; zip?: string; willingToRelocate?: YesNo };
   links: { linkedin?: string; github?: string; portfolio?: string; other?: string[] };
   education: Education[];
   experience: Experience[];
@@ -161,7 +161,7 @@ export function cleanStudentProfile(raw: unknown, base: StudentProfile): Student
   return {
     ...base,
     contact: {
-      firstName: text(c.firstName, 80), lastName: text(c.lastName, 80), preferredName: text(c.preferredName, 80) || undefined, email: text(c.email, 200),
+      firstName: text(c.firstName, 80), middleName: text(c.middleName, 80) || undefined, lastName: text(c.lastName, 80), preferredName: text(c.preferredName, 80) || undefined, email: text(c.email, 200),
       phone: text(c.phone, 40) || undefined, city: text(c.city, 80) || undefined, state: text(c.state, 80) || undefined, country: text(c.country, 80) || undefined, zip: text(c.zip, 20) || undefined,
       willingToRelocate: relocate,
     },

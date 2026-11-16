@@ -1,7 +1,7 @@
 import { bestOption } from "@/lib/apply/options";
 import { answerChoices } from "@/lib/apply/questions";
 import type { Answer, DropdownMethod, FileData, FillAttempt, FillFailure, PageField } from "../shared/types";
-import { attachFile, chooseCustom, chooseNativeSelect, FillError, press, shownChoice, sleep, typeInto, typeKeys, waysFrom, YES } from "./dom";
+import { attachFile, chooseCustom, chooseNativeSelect, FillError, isDropdownInput, press, shownChoice, sleep, typeInto, typeKeys, waysFrom, YES } from "./dom";
 import { findMarked, isEmpty, labelOf, rootOf } from "./scan";
 
 /**
@@ -191,6 +191,11 @@ async function fillOne(field: PageField, answer: Answer, files: { resume: FileDa
       return "upload";
     }
     default: {
+      // A box that opens a list only takes a listed choice: never typed words.
+      if (isDropdownInput(el)) {
+        if (way > 1) return null;
+        return chooseCustom(el, value, { type: value, ways: way === 0 ? dropdownWays : [...dropdownWays].reverse() });
+      }
       if (way >= TEXT_WAYS.length) return null;
       const box = el as HTMLInputElement | HTMLTextAreaElement;
       if (way === 0) typeInto(box, value);
@@ -222,6 +227,7 @@ export function readBack(field: PageField, answer: Answer): string | null {
     case "file":
       return isEmpty(el) ? "the page shows no file" : null;
     default: {
+      if (isDropdownInput(el)) return shownChoice(el) === "" ? "the box shows no choice" : null;
       const shown = (el as HTMLInputElement).value.trim();
       if (!shown) return "the box is empty";
       return sameText(field, shown, value);

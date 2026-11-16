@@ -217,7 +217,7 @@ export async function learnAnswers(userId: string, info: Awaited<ReturnType<type
     const { field } = classifyQuestion(entry.label);
     if (field === "resume" || field === "coverLetter" || field === "phoneExtension" || /cover ?letter|password/i.test(entry.label)) continue;
     // A plain contact field fills the student's details if they were blank.
-    if (field && (["firstName", "lastName", "phone", "city", "addressLine1", "state", "postalCode", "country", "linkedin", "website", "github"] as const).includes(field as never)) {
+    if (field && (["firstName", "middleName", "lastName", "phone", "city", "addressLine1", "state", "postalCode", "country", "linkedin", "website", "github"] as const).includes(field as never)) {
       const key = field as "firstName";
       if (!String(info.profile[key] ?? "").trim()) {
         next[key] = entry.value;
@@ -585,7 +585,7 @@ export async function updateAnswers(userId: string, raw: unknown) {
   return { application: summary(updated!) };
 }
 
-const PROFILE_FIELDS = ["firstName", "lastName", "email", "phone", "linkedin", "website", "github", "city", "addressLine1", "state", "postalCode", "country"] as const;
+const PROFILE_FIELDS = ["firstName", "middleName", "lastName", "email", "phone", "linkedin", "website", "github", "city", "addressLine1", "state", "postalCode", "country"] as const;
 
 /** The profile as the page sees it: the encrypted password is replaced by whether one is set. */
 function publicProfile(profile: ApplicationProfile) {
