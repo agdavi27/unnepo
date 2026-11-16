@@ -51,9 +51,9 @@ export function press(el: Element) {
   (el as HTMLElement).click();
 }
 
-export function chooseNativeSelect(el: HTMLSelectElement, answer: string) {
+export function chooseNativeSelect(el: HTMLSelectElement, answer: string, pick?: (texts: string[]) => string | null) {
   const labels = Array.from(el.options).map((option) => option.text.trim());
-  const choice = answerChoices(answer).map((candidate) => bestOption(candidate, labels)).find(Boolean);
+  const choice = pick ? pick(labels) : answerChoices(answer).map((candidate) => bestOption(candidate, labels)).find(Boolean);
   if (!choice) throw new FillError(`no option matching "${answer}"`, "no_option", labels.filter(Boolean).slice(0, 100));
   el.value = el.options[labels.indexOf(choice)].value;
   el.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
@@ -322,8 +322,38 @@ async function byKeyboard(trigger: HTMLElement, answer: string, options: ChooseO
  * A searchable or plain custom dropdown, tried one way after another until the box shows the choice:
  * clicks first, then the keyboard (or the keyboard first, on a site where it worked before). Scrolling for
  * more options and loose matching are part of each. Says which way worked; throws when none did.
+ *
+ * Answers are never typed into a dropdown: it's opened and an option is picked from its list. Only a search
+ * box that shows no options at all until something is typed (schools, cities) gets a short search, and that
+ * is cleared again when nothing in the results fits. A dropdown either gets a listed choice or stays empty.
  */
 export async function chooseCustom(trigger: HTMLElement, answer: string, options: ChooseOptions = {}): Promise<DropdownMethod> {
+  const search = trigger instanceof HTMLInputElement ? searchFor(options.type ?? "") : "";
+  try {
+    return await eachWay(trigger, answer, { ...options, type: undefined });
+  } catch (error) {
+    const shownNothing = error instanceof FillError && error.problem === "list_didnt_open";
+    if (!search || !shownNothing) {
+      if (trigger instanceof HTMLInputElement && !chosenBeside(trigger)) clearTyped(trigger);
+      throw error;
+    }
+  }
+  try {
+    return await eachWay(trigger, answer, { ...options, type: search });
+  } catch (error) {
+    // Search words left in the box would go in as the answer.
+    if (trigger instanceof HTMLInputElement && !chosenBeside(trigger)) clearTyped(trigger);
+    throw error;
+  }
+}
+
+/** What to search a list for: the first few words of the answer, not the whole of it. */
+function searchFor(answer: string) {
+  const plain = answer.replace(/\s*[([][^)\]]*[)\]]/g, " ").replace(/\s+/g, " ").trim();
+  return plain.split(" ").slice(0, 3).join(" ").slice(0, 24);
+}
+
+async function eachWay(trigger: HTMLElement, answer: string, options: ChooseOptions): Promise<DropdownMethod> {
   const ways: Record<DropdownMethod, typeof byClicking> = { click: byClicking, keyboard: byKeyboard };
   let last: FillError | null = null;
   for (const method of options.ways ?? waysFrom()) {
@@ -338,30 +368,25 @@ export async function chooseCustom(trigger: HTMLElement, answer: string, options
       if ((last.problem === "no_option" && !(trigger instanceof HTMLInputElement && options.type)) || last.problem === "more_choices") break;
     }
   }
-  // A search box left holding typed words would send them as the answer: a dropdown gets a listed choice or nothing.
-  if (trigger instanceof HTMLInputElement && options.type && !chosenBeside(trigger)) clearTyped(trigger);
   throw last ?? new FillError("couldn't fill", "error");
 }
 
-/** Empties a dropdown's search box, the way the site's own code sees it (React watches the value setter). */
-function clearTyped(input: HTMLInputElement) {
-  if (!input.value) return;
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "");
-  input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "deleteContentBackward" }));
-  close(input);
-}
-
 /**
- * A text box that's really a dropdown: it says it opens a list, completes from one, or sits inside a select
- * widget (react-select on Greenhouse and Lever). Only a listed choice goes in one, never typed words.
+ * A plain-looking text box that opens a list of options when clicked: it's a dropdown too, and is marked so it's
+ * only ever given a listed choice. Checked once, just before Unnepo would type in it.
  */
-export function isDropdownInput(el: Element): el is HTMLInputElement {
-  if (!(el instanceof HTMLInputElement) || !["text", "search", ""].includes(el.type)) return false;
-  if (el.getAttribute("role") === "combobox") return true;
-  const popup = (el.getAttribute("aria-haspopup") ?? "").toLowerCase();
-  if (popup && popup !== "false" && popup !== "dialog") return true;
-  if (/^(list|both)$/i.test(el.getAttribute("aria-autocomplete") ?? "")) return true;
-  return /^react-select-/.test(el.id) || Boolean(el.closest("[class*='select__control'], [class*='select__value-container'], [role=combobox]"));
+export async function opensList(input: HTMLInputElement) {
+  if (input.hasAttribute("data-unnepo-dropdown")) return true;
+  if (!["text", "search", ""].includes(input.type) || input.value) return false;
+  const before = new Set(visibleOptions());
+  input.focus();
+  input.click();
+  await sleep(120);
+  const fresh = visibleOptions().filter((el) => !before.has(el));
+  if (!fresh.length) return false;
+  close(input);
+  input.setAttribute("data-unnepo-dropdown", "");
+  return true;
 }
 
 /** The list a dropdown says it controls (aria-controls / aria-owns), when it says. */
@@ -380,6 +405,29 @@ const multiSelect = (trigger: HTMLElement) => trigger.getAttribute("aria-multise
 /** Closes a dropdown's list with Escape on the dropdown itself (never the page, which could close a popup form). */
 function close(trigger: HTMLElement) {
   trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+}
+
+/** Empties a dropdown's search box, the way the site's own code sees it (React watches the value setter). */
+function clearTyped(input: HTMLInputElement) {
+  if (!input.value) return;
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "");
+  input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "deleteContentBackward" }));
+  close(input);
+}
+
+/**
+ * A text box that's really a dropdown: it says it opens a list, completes from one, or sits inside a select
+ * widget (react-select on Greenhouse and Lever). Only a listed choice goes in one, never typed words.
+ */
+export function isDropdownInput(el: Element): el is HTMLInputElement {
+  if (!(el instanceof HTMLInputElement) || !["text", "search", ""].includes(el.type)) return false;
+  if (el.getAttribute("role") === "combobox" || el.hasAttribute("data-unnepo-dropdown")) return true;
+  const popup = (el.getAttribute("aria-haspopup") ?? "").toLowerCase();
+  if (popup && popup !== "false" && popup !== "dialog") return true;
+  if (/^(list|both)$/i.test(el.getAttribute("aria-autocomplete") ?? "")) return true;
+  // Says whether its list is open, or names the list it controls.
+  if (el.hasAttribute("aria-expanded") || el.getAttribute("aria-controls") || el.getAttribute("aria-owns")) return true;
+  return /^react-select-/.test(el.id) || Boolean(el.closest("[class*='select__control'], [class*='select__value-container'], [role=combobox]"));
 }
 
 export function attachFile(input: HTMLInputElement, file: FileData) {

@@ -243,6 +243,10 @@ export type ApplicationProfile = {
   firstName: string;
   /** Optional: only forms that ask for a middle name (or initial) get it. */
   middleName?: string;
+  /** "Jr.", "III": empty for most students, who get "None" where a form offers it. */
+  suffix?: string;
+  /** "Mr.", "Ms.", "Mx.", "Dr.": only the student's own choice is used. */
+  salutation?: string;
   lastName: string;
   email: string;
   phone: string;
