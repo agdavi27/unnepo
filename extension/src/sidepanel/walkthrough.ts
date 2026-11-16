@@ -16,7 +16,7 @@ const STEPS: Step[] = [
   },
   {
     target: "[data-tab='jobs']", tab: "jobs", title: "Home",
-    body: "Write a cover letter for the job on your tab, answer questions like \"Why do you want to work here?\", or add a job by hand. Under the tools, the graph shows every day you did something.",
+    body: "Write a cover letter for the job on your tab, answer questions like \"Why do you want to work here?\", or add a job by hand. Above the tools, the graph shows every day you did something.",
   },
   {
     target: "[data-tab='home']", tab: "home", title: "Jobs: your tracker",

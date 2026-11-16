@@ -1640,12 +1640,13 @@ function wireManualJob(state: PanelState) {
 }
 
 /**
- * Home: four tiles (a cover letter, answering a question, Autofill, adding a job), the resume and password, then
- * under all the tools the graph of every day you did something, and friends.
+ * Home: the graph of every day you did something, then four tiles (a cover letter, answering a question,
+ * Autofill, adding a job), the resume and password, and friends.
  */
 function jobsView(state: PanelState) {
   ensureTracker();
-  return toolsPage(state, weekView(new Date(), "", `${state.apiBase}/home?tab=goals`));
+  // The graph first, the tools under it, then friends.
+  return weekView(new Date(), (friends) => toolsPage(state, friends), `${state.apiBase}/home?tab=goals`);
 }
 
 /** Settings for catching applications, email links and reminders. Kept on this computer. */
@@ -1728,9 +1729,9 @@ function laptopRect() {
   const svg = app.querySelector(".letter-writing svg");
   if (!svg) return null;
   const box = svg.getBoundingClientRect();
-  // Where typingSpiderSvg draws him: 40×30 at (10, 1) in its 60×48.
+  // Where typingSpiderSvg draws him: 40×34 at (10, 1) in its 60×48.
   const scale = box.width / 60;
-  return { left: box.left + 10 * scale, top: box.top + scale, width: 40 * scale, height: 30 * scale };
+  return { left: box.left + 10 * scale, top: box.top + scale, width: 40 * scale, height: 34 * scale };
 }
 type Spot = { left: number; top: number; width: number; height: number };
 function travel(from: Spot, to: Spot, ms: number, landed: () => void) {
