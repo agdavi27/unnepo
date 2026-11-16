@@ -18,7 +18,7 @@ const shared = { outdir: out, bundle: true, target: "chrome116", minify: false, 
 await build({ ...shared, format: "esm", entryPoints: { background: path.join(here, "src/background.ts"), "sidepanel/panel": path.join(here, "src/sidepanel/panel.ts"), "dashboard/dashboard": path.join(here, "src/dashboard/dashboard.ts") } });
 // Page scripts are plain scripts that get injected again and again. Each copy is wrapped in its own scope;
 // without that, every re-injection reset the first copy's state (and left frozen spiders behind).
-await build({ ...shared, format: "iife", entryPoints: { "content/connect": path.join(here, "src/content/connect.ts"), "content/fill": path.join(here, "src/content/fill.ts"), "content/launcher": path.join(here, "src/content/launcher.ts") } });
+await build({ ...shared, format: "iife", entryPoints: { "content/connect": path.join(here, "src/content/connect.ts"), "content/fill": path.join(here, "src/content/fill.ts"), "content/launcher": path.join(here, "src/content/launcher.ts"), "content/overlay": path.join(here, "src/content/overlay.ts") } });
 // Built for the real server, the manifest drops its localhost entries: they're only for testing a local
 // copy, and the Chrome Web Store's review asks about every site an extension can reach.
 const manifest = JSON.parse(readFileSync(path.join(here, "manifest.json"), "utf8"));

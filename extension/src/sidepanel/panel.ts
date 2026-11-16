@@ -1650,9 +1650,9 @@ function jobsView(state: PanelState) {
 }
 
 /** Settings for catching applications, email links and reminders. Kept on this computer. */
-let tracking: { autoDetect: "auto" | "ask"; mailer: Mailer; notify: boolean } | null = null;
-void chrome.storage.local.get(["autoDetect", "mailer", "notify"]).then((stored) => {
-  tracking = { autoDetect: stored.autoDetect === "ask" ? "ask" : "auto", mailer: (stored.mailer as Mailer | undefined) ?? "gmail", notify: stored.notify !== false };
+let tracking: { autoDetect: "auto" | "ask"; mailer: Mailer; notify: boolean; cards: boolean } | null = null;
+void chrome.storage.local.get(["autoDetect", "mailer", "notify", "overlayOff"]).then((stored) => {
+  tracking = { autoDetect: stored.autoDetect === "ask" ? "ask" : "auto", mailer: (stored.mailer as Mailer | undefined) ?? "gmail", notify: stored.notify !== false, cards: stored.overlayOff !== true };
 });
 function trackingSettings(state: PanelState) {
   if (!tracking) return "";
@@ -1665,6 +1665,7 @@ function trackingSettings(state: PanelState) {
       <div class="set-rows">
         ${toggle("auto-save", "Save jobs automatically", tracking.autoDetect === "auto" ? "When a site confirms it" : "Off: Unnepo asks first", tracking.autoDetect === "auto")}
         ${toggle("notify", "Follow-up reminders", "Once a day, when due", tracking.notify)}
+        ${toggle("page-cards", "Cards on job pages", "When you apply: save it, then who to email", tracking.cards)}
         ${toggle("light-mode", "Light mode", "Here and on unnepo.com", theme() === "light")}
         ${toggle("pause", `Stop at Submit <span class="beta">Beta</span>`, "Autofill waits for you to check", !state.autoSubmit)}
         <label class="set-row"><span class="set-text"><span>Email links open in</span></span><select class="field set-select" id="mailer">${mail("gmail", "Gmail")}${mail("outlook", "Outlook")}${mail("mailto", "Mail app")}</select></label>
@@ -1688,6 +1689,10 @@ function wireTracking() {
   document.getElementById("notify")?.addEventListener("change", (event) => {
     tracking!.notify = (event.target as HTMLInputElement).checked;
     void chrome.storage.local.set({ notify: tracking!.notify });
+  });
+  document.getElementById("page-cards")?.addEventListener("change", (event) => {
+    tracking!.cards = (event.target as HTMLInputElement).checked;
+    void chrome.storage.local.set({ overlayOff: !tracking!.cards });
   });
   document.getElementById("light-mode")?.addEventListener("change", (event) => {
     chooseTheme((event.target as HTMLInputElement).checked ? "light" : "dark");
@@ -2018,6 +2023,21 @@ function addDetected(item: Detected) {
   Object.assign(manualJob, { open: true, key: item.url, title: item.title, company: item.company, url: item.url, stage: "applied", note: "Unnepo didn't catch the company. Fill it in, then add it.", saving: false, readFor: "", description: item.description ?? "" });
   go("jobs");
 }
+
+/** "Find on LinkedIn" on the card on a job page: the panel opens on that job's LinkedIn page. */
+function openAsked() {
+  void chrome.storage.local.get("panelOpen").then((stored) => {
+    const asked = stored.panelOpen as { view: "linkedin"; jobId: string; at: number } | undefined;
+    if (!asked) return;
+    void chrome.storage.local.remove("panelOpen");
+    if (asked.jobId && Date.now() - asked.at < 60_000) {
+      jobFrom = "home";
+      openContacts(asked.jobId, asked.view);
+    }
+  });
+}
+openAsked();
+chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes.panelOpen?.newValue) openAsked(); });
 
 setHost({ redraw: () => void render(), openJob, openContacts, upgradeUrl: () => (lastState ? upgradeUrl(lastState) : ""), addJob: addDetected });
 
