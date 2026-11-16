@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { composeLink } from "@/lib/apply/compose-link";
 import { Popup } from "@/components/unnepo/popup";
 import type { TrackerJob } from "@/lib/extension/service";
+import { FREE_UNLOCKS_PER_DAY } from "@/lib/config";
 
 /**
  * A job's people on the website, doing what the extension's People card does: find people at the company, show a
@@ -83,8 +84,8 @@ async function post(body: Record<string, unknown>) {
   return payload as { contact?: Person; gone?: boolean };
 }
 
-export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload, say }: { job: TrackerJob; free: boolean; badge?: string; note?: string; /** Free: written emails left today. */ emailsLeft?: number | null; reload: () => Promise<void>; say: (message: string) => void }) {
-  // Free sees one person at each job: the one the posting names, else the first with an email, else the first.
+export function PeoplePanel({ job, free, badge, note, emailsLeft = null, unlocksLeft = null, reload, say }: { job: TrackerJob; free: boolean; badge?: string; note?: string; /** Free: written emails left today. */ emailsLeft?: number | null; /** Free: unlocks left today. */ unlocksLeft?: number | null; reload: () => Promise<void>; say: (message: string) => void }) {
+  // Free sees the one person it unlocked at a job: the one the posting names, else the first with an email, else the first.
   const shown = free && job.contacts.length ? [job.contacts.find((person) => person.role === "job_poster") ?? job.contacts.find((person) => person.email) ?? job.contacts[0]] : job.contacts.slice(0, 3);
   const company = job.companyMissing ? "this company" : job.company;
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -230,7 +231,7 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload,
             <GmailIcon />
             <span className="min-w-0 flex-1">
               <span className="block select-all truncate font-mono text-[13px] text-[#D4D4DA]">{person.email}</span>
-              {(free || source) && <span className={`block text-[11px] ${unsure || free ? "text-[#F5A524]" : "text-[#8B8B94]"}`}>{free ? "Unverified email" : source}</span>}
+              {source && <span className={`block text-[11px] ${unsure ? "text-[#F5A524]" : "text-[#8B8B94]"}`}>{source}</span>}
             </span>
             <button type="button" onClick={() => void navigator.clipboard.writeText(person.email!).then(() => say("Copied the address."), () => say("Couldn't copy."))} className="flex-none text-xs text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline">Copy</button>
           </div>
@@ -315,7 +316,7 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload,
                     ? <><GmailIcon /><span className="truncate font-mono text-[#D4D4DA]">{person.email}</span></>
                     : <span className="text-[#8B8B94]">{hidden ? "Tap to show who it is" : "No email found"}</span>}
                 </span>
-                {free && person.email && <span className="mt-1.5 inline-block rounded-full border border-[#F5A524]/50 px-1.5 font-mono text-[10px] text-[#F5A524]">Unverified email</span>}
+                {free && person.email && (person.emailSource === "likely" || person.emailSource === "guess") && <span className="mt-1.5 inline-block rounded-full border border-[#F5A524]/50 px-1.5 font-mono text-[10px] text-[#F5A524]">Unverified email</span>}
               </span>
               <span className="flex flex-none flex-col items-end gap-1">
                 {status
@@ -339,6 +340,30 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload,
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {preview.map((row, index) => locked(`preview-${index}`, row.title || ROLE_LABEL[row.role] || "Someone", [row.title ? ROLE_LABEL[row.role] : "", "Name hidden"].filter(Boolean).join(" · ")))}
         </ul>
+      </div>
+    );
+  }
+
+  // Free, not unlocked yet: Unlock spends one of the day's unlocks, and says so.
+  if (free && job.contactsStatus === "idle" && !job.contacts.length) {
+    const left = unlocksLeft ?? 0;
+    const blocked = job.contactsMessage && !/^Finding|^Searching/.test(job.contactsMessage) ? job.contactsMessage : "";
+    return (
+      <div className="flex flex-col gap-3">
+        {head}
+        <Spots />
+        <div className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] bg-[#0A0A0C] p-4">
+          <p className="m-0 text-sm text-[#B4B4BC]">Unlock the best person to email at {company}: the recruiter, the hiring manager or someone on the team, with their work email.</p>
+          <p className="m-0 text-[13px] text-[#8B8B94]">Free unlocks <strong className="text-[#F7F7F8]">{FREE_UNLOCKS_PER_DAY} people a day</strong>, each at a different company. You have <strong className={left ? "text-[#F7F7F8]" : "text-[#F87171]"}>{left} of {FREE_UNLOCKS_PER_DAY}</strong> left today.</p>
+          <div className="flex flex-wrap items-center gap-3">
+            {left > 0
+              ? <button type="button" onClick={() => void find()} disabled={busy.has("find")} className={primary}>{busy.has("find") ? "Unlocking…" : `Unlock 1 person (${left} left today)`}</button>
+              : <a href="/home?tab=pro" className={primary}>Upgrade to Pro for unlimited</a>}
+            {left > 0 && <a href="/home?tab=pro" className={quiet}>Pro has no limit</a>}
+          </div>
+        </div>
+        {(blocked || (left === 0 && note)) && <p className="m-0 text-[13px] text-[#F5A524]">{blocked || note}</p>}
+        {errorLine}
       </div>
     );
   }
@@ -393,14 +418,14 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, reload,
       {head}
       {!focused && errorLine}
       {list}
-      {free && shown.length > 0 && <UnlockCard more={moreFound} company={company} />}
+      {free && shown.length > 0 && <UnlockCard more={moreFound} company={company} left={unlocksLeft} />}
       {popup}
     </div>
   );
 }
 
 /** Free: under the one person shown, who else is there (blurred) and one button to Pro. */
-function UnlockCard({ more, company }: { more: number; company: string }) {
+function UnlockCard({ more, company, left }: { more: number; company: string; left: number | null }) {
   return (
     <div className="mt-1 flex flex-col gap-3 rounded-xl border border-[#3D8BFF]/40 bg-[radial-gradient(120%_140%_at_0%_0%,rgba(61,139,255,.16),transparent_60%)] p-4 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -415,6 +440,7 @@ function UnlockCard({ more, company }: { more: number; company: string }) {
         <span className="min-w-0">
           <span className="block text-sm font-semibold">{more ? `Unlock ${more} more ${more === 1 ? "person" : "people"}` : "Unlock more people"}</span>
           <span className="block text-xs leading-snug text-[#8B8B94]">Recruiters, the team and alumni at {company}, with checked emails.</span>
+          {left !== null && <span className="mt-1 block text-xs leading-snug text-[#8B8B94]">Free: {FREE_UNLOCKS_PER_DAY} unlocks a day, one per company · {left} left today</span>}
         </span>
       </div>
       <a href="/home?tab=pro" className="flex h-10 flex-none items-center justify-center gap-1.5 rounded-lg bg-[#3D8BFF] px-4 text-sm font-semibold text-white transition hover:brightness-110">Upgrade to Pro <span aria-hidden>→</span></a>

@@ -123,7 +123,7 @@ describe("structured profile", () => {
   });
 
   it("offers Free and Pro, monthly or by the semester, with Free counted by the day and Pro unlimited", () => {
-    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 1], ["pro", "$29.99", "or $100 a semester, through May", 20]]);
+    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 2], ["pro", "$29.99", "or $100 a semester, through May", 20]]);
     expect(creditMath(1)).toBe("People at 1 company");
     expect(creditMath(40)).toBe("People at 40 companies");
     const saved = process.env.SIGNUP_CREDITS;

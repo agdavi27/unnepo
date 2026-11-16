@@ -58,14 +58,14 @@ export function serverConfig() {
 
 /**
  * Pricing. Free gets FREE_LIMITS each day (cover letters, answers, written emails, and full autofills that answer the questions
- * too; after those, autofill still fills the basic details) and FREE_PEOPLE_PER_JOB person at each job, with an
- * email that isn't checked. Pro has no limits: only hidden monthly guards
+ * too; after those, autofill still fills the basic details) and FREE_UNLOCKS_PER_DAY unlocks: the best person at a
+ * company, with a checked email, found when the student presses Unlock. Pro has no limits: only hidden monthly guards
  * against scripts (PRO_AI_LIMIT for writing and autofill, PRO_PEOPLE_LIMIT for companies, about 30¢ each), which a
  * real student never meets. `balance` on an account counts people searches left from the trial or a pack.
  */
 export const FREE_LIMITS = { letters: 3, answers: 3, autofills: 3, emails: 3 };
-/** People Free sees at each job: the one the posting names, or else the most relevant, with an unchecked email. */
-export const FREE_PEOPLE_PER_JOB = 1;
+/** People Free unlocks each day: one person at each of two companies, with a checked email. */
+export const FREE_UNLOCKS_PER_DAY = 2;
 export const CREDIT_COST = { letters: 2, answers: 1, autofills: 1, emails: 1, people: 5 };
 /** What Free gets each day, in credits. */
 export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers + FREE_LIMITS.emails * CREDIT_COST.emails;
@@ -102,10 +102,10 @@ export const PUBLIC_PLANS = [
     cta: "Start free",
     popular: false,
     monthly: false,
-    credits: FREE_PEOPLE_PER_JOB,
+    credits: FREE_UNLOCKS_PER_DAY,
     semesterCredits: null,
     applicationsLabel: "Free every day",
-    features: [`${FREE_LIMITS.autofills} full autofills a day, then your basic details`, `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_PEOPLE_PER_JOB} person to email at each job (email not checked)`, "Compete with friends", "Tracker and job matches"],
+    features: [`${FREE_LIMITS.autofills} full autofills a day, then your basic details`, `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_UNLOCKS_PER_DAY} people to email a day, each at a different company`, "Compete with friends", "Tracker and job matches"],
   },
   {
     id: "pro" as const,

@@ -313,7 +313,7 @@ function peopleCard(job: TrackerJob) {
   const posted = job.postedRecruiter && !job.contacts.some((person) => person.role === "job_poster")
     ? `<p class="small">Posted by <strong>${escape(job.postedRecruiter.name)}</strong>${job.postedRecruiter.title ? `, ${escape(job.postedRecruiter.title)}` : ""}${job.postedRecruiter.linkedinUrl ? ` · <a href="${escape(job.postedRecruiter.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</p>`
     : "";
-  // The corner says how many companies' people are left: "1 person per job" on Free, "Unlimited" on Pro.
+  // The corner says how many unlocks are left: "2 of 2 unlocks left today" on Free, "Unlimited" on Pro.
   const badge = store.tracker?.peopleBadge;
   const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${job.contacts.length ? ` · ${shownPeople(job).length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
   if (!isAppliedJob(job)) {
@@ -329,6 +329,20 @@ function peopleCard(job: TrackerJob) {
       <ul class="people-list">${preview.rows.map((row) => freeRow(null, row.title, row.role)).join("")}</ul></section>`;
   }
   const known = job.contacts.length ? peopleList(job) : "";
+  // Free, not unlocked yet: Unlock spends one of the day's unlocks, and says how many are left.
+  if (store.tracker?.free && job.contactsStatus === "idle" && !job.contacts.length) {
+    const left = store.tracker.peopleLeft ?? 0;
+    const perDay = store.tracker.unlocksPerDay ?? 2;
+    const blocked = (job.contactsMessage && !/^Finding|^Searching/.test(job.contactsMessage) ? job.contactsMessage : "") || (left ? "" : store.tracker.peopleNote);
+    const busy = store.busy.has(`find:${job.id}`);
+    return `<section class="page people" aria-label="People">${head}${posted}
+      <p class="note">Unlock the best person to email at ${escape(company)}: the recruiter, the hiring manager or someone on the team, with their work email.</p>
+      <p class="small">Free unlocks <strong>${perDay} people a day</strong>, each at a different company. You have <strong${left ? "" : ' style="color: var(--warn)"'}>${left} of ${perDay}</strong> left today.</p>
+      ${left
+        ? `<button type="button" class="btn primary" data-find-people="${job.id}" ${busy ? "disabled" : ""}>${busy ? "Unlocking…" : `Unlock 1 person (${left} left today)`}</button>`
+        : `<button type="button" class="btn primary" data-upgrade>Upgrade to Pro for unlimited</button>`}
+      ${blocked ? `<p class="small" style="color: var(--warn)">${escape(blocked)}</p>` : ""}</section>`;
+  }
   if (job.contactsStatus === "idle" || (preview && !store.tracker?.free)) {
     return `<section class="page people" aria-label="People">${head}${posted}${known}
       <p class="note">Recruiters, the team, and people you have something in common with.</p>
@@ -352,7 +366,7 @@ function peopleCard(job: TrackerJob) {
     </section>`;
 }
 
-/** Free sees one person at each job: the one the posting names, else the first with an email, else the first. */
+/** Free sees the one person it unlocked at a job: the one the posting names, else the first with an email, else the first. */
 export function freePick<T extends { role: string; email: string | null }>(contacts: T[]) {
   return contacts.find((person) => person.role === "job_poster") ?? contacts.find((person) => person.email) ?? contacts[0];
 }
@@ -373,7 +387,7 @@ function unlockCard(job: TrackerJob) {
   const faces = ["#3D8BFF", "#A78BFA", "#34D399"].map((color) => `<span class="unlock-face" style="background:${color}33;box-shadow:inset 0 0 0 1.5px ${color}88"></span>`).join("");
   return `<div class="unlock-card">
     <div class="unlock-top"><span class="unlock-faces" aria-hidden="true">${faces}<span class="unlock-lock">${LOCK}</span></span>
-      <div class="unlock-copy"><strong>${escape(title)}</strong><span>Recruiters, the team and alumni at ${escape(company)}, with checked emails. Find people from your own school or schools like it.</span></div></div>
+      <div class="unlock-copy"><strong>${escape(title)}</strong><span>Recruiters, the team and alumni at ${escape(company)}, with checked emails. Find people from your own school or schools like it.</span>${store.tracker?.peopleLeft != null ? `<span>Free: ${store.tracker.unlocksPerDay ?? 2} unlocks a day, one per company · ${store.tracker.peopleLeft} left today</span>` : ""}</div></div>
     <button type="button" class="unlock-btn" data-upgrade>Upgrade to Pro <span aria-hidden="true">→</span></button>
   </div>`;
 }
@@ -424,7 +438,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
           <span class="sub">${escape(person.title || ROLE_LABEL[person.role] || "")}</span>
           ${personInfo(person)}
           <span class="person-mail">${person.email ? `${GMAIL}<span class="mail-text">${escape(person.email)}</span>` : `<span class="muted">${hidden ? "Tap to show who it is" : "No email found"}</span>`}</span>
-          ${store.tracker?.free && person.email ? `<span class="unverified-tag">Unverified email</span>` : ""}
+          ${store.tracker?.free && person.email && (person.emailSource === "likely" || person.emailSource === "guess") ? `<span class="unverified-tag">Unverified email</span>` : ""}
         </span>
         <span class="person-side">${tag}<span class="chev" aria-hidden="true">›</span></span>
       </button>
@@ -437,7 +451,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
             <textarea class="field letter-input" rows="7" data-body="${person.id}" aria-label="Email to ${escape(person.name)}">${escape(draft.body)}</textarea>
           </div>` : ""}
         <div class="person-line">${send}${person.linkedinUrl ? `<a class="link" href="${escape(person.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</div>
-        ${person.emailSource && person.email && !store.tracker?.free ? `<span class="small"${person.emailSource === "likely" || person.emailSource === "guess" ? ' style="color: var(--warn)"' : ""}>${escape(EMAIL_SOURCE[person.emailSource] ?? "")}</span>` : ""}
+        ${person.emailSource && person.email ? `<span class="small"${person.emailSource === "likely" || person.emailSource === "guess" ? ' style="color: var(--warn)"' : ""}>${escape(EMAIL_SOURCE[person.emailSource] ?? "")}</span>` : ""}
         ${person.email && !hidden ? `<div class="links">
           ${draft.body ? `<button type="button" class="quiet-link" data-write="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing…" : "Write it again"}</button>` : ""}
           ${drafts[person.id] ? `<button type="button" class="quiet-link" data-save-draft="${person.id}">Save my edits</button>` : ""}

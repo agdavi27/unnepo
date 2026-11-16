@@ -501,17 +501,17 @@ describe("plan limits", () => {
     await repo.setAccountForTests(userId, { balance: 5 });
     const { token } = await issueExtensionToken(userId);
     const { usage } = await (await call("GET", "me", token)).json();
-    // 3 letters (2 credits each), 3 answers and 3 written emails (1 each). Free's people aren't counted, credits or not.
-    expect(usage.credits).toBe(12);
+    // 3 letters (2 credits each), 3 answers and 3 written emails (1 each), and 2 people unlocks (5 each), credits or not.
+    expect(usage.credits).toBe(22);
     // Each tool's box shows what's left today in its corner.
     expect(usage.letters).toMatchObject({ left: 3, badge: "3 left today", note: "" });
     expect(usage.autofills).toMatchObject({ left: 3, basic: false, badge: "3 left today" });
     expect(usage.emails).toMatchObject({ left: 3, badge: "3 left today" });
-    expect(usage.people).toMatchObject({ left: 0, note: "", badge: "1 person per job" });
+    expect(usage.people).toMatchObject({ left: 2, note: "", badge: "2 of 2 unlocks left today" });
     await repo.setAccountForTests(userId, { balance: 0 });
     const low = (await (await call("GET", "me", token)).json()).usage;
-    expect(low.credits).toBe(12);
-    expect(low.people).toMatchObject({ left: 0, badge: "1 person per job" });
+    expect(low.credits).toBe(22);
+    expect(low.people).toMatchObject({ left: 2, badge: "2 of 2 unlocks left today" });
   });
 
   it("keeps a short answer to two sentences unless the student asks for a longer one", async () => {

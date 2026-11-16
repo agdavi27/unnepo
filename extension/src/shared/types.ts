@@ -154,7 +154,7 @@ export type TrackerJob = {
   contacts: TrackerContact[];
 };
 
-export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boolean; peopleNote: string; /** The People box's corner: "1 person per job", "Unlimited". */ peopleBadge?: string; /** Free: written emails left today. */ emailsLeft?: number | null };
+export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boolean; peopleNote: string; /** The People box's corner: "2 of 2 unlocks left today", "Unlimited". */ peopleBadge?: string; /** Free: unlocks left today, and how many a day. Null on Pro. */ peopleLeft?: number | null; unlocksPerDay?: number | null; /** Free: written emails left today. */ emailsLeft?: number | null };
 
 /**
  * A job the extension caught being applied to, for Home's "Detected jobs" menu (the last 5, newest first).
