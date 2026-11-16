@@ -57,6 +57,8 @@ const speech = (() => {
   const spider = document.getElementById("spider")!;
   const line_ = document.getElementById("ticker-line")!;
   const typed = document.getElementById("typed")!;
+  // The rest of the line, hidden: it keeps the line's full height from the first letter.
+  const untyped = document.getElementById("untyped")!;
   const said = document.getElementById("said")!;
   spider.insertAdjacentHTML("beforeend", heroSpiderSvg());
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -74,6 +76,7 @@ const speech = (() => {
     const text = lines[line] ?? "";
     const typing = shown < text.length;
     typed.textContent = text.slice(0, shown);
+    untyped.textContent = text.slice(shown);
     said.textContent = text;
     spider.classList.toggle("talking", typing && text.charAt(shown) !== " " && Math.floor(shown / 2) % 2 === 0);
   };
@@ -96,6 +99,7 @@ const speech = (() => {
     clearTimeout(calm);
     calm = 0;
     typed.textContent = ouch;
+    untyped.textContent = "";
     said.textContent = ouch;
     line_.classList.add("alert");
     spider.classList.remove("talking", "mad");
@@ -1695,6 +1699,7 @@ function dressSpider(look?: SpiderLook) {
   if (!look || key === dressed) return;
   dressed = key;
   spiderLook = look;
+  store.spiderLook = look;
   const spider = document.getElementById("spider")!;
   spider.querySelector("svg")?.remove();
   spider.insertAdjacentHTML("beforeend", heroSpiderSvg(look, theme() === "light"));
