@@ -103,12 +103,13 @@ export function weekView(now = new Date(), under: string | ((friends: string) =>
   };
   const LETTERS = ["M", "T", "W", "T", "F", "S", "S"];
   const letters = LETTERS.map((letter) => `<span>${letter}</span>`).join("");
-  // One week: seven big squares in a row, each with its count. More: a column per week, Monday at the top.
+  // One week: seven big squares in a row, each with its count. More: a column per week, Monday at the top. Five weeks
+  // fill the card's width with short, wide days, so the graph sits flat.
   const calendar = weeks === 1
     ? `<div class="heat-week" role="group" aria-label="This week, day by day">${grid[0].map((date, index) => `<div class="heat-week-day">${day(date, " ")}<span>${LETTERS[index]}</span></div>`).join("")}</div>`
-    : `<div class="heat${weeks < WEEKS ? " roomy" : ""}" role="group" aria-label="Every day you did something, ${rangeLabel.toLowerCase()}" style="grid-template-columns: 12px repeat(${weeks}, minmax(0, ${weeks < WEEKS ? "26px" : "1fr"}))">
+    : `<div class="heat${weeks < WEEKS ? " roomy" : ""}" role="group" aria-label="Every day you did something, ${rangeLabel.toLowerCase()}" style="grid-template-columns: 12px repeat(${weeks}, minmax(0, 1fr))">
         <div class="heat-col heat-letters"><span class="heat-month"></span>${letters}</div>
-        ${grid.map((days, index) => `<div class="heat-col"><span class="heat-month">${index % (weeks < WEEKS ? 2 : 4) === 0 ? escape(shortDate(days[0])) : ""}</span>${days.map((date) => day(date)).join("")}</div>`).join("")}
+        ${grid.map((days, index) => `<div class="heat-col"><span class="heat-month">${index % (weeks < WEEKS ? 1 : 4) === 0 ? escape(shortDate(days[0])) : ""}</span>${days.map((date) => day(date)).join("")}</div>`).join("")}
       </div>`;
   const ranges = RANGES.map(([value, label, , title]) => `<button type="button" class="range-btn${value === range ? " on" : ""}" data-graph-range="${value}" aria-pressed="${value === range}" title="${title}">${label}</button>`).join("");
 
