@@ -1374,11 +1374,22 @@ function profileCard(state: PanelState) {
       <span class="account-name" title="${escape(me.user.email)}">${escape(name)}</span>
       <span class="me-line"><span>${escape(plan)}</span><span aria-hidden="true">·</span>${profile}</span>
       <div class="me-stats" aria-label="${free ? "Left today" : "Your plan"}">
-        ${free ? `${stat(me.usage?.letters.left, "letters")}${stat(me.usage?.answers.left, "answers")}${stat(me.usage?.autofills.left, "fills")}<a class="btn accent small-btn" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade</a>`
+        ${free ? `${stat(me.usage?.letters.left, "letters")}${stat(me.usage?.answers.left, "answers")}${stat(me.usage?.autofills.left, "fills")}${stat(me.usage?.people.left, "unlocks")}`
           : `${stat(credits, "")}<a class="me-link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a>`}
       </div>
+      ${free ? `<div class="me-reset"><span>Left today · resets at ${escape(resetTime())} tonight</span><a class="btn accent small-btn" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade</a></div>` : ""}
       ${me.admin ? adminPlanSwitch(me.planPreview ?? null) : ""}
     </section>`;
+}
+
+/**
+ * When Free's daily counts start over, in the student's own time: the last minute of the day in Eastern time
+ * (the server counts days there), so "11:59 PM" for a student on Eastern time.
+ */
+function resetTime(now = new Date()) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", hour: "2-digit", minute: "2-digit", second: "2-digit" }).formatToParts(now).map((part) => [part.type, part.value]));
+  const intoDay = Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second);
+  return new Date(now.getTime() + (86_400 - intoDay - 60) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 /** Admins only: see the product as a Free or a Pro student does. Billing never changes. */

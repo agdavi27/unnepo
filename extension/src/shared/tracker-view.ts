@@ -350,7 +350,7 @@ function peopleCard(job: TrackerJob) {
       <p class="small">Free unlocks <strong>${perDay} people a day</strong>, each at a different company. You have <strong${left ? "" : ' style="color: var(--warn)"'}>${left} of ${perDay}</strong> left today.</p>
       ${left
         ? `<button type="button" class="btn primary" data-find-people="${job.id}" ${busy ? "disabled" : ""}>${busy ? "Unlocking…" : `Unlock 1 person (${left} left today)`}</button>`
-        : `<button type="button" class="btn primary" data-upgrade>Upgrade to Pro for unlimited</button>`}
+        : `<button type="button" class="btn primary" data-upgrade>Get unlimited verified contacts with Pro</button>`}
       ${blocked ? `<p class="small" style="color: var(--warn)">${escape(blocked)}</p>` : ""}</section>`;
   }
   if (job.contactsStatus === "idle" || (preview && !store.tracker?.free)) {
@@ -393,11 +393,12 @@ const LOCK = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke
 function unlockCard(job: TrackerJob) {
   const more = Math.max(0, job.contacts.length - 1) + (job.fillReport?.peopleLocked ?? 0);
   const company = job.companyMissing ? "this company" : short(job.company, 24);
-  const title = more ? `Unlock ${more} more ${more === 1 ? "person" : "people"}` : "Unlock more people";
+  const title = "Unlock more verified contacts";
+  const found = more ? `Unnepo found ${more} more ${more === 1 ? "person" : "people"} at ${company}. ` : "";
   const faces = ["#3D8BFF", "#A78BFA", "#34D399"].map((color) => `<span class="unlock-face" style="background:${color}33;box-shadow:inset 0 0 0 1.5px ${color}88"></span>`).join("");
   return `<div class="unlock-card">
     <div class="unlock-top"><span class="unlock-faces" aria-hidden="true">${faces}<span class="unlock-lock">${LOCK}</span></span>
-      <div class="unlock-copy"><strong>${escape(title)}</strong><span>Recruiters, the team and alumni at ${escape(company)}, with checked emails. Find people from your own school or schools like it.</span>${store.tracker?.peopleLeft != null ? `<span>Free: ${store.tracker.unlocksPerDay ?? 2} unlocks a day, one per company · ${store.tracker.peopleLeft} left today</span>` : ""}</div></div>
+      <div class="unlock-copy"><strong>${escape(title)}</strong><span>${escape(found)}Pro shows recruiters, the team and alumni, each with a verified work email, including people from your own school.</span>${store.tracker?.peopleLeft != null ? `<span>Free: ${store.tracker.unlocksPerDay ?? 2} unlocks a day, one per company · ${store.tracker.peopleLeft} left today</span>` : ""}</div></div>
     <button type="button" class="unlock-btn" data-upgrade>Upgrade to Pro <span aria-hidden="true">→</span></button>
   </div>`;
 }

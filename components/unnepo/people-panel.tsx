@@ -198,7 +198,7 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, unlocks
   );
 
   const firstWithEmail = job.contacts.find((person) => person.email)?.id;
-  // Free shows one person; the rest of who the search found (and checked emails) come with Pro.
+  // Free shows one person; the rest of who the search found, with verified emails, come with Pro.
   const moreFound = Math.max(0, job.contacts.length - 1) + (job.fillReport?.peopleLocked ?? 0);
   const revealsLeft = (job.fillReport?.peopleReveals ?? 0) < MAX_REVEALS;
   const isHiddenPerson = (person: Person) => !person.email && job.hidden.includes(person.name.toLowerCase());
@@ -358,8 +358,8 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, unlocks
           <div className="flex flex-wrap items-center gap-3">
             {left > 0
               ? <button type="button" onClick={() => void find()} disabled={busy.has("find")} className={primary}>{busy.has("find") ? "Unlocking…" : `Unlock 1 person (${left} left today)`}</button>
-              : <a href="/home?tab=pro" className={primary}>Upgrade to Pro for unlimited</a>}
-            {left > 0 && <a href="/home?tab=pro" className={quiet}>Pro has no limit</a>}
+              : <a href="/home?tab=pro" className={primary}>Get unlimited verified contacts with Pro</a>}
+            {left > 0 && <a href="/home?tab=pro" className={quiet}>Pro: unlimited verified contacts</a>}
           </div>
         </div>
         {(blocked || (left === 0 && note)) && <p className="m-0 text-[13px] text-[#F5A524]">{blocked || note}</p>}
@@ -439,8 +439,8 @@ function UnlockCard({ more, company, left }: { more: number; company: string; le
           </span>
         </span>
         <span className="min-w-0">
-          <span className="block text-sm font-semibold">{more ? `Unlock ${more} more ${more === 1 ? "person" : "people"}` : "Unlock more people"}</span>
-          <span className="block text-xs leading-snug text-[#8B8B94]">Recruiters, the team and alumni at {company}, with checked emails.</span>
+          <span className="block text-sm font-semibold">Unlock more verified contacts</span>
+          <span className="block text-xs leading-snug text-[#8B8B94]">{more ? `Unnepo found ${more} more ${more === 1 ? "person" : "people"} at ${company}. ` : ""}Pro shows recruiters, the team and alumni, each with a verified work email.</span>
           {left !== null && <span className="mt-1 block text-xs leading-snug text-[#8B8B94]">Free: {FREE_UNLOCKS_PER_DAY} unlocks a day, one per company · {left} left today</span>}
         </span>
       </div>

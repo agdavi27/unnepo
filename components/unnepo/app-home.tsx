@@ -54,7 +54,7 @@ const VIEWS: { id: View; label: string }[] = [
 
 /** What Pro does that Free doesn't, on the Upgrade to Pro page. */
 const PRO_REASONS: Array<[string, string]> = [
-  ["3 people to email at every company", "Names, titles and checked emails for recruiters, hiring managers and the team. Free shows 1 person, with an email that isn't checked."],
+  ["Unlimited verified contacts at every company", "Up to 3 people at each company (recruiters, hiring managers and the team), each with a verified work email, and more on request. Free unlocks 2 people a day, one per company."],
   ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 3 general ones a day."],
   ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 3 a day."],
   ["Unlimited autofill that answers the questions too", "Free has 3 full autofills a day, then fills your basic details."],
