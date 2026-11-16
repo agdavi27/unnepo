@@ -680,7 +680,7 @@ describe("people after applying", () => {
   });
 
   it("lets Free unlock 2 people a day, each at a different company, whatever credits it has, and never stops Pro", async () => {
-    const found = (search: Search) => (search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []);
+    const found = (search: Search) => (search.q_organization_domains_list?.includes("emptyco.com") ? [] : search.q_keywords === "Colby College" ? [person("a1", "Casey", "Park", "Product Manager")] : search.person_titles?.includes("recruiter") ? [person("r1", "Avery", "Kim", "Recruiter")] : []);
     const { userId, application, contacts, searches } = await appliedWith(found, { verified: ["a1", "r1"], free: true });
     const debits = async () => (await repo.listLedger(userId)).filter((entry) => entry.entryType === "unlock_debit").reduce((sum, entry) => sum - entry.amount, 0);
     // The first unlock: one person, the one the posting names, and the rest kept back for Pro. Trial credits aren't spent.
@@ -703,6 +703,14 @@ describe("people after applying", () => {
     await runContactDiscovery(userId, same.id);
     expect(await applicationContacts.list(userId, [same.id])).toHaveLength(0);
     expect((await applications.get(userId, same.id))?.contactsStatus).toBe("idle");
+
+    // A company where no one turns up doesn't use an unlock, and says so.
+    const empty = await another(5, "Emptyco", "emptyco.com");
+    await runContactDiscovery(userId, empty.id);
+    expect(await applicationContacts.list(userId, [empty.id])).toHaveLength(0);
+    expect((await applications.get(userId, empty.id))?.contactsMessage).toMatch(/didn't use an unlock/);
+    expect((await applications.get(userId, empty.id))?.fillReport?.personCharged).toBeFalsy();
+    expect((await planUsage(userId)).people.left).toBe(1);
 
     // The second unlock, at another company: one person, and none left today.
     const other = await another(3, "Globex", "globex.com");
@@ -1138,6 +1146,13 @@ describe("jobs added by hand, and jobs missing the company", () => {
     expect(companyMissing({ company: "jobs.lever.co", jobUrl: "https://jobs.lever.co/x" })).toBe(true);
     expect(companyMissing({ company: "", jobUrl: "" })).toBe(true);
     expect(companyMissing({ company: "MealPal", jobUrl: "https://mealpal.applytojob.com/apply/1" })).toBe(false);
+    // A page's badges, buttons and counts read as the company: the student is asked which company it is.
+    for (const junk of ["Verified listing", "Verified", "Promoted", "Easy Apply", "Actively hiring", "Be an early applicant", "200+ applicants", "3 days ago", "Remote", "Full-time", "Company logo", "Confidential", "$25/hr", "4.2"]) {
+      expect(companyMissing({ company: junk, jobUrl: "https://www.linkedin.com/jobs/view/1" }), junk).toBe(true);
+    }
+    for (const real of ["Google", "Verizon", "New York Life", "Remote Year Inc", "Top Hat", "Hidden Valley Ranch", "3M"]) {
+      expect(companyMissing({ company: real, jobUrl: "https://example.com/jobs/1" }), real).toBe(false);
+    }
     const userId = await student();
     const app = (await addJobByHand(userId, { title: "Intern", company: "ZipRecruiter" })).application;
     expect(app.companyMissing).toBe(true);

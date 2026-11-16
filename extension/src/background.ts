@@ -5,6 +5,7 @@ import { QUICK_BOARDS } from "./content/quick-apply";
 import { isJobPage, sendsApplication } from "./shared/job-page";
 import { dueCount, reminders } from "./shared/reminders";
 import { notJobTitle } from "@/lib/apply/job-title";
+import { notCompanyName } from "@/lib/apply/company-name";
 import { APPLIED_LINE, appliedDay } from "./shared/applied-line";
 
 /**
@@ -1942,7 +1943,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (!/^https:\/\/\S+\.\S+/.test(link || url)) return reply({ ok: false, error: "Open the job's page first." });
         // What the page didn't say is read from the job's link: Unnepo reads company sites; a job board posting
         // that isn't this page is read in a background tab.
-        const unsure = (name: string) => name.length < 2 || BOARD_WORD.test(name);
+        const unsure = (name: string) => name.length < 2 || BOARD_WORD.test(name) || notCompanyName(name);
         if ((unsure(company) || title.length < 2 || description.length < 200) && link) {
           let info: LinkInfo | null = null;
           try {

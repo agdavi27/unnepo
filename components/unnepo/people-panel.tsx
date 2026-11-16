@@ -401,6 +401,7 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, unlocks
         <Spots />
         <div className="flex flex-col gap-3 rounded-2xl border border-[#1F1F24] bg-[#0A0A0C] p-4">
           <p className="m-0 text-sm text-[#B4B4BC]">{stale || job.contactsStatus === "failed" ? "That search didn't finish." : "No one found yet."} Add the company&apos;s website and Unnepo looks again.</p>
+          {free && <p className="m-0 text-[13px] text-[#8B8B94]">That search didn&apos;t use an unlock: only finding someone with an email does.{unlocksLeft !== null ? ` You have ${unlocksLeft} of ${FREE_UNLOCKS_PER_DAY} left today.` : ""}</p>}
           <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void find(); }}>
             <input value={website} onChange={(event) => setWebsite(event.target.value)} placeholder="Company website, like acme.com" aria-label="Company website" className="h-10 min-w-0 flex-1 basis-48 rounded-xl border border-[#26262C] bg-[#0C0C0E] px-3 text-sm placeholder:text-[#5C5C66] focus:border-[#3D8BFF] focus:outline-none" />
             <button type="submit" disabled={busy.has("find")} className="h-10 rounded-xl bg-white px-4 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{busy.has("find") ? "Starting…" : "Search"}</button>

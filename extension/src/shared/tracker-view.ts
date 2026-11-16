@@ -230,7 +230,7 @@ export function jobPage(job: TrackerJob, focus?: string) {
         ${menu}
       </div>
       ${status ? `<div class="job-status">${status}</div>` : ""}
-      ${editing.jobId === job.id ? editForm(job) : ""}
+      ${editing.jobId === job.id ? editForm(job) : job.companyMissing ? companyAsk(job) : ""}
       <div class="next-box${tone}">
         <div class="next-top"><span class="next-eyebrow">${escape(eyebrow)}</span><span class="dots" aria-hidden="true">${bars}</span></div>
         <p class="next-text">${escape(progress.next)}</p>
@@ -240,6 +240,16 @@ export function jobPage(job: TrackerJob, focus?: string) {
     </section>
     ${applied ? `<section class="page" aria-label="People you emailed">${reachPicker(job)}</section>` : ""}
     ${peopleCard(job)}`;
+}
+
+/** A job saved without a real company (blank, or a badge like "Verified listing"): the student says which company it is. */
+function companyAsk(job: TrackerJob) {
+  const read = job.company.trim();
+  const said = read && read.length < 60 ? ` The page said "${escape(read)}", which doesn't look like a company.` : "";
+  return `<div class="next-box due" role="alert">
+    <p class="next-text"><strong>Which company is this?</strong>${said} Unnepo needs it to find people to email.</p>
+    <button type="button" class="btn primary next-btn" data-edit-job="${job.id}">Add the company</button>
+  </div>`;
 }
 
 // A click anywhere outside the ⋯ menu closes it.
@@ -498,10 +508,11 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
   root.querySelector<HTMLButtonElement>("[data-see-people]")?.addEventListener("click", () => {
     root.querySelector<HTMLElement>(".people")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
-  root.querySelector<HTMLButtonElement>("[data-edit-job]")?.addEventListener("click", () => {
+  root.querySelectorAll<HTMLButtonElement>("[data-edit-job]").forEach((button) => button.addEventListener("click", () => {
     Object.assign(editing, { jobId: job.id, title: job.titleMissing ? "" : job.title, company: job.companyMissing ? "" : job.company, url: job.url ?? "", busy: false, error: "" });
     host.redraw();
-  });
+    root.querySelector<HTMLInputElement>(job.companyMissing ? '[data-edit="company"]' : '[data-edit="title"]')?.focus();
+  }));
   root.querySelectorAll<HTMLInputElement>("[data-edit]").forEach((box) => box.addEventListener("input", () => {
     editing[box.dataset.edit as "title" | "company" | "url"] = box.value;
   }));

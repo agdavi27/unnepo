@@ -263,6 +263,17 @@ function InfoPopup({ row, now, tracker, onClose, onDelete, onHide, onChanged, re
             </div>
           </div>
           {editing && <EditJob job={job} onCancel={() => setEditing(false)} onSaved={(note) => { setEditing(false); onChanged(note); }} />}
+          {/* Saved without a real company (blank, or a badge like "Verified listing"): the student says which it is. */}
+          {!editing && job.companyMissing && (
+            <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-[#F5A524]/50 bg-[#F5A524]/[0.06] px-4 py-3">
+              <span aria-hidden className="font-semibold text-[#F5A524]">!</span>
+              <span className="min-w-0 flex-1 text-sm text-[#F5D79A]">
+                <b className="font-semibold">Which company is this?</b>
+                {job.company.trim() && job.company.trim().length < 60 ? <> The page said &ldquo;{job.company.trim()}&rdquo;, which doesn&apos;t look like a company.</> : null} Unnepo needs it to find people to email.
+              </span>
+              <button type="button" onClick={() => setEditing(true)} className="flex-none rounded-lg bg-[#F5A524] px-3 py-1.5 text-sm font-semibold text-black hover:brightness-110">Add the company</button>
+            </div>
+          )}
           <PeoplePanel job={job} free={Boolean(tracker.free)} badge={tracker.peopleBadge} note={tracker.peopleNote} emailsLeft={tracker.emailsLeft ?? null} unlocksLeft={tracker.peopleLeft ?? null} reload={reload} say={say} />
         </div>
 
