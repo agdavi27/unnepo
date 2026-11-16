@@ -177,16 +177,16 @@ async function currentMe(token: string): Promise<Me | null> {
   return copy.me;
 }
 
-/** The student's resume file from Unnepo. Says why when it can't (no resume, or the file is gone). */
-async function resumeFile(): Promise<{ file: FileData | null; error: string | null }> {
+/** The student's resume (or transcript) file from Unnepo. Says why when it can't (none yet, or the file is gone). */
+async function resumeFile(kind: "resume" | "transcript" = "resume"): Promise<{ file: FileData | null; error: string | null }> {
   const { token, apiBase } = await settings();
-  const response = await fetch(`${apiBase}/api/extension/resume`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
-  if (!response) return { file: null, error: "Couldn't reach Unnepo to get your resume." };
+  const response = await fetch(`${apiBase}/api/extension/${kind}`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+  if (!response) return { file: null, error: `Couldn't reach Unnepo to get your ${kind}.` };
   if (!response.ok) {
     const message = ((await response.json().catch(() => ({}))) as { error?: string }).error;
-    return { file: null, error: message || `Unnepo couldn't send your resume (${response.status}).` };
+    return { file: null, error: message || `Unnepo couldn't send your ${kind} (${response.status}).` };
   }
-  const name = response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] ?? "Resume.pdf";
+  const name = response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] ?? (kind === "resume" ? "Resume.pdf" : "Transcript.pdf");
   const bytes = new Uint8Array(await response.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
@@ -261,13 +261,50 @@ async function beginApplying(tabId: number, questionsOnly?: boolean): Promise<Ap
   return applying;
 }
 
-/** Uploads a new resume to Unnepo from the panel. Unnepo reads it into the profile, like the website does. */
-async function uploadResume(name: string, mime: string, base64: string) {
+/**
+ * Writes an answer for each complex question still empty on the tab (found by Begin applying) and types it into
+ * its box, a few at a time. `put: false` only writes them, for the panel to show first.
+ */
+async function answerComplex(id: number, options: { job?: Partial<JobDetails>; put?: false }): Promise<{ ok: boolean; written?: number; stopped?: string; error?: string }> {
+  const applying = (await applyingAll())[id];
+  if (!applying) return { ok: false, error: "Press Begin applying first." };
+  const given = options.job;
+  const tracked = (await jobs())[id];
+  const context = tracked?.applicationId ? { applicationId: tracked.applicationId } : given?.title ? { job: { title: given.title, company: given.company || given.site, description: given.description } } : {};
+  const answers = { ...(applying.answers ?? {}) };
+  const todo = applying.questions.filter((question) => !question.answered && !answers[question.id]?.put && !(options.put === false && answers[question.id]?.text));
+  // A few at a time: quick, without asking Unnepo for everything at once.
+  let next = 0;
+  let stopped = "";
+  const worker = async () => {
+    while (next < todo.length && !stopped) {
+      const question = todo[next++];
+      try {
+        const long = question.label.length > 60 || /describe|tell us|explain|why/i.test(question.label);
+        const written = await api<{ answer: string }>("POST", "write", { question: question.label, batch: true, ...(long ? { length: "paragraph" } : {}), ...context });
+        // Shown in the panel first, when asked: the student puts each one in its box.
+        const put = options.put === false ? { ok: false, reason: "" } : await send<{ ok: boolean; reason?: string }>(id, { type: "put-answer", id: question.id, text: written.answer }).catch(() => ({ ok: false, reason: "Couldn't reach the page." }));
+        answers[question.id] = { text: written.answer, put: put.ok, ...(put.ok || !put.reason ? {} : { error: put.reason }) };
+      } catch (error) {
+        const why = error instanceof Error ? error.message : "Couldn't write this one.";
+        answers[question.id] = { text: "", put: false, error: why };
+        // Out of uses or today's limit: the rest would fail the same way.
+        if (error instanceof ApiError && (error.status === 402 || error.status === 429 || /limit|credits|upgrade/i.test(why))) stopped = why;
+      }
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+  await saveApplying(id, { ...applying, answers });
+  return { ok: true, written: todo.filter((question) => answers[question.id]?.text).length, stopped };
+}
+
+/** Uploads a new resume (or transcript) to Unnepo from the panel. A resume is read into the profile, like the website does. */
+async function uploadResume(name: string, mime: string, base64: string, kind: "resume" | "transcript" = "resume") {
   const { token, apiBase } = await settings();
   const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
   const form = new FormData();
   form.append("file", new File([bytes], name, { type: mime }));
-  const response = await fetch(`${apiBase}/api/extension/resume`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+  const response = await fetch(`${apiBase}/api/extension/${kind}`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
   const payload = (await response.json().catch(() => ({}))) as { error?: string };
   if (!response.ok) throw new Error(payload.error || `Upload failed (${response.status}).`);
 }
@@ -1902,6 +1939,29 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (resume.file) void log("Attached your resume from the button on the page.");
         return reply({ ok: Boolean(resume.file), file: resume.file, error: resume.error ?? (resume.file ? null : "Upload your resume in Unnepo first") });
       }
+      // "Attach transcript with Unnepo" beside a transcript upload box on the page.
+      case "transcript-file": {
+        if (!sender.tab) return reply({ ok: false });
+        const transcript = await resumeFile("transcript");
+        if (transcript.file) void log("Attached your transcript from the button on the page.");
+        return reply({ ok: Boolean(transcript.file), file: transcript.file, error: transcript.file ? null : "Add your transcript in Unnepo first (Me tab)" });
+      }
+      // The panel's transcript: Upload or Change, and its name opens it.
+      case "upload-transcript":
+        if (sender.tab) return reply({ ok: false });
+        try {
+          await uploadResume(String(message.name), String(message.mime), String(message.base64), "transcript");
+          await meChanged("transcript");
+          void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
+          return reply({ ok: true });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Upload failed." });
+        }
+      case "get-transcript": {
+        if (sender.tab) return reply({ ok: false });
+        const transcript = await resumeFile("transcript");
+        return reply({ ok: Boolean(transcript.file), file: transcript.file, error: transcript.error });
+      }
       // "Attach" beside the resume: the resume file into the application's resume box.
       case "attach-resume": {
         if (sender.tab) return reply({ ok: false });
@@ -1937,39 +1997,46 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         return reply({ ok: true });
       }
       // "Answer complex questions": writes an answer for each one still empty, and types it into its box.
-      case "answer-complex": {
+      case "answer-complex":
         if (sender.tab) return reply({ ok: false });
-        const id = Number(message.tabId);
-        const applying = (await applyingAll())[id];
-        if (!applying) return reply({ ok: false, error: "Press Begin applying first." });
-        const given = message.job as Partial<JobDetails> | undefined;
-        const tracked = (await jobs())[id];
-        const context = tracked?.applicationId ? { applicationId: tracked.applicationId } : given?.title ? { job: { title: given.title, company: given.company || given.site, description: given.description } } : {};
-        const answers = { ...(applying.answers ?? {}) };
-        const todo = applying.questions.filter((question) => !question.answered && !answers[question.id]?.put && !(message.put === false && answers[question.id]?.text));
-        // A few at a time: quick, without asking Unnepo for everything at once.
-        let next = 0;
-        let stopped = "";
-        const worker = async () => {
-          while (next < todo.length && !stopped) {
-            const question = todo[next++];
-            try {
-              const long = question.label.length > 60 || /describe|tell us|explain|why/i.test(question.label);
-              const written = await api<{ answer: string }>("POST", "write", { question: question.label, batch: true, ...(long ? { length: "paragraph" } : {}), ...context });
-              // Shown in the panel first, when asked: the student puts each one in its box.
-              const put = message.put === false ? { ok: false, reason: "" } : await send<{ ok: boolean; reason?: string }>(id, { type: "put-answer", id: question.id, text: written.answer }).catch(() => ({ ok: false, reason: "Couldn't reach the page." }));
-              answers[question.id] = { text: written.answer, put: put.ok, ...(put.ok || !put.reason ? {} : { error: put.reason }) };
-            } catch (error) {
-              const why = error instanceof Error ? error.message : "Couldn't write this one.";
-              answers[question.id] = { text: "", put: false, error: why };
-              // Out of uses or today's limit: the rest would fail the same way.
-              if (error instanceof ApiError && (error.status === 402 || error.status === 429 || /limit|credits|upgrade/i.test(why))) stopped = why;
-            }
-          }
-        };
-        await Promise.all([worker(), worker(), worker()]);
-        await saveApplying(id, { ...applying, answers });
-        return reply({ ok: true, written: todo.filter((question) => answers[question.id]?.text).length, stopped });
+        return reply(await answerComplex(Number(message.tabId), { job: message.job as Partial<JobDetails> | undefined, put: message.put === false ? false : undefined }));
+      // The bar on an application form: how many boxes Autofill can do and questions Unnepo can write, and
+      // whether Autofill is running on this tab.
+      case "form-page-state": {
+        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
+        const { token } = await settings();
+        const me = token ? await currentMe(token) : null;
+        if (!me) return reply({ ok: false });
+        const { overlayOff } = await chrome.storage.local.get("overlayOff");
+        const job = (await jobs())[sender.tab.id];
+        const free = Boolean(me.usage?.free && !me.unlimitedCredits);
+        return reply({ ok: true, off: overlayOff === true, free, answersLeft: free ? me.usage?.answers.left ?? null : null, autofillsLeft: free ? me.usage?.autofills.left ?? null : null, running: Boolean(job?.running && runs.has(sender.tab.id)), step: job?.step ?? "", error: job?.error ?? null, profileReady: me.profileReady });
+      }
+      // Its Autofill: the same fill as the Jobs tab's Autofill (Beta), on this tab.
+      case "form-autofill": {
+        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
+        const id = sender.tab.id;
+        if (sender.tab.url && LINKEDIN.test(new URL(sender.tab.url).hostname)) return reply({ ok: false, error: "Unnepo doesn't fill LinkedIn. Open the company's own application." });
+        if (!runs.has(id)) void run(id);
+        return reply({ ok: true });
+      }
+      case "form-stop": {
+        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
+        runs.delete(sender.tab.id);
+        await saveJob(sender.tab.id, { running: false, step: "Stopped." });
+        return reply({ ok: true });
+      }
+      // Its Answer button: finds the written-answer questions, writes each one, and types it into its box.
+      case "form-answer": {
+        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
+        const id = sender.tab.id;
+        try {
+          const applying = await beginApplying(id, true);
+          if (!applying.questions.some((question) => !question.answered)) return reply({ ok: true, written: 0, stopped: "", found: 0 });
+          return reply({ ...(await answerComplex(id, {})), found: applying.questions.length });
+        } catch {
+          return reply({ ok: false, error: "Couldn't reach the page. Reload it and try again." });
+        }
       }
       // An answer edited in the panel, put in its box again; or the page scrolled to a question.
       case "put-answer": {

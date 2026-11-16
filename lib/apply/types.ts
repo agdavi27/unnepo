@@ -296,4 +296,6 @@ export type ApplicationProfile = {
   accountConsentAt?: string | null;
   /** Job sites where Unnepo created an account for the student. */
   jobAccounts?: Array<{ host: string; email: string; createdAt: string }>;
+  /** The student's transcript, kept like the resume so the extension can attach it where a form asks. */
+  transcript?: { fileName: string; mime: string; byteSize: number; storagePath: string; uploadedAt: string } | null;
 };

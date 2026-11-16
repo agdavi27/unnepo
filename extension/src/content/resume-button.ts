@@ -2,29 +2,42 @@ import type { FileData } from "../shared/types";
 
 /**
  * A small "Attach with Unnepo" button beside each resume upload box on a job page (a file box whose label or
- * the text around it says resume or CV). Pressing it asks the extension for the student's resume and puts it in
- * that box. Nothing is read or sent until it's pressed. Boxes for a cover letter or other documents are left alone.
+ * the text around it says resume or CV), and "Attach transcript" beside a transcript box. Pressing it asks the
+ * extension for the student's resume (or the transcript they saved in Unnepo) and puts it in that box. Nothing is
+ * read or sent until it's pressed. Boxes for a cover letter or other documents are left alone.
  */
 
 const RESUME = /r[eé]sum[eé]|\bcv\b|curriculum vitae/i;
 const NOT_RESUME = /cover letter|transcript|portfolio|writing sample|references?\b|certificat|photo|headshot/i;
+const TRANSCRIPT = /transcript|academic record|grade report/i;
+const NOT_TRANSCRIPT = /cover letter|r[eé]sum[eé]|\bcv\b|portfolio|writing sample|photo|headshot/i;
+type Kind = "resume" | "transcript";
 const MARK = "data-unnepo-resume";
 
+/** What a box's words ask for: a resume, a transcript, or something else (null). */
+function kindIn(text: string): Kind | null | "other" {
+  if (TRANSCRIPT.test(text) && !NOT_TRANSCRIPT.test(text)) return "transcript";
+  if (RESUME.test(text) && !NOT_RESUME.test(text)) return "resume";
+  return NOT_RESUME.test(text) || TRANSCRIPT.test(text) ? "other" : null;
+}
+
 /**
- * Whether a file box asks for a resume: its own labels and aria text say so, or else the nearest short text
- * around it names a resume and nothing else (a box beside "Cover letter" is left alone).
+ * What a file box asks for: its own labels and aria text say so, or else the nearest short text around it names
+ * a resume (or a transcript) and nothing else (a box beside "Cover letter" is left alone).
  */
-function asksForResume(input: HTMLInputElement) {
+function asksFor(input: HTMLInputElement): Kind | null {
   const own = [input.getAttribute("aria-label"), input.title, ...Array.from(input.labels ?? []).map((label) => label.textContent)].filter(Boolean).join(" ");
-  if (own.trim()) return RESUME.test(own) && !NOT_RESUME.test(own);
+  if (own.trim()) { const kind = kindIn(own); return kind === "other" ? null : kind; }
   let box: HTMLElement | null = input.parentElement;
   for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
     const text = (box.innerText || "").replace(/\s+/g, " ").trim();
     if (text.length > 300) break;
-    if (NOT_RESUME.test(text)) return false;
-    if (RESUME.test(text)) return true;
+    const kind = kindIn(text);
+    if (kind === "other") return null;
+    if (kind) return kind;
   }
-  return RESUME.test(`${input.name} ${input.id}`);
+  const kind = kindIn(`${input.name} ${input.id}`);
+  return kind === "other" ? null : kind;
 }
 
 /** The part of the page the student sees for this box: the input itself, or its nearest visible wrapper. */
@@ -46,7 +59,7 @@ function attachFile(input: HTMLInputElement, file: FileData) {
   input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
 }
 
-function addButton(input: HTMLInputElement, after: HTMLElement) {
+function addButton(input: HTMLInputElement, after: HTMLElement, kind: Kind) {
   input.setAttribute(MARK, "");
   const host = document.createElement("span");
   host.setAttribute(MARK, "button");
@@ -63,7 +76,7 @@ function addButton(input: HTMLInputElement, after: HTMLElement) {
       .ok .dot { background: #22C55E; }
       .bad { border-color: #F5A524; box-shadow: 2px 2px 0 #F5A524; }
     </style>
-    <button type="button" title="Put your Unnepo resume in this upload box"><span class="dot" aria-hidden="true"></span><span class="text">Attach with Unnepo</span></button>`;
+    <button type="button" title="Put your Unnepo ${kind} in this upload box"><span class="dot" aria-hidden="true"></span><span class="text">${kind === "resume" ? "Attach with Unnepo" : "Attach transcript with Unnepo"}</span></button>`;
   const button = root.querySelector("button")!;
   const text = root.querySelector<HTMLElement>(".text")!;
   const set = (words: string, tone: "" | "ok" | "bad") => { text.textContent = words; button.className = tone; };
@@ -74,12 +87,12 @@ function addButton(input: HTMLInputElement, after: HTMLElement) {
     set("Attaching…", "");
     let result: { ok?: boolean; file?: FileData | null; error?: string | null } | undefined;
     try {
-      result = await chrome.runtime.sendMessage({ type: "resume-file" });
+      result = await chrome.runtime.sendMessage({ type: kind === "resume" ? "resume-file" : "transcript-file" });
     } catch {
       result = { ok: false, error: "Unnepo was updated. Refresh this page" };
     }
     button.disabled = false;
-    if (!result?.ok || !result.file) return set(result?.error || "Upload your resume in Unnepo first", "bad");
+    if (!result?.ok || !result.file) return set(result?.error || `Upload your ${kind} in Unnepo first`, "bad");
     try {
       attachFile(input, result.file);
       set(`✓ Attached ${result.file.name.length > 28 ? `${result.file.name.slice(0, 26)}…` : result.file.name}`, "ok");
@@ -92,13 +105,14 @@ function addButton(input: HTMLInputElement, after: HTMLElement) {
 
 function scan() {
   for (const input of Array.from(document.querySelectorAll<HTMLInputElement>(`input[type=file]:not([${MARK}])`))) {
-    if (input.files?.length || !asksForResume(input)) continue;
+    const kind = input.files?.length ? null : asksFor(input);
+    if (!kind) continue;
     const shown = shownFor(input);
-    if (shown) addButton(input, shown);
+    if (shown) addButton(input, shown, kind);
   }
 }
 
-/** Watches the page (forms appear step by step) and adds the button beside each resume box as it shows up. */
+/** Watches the page (forms appear step by step) and adds the button beside each resume and transcript box as it shows up. */
 export function watchResumeBoxes() {
   let pending = 0;
   const observer = new MutationObserver(() => {

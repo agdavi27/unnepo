@@ -4,6 +4,7 @@ import { watchEdits } from "./edits";
 import { watchResumeBoxes } from "./resume-button";
 import { watchLetterBoxes } from "./letter-button";
 import { watchLinkBoxes } from "./link-buttons";
+import { watchForms } from "./form-help";
 import { appliedList, appliedStatus, isAppliedListPage } from "./board-status";
 
 /**
@@ -222,6 +223,9 @@ if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^local
 
 // One tap for LinkedIn, GitHub and portfolio boxes: a chip with the link from the student's profile.
 if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) watchLinkBoxes();
+
+// On an application form: outlines on what Unnepo can fill (blue) and write (purple), and a bar with Autofill and Answer.
+if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) watchForms(looksLikeJobPage);
 
 // Job sites build their pages after loading, so it checks a few times over the first half minute.
 if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname) && !dismissed()) {
