@@ -3,6 +3,7 @@ import { QUICK_BOARDS, watchApplyPresses } from "./quick-apply";
 import { watchEdits } from "./edits";
 import { watchResumeBoxes } from "./resume-button";
 import { watchLetterBoxes } from "./letter-button";
+import { watchLinkBoxes } from "./link-buttons";
 import { appliedList, appliedStatus, isAppliedListPage } from "./board-status";
 
 /**
@@ -218,6 +219,9 @@ if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^local
 
 // "Write with unnepo" beside each cover letter question on an application form, once signed in.
 if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) void watchLetterBoxes();
+
+// One tap for LinkedIn, GitHub and portfolio boxes: a chip with the link from the student's profile.
+if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) watchLinkBoxes();
 
 // Job sites build their pages after loading, so it checks a few times over the first half minute.
 if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname) && !dismissed()) {
