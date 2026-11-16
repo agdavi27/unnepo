@@ -1,4 +1,4 @@
-import { classifyQuestion } from "@/lib/apply/questions";
+import { isComplexQuestion } from "./question-kinds";
 import type { BeginResult, ComplexQuestion, FileData, JobDetails, PageField } from "../shared/types";
 import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
 import { typeInto } from "./dom";
@@ -86,18 +86,8 @@ export function jobDetails(): JobDetails {
 }
 
 /** Questions a profile can't answer: written answers, not name, email, dates, links or yes/no. */
-const QUESTION_WORDS = /\b(why|how|what|describe|tell us|explain|share|walk us|give an example|example of|talk about|discuss|elaborate|in your own words|motivat|interest(s|ed)? you|excit|challenge|proud|accomplish|strength|weakness|goal|hope to|would you|have you ever|a time when|cover letter|additional information|anything else)\b/i;
-const BASIC = /\b(first|last|full|preferred|legal|middle) ?name\b|^name\b|e-?mail|phone|mobile|address|city|state|zip|postal|country|linked ?in|github|portfolio|website|\burl\b|salary|compensation|pay\b|start date|date|gpa|school|university|college|degree|major|minor|graduat|year|pronoun|referr(ed|al)|how did you hear|source|sponsor|authori[sz]ed|visa|relocat|citizen|clearance|age\b|18\b/i;
-
 export function complexQuestions(fields: PageField[] = scanFields()): PageField[] {
-  return fields.filter((field) => {
-    if (field.type !== "textarea" && field.type !== "text") return false;
-    const label = field.label.trim();
-    if (label.length < 8 || classifyQuestion(label).sensitive || classifyQuestion(label).field) return false;
-    if (field.type === "textarea") return !BASIC.test(label) || QUESTION_WORDS.test(label);
-    // A one-line box counts when it plainly asks for a written answer.
-    return label.length >= 30 && QUESTION_WORDS.test(label) && !BASIC.test(label);
-  });
+  return fields.filter((field) => isComplexQuestion(field.type, field.label));
 }
 
 /* ---------- The little spiders beside each complex question ---------- */

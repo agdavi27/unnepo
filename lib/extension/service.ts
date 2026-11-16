@@ -6,7 +6,7 @@ import { followUpsDue } from "@/lib/apply/follow-ups";
 import { assertCoverLetterAllowed, assertUseAllowed, countCoverLetter, countUse, isFree, planUsage } from "@/lib/apply/limits";
 import { isAdminEmail } from "@/lib/services/auth";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
-import { dataDir, nowIso, repo } from "@/lib/db/file-store";
+import { dataDir, id, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 import { coverLetterPdf, LETTER_FORMATS, rewriteLetterPart, writeCoverLetter, type CoverLetterStyle } from "@/lib/apply/cover-letter";
 import { answerMaybe, companyMissing, contactBounced, createApplication, findPeopleOnApply, markApplied, setReachedOut, minimalApplication, trackedAt, repairCompanies, answerWith, ensureCharged, learnAnswers, requireApp, retryContacts, revealContact, runContext, runLater, setOutcome, setJobHidden, student, summary, titleMissing, updateOutreach, writeContactEmail } from "@/lib/apply/service";
@@ -109,6 +109,8 @@ export async function extensionMe(userId: string) {
     usage,
     // The resume the extension attaches. `file` is false when only its text was kept, so it must be uploaded again.
     resume: resume ? { fileName: resume.fileName, uploadedAt: resume.createdAt, file: Boolean(resume.storagePath) && resume.byteSize > 0 } : null,
+    // The transcript the extension attaches where a form asks for one.
+    transcript: stored?.transcript?.storagePath ? { fileName: stored.transcript.fileName, uploadedAt: stored.transcript.uploadedAt } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
     // The spider the student wears from the Stats page, for the panel and the crawling spiders.
     spider: { skin: wornSkin(stored?.spiderSkin, applied.length), school: state.profile.education?.[0]?.school ?? "" },
@@ -146,6 +148,33 @@ export async function extensionResume(userId: string) {
   if (!resume) throw new ServiceError("Upload a resume in Unnepo first.", "no_resume", 404);
   if (!bytes?.byteLength) throw new ServiceError("Unnepo has your resume's text but not the file. Upload it again.", "no_resume_file", 404);
   return { bytes, fileName: resume.fileName, mime: resume.mime || "application/pdf" };
+}
+
+const TRANSCRIPT_MAX_BYTES = 10 * 1024 * 1024;
+
+/** Saves the student's transcript (a PDF, a Word file, or a picture of it), replacing the one before. */
+export async function extensionSaveTranscript(userId: string, file: { name: string; type: string; bytes: Uint8Array }) {
+  const lower = file.name.toLowerCase();
+  if (!/\.(pdf|docx|png|jpe?g)$/.test(lower)) throw new ServiceError("Upload your transcript as a PDF, DOCX, PNG or JPG.", "file_type");
+  if (file.bytes.byteLength > TRANSCRIPT_MAX_BYTES) throw new ServiceError("Transcripts need to be 10 MB or smaller.", "file_size");
+  const stored = await applicationProfiles.get(userId);
+  if (!stored) throw new ServiceError("Finish setting up your profile first.", "profile", 400);
+  const mime = file.type || (lower.endsWith(".pdf") ? "application/pdf" : lower.endsWith(".docx") ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : lower.endsWith(".png") ? "image/png" : "image/jpeg");
+  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+  const storagePath = await saveResumeBytes(dataDir(), `${userId}/transcript-${id()}-${safeName}`, file.bytes, mime);
+  if (!storagePath) throw new ServiceError("Couldn't save your transcript right now. Try again in a moment.", "storage", 503);
+  const transcript = { fileName: file.name, mime, byteSize: file.bytes.byteLength, storagePath, uploadedAt: nowIso() };
+  await applicationProfiles.put(userId, { ...stored, transcript });
+  return { ok: true, transcript: { fileName: transcript.fileName, uploadedAt: transcript.uploadedAt } };
+}
+
+/** The transcript file, for the extension to attach. */
+export async function extensionTranscript(userId: string) {
+  const transcript = (await applicationProfiles.get(userId))?.transcript;
+  if (!transcript?.storagePath) throw new ServiceError("Add your transcript in Unnepo first.", "no_transcript", 404);
+  const bytes = await readStoredResume(transcript.storagePath);
+  if (!bytes?.byteLength) throw new ServiceError("Unnepo lost your transcript's file. Upload it again.", "no_transcript_file", 404);
+  return { bytes, fileName: transcript.fileName, mime: transcript.mime };
 }
 
 /** A job the extension is on. Unnepo reads it when it can; otherwise it keeps what the page showed. */

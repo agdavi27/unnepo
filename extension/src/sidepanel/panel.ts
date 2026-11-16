@@ -394,7 +394,7 @@ function toolsPage(state: PanelState, extra = "") {
       </div>
       ${manualJob.note && !popup ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
       ${toolsNote() && !popup ? `<p class="small" role="status">${escape(toolsNote())}</p>` : ""}
-      <div class="tool-lines">${resumeLine(state)}${letterLine()}<div id="password-slot"></div></div>
+      <div class="tool-lines">${resumeLine(state)}${transcriptLine(state)}${letterLine()}<div id="password-slot"></div></div>
       ${extra}
     </div>`;
 }
@@ -1290,6 +1290,49 @@ function resumeLine(state: PanelState) {
     ${note ? `<p class="small tool-note" role="status">${escape(note)}</p>` : ""}`;
 }
 
+/** The transcript, saved like the resume: its name opens it, Upload or Change picks one. Attached from the page's button. */
+const transcriptState = { busy: false, note: "" };
+function transcriptLine(state: PanelState) {
+  const transcript = state.me!.transcript;
+  const name = transcript ? escape(transcript.fileName) : "None yet";
+  const note = transcriptState.note || (transcript ? "" : "Save it once. Forms that ask for one get an Attach button.");
+  return `
+    <div class="tool-line">
+      <span class="tool-what">Transcript</span>
+      ${transcript ? `<button type="button" class="resume-link" id="open-transcript" title="Open ${name}" ${transcriptState.busy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
+      <button type="button" class="tool-change" id="replace-transcript" ${transcriptState.busy ? "disabled" : ""}>${transcriptState.busy ? "Uploading…" : transcript ? "Change" : "Upload"}</button>
+    </div>
+    ${note ? `<p class="small tool-note" role="status">${escape(note)}</p>` : ""}`;
+}
+
+async function seeTranscript() {
+  type Got = { ok: boolean; file?: { base64: string; mime: string } | null; error?: string | null };
+  const result = await ask<Got>({ type: "get-transcript" }).catch((): Got => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  if (result.ok && result.file) {
+    const bytes = Uint8Array.from(atob(result.file.base64), (char) => char.charCodeAt(0));
+    void chrome.tabs.create({ url: URL.createObjectURL(new Blob([bytes], { type: result.file.mime })) });
+    transcriptState.note = "";
+  } else {
+    transcriptState.note = result.error ?? "Couldn't open your transcript.";
+  }
+  void render();
+}
+
+async function replaceTranscript(file: File) {
+  if (!/\.(pdf|docx|png|jpe?g)$/i.test(file.name)) { transcriptState.note = "Choose a PDF, DOCX, PNG or JPG."; return void render(); }
+  if (file.size > 10 * 1024 * 1024) { transcriptState.note = "Transcripts need to be 10 MB or smaller."; return void render(); }
+  transcriptState.busy = true;
+  transcriptState.note = "";
+  void render();
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  const result = await ask<{ ok: boolean; error?: string }>({ type: "upload-transcript", name: file.name, mime: file.type || "application/pdf", base64: btoa(binary) }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  transcriptState.busy = false;
+  transcriptState.note = result.ok ? "Transcript saved. Attach it from the button beside any transcript box." : result.error ?? "Upload failed.";
+  void render();
+}
+
 /** "Attach resume to this application": the resume file into the page's resume upload box. */
 const resumeAttach = { busy: false, note: "" };
 async function attachResume() {
@@ -1706,6 +1749,12 @@ resumeInput.addEventListener("change", () => {
   resumeInput.value = "";
   if (file) void replaceResume(file);
 });
+const transcriptInput = document.getElementById("transcript-input") as HTMLInputElement;
+transcriptInput.addEventListener("change", () => {
+  const file = transcriptInput.files?.[0];
+  transcriptInput.value = "";
+  if (file) void replaceTranscript(file);
+});
 
 
 /** Puts the student's spider at the top of the panel. */
@@ -1992,6 +2041,8 @@ function draw(state: PanelState): boolean {
   wireJobBox(state);
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
+  document.getElementById("open-transcript")?.addEventListener("click", () => void seeTranscript());
+  document.getElementById("replace-transcript")?.addEventListener("click", () => transcriptInput.click());
   document.getElementById("attach-resume")?.addEventListener("click", () => void attachResume());
   document.querySelectorAll<HTMLButtonElement>("[data-attach-letter]").forEach((button) => button.addEventListener("click", () => void attachLetter()));
   document.getElementById("start-resume")?.addEventListener("click", () => resumeInput.click());
