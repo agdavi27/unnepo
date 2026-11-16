@@ -2,7 +2,10 @@ import { stageOf } from "@/lib/apply/stats";
 import { composeLink } from "@/lib/apply/compose-link";
 import { followUpsDue } from "@/lib/apply/follow-ups";
 import { STEPS, STEP_LABEL, progressOf as sharedProgress, type Progress } from "@/lib/apply/progress";
+import type { SpiderLook } from "@/lib/spiders";
 import { MAX_FOLLOW_UPS, reminders, type Reminder } from "./reminders";
+import { typingSpiderSvg } from "./hero-spider";
+import { theme } from "./theme";
 import type { Detected, Mailer, OpenedEmails, ReminderMarks, Tracker, TrackerContact, TrackerJob } from "./types";
 
 /**
@@ -25,6 +28,8 @@ export const store = {
   detected: null as Detected[] | null,
   marks: {} as ReminderMarks, opened: {} as OpenedEmails, followUps: {} as Record<string, number>,
   mailer: "gmail" as Mailer,
+  /** The student's spider, for the one typing while people are found. The panel sets it. */
+  spiderLook: undefined as SpiderLook | undefined,
   /** What happened last, per job: "Copied", an error. */
   notes: {} as Record<string, string>,
   busy: new Set<string>(),
@@ -65,7 +70,8 @@ export function ensureTracker(maxAge = 20_000) {
 let pollTimer = 0;
 function pollWhileFinding() {
   clearTimeout(pollTimer);
-  if (store.tracker?.jobs.some((job) => job.contactsStatus === "finding" || job.contactsStatus === "writing")) pollTimer = window.setTimeout(() => void loadTracker(true), 4000);
+  // Every 2 seconds while people are being found, so the progress bar keeps up with the search.
+  if (store.tracker?.jobs.some((job) => job.contactsStatus === "finding" || job.contactsStatus === "writing")) pollTimer = window.setTimeout(() => void loadTracker(true), 2000);
 }
 
 export const jobById = (id: string) => store.tracker?.jobs.find((job) => job.id === id) ?? null;
@@ -317,6 +323,54 @@ export function wireReach(root: HTMLElement) {
   root.querySelectorAll<HTMLButtonElement>("[data-reach-job]").forEach((button) => button.addEventListener("click", () => void setReached(button.dataset.reachJob!, Number(button.dataset.reach))));
 }
 
+/**
+ * How far a people search has got, from the step the server last said it was on (its message), so the bar moves
+ * as the search does. The bar glides between steps (see .people-progress), since the panel asks every 2 seconds.
+ */
+const PEOPLE_STEPS: Array<[RegExp, number]> = [
+  [/website/i, 0.12],
+  [/relevant people/i, 0.3],
+  [/ranking/i, 0.48],
+  [/full names?/i, 0.58],
+  [/email format/i, 0.66],
+  [/hunter/i, 0.72],
+  [/name and profile/i, 0.8],
+  [/best person'?s email|best person to/i, 0.86],
+];
+export function peopleProgress(job: Pick<TrackerJob, "contactsStatus" | "contactsMessage">) {
+  if (job.contactsStatus === "writing") return 0.94;
+  const message = job.contactsMessage ?? "";
+  return PEOPLE_STEPS.find(([words]) => words.test(message))?.[1] ?? 0.06;
+}
+
+/**
+ * Where each job's bar was last drawn, so a redraw (the card is drawn again from scratch) glides on from there
+ * instead of jumping, and a redraw with nothing new doesn't start the glide over.
+ */
+const barFrom = new Map<string, { from: number; to: number; at: number }>();
+const GLIDE_MS = 1800;
+
+/** While people are being found: the spider typing on his laptop, the step it's on, and a bar that fills as it goes. */
+function findingPeople(job: TrackerJob, company: string) {
+  const share = Math.round(peopleProgress(job) * 100);
+  const last = barFrom.get(job.id);
+  const now = Date.now();
+  // A new step glides from where the bar is now; the same step keeps its glide, or sits still once it's done.
+  const glide = !last ? { from: 0, to: share, at: now }
+    : last.to !== share ? { from: Math.round(last.to - ((last.to - last.from) * Math.max(0, GLIDE_MS - (now - last.at))) / GLIDE_MS), to: share, at: now }
+    : last;
+  barFrom.set(job.id, glide);
+  // Drawn again partway through: start from about where the bar has got to, for the time that's left.
+  const left = Math.max(0, GLIDE_MS - (now - glide.at));
+  const from = Math.round(glide.to - ((glide.to - glide.from) * left) / GLIDE_MS);
+  const line = job.contactsMessage || `Searching for people at ${company}…`;
+  return `<div class="letter-writing people-finding" role="status">
+      ${typingSpiderSvg(110, store.spiderLook, theme() === "light")}
+      <span class="small">${escape(line)}</span>
+      <div class="bar people-progress" role="progressbar" aria-label="Finding people" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${share}"><div style="--from: ${from}%; --to: ${share}%; animation-duration: ${left || 1}ms"></div></div>
+    </div>`;
+}
+
 function peopleCard(job: TrackerJob) {
   const company = job.companyMissing ? "this company" : job.company;
   // Once the poster is one of the job's people, their card says so instead.
@@ -361,7 +415,7 @@ function peopleCard(job: TrackerJob) {
   }
   const stale = job.contactsStatus === "finding" && Date.now() - Date.parse(job.updatedAt) > 2 * 60 * 1000;
   if ((job.contactsStatus === "finding" || job.contactsStatus === "writing") && !stale) {
-    return `<section class="page people" aria-label="People">${head}${posted}${known}<p class="note" role="status">${escape(job.contactsMessage || `Searching for people at ${company}…`)}</p></section>`;
+    return `<section class="page people" aria-label="People">${head}${posted}${known}${findingPeople(job, company)}</section>`;
   }
   const none = !job.contacts.length;
   const linkedIn = (label: string, keywords: string) => `<a class="link" href="https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords })}" target="_blank" rel="noreferrer">${label} on LinkedIn ↗</a>`;
