@@ -1,4 +1,4 @@
-import { typeInto } from "./dom";
+import { isDropdownInput, typeInto } from "./dom";
 import { findMarked, isEmpty, scanFields } from "./scan";
 import { findAction } from "./actions";
 
@@ -218,7 +218,7 @@ async function writeFor(chip: HTMLButtonElement, item: Marked) {
   chip.textContent = "Writing…";
   const result = (await chrome.runtime.sendMessage({ type: "write-answer", label: item.label }).catch(() => null)) as { answer?: string; error?: string } | null;
   const control = item.control;
-  if (result?.answer && control.isConnected && (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement) && isEmpty(control)) {
+  if (result?.answer && control.isConnected && (control instanceof HTMLInputElement || control instanceof HTMLTextAreaElement) && !isDropdownInput(control) && isEmpty(control)) {
     typeInto(control, result.answer);
     control.focus({ preventScroll: true });
     chip.textContent = "Written: check it";

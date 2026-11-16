@@ -1036,6 +1036,14 @@ describe("people after applying", () => {
 });
 
 describe("questions from the latest round", () => {
+  it("fills a middle name, or its first letter for a middle initial, and nothing when there isn't one", () => {
+    const withMiddle = { ...context, profile: { ...profile, middleName: "alex" } };
+    const [name, initial] = planAnswers([q("m", "Middle Name", "text"), q("mi", "Middle Initial", "text")], withMiddle);
+    expect(name).toMatchObject({ answer: "Alex", source: "profile" });
+    expect(initial).toMatchObject({ answer: "A" });
+    expect(planAnswers([q("m", "Middle Name", "text")], context)[0].answer).toBeNull();
+  });
+
   it("answers opt-into texting, phone country code, and current employer", () => {
     const p = { ...profile, accountConsentAt: "default" };
     expect(policyAnswer("Opt into Text Messaging?", "select", ["Yes", "No"], p)).toBe("Yes");

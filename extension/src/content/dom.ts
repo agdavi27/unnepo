@@ -338,7 +338,30 @@ export async function chooseCustom(trigger: HTMLElement, answer: string, options
       if ((last.problem === "no_option" && !(trigger instanceof HTMLInputElement && options.type)) || last.problem === "more_choices") break;
     }
   }
+  // A search box left holding typed words would send them as the answer: a dropdown gets a listed choice or nothing.
+  if (trigger instanceof HTMLInputElement && options.type && !chosenBeside(trigger)) clearTyped(trigger);
   throw last ?? new FillError("couldn't fill", "error");
+}
+
+/** Empties a dropdown's search box, the way the site's own code sees it (React watches the value setter). */
+function clearTyped(input: HTMLInputElement) {
+  if (!input.value) return;
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, "");
+  input.dispatchEvent(new InputEvent("input", { bubbles: true, composed: true, inputType: "deleteContentBackward" }));
+  close(input);
+}
+
+/**
+ * A text box that's really a dropdown: it says it opens a list, completes from one, or sits inside a select
+ * widget (react-select on Greenhouse and Lever). Only a listed choice goes in one, never typed words.
+ */
+export function isDropdownInput(el: Element): el is HTMLInputElement {
+  if (!(el instanceof HTMLInputElement) || !["text", "search", ""].includes(el.type)) return false;
+  if (el.getAttribute("role") === "combobox") return true;
+  const popup = (el.getAttribute("aria-haspopup") ?? "").toLowerCase();
+  if (popup && popup !== "false" && popup !== "dialog") return true;
+  if (/^(list|both)$/i.test(el.getAttribute("aria-autocomplete") ?? "")) return true;
+  return /^react-select-/.test(el.id) || Boolean(el.closest("[class*='select__control'], [class*='select__value-container'], [role=combobox]"));
 }
 
 /** The list a dropdown says it controls (aria-controls / aria-owns), when it says. */

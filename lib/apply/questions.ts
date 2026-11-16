@@ -7,11 +7,12 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "phoneCountry" | "classYear";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "middleName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "phoneCountry" | "classYear";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
   [/^(legal )?last name\b|^surname|^family name/i, "lastName"],
+  [/^(legal )?middle (name|initial)\b|^m\.?i\.?$/i, "middleName"],
   [/^preferred (first )?name\b|^nickname/i, "firstName"],
   [/^(full |legal )?name\b(?!.*(company|school|employer|reference|university))/i, "fullName"],
   [/currently (a )?(student|enrolled)|are you (a )?(current|currently enrolled) (student|undergraduate)|currently attending/i, "currentStudent"],
@@ -139,12 +140,17 @@ export function fullUrl(value: string) {
   return `https://${trimmed}`;
 }
 
-function standardAnswer(field: StandardField, context: AnswerContext): { answer: string; source: string } | null {
+function standardAnswer(field: StandardField, context: AnswerContext, label = ""): { answer: string; source: string } | null {
   const p = context.profile;
   const pick = (value: string, source = "profile") => (value.trim() ? { answer: value.trim(), source } : null);
   switch (field) {
     case "firstName": return pick(nameCase(p.firstName));
     case "lastName": return pick(nameCase(p.lastName));
+    // "Middle initial" (or a box that only takes one letter) gets just the first letter.
+    case "middleName": {
+      const middle = nameCase(p.middleName ?? "").trim();
+      return pick(/initial|^m\.?i\.?$/i.test(label.trim()) ? middle.charAt(0) : middle);
+    }
     case "fullName": return pick(nameCase([p.firstName, p.lastName].filter(Boolean).join(" ")));
     case "email": return pick(p.email);
     case "phone": return pick(p.phone);
@@ -369,7 +375,7 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
     if (sensitive || question.sensitive) return { ...question, sensitive: true, answer: null, source: null, evidence: null };
     const fileMatches = (field === "resume" || field === "coverLetter") === (question.kind === "file");
     if (field && fileMatches && question.label.length <= 70 && question.kind !== "checkbox" && question.kind !== "multiselect") {
-      const found = standardAnswer(field, context);
+      const found = standardAnswer(field, context, question.label);
       if (found) {
         const answer = question.kind === "select" ? matchOption(found.answer, question.options) : found.answer;
         if (answer) return { ...question, answer, source: found.source, evidence: null };

@@ -1,4 +1,5 @@
 import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
+import { isDropdownInput } from "./dom";
 import { QUICK_BOARDS } from "./quick-apply";
 import type { FieldType, PageField, Scan } from "../shared/types";
 
@@ -264,7 +265,7 @@ export function scanFields(): PageField[] {
     } else if (el instanceof HTMLSelectElement) {
       fieldType = "select";
       options = Array.from(el.options).map((option) => clean(option.text)).filter((text) => text && !BLANK.test(text));
-    } else if (el.tagName === "BUTTON" || boxDropdown(el) || el.getAttribute("role") === "combobox" || el.getAttribute("data-automation-id") === "searchBox") {
+    } else if (el.tagName === "BUTTON" || boxDropdown(el) || el.getAttribute("role") === "combobox" || el.getAttribute("data-automation-id") === "searchBox" || isDropdownInput(el)) {
       fieldType = "combobox";
     } else if (el.tagName === "TEXTAREA") {
       fieldType = "textarea";

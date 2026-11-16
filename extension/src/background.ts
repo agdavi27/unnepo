@@ -1769,6 +1769,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       }
       // The link chips on application forms: the student's LinkedIn, GitHub and portfolio from their profile.
       // Kept ten minutes, so a form's pages don't each ask again.
+      // The "Fill with unnepo" chip by a job site's password box: this site's password, only when it's pressed.
+      case "password-page-fill": {
+        if (!fromOwnContent(sender) || !sender.tab?.url || !/^https:/.test(sender.tab.url)) return reply({ ok: false });
+        const site = accountKey(sender.tab.url);
+        const password = await passwordFor(site);
+        // A form with a "confirm" box makes an account with it: kept, so a new job-site password later doesn't lock it.
+        if (message.creating) await rememberAccount(site, password);
+        return reply({ ok: true, password });
+      }
       case "links-page-state": {
         if (!fromOwnContent(sender)) return reply({ ok: false });
         const { token } = await settings();

@@ -28,6 +28,7 @@ function fromLegacy(stored: ApplicationProfile | null, user: { email: string; na
   base.contact = {
     ...base.contact,
     firstName: stored.firstName || base.contact.firstName,
+    middleName: stored.middleName || undefined,
     lastName: stored.lastName || base.contact.lastName,
     phone: stored.phone || undefined, city: stored.city || undefined, state: stored.state || undefined, zip: stored.postalCode || undefined, country: stored.country || undefined,
   };
@@ -102,6 +103,7 @@ function syncLegacy(stored: ApplicationProfile | null, student: StudentProfile, 
   return {
     ...(stored ?? { website: "", saved: {} }),
     firstName: c.firstName,
+    middleName: c.middleName ?? "",
     lastName: c.lastName,
     email: c.email,
     phone: c.phone ?? "",
