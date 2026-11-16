@@ -278,6 +278,10 @@ export async function extensionTracker(userId: string) {
     free: usage.free,
     peopleNote: usage.people.note,
     peopleBadge: usage.people.badge,
+    /** Free: unlocks left today (people, each at a different company). Null on Pro. */
+    peopleLeft: usage.free ? usage.people.left : null,
+    /** Free: how many unlocks a day. */
+    unlocksPerDay: usage.free ? usage.people.allowance : null,
     /** Free: emails it can still have written today, shown on Write email. Null on Pro. */
     emailsLeft: usage.free ? usage.emails.left : null,
   };

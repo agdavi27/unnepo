@@ -715,8 +715,8 @@ async function fastQuestions(userId: string, info: Awaited<ReturnType<typeof stu
 export async function findPeopleOnApply(userId: string, applicationId: string) {
   const [app, plan, stored] = await Promise.all([applications.get(userId, applicationId), planState(userId), applicationProfiles.get(userId)]);
   if (!app || app.contactsStatus !== "idle" || (app.status !== "submitted" && app.status !== "applied_manual")) return false;
-  // Free looks only when the student turned it on (or presses Find people).
-  const on = !plan.free ? stored?.autoFindPeople !== false : stored?.autoFindPeople === true;
+  // Free never looks on its own: each search spends one of the day's unlocks, so the student picks the job.
+  const on = !plan.free && stored?.autoFindPeople !== false;
   if (!on || companyMissing(app)) return false;
   await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: `Searching for relevant people at ${app.company}…` });
   startContacts(userId, app.id, true);
@@ -785,16 +785,21 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     if (contactsBusy(app)) return;
     await applications.update(userId, app.id, { contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
   }
-  // A company's people count once (Free's weekly company, a trial credit, or Pro's hidden guard), only when
+  // A company's people count once (one of Free's daily unlocks, a trial credit, or Pro's hidden guard), only when
   // someone with an email turns up. With none left, nothing is looked up.
   const paidKey = `person:${userId}:${app.id}`;
-  // Free: one person at each job, even for a job whose whole list was paid for during the trial.
-  if (await isFree(userId)) return onePerson(userId, app);
+  const free = await isFree(userId);
   const alreadyPaid = Boolean(app.fillReport?.personCharged);
+  // Free: an unlock needs one left today, at a company it hasn't unlocked yet. The job goes back to its Unlock button.
+  const blocked = free && !alreadyPaid ? await freeUnlockBlocked(userId, app) : null;
+  if (blocked) {
+    await applications.update(userId, app.id, { contactsStatus: "idle", contactsMessage: blocked });
+    return;
+  }
   const way = alreadyPaid ? null : await peopleAccess(userId);
   if (!alreadyPaid && !way) {
-    // Free (and a trial with its credits spent): one person, not checked. Pro unlocks the rest.
-    if (!(await planUsage(userId)).people.paid) return onePerson(userId, app);
+    // A trial with its credits spent: one person, not checked. Pro unlocks the rest. Free out of unlocks: the note.
+    if (!free && !(await planUsage(userId)).people.paid) return onePerson(userId, app);
     await applications.update(userId, app.id, { contactsStatus: "done", contactsMessage: await peopleNote(userId) });
     return;
   }
@@ -817,6 +822,11 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     await applications.update(userId, app.id, { contactsStatus: "failed", contactsMessage: `${reason} Try again.` });
     return;
   }
+  // Free's unlock is one person: the one the posting names, else the first with an email. The rest stay locked.
+  if (free) {
+    const best = freePick(found.people);
+    found = { ...found, people: best ? [best] : [], hidden: {}, locked: found.locked + Math.max(0, found.people.length - 1) + Object.keys(found.hidden).length };
+  }
   let charged = alreadyPaid;
   // 1 credit for the job's list of people, once, and only when someone on it has an email (checked or written
   // from the company's format). Searching again is free; a list with no emails costs nothing.
@@ -833,7 +843,23 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const latest = (await applications.get(userId, app.id)) ?? app;
   const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
   // Emails are written only when the student asks, one person at a time.
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, peoplePreview: undefined, peopleLocked: undefined, ...(charged ? { personCharged: true } : {}) } });
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, peoplePreview: undefined, peopleLocked: free ? found.locked : undefined, ...(charged ? { personCharged: true } : {}) } });
+}
+
+/** The person Free keeps from a search: the one the posting names, else the first with an email, else the first. */
+function freePick<T extends { role: string; email: string | null }>(people: T[]) {
+  return people.find((person) => person.role === "job_poster" && person.email) ?? people.find((person) => person.email) ?? people[0] ?? null;
+}
+
+/**
+ * Why Free can't unlock this job right now, or null when it can: none of today's unlocks left, or someone at this
+ * company is already unlocked on another job (Free's unlocks are for different companies).
+ */
+async function freeUnlockBlocked(userId: string, app: JobApplication) {
+  const others = (await applications.list(userId)).filter((other) => other.id !== app.id && other.fillReport?.personCharged && sameCompany(other.company, app.company));
+  if (others.length) return `You already unlocked someone at ${app.company} on your ${others[0].title} job. Free's unlocks are for different companies.`;
+  const { people } = await planUsage(userId);
+  return people.left > 0 ? null : people.note;
 }
 
 /**
@@ -905,6 +931,11 @@ export async function retryContacts(userId: string, raw: unknown) {
   const website = String((raw as { website?: unknown } | null)?.website ?? "").trim();
   const domain = website ? siteDomain(/^https?:\/\//i.test(website) ? website : `https://${website}`) : null;
   if (website && !domain) throw new ServiceError("That doesn't look like the company's own website. Try something like acme.com.", "website", 400);
+  // Free: said right away when there's no unlock to spend, before anything is marked as searching.
+  if (!app.fillReport?.personCharged && (await isFree(userId))) {
+    const blocked = await freeUnlockBlocked(userId, app);
+    if (blocked) throw new ServiceError(blocked, "people", 402);
+  }
   await applications.update(userId, app.id, { ...(domain ? { companyDomain: domain } : {}), contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
   startContacts(userId, app.id, true);
   return { ok: true };
