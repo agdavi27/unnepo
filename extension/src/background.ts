@@ -1720,6 +1720,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         void log(`Attached your cover letter to "${attached[0].slice(0, 40)}".`);
         return reply({ ok: true, attached });
       }
+      // "Attach with Unnepo" beside a resume upload box on the page: the resume file, for that box.
+      case "resume-file": {
+        if (!sender.tab) return reply({ ok: false });
+        const resume = await readyResume();
+        if (resume.file) void log("Attached your resume from the button on the page.");
+        return reply({ ok: Boolean(resume.file), file: resume.file, error: resume.error ?? (resume.file ? null : "Upload your resume in Unnepo first") });
+      }
       // "Attach" beside the resume: the resume file into the application's resume box.
       case "attach-resume": {
         if (sender.tab) return reply({ ok: false });

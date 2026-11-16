@@ -83,7 +83,7 @@ const NAMES: Record<CountedKind, [string, string]> = {
 /** The line for a tool that's run out (or is down to its last one). The count itself is the badge in each box's corner. */
 function usesNote(kind: CountedKind, left: number, free: boolean, cap: number) {
   const [one, many] = NAMES[kind];
-  if (kind === "people" && free) return left > 0 ? "" : `You've used today's ${FREE_UNLOCKS_PER_DAY} unlocks. Free unlocks ${FREE_UNLOCKS_PER_DAY} people a day, each at a different company. More tomorrow, or Pro has no limit.`;
+  if (kind === "people" && free) return left > 0 ? "" : `You've used today's ${FREE_UNLOCKS_PER_DAY} unlocks. Free unlocks ${FREE_UNLOCKS_PER_DAY} people a day, each at a different company. More tomorrow, or Pro finds unlimited verified contacts.`;
   if (left > 0) return free && left === 1 && kind !== "people" ? `Only 1 ${one} left today` : "";
   if (!free) return `That's a lot of ${many} this month (${cap}). More on the 1st, or write to us if you need more sooner.`;
   if (kind === "autofills") return `Today's ${FREE_LIMITS.autofills} full autofills are used. Autofill still fills your basic details; Pro answers the questions too, with no limit.`;

@@ -1,6 +1,7 @@
 import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
 import { QUICK_BOARDS, watchApplyPresses } from "./quick-apply";
 import { watchEdits } from "./edits";
+import { watchResumeBoxes } from "./resume-button";
 import { appliedList, appliedStatus, isAppliedListPage } from "./board-status";
 
 /**
@@ -210,6 +211,9 @@ if (window.top === window && QUICK_BOARDS.test(location.hostname)) {
     }
   });
 }
+
+// "Attach with Unnepo" beside each resume upload box, on job sites (not on Unnepo itself).
+if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) watchResumeBoxes();
 
 // Job sites build their pages after loading, so it checks a few times over the first half minute.
 if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname) && !dismissed()) {

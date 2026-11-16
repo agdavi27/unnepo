@@ -120,7 +120,7 @@ export const PUBLIC_PLANS = [
     credits: 20,
     semesterCredits: 70,
     applicationsLabel: "Unlimited everything",
-    features: ["Unlimited autofill that answers the questions too", "Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", "3 people at every company, with checked emails", "Unlimited emails and follow-ups written for you", "Email updates the moment they arrive", "Compete with friends"],
+    features: ["Unlimited autofill that answers the questions too", "Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", "Unlimited verified contacts: 3 people at every company, with verified emails", "Unlimited emails and follow-ups written for you", "Email updates the moment they arrive", "Compete with friends"],
   },
 ];
 

@@ -737,6 +737,7 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .me-hero .me-stats { display: flex; align-items: center; justify-content: center; gap: 18px; margin-top: 10px; }
 .me-hero .me-stat { padding: 0; border: 0; background: transparent; align-items: center; }
 .me-hero .me-stat b { font-size: 18px; }
+.me-reset { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font: 500 11px var(--mono); color: var(--muted); }
 .me-hero .row-between { width: 100%; margin-top: 8px; }
 .friends-strip { display: flex; flex-direction: column; gap: 10px; }
 .strip-row { display: flex; gap: 14px; overflow-x: auto; padding: 2px 2px 4px; scrollbar-width: none; }
