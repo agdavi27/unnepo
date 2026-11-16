@@ -1726,6 +1726,23 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const free = Boolean(me.usage?.free && !me.unlimitedCredits);
         return reply({ ok: true, free, left: free ? me.usage?.letters.left ?? null : null, highlights: me.highlights ?? [] });
       }
+      // The link chips on application forms: the student's LinkedIn, GitHub and portfolio from their profile.
+      // Kept ten minutes, so a form's pages don't each ask again.
+      case "links-page-state": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const { token } = await settings();
+        if (!token) return reply({ ok: false });
+        const { linksCopy } = (await chrome.storage.session.get("linksCopy")) as { linksCopy?: { token: string; at: number; links: Record<string, string> } };
+        if (linksCopy?.token === token && Date.now() - linksCopy.at < 600_000) return reply({ ok: true, links: linksCopy.links });
+        try {
+          const { profile } = await api<{ profile: { links?: { linkedin?: string; github?: string; portfolio?: string } } }>("GET", "profile");
+          const links = Object.fromEntries(Object.entries(profile.links ?? {}).filter(([, value]) => typeof value === "string" && value.trim())) as Record<string, string>;
+          await chrome.storage.session.set({ linksCopy: { token, at: Date.now(), links } });
+          return reply({ ok: true, links });
+        } catch {
+          return reply({ ok: false });
+        }
+      }
       // Its popup's Write (and saving the student's edits): the cover letter for the job on that tab.
       case "letter-page-write": {
         if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
