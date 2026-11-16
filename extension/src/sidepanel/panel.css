@@ -602,16 +602,11 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .next-box.ended { border-color: var(--line-2); background: transparent; }
 .next-box.ended .next-eyebrow { color: var(--muted-2); }
 
-/* Home with the job list: the panel fits the window. The spider hangs down onto the calendar's corner, the calendar
-   stays put, and the job list scrolls inside its own box. */
+/* Jobs: the panel fits the window and the job list scrolls inside its own box. */
 body.contained { height: 100vh; min-height: 0; }
-.contained .top { position: relative; z-index: 3; padding-bottom: 0; margin-bottom: -30px; pointer-events: none; }
-.contained .top a, .contained .top button { pointer-events: auto; }
-.contained .spider { margin-top: 14px; }
-.contained .spider .thread { height: 46px; }
 .contained .body { min-height: 0; overflow-y: auto; padding-top: 12px; gap: 10px; }
 .contained .week-card { flex: none; padding: 14px; gap: 10px; }
-.week-head { display: flex; align-items: center; gap: 10px; padding-right: 76px; min-height: 18px; }
+.week-head { display: flex; align-items: center; gap: 10px; min-height: 18px; }
 .week-head .streak { font-size: 12px; }
 .week-head .streak svg { width: 13px; height: 13px; }
 .heat-how > summary { font-size: 11px; color: var(--muted-2); }
@@ -893,3 +888,29 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .giveaway-steps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.4; color: var(--muted-2); }
 .giveaway-steps strong { color: var(--fg); font-weight: 600; }
 .giveaway-progress { display: flex; align-items: center; gap: 10px; }
+
+/* A job's page: the two ways to find people to email, each opening its own page. */
+.contacts-choice { gap: 10px; }
+.contact-choice { width: 100%; min-height: 60px; padding: 12px; border: 1px solid var(--edge); border-radius: 14px; background: var(--raise); color: var(--fg); display: flex; align-items: center; gap: 12px; text-align: left; cursor: pointer; }
+.contact-choice:hover { border-color: var(--edge-hi); background: var(--raise-hi); }
+.contact-choice .contact-icon { flex: none; color: var(--accent); }
+.contact-choice .chev { margin-top: 0; margin-left: auto; }
+.contact-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.contact-name { font: 600 14px/1.25 Geist, sans-serif; }
+.contact-sub { font: 500 11px var(--mono); color: var(--muted); letter-spacing: .02em; }
+.contact-sub.out { color: var(--warn); }
+
+/* Find with LinkedIn: names read off LinkedIn, each with the email built from the company's format. */
+.guess-search { display: flex; flex-direction: column; gap: 8px; }
+.guess-search.chips { flex-direction: row; align-items: center; }
+.guess-format { display: flex; flex-direction: column; gap: 6px; }
+.guess-format select { height: 38px; font-family: var(--mono); font-size: 12px; }
+.guess-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.guess-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.guess-row:last-child { border-bottom: 0; }
+.guess-text { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.guess-name { font-weight: 600; }
+.guess-text .sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.guess-mail { overflow-wrap: anywhere; color: var(--fg-2); }
+.guess-actions { flex: none; display: flex; gap: 6px; }
+.guess-actions a.icon-btn { text-decoration: none; font: 700 11px Geist, sans-serif; }

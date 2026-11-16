@@ -1,6 +1,6 @@
 /**
  * "How Unnepo works", inside the side panel: the panel dims, and an arrow points at the real part of it each step
- * talks about (the spider, then the Tools, Jobs and Me tabs), switching to that tab as it goes. It opens by itself
+ * talks about (the spider, then the Home, Jobs and Me tabs), switching to that tab as it goes. It opens by itself
  * the first time the panel opens connected, never again after that; Me → "Show me how it works" brings it back.
  */
 
@@ -15,8 +15,8 @@ const STEPS: Step[] = [
     body: "It lives in this panel, beside the job you're looking at. On job pages a little spider drops in at the top right. Click it to open this panel.",
   },
   {
-    target: "[data-tab='jobs']", tab: "jobs", title: "Tools",
-    body: "Write a cover letter for the job on your tab, answer questions like \"Why do you want to work here?\", or add a job by hand.",
+    target: "[data-tab='jobs']", tab: "jobs", title: "Home",
+    body: "Write a cover letter for the job on your tab, answer questions like \"Why do you want to work here?\", or add a job by hand. Under the tools, the graph shows every day you did something.",
   },
   {
     target: "[data-tab='home']", tab: "home", title: "Jobs: your tracker",
@@ -24,7 +24,7 @@ const STEPS: Step[] = [
   },
   {
     target: "[data-tab='home']", tab: "home", title: "Find people to email",
-    body: "Open a job and press Find people: recruiters, the team and alumni, with their emails. Unnepo reminds you when to follow up.",
+    body: "Open a job, then pick Find with LinkedIn (names from LinkedIn, guessed emails, free) or Find verified emails (checked work emails). Unnepo reminds you when to follow up.",
   },
   {
     target: "[data-tab='settings']", tab: "settings", title: "Me",

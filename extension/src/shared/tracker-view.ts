@@ -5,6 +5,7 @@ import { STEPS, STEP_LABEL, progressOf as sharedProgress, type Progress } from "
 import type { SpiderLook } from "@/lib/spiders";
 import { MAX_FOLLOW_UPS, reminders, type Reminder } from "./reminders";
 import { typingSpiderSvg } from "./hero-spider";
+import { guessedCount } from "./guessed";
 import { theme } from "./theme";
 import type { Detected, Mailer, OpenedEmails, ReminderMarks, Tracker, TrackerContact, TrackerJob } from "./types";
 
@@ -19,7 +20,7 @@ const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Prom
 const short = (text: string, max = 60) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
 /** What the page around this does: draw again, open a job (and a person on it), and where the plans are. */
-export type Host = { redraw: () => void; openJob: (id: string, contactId?: string) => void; upgradeUrl: () => string; addJob?: (from: Detected) => void };
+export type Host = { redraw: () => void; openJob: (id: string, contactId?: string) => void; upgradeUrl: () => string; addJob?: (from: Detected) => void; /** A job's people, on their own page: from LinkedIn with guessed emails, or verified. */ openContacts?: (id: string, kind: "linkedin" | "verified") => void };
 
 // ---- The tracker, kept here between draws ----
 
@@ -245,7 +246,44 @@ export function jobPage(job: TrackerJob, focus?: string) {
       ${note ? `<p class="small" role="status">${escape(note)}</p>` : ""}
     </section>
     ${applied ? `<section class="page" aria-label="People you emailed">${reachPicker(job)}</section>` : ""}
-    ${peopleCard(job)}`;
+    ${contactsChoice(job)}`;
+}
+
+const LINKEDIN_ICON = `<svg class="contact-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM3 9.75h4V21H3zM9.5 9.75h3.8v1.6h.06c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.77 2.6 4.77 6V21h-4v-5c0-1.2-.02-2.73-1.66-2.73-1.67 0-1.92 1.3-1.92 2.65V21h-4z"/></svg>`;
+const VERIFIED_ICON = `<svg class="contact-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>`;
+
+/** What the verified button says under its name: people found, searching, uses left on Free, or Pro. */
+function verifiedSub(job: TrackerJob) {
+  const found = job.contacts.length;
+  if (found) return `${found} ${found === 1 ? "person" : "people"} found`;
+  if (job.contactsStatus === "finding" || job.contactsStatus === "writing") return "Searching…";
+  if (!store.tracker?.free) return "Pro · checked work emails";
+  const left = store.tracker.peopleLeft ?? 0;
+  return left ? `${left} ${left === 1 ? "use" : "uses"} left today` : "Pro · none left today";
+}
+
+/**
+ * Under the job: two ways to find who to email, each opening its own page. LinkedIn (free): names read off
+ * LinkedIn, emails guessed from the company's format. Verified: Unnepo's search, with checked emails (Pro, or a
+ * Free unlock).
+ */
+function contactsChoice(job: TrackerJob) {
+  const guessed = guessedCount(job.id);
+  const free = Boolean(store.tracker?.free);
+  const out = free && !job.contacts.length && (store.tracker?.peopleLeft ?? 0) === 0;
+  return `
+    <section class="page contacts-choice" aria-label="Find people to email">
+      <span class="eyebrow">Find people to email</span>
+      <button type="button" class="contact-choice" data-open-contacts="linkedin">${LINKEDIN_ICON}<span class="contact-text"><span class="contact-name">Find with LinkedIn + guessed emails</span><span class="contact-sub">${guessed ? `${guessed} ${guessed === 1 ? "person" : "people"} saved` : "Free · names from LinkedIn, emails from the company's format"}</span></span><span class="chev" aria-hidden="true">›</span></button>
+      <button type="button" class="contact-choice" data-open-contacts="verified">${VERIFIED_ICON}<span class="contact-text"><span class="contact-name">Find verified emails</span><span class="contact-sub${out ? " out" : ""}">${escape(verifiedSub(job))}</span></span><span class="chev" aria-hidden="true">›</span></button>
+    </section>`;
+}
+
+/** The verified people at a job, on their own page. */
+export function verifiedPage(job: TrackerJob, focus?: string) {
+  if (focus) openPeople.add(focus);
+  const note = store.notes[job.id];
+  return `<div class="row-between"><span class="heading">${escape(short(job.titleMissing ? "This job" : job.title, 40))}</span></div>${peopleCard(job)}${note ? `<p class="small" role="status">${escape(note)}</p>` : ""}`;
 }
 
 /** A job saved without a real company (blank, or a badge like "Verified listing"): the student says which company it is. */
@@ -529,7 +567,18 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
     </li>`;
 }
 
-/** Wires a job page drawn by `jobPage` inside `root`. */
+/** Starts Unnepo's search for verified people at a job (with the website typed in, if any). */
+async function findPeople(job: TrackerJob) {
+  store.busy.add(`find:${job.id}`);
+  host.redraw();
+  const website = (websites[job.id] ?? "").trim();
+  const result = await ask<{ ok: boolean; error?: string }>({ type: "people", body: { action: "find", applicationId: job.id, ...(website ? { website } : {}) } }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  store.busy.delete(`find:${job.id}`);
+  store.notes[job.id] = result.ok ? "" : result.error ?? "Couldn't start the search.";
+  await loadTracker(true);
+}
+
+/** Wires a job page drawn by `jobPage` (or its verified people, `verifiedPage`) inside `root`. */
 export function wireJobPage(root: HTMLElement, job: TrackerJob) {
   wireReach(root);
   const say = (text: string) => { store.notes[job.id] = text; host.redraw(); };
@@ -561,8 +610,15 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     menu.querySelectorAll(".job-menu-item").forEach((item) => item.addEventListener("click", () => { menuOpenFor = ""; menu.open = false; }));
   });
   root.querySelector<HTMLButtonElement>("[data-see-people]")?.addEventListener("click", () => {
-    root.querySelector<HTMLElement>(".people")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    root.querySelector<HTMLElement>(".contacts-choice")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
+  root.querySelectorAll<HTMLButtonElement>("[data-open-contacts]").forEach((button) => button.addEventListener("click", () => {
+    const kind = button.dataset.openContacts as "linkedin" | "verified";
+    // Verified, with nothing found yet: the search starts right away when there's a use for it (Pro, or one left on Free).
+    const canFind = isAppliedJob(job) && job.contactsStatus === "idle" && !job.contacts.length && (!store.tracker?.free || (store.tracker.peopleLeft ?? 0) > 0);
+    if (kind === "verified" && canFind && !store.busy.has(`find:${job.id}`)) void findPeople(job);
+    host.openContacts?.(job.id, kind);
+  }));
   root.querySelectorAll<HTMLButtonElement>("[data-edit-job]").forEach((button) => button.addEventListener("click", () => {
     Object.assign(editing, { jobId: job.id, title: job.titleMissing ? "" : job.title, company: job.companyMissing ? "" : job.company, url: job.url ?? "", busy: false, error: "" });
     host.redraw();
@@ -612,15 +668,7 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     host.openJob("");
   });
   root.querySelectorAll<HTMLInputElement>("[data-website]").forEach((box) => box.addEventListener("input", () => { websites[job.id] = box.value; }));
-  root.querySelectorAll<HTMLButtonElement>("[data-find-people]").forEach((button) => button.addEventListener("click", async () => {
-    store.busy.add(`find:${job.id}`);
-    host.redraw();
-    const website = (websites[job.id] ?? "").trim();
-    const result = await ask<{ ok: boolean; error?: string }>({ type: "people", body: { action: "find", applicationId: job.id, ...(website ? { website } : {}) } }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
-    store.busy.delete(`find:${job.id}`);
-    store.notes[job.id] = result.ok ? "" : result.error ?? "Couldn't start the search.";
-    await loadTracker(true);
-  }));
+  root.querySelectorAll<HTMLButtonElement>("[data-find-people]").forEach((button) => button.addEventListener("click", () => void findPeople(job)));
   // On Free, Show person opens the Upgrade to Pro page on the website.
   root.querySelectorAll<HTMLButtonElement>("[data-upgrade]").forEach((button) => button.addEventListener("click", () => {
     if (host.upgradeUrl()) window.open(host.upgradeUrl(), "_blank", "noreferrer");

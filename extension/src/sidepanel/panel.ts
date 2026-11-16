@@ -1,11 +1,11 @@
 import type { SpiderLook } from "@/lib/spiders";
 import { notJobTitle } from "@/lib/apply/job-title";
 import { notCompanyName } from "@/lib/apply/company-name";
-import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
+import { heroSpiderSvg, miniSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
-import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
 import { AUTOFILL_ENABLED, type Detected, type Issue, type JobDetails, type Mailer, type PanelState } from "../shared/types";
-import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
+import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, verifiedPage, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
+import { guessedPage, wireGuessedPage } from "../shared/guessed";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
 import { friendAsks, friendPopup, friendRequests, friendsStrip, giveawayPopup, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
@@ -31,9 +31,9 @@ const planBadge = document.getElementById("plan-badge")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
 /** The three tabs along the bottom (home = Jobs, jobs = Tools, settings = Me; shown under those names), and the pages opened from them. */
-type View = "home" | "jobs" | "feedback" | "settings" | "job";
+type View = "home" | "jobs" | "feedback" | "settings" | "job" | "linkedin" | "verified";
 const TABS: View[] = ["home", "jobs", "settings"];
-// The panel opens on Tools.
+// The panel opens on Home (the tools and the graph).
 let view: View = "jobs";
 /** The job open on the "job" page, and the person to show on it. */
 let openedJob = { id: "", contact: "" };
@@ -240,15 +240,13 @@ let fillPending: number | null = null;
 const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPending !== null && fillPending === state.tab?.id);
 
 /**
- * Week with no job on the tab: getting started, the calendar of every day you did something, then every job with
- * its progress (searchable, filtered by step) and the dashboard on unnepo.com, then friends.
+ * Jobs with no job on the tab: getting started, then every job with its progress (searchable, filtered by step)
+ * and the dashboard on unnepo.com. A job's people are a tap in, on its own page.
  */
 function homeLists(state: PanelState) {
   const noEmail = firstEmailCount();
   const nudge = noEmail ? `<button type="button" class="email-nudge" data-show-jobs="reach"><span>${noEmail} ${noEmail === 1 ? "job needs" : "jobs need"} a first email</span><span aria-hidden="true">See →</span></button>` : "";
-  // The job list scrolls inside its own box, so the calendar stays on screen above it.
-  const list = (friends: string) => jobsList(nudge, `<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>${friends}`);
-  return `${boardCard(state)}${startCard(state)}${weekView(new Date(), list, `${state.apiBase}/home?tab=goals`)}`;
+  return `${boardCard(state)}${startCard(state)}${jobsList(nudge, `<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>`)}`;
 }
 
 /** "Bring in": on a job board's applications page, the ones Unnepo missed, saved in one press. */
@@ -437,7 +435,7 @@ function pageJob(state: PanelState): Partial<JobDetails> | null {
   return title ? { title, company: state.job?.company || state.page?.company || "", site: state.page?.site ?? "", description: "" } : null;
 }
 
-const MINI_SPIDER = `<svg class="mini-spider" viewBox="0 0 ${SPRITE_W} ${SPRITE_H}" width="18" height="${Math.round((18 * SPRITE_H) / SPRITE_W)}" shape-rendering="crispEdges" aria-hidden="true"><g transform="rotate(180 ${SPRITE_W / 2} ${SPRITE_H / 2})">${spiderRects(0)}</g></svg>`;
+const MINI_SPIDER = miniSpiderSvg(18);
 
 /** Answering every complex question: what's going on, and edits to answers not yet put back on the page. */
 const complex = { busy: false, note: "", drafts: {} as Record<string, string>, open: new Set<string>() };
@@ -565,15 +563,23 @@ function homeView(state: PanelState) {
     ${onWeb && !how ? hereLinks() : ""}${note}${homeLists(state)}`;
 }
 
-/** Back, on a page opened from a tab: a job's page goes back where it came from, Feedback to Settings. */
-const back = () => `<button type="button" class="back" data-go="${view === "feedback" ? "settings" : jobFrom}"><span aria-hidden="true">‹</span> Back</button>`;
+/** Back, on a page opened from a tab: a job's page goes back where it came from, its people to the job, Feedback to Settings. */
+const back = () => `<button type="button" class="back" data-go="${view === "feedback" ? "settings" : view === "linkedin" || view === "verified" ? "job" : jobFrom}"><span aria-hidden="true">‹</span> Back</button>`;
 
 /** A job's own page: its status, its link, and the people at the company with their emails. */
 function jobView() {
   ensureTracker();
   const job = jobById(openedJob.id);
   if (!job) return store.tracker ? `<p class="note">That job isn't in your tracker any more.</p>` : `<p class="note">Loading the job…</p>`;
-  return jobPage(job, openedJob.contact || undefined);
+  return jobPage(job);
+}
+
+/** A job's people, on their own page: from LinkedIn with guessed emails, or verified. */
+function contactsView(kind: "linkedin" | "verified") {
+  ensureTracker();
+  const job = jobById(openedJob.id);
+  if (!job) return store.tracker ? `<p class="note">That job isn't in your tracker any more.</p>` : `<p class="note">Loading the job…</p>`;
+  return kind === "linkedin" ? guessedPage(job) : verifiedPage(job, openedJob.contact || undefined);
 }
 
 /** A page that was asked for. */
@@ -581,6 +587,8 @@ function pageView(state: PanelState) {
   const heading = (text: string) => `<div class="row-between"><span class="heading">${text}</span></div>`;
   const pages: Record<Exclude<View, "home">, () => string> = {
     job: jobView,
+    linkedin: () => contactsView("linkedin"),
+    verified: () => contactsView("verified"),
     jobs: () => jobsView(state),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     // Me: who you are and your plan, friends, how Unnepo behaves, then help. Sign out and the version last.
@@ -1631,10 +1639,13 @@ function wireManualJob(state: PanelState) {
   });
 }
 
-/** The Tools tab: four tiles (a cover letter, answering a question, Autofill, adding a job), then the resume and password. */
+/**
+ * Home: four tiles (a cover letter, answering a question, Autofill, adding a job), the resume and password, then
+ * under all the tools the graph of every day you did something, and friends.
+ */
 function jobsView(state: PanelState) {
   ensureTracker();
-  return toolsPage(state);
+  return toolsPage(state, weekView(new Date(), "", `${state.apiBase}/home?tab=goals`));
 }
 
 /** Settings for catching applications, email links and reminders. Kept on this computer. */
@@ -1841,7 +1852,7 @@ function draw(state: PanelState): boolean {
   planBadge.innerHTML = !state.connected || !state.me ? "" : onFree(state)
     ? `<a class="plan-badge" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade to Pro</a>`
     : `<span class="plan-badge pro">${state.me.trial ? "Pro trial" : "Pro"}</span>`;
-  const tabNow = view === "job" ? jobFrom : view === "feedback" ? "settings" : view;
+  const tabNow = view === "job" || view === "linkedin" || view === "verified" ? jobFrom : view === "feedback" ? "settings" : view;
   // Me: friend requests.
   const badge = (element: HTMLElement, count: number) => { element.textContent = count ? String(count) : ""; element.hidden = !count; };
   // Jobs counts jobs with nobody emailed yet, plus caught jobs asking "Did you apply?".
@@ -1929,8 +1940,9 @@ function draw(state: PanelState): boolean {
     }));
     wireJobsList(app);
     app.querySelectorAll<HTMLButtonElement>("[data-show-jobs]").forEach((button) => button.addEventListener("click", () => { showJobs("reach"); go("home"); }));
-    const job = view === "job" ? jobById(openedJob.id) : null;
-    if (job) wireJobPage(app, job);
+    const job = view === "job" || view === "linkedin" || view === "verified" ? jobById(openedJob.id) : null;
+    if (job && view === "linkedin") wireGuessedPage(app, job);
+    else if (job) wireJobPage(app, job);
     wireTracking();
   }
   document.getElementById("use-code")?.addEventListener("click", async () => {
@@ -1986,12 +1998,18 @@ function draw(state: PanelState): boolean {
   return true;
 }
 
-/** Opens a job's own page; no id goes back Home (after deleting one). */
+/** Opens a job's own page (its verified people, when one of them is asked for); no id goes back Home (after deleting one). */
 function openJob(id: string, contact = "") {
   if (!id) return go(jobFrom);
   openedJob = { id, contact };
   if (TABS.includes(view)) jobFrom = view;
-  go("job");
+  go(contact ? "verified" : "job");
+}
+
+/** A job's people, from its page. */
+function openContacts(id: string, kind: "linkedin" | "verified") {
+  openedJob = { id, contact: "" };
+  go(kind);
 }
 
 /** "✓ I applied" on a detected job Unnepo couldn't name: the add-a-job form, filled in with what it saw. */
@@ -2000,7 +2018,7 @@ function addDetected(item: Detected) {
   go("jobs");
 }
 
-setHost({ redraw: () => void render(), openJob, upgradeUrl: () => (lastState ? upgradeUrl(lastState) : ""), addJob: addDetected });
+setHost({ redraw: () => void render(), openJob, openContacts, upgradeUrl: () => (lastState ? upgradeUrl(lastState) : ""), addJob: addDetected });
 
 /** Opens a page, from any button that says which. */
 function go(next: View) {

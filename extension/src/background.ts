@@ -1492,6 +1492,58 @@ chrome.notifications.onClicked.addListener((id) => {
 const fromExtension = (sender: chrome.runtime.MessageSender) => sender.id === chrome.runtime.id && (!sender.tab || (sender.url ?? "").startsWith(chrome.runtime.getURL("")));
 const failed = (error: unknown, fallback: string) => ({ ok: false, error: error instanceof Error ? error.message : fallback });
 
+/** Waits for a tab to finish loading, or gives up after `ms`. */
+function tabLoaded(tabId: number, ms: number) {
+  return new Promise<void>((resolve) => {
+    const done = () => { chrome.tabs.onUpdated.removeListener(listen); clearTimeout(timer); resolve(); };
+    const listen = (id: number, info: { status?: string }) => { if (id === tabId && info.status === "complete") done(); };
+    const timer = setTimeout(done, ms);
+    chrome.tabs.onUpdated.addListener(listen);
+    void chrome.tabs.get(tabId).then((tab) => { if (tab.status === "complete") done(); }, done);
+  });
+}
+
+export type LinkedInPerson = { name: string; title: string; linkedinUrl: string };
+
+/**
+ * The people on a LinkedIn page (a people search, or a company's People page): each profile link's name, the line
+ * under it (their title) and the profile. Scrolls down first, since LinkedIn draws results as you scroll. Runs in
+ * the page, so it has to stand on its own.
+ */
+async function linkedInPeopleOnPage(): Promise<{ signedOut: boolean; people: LinkedInPerson[] }> {
+  if (/\/(login|authwall|checkpoint|signup)/.test(location.pathname)) return { signedOut: true, people: [] };
+  const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+  for (let step = 0; step < 4; step += 1) { window.scrollBy(0, window.innerHeight); await wait(450); }
+  window.scrollTo(0, 0);
+  const skip = /^(•|·)?\s*(1st|2nd|3rd\+?)$|degree connection|^view .*profile|^(connect|follow|message|pending|following)$|mutual connection|followers$|^(current|past|summary|skills):/i;
+  const found = new Map<string, LinkedInPerson>();
+  for (const link of Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/in/"]'))) {
+    const href = link.href.split("?")[0].replace(/\/$/, "");
+    if (!/linkedin\.com\/in\/[^/]+$/.test(href) || found.has(href)) continue;
+    const raw = (link.querySelector('span[aria-hidden="true"]')?.textContent || link.innerText || "").split("\n")[0];
+    const name = raw.replace(/^View\s+/i, "").replace(/[’']s\s+profile$/i, "").replace(/\s+/g, " ").trim();
+    if (!name || /linkedin member/i.test(name) || name.length > 60 || !/[a-z]/i.test(name)) continue;
+    const card = link.closest("li") ?? link.parentElement?.parentElement?.parentElement ?? link;
+    const lines = ((card as HTMLElement).innerText || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    const at = lines.findIndex((line) => line.startsWith(name));
+    const title = lines.slice(at + 1).find((line) => !skip.test(line) && !line.startsWith(name)) ?? "";
+    found.set(href, { name, title: title.slice(0, 140), linkedinUrl: href });
+  }
+  return { signedOut: false, people: [...found.values()].slice(0, 60) };
+}
+
+async function readLinkedIn(tabId: number): Promise<{ ok: boolean; tabId?: number; people?: LinkedInPerson[]; error?: string }> {
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab?.url || !/^https:\/\/([a-z]+\.)?linkedin\.com\//.test(tab.url)) return { ok: false, error: "The LinkedIn tab was closed. Open it again." };
+  // LinkedIn draws its results a moment after the page loads.
+  await new Promise((done) => setTimeout(done, 1500));
+  const [result] = await chrome.scripting.executeScript({ target: { tabId }, func: linkedInPeopleOnPage }).catch(() => [] as chrome.scripting.InjectionResult<Awaited<ReturnType<typeof linkedInPeopleOnPage>>>[]);
+  const read = result?.result;
+  if (!read) return { ok: false, tabId, error: "Couldn't read that LinkedIn page." };
+  if (read.signedOut) return { ok: false, tabId, error: "Sign in to LinkedIn in that tab, then press Read LinkedIn again." };
+  return { ok: true, tabId, people: read.people };
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   const tabId = sender.tab?.id;
   void (async () => {
@@ -1703,6 +1755,21 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         }
       }
       // The job box: what the page says about the job. The resume starts loading now, for Begin applying.
+      // "Find with LinkedIn": open LinkedIn's people search for the company, then read the names off it.
+      case "linkedin-open": {
+        if (sender.tab) return reply({ ok: false });
+        const keywords = String(message.keywords ?? "").trim().slice(0, 200);
+        if (!keywords) return reply({ ok: false, error: "This job has no company to search for." });
+        const url = `https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords, origin: "GLOBAL_SEARCH_HEADER" })}`;
+        const tab = await chrome.tabs.create({ url, active: true }).catch(() => null);
+        if (!tab?.id) return reply({ ok: false, error: "Couldn't open LinkedIn." });
+        await tabLoaded(tab.id, 20_000);
+        return reply(await readLinkedIn(tab.id));
+      }
+      case "linkedin-read": {
+        if (sender.tab) return reply({ ok: false });
+        return reply(await readLinkedIn(Number(message.tabId)));
+      }
       case "job-details": {
         if (sender.tab) return reply({ ok: false });
         const details = await readJobDetails(Number(message.tabId)).catch(() => null);
