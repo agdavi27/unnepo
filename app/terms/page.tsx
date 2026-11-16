@@ -97,7 +97,7 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     body: (
       <ul>
         <li>Unnepo has a free plan and paid plans. The price and what&apos;s included are shown before you pay. Payments are processed by Stripe.</li>
-        <li>A monthly plan renews each month until you cancel. A semester plan is paid up front for the semester. If you cancel, you keep your paid features until the end of the period you already paid for.</li>
+        <li>A monthly plan renews each month until you cancel. A yearly plan is paid up front for the year and renews each year until you cancel. If you cancel, you keep your paid features until the end of the period you already paid for.</li>
         <li>Credits have no cash value, can&apos;t be transferred, and are used and refreshed as described in the app.</li>
         <li>Except where the law requires otherwise, payments aren&apos;t refundable. If something went wrong with a charge, email us and we&apos;ll make it right.</li>
         <li>We may change prices or plans. Changes to a paid plan you already have start at your next renewal, and we&apos;ll tell you before they do.</li>

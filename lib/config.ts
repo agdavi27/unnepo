@@ -27,16 +27,16 @@ export function serverConfig() {
     packCredits: intEnv("PACK_CREDITS", 15),
     proPriceCents: intEnv("PRO_PRICE_CENTS", 2999),
     proMonthlyCredits: intEnv("PRO_MONTHLY_CREDITS", 20),
-    /** People searches a Pro semester (4 months, paid up front) comes with: fewer than 4 months, since it costs less a month. */
-    proSemesterCredits: intEnv("PRO_SEMESTER_CREDITS", 70),
-    proSemesterPriceCents: intEnv("PRO_SEMESTER_PRICE_CENTS", 10000),
+    /** Pro paid for a year up front: twelve months of Pro, for less than twelve monthly payments. */
+    proYearCredits: intEnv("PRO_YEAR_CREDITS", 240),
+    proYearPriceCents: intEnv("PRO_YEAR_PRICE_CENTS", 19900),
     premiumPriceCents: intEnv("PREMIUM_PRICE_CENTS", 3900),
     premiumMonthlyCredits: intEnv("PREMIUM_MONTHLY_CREDITS", 75),
     premiumSemesterPriceCents: intEnv("PREMIUM_SEMESTER_PRICE_CENTS", 11700),
     // Pro's writing and autofill are unlimited; this is a hidden fair-use guard against scripts, never shown as a number.
     proAiLimit: intEnv("PRO_AI_LIMIT", 1000),
-    /** Pro's people have no limit; this hidden monthly guard (companies, about 30¢ each) only stops scripts. */
-    proPeopleLimit: intEnv("PRO_PEOPLE_LIMIT", 100),
+    /** Companies Pro finds people at each month (about 20–30¢ each). Shown to the student; see PRO_COMPANIES_PER_MONTH. */
+    proPeopleLimit: intEnv("PRO_PEOPLE_LIMIT", PRO_COMPANIES_PER_MONTH),
     premiumAiLimit: intEnv("PREMIUM_AI_LIMIT", 1000),
     dailyGlobalSpendCents: intEnv("DAILY_GLOBAL_SPEND_CENTS", 25000),
     // The most one account can spend on finding people in a day ($3): stops a script, never a real student.
@@ -59,22 +59,25 @@ export function serverConfig() {
 /**
  * Pricing. Free gets FREE_LIMITS each day (cover letters, answers, written emails, and full autofills that answer the questions
  * too; after those, autofill still fills the basic details) and FREE_UNLOCKS_PER_DAY unlocks: the best person at a
- * company, with a checked email, found when the student presses Unlock. Pro has no limits: only hidden monthly guards
- * against scripts (PRO_AI_LIMIT for writing and autofill, PRO_PEOPLE_LIMIT for companies, about 30¢ each), which a
- * real student never meets. `balance` on an account counts people searches left from the trial or a pack.
+ * company, with a checked email, found when the student presses Unlock. Pro's writing and autofill have no limit (only
+ * a hidden guard against scripts, PRO_AI_LIMIT); its people are PRO_COMPANIES_PER_MONTH companies a month, shown on the plan. `balance` on an account counts people searches left from the trial or a pack.
  */
 export const FREE_LIMITS = { letters: 3, answers: 3, autofills: 3, emails: 3 };
 /** People Free unlocks each day: one person at each of two companies, with a checked email. */
 export const FREE_UNLOCKS_PER_DAY = 2;
+/** Companies Pro finds people at each month: up to 3 people at each, with verified emails. Shown on the plan. */
+export const PRO_COMPANIES_PER_MONTH = 50;
 export const CREDIT_COST = { letters: 2, answers: 1, autofills: 1, emails: 1, people: 5 };
 /** What Free gets each day, in credits. */
 export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers + FREE_LIMITS.emails * CREDIT_COST.emails;
 
-/** A semester plan: four months paid up front, with four months of credits at once. */
+/** A semester plan (no longer sold; students already on one keep it): four months paid up front. */
 export const SEMESTER_MONTHS = 4;
+/** The yearly plan: twelve months paid up front, renewing each year until cancelled. */
+export const YEAR_MONTHS = 12;
 
 /**
- * When a Pro semester ends: May 31 (end of day, Eastern), the next one to come. PRO_SEMESTER_ENDS_AT (an ISO date)
+ * When a Pro semester (no longer sold) ends: May 31 (end of day, Eastern), the next one to come. PRO_SEMESTER_ENDS_AT (an ISO date)
  * overrides it while it's still in the future. A semester bought in the summer runs to the following May.
  */
 export function semesterEndsAt(now = Date.now()) {
@@ -96,14 +99,14 @@ export const PUBLIC_PLANS = [
     id: "free" as const,
     name: "Free",
     priceLabel: "$0",
-    semesterLabel: null,
+    yearLabel: null,
     cadence: "Free for students, no card",
     blurb: "Everything you need to start",
     cta: "Start free",
     popular: false,
     monthly: false,
     credits: FREE_UNLOCKS_PER_DAY,
-    semesterCredits: null,
+    yearCredits: null,
     applicationsLabel: "Free every day",
     features: [`${FREE_LIMITS.autofills} full autofills a day, then your basic details`, `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_UNLOCKS_PER_DAY} people to email a day, each at a different company`, "Compete with friends", "Tracker and job matches"],
   },
@@ -111,16 +114,16 @@ export const PUBLIC_PLANS = [
     id: "pro" as const,
     name: "Pro",
     priceLabel: "$29.99",
-    semesterLabel: "or $100 a semester, through May",
-    cadence: "Billed monthly or each semester",
-    blurb: "Unlimited everything",
+    yearLabel: "or $199 a year (save 45%)",
+    cadence: "Billed monthly or yearly",
+    blurb: "Unlimited writing and autofill, verified contacts every month",
     cta: "Choose Pro",
     popular: true,
     monthly: true,
     credits: 20,
-    semesterCredits: 70,
-    applicationsLabel: "Unlimited everything",
-    features: ["Unlimited autofill that answers the questions too", "Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", "Unlimited verified contacts: 3 people at every company, with verified emails", "Unlimited emails and follow-ups written for you", "Email updates the moment they arrive", "Compete with friends"],
+    yearCredits: 240,
+    applicationsLabel: "Unlimited writing and autofill",
+    features: ["Unlimited autofill that answers the questions too", "Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", `Verified contacts at ${PRO_COMPANIES_PER_MONTH} companies a month: up to 3 people at each, with verified emails`, "Unlimited emails and follow-ups written for you", "Email updates the moment they arrive", "Compete with friends"],
   },
 ];
 

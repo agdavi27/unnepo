@@ -1,4 +1,4 @@
-import { PUBLIC_PLANS, SEMESTER_MONTHS, semesterEndsAt, serverConfig } from "@/lib/config";
+import { PUBLIC_PLANS, SEMESTER_MONTHS, YEAR_MONTHS, semesterEndsAt, serverConfig } from "@/lib/config";
 import { id, nowIso, repo } from "@/lib/db/file-store";
 import { ServiceError } from "@/lib/errors";
 
@@ -218,7 +218,7 @@ async function grantFromInvoice(object: StripeObject, eventId: string) {
       kind: String(metadata.kind ?? nested.kind ?? "") || undefined,
       stripeCustomerId: idOf(object.customer) || undefined,
     });
-    // A Pro semester ends at the end of May, with no renewal and no proration.
+    // A Pro semester (no longer sold, but a checkout opened before could still finish) ends at the end of May.
     const kindName = String(metadata.kind ?? nested.kind ?? "");
     if (billingReason === "subscription_create" && kindName === "pro_semester") {
       try {
@@ -289,14 +289,13 @@ export async function confirmDemoPurchase(userId: string, kind: CheckoutKind) {
   return { granted: grant.granted, credits: grant.granted ? offer.credits : 0, demo: true };
 }
 
-type CheckoutKind = "grind" | "pack" | "pro" | "premium" | "pro_semester" | "premium_semester";
+type CheckoutKind = "grind" | "pack" | "pro" | "pro_year" | "premium" | "premium_semester";
 
 /** A semester plan bills every SEMESTER_MONTHS months and grants that many months of credits each time. */
 function checkoutOffer(kind: CheckoutKind, config: ReturnType<typeof serverConfig>) {
   if (kind === "premium_semester") return { credits: config.premiumMonthlyCredits * SEMESTER_MONTHS, amount: config.premiumSemesterPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium (semester)", priceId: process.env.STRIPE_PRICE_PREMIUM_SEMESTER, recurring: true, months: SEMESTER_MONTHS };
-  // A Pro semester runs until the end of May (see semesterEndsAt), not a fixed four months: it bills on a yearly
-  // interval so it can never renew first, and the subscription is set to cancel on May 31 once it's paid.
-  if (kind === "pro_semester") return { credits: config.proSemesterCredits, amount: config.proSemesterPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro (semester, through May)", priceId: process.env.STRIPE_PRICE_PRO_SEMESTER, recurring: true, months: 12 };
+  // Pro for a year: billed every twelve months, renewing until cancelled. (Semesters aren't sold any more.)
+  if (kind === "pro_year") return { credits: config.proYearCredits, amount: config.proYearPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro (yearly)", priceId: process.env.STRIPE_PRICE_PRO_YEAR, recurring: true, months: YEAR_MONTHS };
   if (kind === "premium") return { credits: config.premiumMonthlyCredits, amount: config.premiumPriceCents, bucket: "allowance" as const, plan: "premium" as const, name: "Unnepo Premium", priceId: process.env.STRIPE_PRICE_PREMIUM, recurring: true };
   if (kind === "pro") return { credits: config.proMonthlyCredits, amount: config.proPriceCents, bucket: "allowance" as const, plan: "pro" as const, name: "Unnepo Pro", priceId: process.env.STRIPE_PRICE_PRO, recurring: true };
   if (kind === "grind") return { credits: config.grindMonthlyCredits, amount: config.grindPriceCents, bucket: "allowance" as const, plan: "grind" as const, name: "Unnepo The Grind", priceId: process.env.STRIPE_PRICE_GRIND, recurring: true };
@@ -310,13 +309,14 @@ function checkoutOffer(kind: CheckoutKind, config: ReturnType<typeof serverConfi
 export function checkoutKind(plan: unknown, billing: unknown): CheckoutKind {
   if (plan === "pack") return "pack";
   if (plan !== "pro") throw new ServiceError("Choose Pro.", "plan", 400);
-  return billing === "semester" ? "pro_semester" : "pro";
+  // "semester" is what older pages send: it's the yearly plan now.
+  return billing === "year" || billing === "semester" ? "pro_year" : "pro";
 }
 
 /** The price the plan cards show, in cents. Null for what they don't list. */
 function advertisedCents(kind: CheckoutKind) {
-  const plan = PUBLIC_PLANS.find((item) => item.id === kind.replace("_semester", ""));
-  const label = kind.endsWith("_semester") ? plan?.semesterLabel : plan?.priceLabel;
+  const plan = PUBLIC_PLANS.find((item) => item.id === kind.replace(/_(semester|year)$/, ""));
+  const label = kind.endsWith("_year") ? plan?.yearLabel : kind.endsWith("_semester") ? null : plan?.priceLabel;
   const dollars = /\$(\d+(?:\.\d{1,2})?)/.exec(label ?? "")?.[1];
   return dollars ? Math.round(Number(dollars) * 100) : null;
 }

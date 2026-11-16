@@ -375,7 +375,7 @@ const roleForTitle = (title: string): ContactRole => (RECRUITING.test(title) ? "
  * soon as one person has a usable email: the rest of the list is revealed when the student asks.
  * Every person comes from one of these sources. Nobody is invented. Each search is recorded, so a result can be traced.
  */
-export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; facts?: StudentFacts; known?: KnownEmail[]; progress?: Progress; /** Free: one person, with an email built from the format and never checked, and no paid reveal. */ one?: boolean } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch; hidden: Record<string, HiddenPerson>; reveals: number; locked: number }> {
+export async function findPeopleForApplication(userId: string, app: JobApplication, options: { school?: string; facts?: StudentFacts; known?: KnownEmail[]; progress?: Progress; /** Free: one person, with an email built from the format and never checked, and no paid reveal. */ one?: boolean; /** Free's unlock: it shows one person, so the wider searches stop once anyone is found. */ few?: boolean } = {}): Promise<{ people: ListedPerson[]; domain: string | null; notes: string[]; search: PeopleSearch; hidden: Record<string, HiddenPerson>; reveals: number; locked: number }> {
   const started = Date.now();
   const spentBefore = await spentTodayCents(userId).catch(() => 0);
   const over = () => Date.now() - started > TIME_BUDGET_MS;
@@ -418,6 +418,8 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
   let pool: Pooled[] = [];
   let winner: string | null = null;
   const titles = [...new Set([team, core].filter(Boolean))];
+  // How many people are worth searching wider for: Free's unlock shows one, so one is enough.
+  const want = options.few ? 1 : LIST_SIZE;
 
   const gather = async (domain: string) => {
     const seen = new Map<string, Pooled>();
@@ -440,8 +442,8 @@ export async function findPeopleForApplication(userId: string, app: JobApplicati
     take(await look("Recruiters", domain, { person_titles: RECRUITER_TITLES }), "recruiter", (person) => recruiterWhy(app, person), 0);
     if (titles.length) take(await look(team ? `${team} department` : `${core} roles`, domain, { person_titles: titles }), "team_member", (person) => `${person.title || "Works"} in ${team || "the same kind of role"}, the team this job is in.`, 0);
     // Not enough yet: wider, still free, and worth less on the list.
-    if (seen.size < LIST_SIZE && !over()) take(await look("HR and people teams", domain, { person_titles: HR_TITLES }), "recruiter", worksThere, -5);
-    if (seen.size < LIST_SIZE && !over()) {
+    if (seen.size < want && !over()) take(await look("HR and people teams", domain, { person_titles: HR_TITLES }), "recruiter", worksThere, -5);
+    if (seen.size < want && !over()) {
       // Only people whose work is about this job, unless nobody at all has turned up.
       const anyone = await look("Anyone at the company", domain, { person_seniorities: WORKING_LEVELS });
       const fitting = anyone.filter((person) => relatedToJob(person.title, app));

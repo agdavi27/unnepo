@@ -729,7 +729,7 @@ describe("people after applying", () => {
     expect(await applicationContacts.list(userId, [third.id])).toHaveLength(0);
     expect(await debits()).toBe(0);
 
-    // Pro has no limit, even with no credits: the people are looked up, and nothing is spent.
+    // Pro counts companies by the month (shown), even with no credits: the people are looked up, and nothing is spent.
     await repo.setAccountForTests(userId, { plan: "pro" });
     const paid = await another(3);
     const searchesBefore = searches.length;
@@ -737,7 +737,8 @@ describe("people after applying", () => {
     expect(searches.length).toBeGreaterThan(searchesBefore);
     expect((await applicationContacts.list(userId, [paid.id])).length).toBeGreaterThan(1);
     expect(await debits()).toBe(0);
-    expect((await planUsage(userId)).people.badge).toBe("Unlimited");
+    // Free's unlocks earlier in the month don't come out of Pro's 50.
+    expect((await planUsage(userId)).people.badge).toBe("49 of 50 companies left this month");
   });
 
   it("charges nothing for a list with no emails, and never charges an unlimited account", async () => {

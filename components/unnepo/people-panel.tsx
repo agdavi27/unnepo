@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { composeLink } from "@/lib/apply/compose-link";
 import { Popup } from "@/components/unnepo/popup";
 import type { TrackerJob } from "@/lib/extension/service";
-import { FREE_UNLOCKS_PER_DAY } from "@/lib/config";
+import { FREE_UNLOCKS_PER_DAY, PRO_COMPANIES_PER_MONTH } from "@/lib/config";
 
 /**
  * A job's people on the website, doing what the extension's People card does: find people at the company, show a
@@ -358,8 +358,8 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, unlocks
           <div className="flex flex-wrap items-center gap-3">
             {left > 0
               ? <button type="button" onClick={() => void find()} disabled={busy.has("find")} className={primary}>{busy.has("find") ? "Unlocking…" : `Unlock 1 person (${left} left today)`}</button>
-              : <a href="/home?tab=pro" className={primary}>Get unlimited verified contacts with Pro</a>}
-            {left > 0 && <a href="/home?tab=pro" className={quiet}>Pro: unlimited verified contacts</a>}
+              : <a href="/home?tab=pro" className={primary}>Get verified contacts at {PRO_COMPANIES_PER_MONTH} companies a month with Pro</a>}
+            {left > 0 && <a href="/home?tab=pro" className={quiet}>Pro: verified contacts at {PRO_COMPANIES_PER_MONTH} companies a month</a>}
           </div>
         </div>
         {(blocked || (left === 0 && note)) && <p className="m-0 text-[13px] text-[#F5A524]">{blocked || note}</p>}

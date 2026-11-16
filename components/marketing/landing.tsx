@@ -70,7 +70,7 @@ export function Landing() {
                   Sign up free
                 </Link>
               </div>
-              <p className="m-0 text-[13px] text-[#9A9AA3]">Free for students, no card. The tracker is free and unlimited. Pro is $29.99 a month or $100 a semester (through May), and some schools cover it.</p>
+              <p className="m-0 text-[13px] text-[#9A9AA3]">Free for students, no card. The tracker is free and unlimited. Pro is $29.99 a month or $199 a year, and some schools cover it.</p>
             </div>
             <div className="flex min-w-0 flex-[1_1_480px] flex-col items-center gap-[22px]">
               <SpiderDialogue />
@@ -168,7 +168,7 @@ export function Landing() {
                     <p className={`m-0 ${PIXEL} text-xs leading-relaxed`}>{free ? "Free for students" : plan.name}</p>
                     <p className="m-0 text-[44px] font-bold leading-none tracking-[-1.5px]">
                       {plan.priceLabel}
-                      {plan.monthly && <span className="text-sm font-normal tracking-normal text-[#9A9AA3]"> / month {plan.semesterLabel}</span>}
+                      {plan.monthly && <span className="text-sm font-normal tracking-normal text-[#9A9AA3]"> / month {plan.yearLabel}</span>}
                     </p>
                     <ul className="m-0 flex flex-1 list-disc flex-col gap-2 pl-[18px] text-sm leading-[1.4] text-[#B4B4BC]">
                       {features.map((feature) => <li key={feature}>{feature}</li>)}
