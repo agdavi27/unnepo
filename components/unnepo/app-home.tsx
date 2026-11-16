@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
-import { CREDIT_COST, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
+import { CREDIT_COST, ENTERPRISE_PLAN, PRO_COMPANIES_PER_MONTH, PUBLIC_PLANS } from "@/lib/config";
 import type { planUsage } from "@/lib/apply/limits";
 import { Logo } from "@/components/brand/logo";
 import { SpiderSettings } from "@/components/unnepo/spider-settings";
@@ -54,7 +54,7 @@ const VIEWS: { id: View; label: string }[] = [
 
 /** What Pro does that Free doesn't, on the Upgrade to Pro page. */
 const PRO_REASONS: Array<[string, string]> = [
-  ["Unlimited verified contacts at every company", "Up to 3 people at each company (recruiters, hiring managers and the team), each with a verified work email, and more on request. Free unlocks 2 people a day, one per company."],
+  [`Verified contacts at ${PRO_COMPANIES_PER_MONTH} companies a month`, "Up to 3 people at each company (recruiters, hiring managers and the team), each with a verified work email, and more on request. Free unlocks 2 people a day, one per company."],
   ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 3 general ones a day."],
   ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 3 a day."],
   ["Unlimited autofill that answers the questions too", "Free has 3 full autofills a day, then fills your basic details."],
@@ -396,7 +396,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
                         ) : null}
                       </div>
                       <p className="mt-3 text-3xl font-bold tabular-nums">{plan.priceLabel}<span className="text-sm font-normal text-muted">{plan.monthly ? " / month" : ""}</span></p>
-                      {plan.semesterLabel && <p className="mt-1 text-xs text-faint">{plan.semesterLabel}</p>}
+                      {plan.yearLabel && <p className="mt-1 text-xs text-faint">{plan.yearLabel}</p>}
                       <p className="mt-1 text-sm text-muted">{plan.blurb}</p>
                       <p className="mt-4 text-sm font-medium">{plan.applicationsLabel}</p>
                       <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-sm text-muted">{plan.features.map((feature) => <li key={feature}>{feature}</li>)}</ul>
@@ -414,7 +414,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
                         ) : plan.monthly ? (
                           <>
                             <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: plan.id, billing: "monthly" })} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{subscribed ? "Switch" : "Upgrade"} to {plan.name}</button>
-                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: plan.id, billing: "semester" })} className="mt-2 w-full rounded-xl border border-line px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-50">Pay by the semester</button>
+                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: plan.id, billing: "year" })} className="mt-2 w-full rounded-xl border border-line px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-50">Pay yearly</button>
                           </>
                         ) : null}
                       </div>
@@ -451,7 +451,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
  * doesn't do). Shown above every page but Settings, where the plans are.
  */
 /** Upgrade to Pro: the price, every reason, and the button to Stripe (an admin just switches their view). */
-function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin: boolean; onUpgrade: (billing: "monthly" | "semester") => void; onPlans: () => void }) {
+function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin: boolean; onUpgrade: (billing: "monthly" | "year") => void; onPlans: () => void }) {
   const pro = PUBLIC_PLANS.find((plan) => plan.id === "pro")!;
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
@@ -462,7 +462,7 @@ function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin
       </div>
       <div className="rounded-2xl border border-[#3D8BFF] bg-panel p-6">
         <p className="text-4xl font-bold tabular-nums">{pro.priceLabel}<span className="text-base font-normal text-muted"> / month</span></p>
-        {pro.semesterLabel && <p className="mt-1 text-sm text-faint">{pro.semesterLabel}</p>}
+        {pro.yearLabel && <p className="mt-1 text-sm text-faint">{pro.yearLabel}</p>}
         <ul className="m-0 mt-6 flex list-none flex-col gap-4 p-0">
           {PRO_REASONS.map(([title, why]) => (
             <li key={title} className="grid grid-cols-[20px_1fr] gap-3">
@@ -473,7 +473,7 @@ function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin
         </ul>
         <div className="mt-6 flex flex-col gap-2 sm:flex-row">
           <button type="button" disabled={busy} onClick={() => onUpgrade("monthly")} className="flex-1 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{admin ? "Switch to Pro (admin, free)" : `Upgrade to Pro, ${pro.priceLabel} a month`}</button>
-          {!admin && <button type="button" disabled={busy} onClick={() => onUpgrade("semester")} className="flex-1 rounded-xl border border-line px-4 py-2.5 text-sm hover:bg-white/5 disabled:opacity-50">Pay by the semester</button>}
+          {!admin && <button type="button" disabled={busy} onClick={() => onUpgrade("year")} className="flex-1 rounded-xl border border-line px-4 py-2.5 text-sm hover:bg-white/5 disabled:opacity-50">Pay yearly</button>}
         </div>
         <p className="mt-3 text-xs text-faint">Cancel any time. <button type="button" onClick={onPlans} className="underline underline-offset-4 hover:text-white">Compare every plan</button></p>
       </div>

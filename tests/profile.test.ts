@@ -122,17 +122,19 @@ describe("structured profile", () => {
     expect((await repo.getAccount(a))?.balance).toBe(3);
   });
 
-  it("offers Free and Pro, monthly or by the semester, with Free counted by the day and Pro unlimited", () => {
-    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.semesterLabel, plan.credits])).toEqual([["free", "$0", null, 2], ["pro", "$29.99", "or $100 a semester, through May", 20]]);
+  it("offers Free and Pro, monthly or yearly, with Free counted by the day and Pro's companies by the month", () => {
+    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.yearLabel, plan.credits])).toEqual([["free", "$0", null, 2], ["pro", "$29.99", "or $199 a year (save 45%)", 20]]);
+    expect(PUBLIC_PLANS[1].features).toContain("Verified contacts at 50 companies a month: up to 3 people at each, with verified emails");
+    expect(PUBLIC_PLANS.flatMap((plan) => plan.features).some((feature) => /unlimited (verified )?contacts|every company/i.test(feature))).toBe(false);
     expect(creditMath(1)).toBe("People at 1 company");
     expect(creditMath(40)).toBe("People at 40 companies");
     const saved = process.env.SIGNUP_CREDITS;
     delete process.env.SIGNUP_CREDITS;
     expect(serverConfig().signupCredits).toBe(3);
     expect(FREE_CREDITS).toBe(12);
-    expect(serverConfig().proPeopleLimit).toBe(100);
+    expect(serverConfig().proPeopleLimit).toBe(50);
     expect(serverConfig().proMonthlyCredits).toBe(20);
-    expect(serverConfig().proSemesterCredits).toBe(70);
+    expect(serverConfig().proYearCredits).toBe(240);
     expect(serverConfig().premiumMonthlyCredits).toBe(75);
     const pack = process.env.PACK_CREDITS;
     delete process.env.PACK_CREDITS;
@@ -140,7 +142,7 @@ describe("structured profile", () => {
     process.env.PACK_CREDITS = pack;
     expect(serverConfig().packPriceCents).toBe(1500);
     expect(serverConfig().proPriceCents).toBe(2999);
-    expect(serverConfig().proSemesterPriceCents).toBe(10000);
+    expect(serverConfig().proYearPriceCents).toBe(19900);
     expect(serverConfig().premiumPriceCents).toBe(3900);
     expect(serverConfig().premiumSemesterPriceCents).toBe(11700);
     expect(serverConfig().proAiLimit).toBe(1000);

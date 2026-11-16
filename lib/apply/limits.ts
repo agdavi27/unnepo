@@ -9,8 +9,8 @@ import { isAdminEmail } from "@/lib/services/auth";
 /**
  * Plan limits. Free has a few cover letters, answers, written emails and full autofills each day, and
  * FREE_UNLOCKS_PER_DAY unlocks: the best person at a company, each at a different company, whatever credits it has
- * (the trial spends its credits on whole lists); Pro has no limits, only hidden monthly guards (PRO_AI_LIMIT, PRO_PEOPLE_LIMIT)
- * against scripts. Days, weeks (from Monday) and months are counted in Eastern time, so they turn over at midnight
+ * (the trial spends its credits on whole lists); Pro's writing has no limit, only a hidden monthly guard (PRO_AI_LIMIT)
+ * against scripts, and its people are PRO_PEOPLE_LIMIT companies a month, which the student sees. Days, weeks (from Monday) and months are counted in Eastern time, so they turn over at midnight
  * for most students.
  * Accounts listed in UNLIMITED_CREDIT_EMAILS (comma-separated, set in Vercel) never run out of credits and
  * aren't charged them, but keep their plan, so a Free account still sees every Free limit.
@@ -19,7 +19,7 @@ import { isAdminEmail } from "@/lib/services/auth";
 /** Writing and autofill, which Free counts by the day. */
 export type UsageKind = keyof typeof FREE_LIMITS;
 /** Everything counted: people too, which Free counts by the day and paid plans by the month. */
-export type CountedKind = UsageKind | "people";
+export type CountedKind = UsageKind | "people" | "companies";
 
 export async function hasUnlimitedCredits(userId: string) {
   const list = (process.env.UNLIMITED_CREDIT_EMAILS || "").split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
@@ -78,13 +78,15 @@ const NAMES: Record<CountedKind, [string, string]> = {
   autofills: ["autofill", "autofills"],
   emails: ["written email", "written emails"],
   people: ["company", "companies"],
+  companies: ["company", "companies"],
 };
 
 /** The line for a tool that's run out (or is down to its last one). The count itself is the badge in each box's corner. */
 function usesNote(kind: CountedKind, left: number, free: boolean, cap: number) {
   const [one, many] = NAMES[kind];
-  if (kind === "people" && free) return left > 0 ? "" : `You've used today's ${FREE_UNLOCKS_PER_DAY} unlocks. Free unlocks ${FREE_UNLOCKS_PER_DAY} people a day, each at a different company. More tomorrow, or Pro finds unlimited verified contacts.`;
+  if (kind === "people" && free) return left > 0 ? "" : `You've used today's ${FREE_UNLOCKS_PER_DAY} unlocks. Free unlocks ${FREE_UNLOCKS_PER_DAY} people a day, each at a different company. More tomorrow, or Pro finds verified contacts.`;
   if (left > 0) return free && left === 1 && kind !== "people" ? `Only 1 ${one} left today` : "";
+  if (!free && kind === "people") return `You've used this month's ${cap} companies. Pro finds people at ${cap} companies a month; more on the 1st.`;
   if (!free) return `That's a lot of ${many} this month (${cap}). More on the 1st, or write to us if you need more sooner.`;
   if (kind === "autofills") return `Today's ${FREE_LIMITS.autofills} full autofills are used. Autofill still fills your basic details; Pro answers the questions too, with no limit.`;
   return `No ${many} left today. More tomorrow, or Pro has no limit.`;
@@ -123,8 +125,9 @@ export async function planUsage(userId: string) {
   const people = (() => {
     if (shownUnlimited) return { used: 0, left: 999, allowance: 999, credits, paid: true, note: "", badge: "Unlimited" };
     if (paid) {
-      const left = Math.max(0, config.proPeopleLimit - monthly("people"));
-      return { used: monthly("people"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, config.proPeopleLimit), badge: "Unlimited" };
+      // Counted apart from "people", so the Free unlocks used earlier in the month don't come out of Pro's.
+      const left = Math.max(0, config.proPeopleLimit - monthly("companies"));
+      return { used: monthly("companies"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, config.proPeopleLimit), badge: `${left} of ${config.proPeopleLimit} companies left this month` };
     }
     // Free unlocks FREE_UNLOCKS_PER_DAY people a day, credits or not. The trial spends its credits on whole lists.
     if (free) {
@@ -159,6 +162,7 @@ export async function spendPeople(userId: string, way: PeopleWay, key: string, n
   if (way === "unlimited") return true;
   if (way === "credit") return !(await repo.spendCredits({ userId, amount: 1, idempotencyKey: key, note, entryType: "unlock_debit" })).insufficient;
   await countUse(userId, "people");
+  if (!(await planState(userId)).free) await countUse(userId, "companies");
   return true;
 }
 

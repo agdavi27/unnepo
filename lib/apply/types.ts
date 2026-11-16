@@ -236,7 +236,7 @@ export type ApplicationContact = {
   updatedAt: string;
 };
 
-export type UsageCounts = { letters?: number; answers?: number; autofills?: number; emails?: number; people?: number };
+export type UsageCounts = { letters?: number; answers?: number; autofills?: number; emails?: number; people?: number; /** Companies searched on a paid plan, counted apart so Free's unlocks don't use up Pro's month. */ companies?: number };
 
 /** Reusable answers for application forms. Only what the student typed or what appears in their resume. */
 export type ApplicationProfile = {

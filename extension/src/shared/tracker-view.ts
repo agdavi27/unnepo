@@ -323,7 +323,7 @@ function peopleCard(job: TrackerJob) {
   const posted = job.postedRecruiter && !job.contacts.some((person) => person.role === "job_poster")
     ? `<p class="small">Posted by <strong>${escape(job.postedRecruiter.name)}</strong>${job.postedRecruiter.title ? `, ${escape(job.postedRecruiter.title)}` : ""}${job.postedRecruiter.linkedinUrl ? ` · <a href="${escape(job.postedRecruiter.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</p>`
     : "";
-  // The corner says how many unlocks are left: "2 of 2 unlocks left today" on Free, "Unlimited" on Pro.
+  // The corner says how many unlocks are left: "2 of 2 unlocks left today" on Free, "12 of 50 companies left this month" on Pro.
   const badge = store.tracker?.peopleBadge;
   const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${job.contacts.length ? ` · ${shownPeople(job).length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
   if (!isAppliedJob(job)) {
@@ -350,7 +350,7 @@ function peopleCard(job: TrackerJob) {
       <p class="small">Free unlocks <strong>${perDay} people a day</strong>, each at a different company. You have <strong${left ? "" : ' style="color: var(--warn)"'}>${left} of ${perDay}</strong> left today.</p>
       ${left
         ? `<button type="button" class="btn primary" data-find-people="${job.id}" ${busy ? "disabled" : ""}>${busy ? "Unlocking…" : `Unlock 1 person (${left} left today)`}</button>`
-        : `<button type="button" class="btn primary" data-upgrade>Get unlimited verified contacts with Pro</button>`}
+        : `<button type="button" class="btn primary" data-upgrade>Get more verified contacts with Pro</button>`}
       ${blocked ? `<p class="small" style="color: var(--warn)">${escape(blocked)}</p>` : ""}</section>`;
   }
   if (job.contactsStatus === "idle" || (preview && !store.tracker?.free)) {

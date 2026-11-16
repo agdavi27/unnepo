@@ -813,6 +813,7 @@ export async function runContactDiscovery(userId: string, applicationId: string,
     const before = await applicationContacts.list(userId, others.map((other) => other.id));
     found = await findPeopleForApplication(userId, app, {
       school: info.context.school,
+      few: free,
       facts: { pastEmployers: resume.experience.map((job) => job.company).filter(Boolean) },
       known: before.filter((row) => row.email && !row.name.includes("*")).map((row) => ({ email: row.email!, name: row.name, verified: row.emailSource === "apollo" || row.emailSource === "hunter" || row.emailSource === "pattern" || row.emailSource === "website" })),
       progress: async (text) => { await applications.update(userId, app.id, { contactsMessage: text }); },

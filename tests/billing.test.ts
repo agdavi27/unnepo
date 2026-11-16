@@ -85,7 +85,9 @@ describe("checkout", () => {
   it("only sells what's on the plan cards", () => {
     expect(checkoutKind("pro", "monthly")).toBe("pro");
     expect(checkoutKind("pro", undefined)).toBe("pro");
-    expect(checkoutKind("pro", "semester")).toBe("pro_semester");
+    expect(checkoutKind("pro", "year")).toBe("pro_year");
+    // Older pages still send "semester": that's the yearly plan now.
+    expect(checkoutKind("pro", "semester")).toBe("pro_year");
     expect(checkoutKind("pack", undefined)).toBe("pack");
     // Premium isn't sold any more; students already on it keep it.
     for (const plan of ["premium", "grind", "free", "", undefined, { plan: "pro" }]) expect(() => checkoutKind(plan, "monthly")).toThrow("Choose Pro.");
@@ -103,15 +105,17 @@ describe("checkout", () => {
     expect(session.subscription_data.metadata).toMatchObject({ userId: user.id, kind: "pro", plan: "pro", credits: "20" });
   });
 
-  it("charges $100 for a semester with a semester of credits, on an interval that can't renew before May", async () => {
+  it("charges $199 for a year, renewing every twelve months, with no end date set", async () => {
     const user = await student();
-    await createStripeCheckout(user, "pro_semester", ORIGIN);
+    await createStripeCheckout(user, "pro_year", ORIGIN);
     const [pro] = api.checkout.mock.calls.map((call) => call[0]);
-    expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 10000, recurring: { interval: "month", interval_count: 12 } });
-    expect(pro.metadata.credits).toBe("70");
+    expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 19900, recurring: { interval: "month", interval_count: 12 } });
+    expect(pro.metadata).toMatchObject({ kind: "pro_year", plan: "pro", credits: "240" });
+    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro_year", subscription: "sub_year", credits: "240" }));
+    expect(api.update).not.toHaveBeenCalled();
   });
 
-  it("ends a paid semester on May 31 without proration, and leaves monthly Pro alone", async () => {
+  it("still ends a semester bought before (no longer sold) on May 31, and leaves monthly Pro alone", async () => {
     const user = await student();
     await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro_semester", subscription: "sub_sem", credits: "70" }));
     expect(api.update).toHaveBeenCalledWith("sub_sem", { cancel_at: Math.floor(semesterEndsAt().getTime() / 1000), proration_behavior: "none" });
@@ -144,7 +148,7 @@ describe("checkout", () => {
     const user = await student();
     await applyVerifiedStripeEvent(paidInvoice(user.id));
     await expect(createStripeCheckout(user, "pro", ORIGIN)).rejects.toThrow("already on this plan");
-    await createStripeCheckout(user, "pro_semester", ORIGIN);
+    await createStripeCheckout(user, "pro_year", ORIGIN);
     const session = api.checkout.mock.calls[0][0];
     expect(session.customer).toBe("cus_1");
     expect(session.customer_email).toBeUndefined();

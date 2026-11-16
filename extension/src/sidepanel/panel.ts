@@ -1375,7 +1375,7 @@ function profileCard(state: PanelState) {
       <span class="me-line"><span>${escape(plan)}</span><span aria-hidden="true">·</span>${profile}</span>
       <div class="me-stats" aria-label="${free ? "Left today" : "Your plan"}">
         ${free ? `${stat(me.usage?.letters.left, "letters")}${stat(me.usage?.answers.left, "answers")}${stat(me.usage?.autofills.left, "fills")}${stat(me.usage?.people.left, "unlocks")}`
-          : `${stat(credits, "")}<a class="me-link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a>`}
+          : `${stat(credits, me.unlimitedCredits ? "writing" : "")}${me.unlimitedCredits && me.usage && me.usage.people.left < 999 ? stat(me.usage.people.left, "companies left this month") : ""}<a class="me-link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a>`}
       </div>
       ${free ? `<div class="me-reset"><span>Left today · resets at ${escape(resetTime())} tonight</span><a class="btn accent small-btn" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade</a></div>` : ""}
       ${me.admin ? adminPlanSwitch(me.planPreview ?? null) : ""}
