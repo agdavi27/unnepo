@@ -129,35 +129,64 @@ function drawStep() {
   root.querySelector<HTMLButtonElement>(".tour-next")!.focus();
 }
 
+/** Whether the part a step points at is on the page and can be seen (the spider is hidden while he's off typing). */
+function shown(target: HTMLElement | null) {
+  if (!target) return false;
+  const rect = target.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0 && getComputedStyle(target).visibility !== "hidden";
+}
+
+/**
+ * Puts the hole around the part this step talks about, the arrow at it, and the card beside it, so all three fit
+ * whatever size the panel is. Chrome doesn't let an extension set its side panel's width, so the tour fits the panel
+ * instead: the part is scrolled into view, and the card goes on the side with room for it, measured, never on top
+ * of the part, and scrolls inside itself when the panel is too short for all of it.
+ */
 function position() {
   if (!root) return;
-  const target = document.querySelector<HTMLElement>(STEPS[step].target);
+  let target = document.querySelector<HTMLElement>(STEPS[step].target);
+  // The spider is off typing on a job's page (hidden up here): point at the logo and his line instead of nothing.
+  if (!shown(target) && STEPS[step].target === "#spider") target = document.querySelector<HTMLElement>(".top-text");
   const hole = root.querySelector<HTMLElement>(".tour-hole")!;
   const arrow = root.querySelector<SVGElement>(".tour-arrow")!;
   const card = root.querySelector<HTMLElement>(".tour-card")!;
-  const rect = target && target.getBoundingClientRect().height > 0 ? target.getBoundingClientRect() : null;
-  if (!rect) {
+  if (!target || !shown(target)) {
     // Nothing to point at: the card in the middle, the whole panel dimmed.
     hole.style.cssText = "left:50%;top:50%;width:0;height:0;";
     arrow.style.display = "none";
-    card.style.cssText = "top:50%;transform:translateY(-50%);";
+    card.style.cssText = `top:50%;transform:translateY(-50%);max-height:${window.innerHeight - 24}px;overflow-y:auto;`;
     return;
   }
+  // Scrolled out of sight (the spider, once the page is scrolled down): bring it back first.
+  let rect = target.getBoundingClientRect();
+  if (rect.top < 0 || rect.bottom > window.innerHeight) {
+    target.scrollIntoView({ block: "nearest", behavior: "instant" as ScrollBehavior });
+    rect = target.getBoundingClientRect();
+  }
   const pad = 6;
-  hole.style.cssText = `left:${rect.left - pad}px;top:${rect.top - pad}px;width:${rect.width + pad * 2}px;height:${rect.height + pad * 2}px;`;
+  const gap = 54;
+  const edge = 10;
+  hole.style.cssText = `left:${rect.left - pad}px;top:${Math.max(rect.top - pad, 2)}px;width:${rect.width + pad * 2}px;height:${Math.min(rect.height + pad * 2, window.innerHeight - 4)}px;`;
   arrow.style.display = "";
   const centre = rect.left + rect.width / 2;
   const arrowLeft = Math.min(Math.max(centre - 17, 8), window.innerWidth - 42);
-  // Room below the target (the spider at the top): the card goes under it, the arrow pointing up. Otherwise (the
-  // tabs along the bottom) above it, the arrow pointing down.
-  const below = rect.bottom + 230 < window.innerHeight;
+  // The card's real height at this width, with nothing limiting it.
+  card.style.cssText = "top:0;visibility:hidden;";
+  const needed = card.offsetHeight;
+  const roomBelow = window.innerHeight - (rect.bottom + pad + gap) - edge;
+  const roomAbove = rect.top - pad - gap - edge;
+  // Under the part when it fits there (the spider at the top), else over it (the tabs along the bottom), else
+  // whichever side has more room, with the card scrolling inside itself.
+  const below = needed <= roomBelow || (needed > roomAbove && roomBelow >= roomAbove);
+  const room = Math.max(below ? roomBelow : roomAbove, 120);
+  const fit = needed > room ? `max-height:${room}px;overflow-y:auto;` : "";
   if (below) {
     arrow.style.cssText = `left:${arrowLeft}px;top:${rect.bottom + pad + 4}px;`;
     arrow.classList.remove("down");
-    card.style.cssText = `top:${rect.bottom + pad + 54}px;`;
+    card.style.cssText = `top:${rect.bottom + pad + gap}px;${fit}`;
   } else {
     arrow.style.cssText = `left:${arrowLeft}px;top:${rect.top - pad - 48}px;`;
     arrow.classList.add("down");
-    card.style.cssText = `bottom:${window.innerHeight - rect.top + pad + 54}px;`;
+    card.style.cssText = `bottom:${window.innerHeight - rect.top + pad + gap}px;${fit}`;
   }
 }
