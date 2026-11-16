@@ -182,6 +182,21 @@ export function companyNames(app: Pick<JobApplication, "company" | "jobUrl">) {
 }
 
 /**
+ * "Find with LinkedIn": the company's website and email format, from the free sources only (a format learned
+ * before, the company's own pages), never a paid lookup. The names the student read off LinkedIn help match an
+ * address on the website to its owner. No format known: the pattern is null and the panel guesses first.last.
+ */
+export async function companyEmailFormat(userId: string, app: JobApplication, options: { website?: string; names?: string[] } = {}) {
+  const typed = options.website?.trim() ?? "";
+  const given = typed ? siteDomain(/^https?:\/\//i.test(typed) ? typed : `https://${typed}`) : null;
+  if (typed && !given) throw new ServiceError("That doesn't look like the company's own website. Try something like acme.com.", "website", 400);
+  const domain = given ?? (await companyDomains(userId, app))[0] ?? null;
+  if (!domain) return { domain: null, pattern: null, acceptAll: false, source: "none" };
+  const format = await learnFormat(userId, domain, [], (options.names ?? []).slice(0, 40), { useHunter: false });
+  return { domain, pattern: format.pattern, acceptAll: format.acceptAll, source: format.source };
+}
+
+/**
  * The company's possible websites, most likely first: one that found people before, the posting's own
  * site, Unnepo's list of known companies, then Apollo's matches whose name fits. A guess that found nobody
  * is never kept, so a wrong match can't stick.
