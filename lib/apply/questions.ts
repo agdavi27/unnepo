@@ -1,4 +1,4 @@
-import { bestOption } from "@/lib/apply/options";
+import { bestOption, dialCodeOption } from "@/lib/apply/options";
 import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types";
 
 /**
@@ -7,14 +7,16 @@ import type { ApplicationProfile, ApplicationQuestion } from "@/lib/apply/types"
  */
 const SENSITIVE = /\b(gender|sex|pronouns?|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|military|disabilit|sexual orientation|transgender|lgbt|age|date of birth|birth ?date|criminal|convict|felony|arrest|salary|compensation|pay expectations?|desired pay|visa|sponsor|sponsorship|authori[sz]ed to work|work authori[sz]ation|right to work|citizen|citizenship|social security|ssn|religio|marital|national origin|background check|drug test|entitled to work|eligible to work|legally|attest|attestation|acknowledge?|acknowledgement|privacy (?:policy|notice)|consent|certify|non-compete|non-solicitation|agree)\b/i;
 
-type StandardField = keyof Pick<ApplicationProfile, "firstName" | "middleName" | "lastName" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "phoneCountry" | "classYear";
+type StandardField = keyof Pick<ApplicationProfile, "firstName" | "middleName" | "lastName" | "suffix" | "salutation" | "email" | "phone" | "linkedin" | "website" | "github" | "city" | "addressLine1" | "state" | "postalCode" | "country"> | "fullName" | "school" | "major" | "graduationYear" | "resume" | "coverLetter" | "phoneType" | "phoneExtension" | "hearAbout" | "currentStudent" | "phoneCountry" | "classYear";
 
 const STANDARD: Array<[RegExp, StandardField]> = [
   [/^(legal )?first name\b|^given name/i, "firstName"],
   [/^(legal )?last name\b|^surname|^family name/i, "lastName"],
   [/^(legal )?middle (name|initial)\b|^m\.?i\.?$/i, "middleName"],
+  [/^((name|generational) )?suffix\b|^suffix\b|\bname suffix\b|^(jr|sr)\.?\s*\//i, "suffix"],
+  [/^(salutation|(name )?prefix|courtesy title|honorific|title \((mr|ms|mrs|mx|dr)\b)|^(mr|ms|mrs|mx)\.?\s*\//i, "salutation"],
   [/^preferred (first )?name\b|^nickname/i, "firstName"],
-  [/^(full |legal )?name\b(?!.*(company|school|employer|reference|university))/i, "fullName"],
+  [/^(full |legal )?name\b(?!.*(company|school|employer|reference|university|suffix|prefix|salutation|title|middle|initial|pronunciation))/i, "fullName"],
   [/currently (a )?(student|enrolled)|are you (a )?(current|currently enrolled) (student|undergraduate)|currently attending/i, "currentStudent"],
   [/\be-?mail\b/i, "email"],
   [/^(address line 1|street address|address 1|address|street)$/i, "addressLine1"],
@@ -146,6 +148,8 @@ function standardAnswer(field: StandardField, context: AnswerContext, label = ""
   switch (field) {
     case "firstName": return pick(nameCase(p.firstName));
     case "lastName": return pick(nameCase(p.lastName));
+    case "suffix": return pick(p.suffix ?? "");
+    case "salutation": return pick(p.salutation ?? "");
     // "Middle initial" (or a box that only takes one letter) gets just the first letter.
     case "middleName": {
       const middle = nameCase(p.middleName ?? "").trim();
@@ -238,11 +242,15 @@ export function eligibilityAnswer(label: string, profile: ApplicationProfile) {
 
 /** Other names sites use for the same answer. */
 const SAME_ANSWER: Record<string, string[]> = {
+  none: ["N/A", "NA", "Not applicable", "No suffix"],
   mobile: ["Cell", "Cell Phone", "Mobile Phone", "Cellular", "Personal Mobile"],
   freshman: ["First year", "1st year", "Year 1", "First-year"], sophomore: ["Second year", "2nd year", "Year 2"], junior: ["Third year", "3rd year", "Year 3"], senior: ["Fourth year", "4th year", "Year 4"],
   "graduate student": ["Graduate", "Masters", "Master's student", "Graduate Student"],
   "company website": ["Company Careers Site", "Company Career Site", "Careers Site", "Career Site", "Careers Page", "Career Website", "Corporate Website", "Website", "Company Web Site", "Job Board", "Online Job Board", "Internet", "Online", "Other"],
 };
+
+/** A suffix list's "no suffix" option. */
+const NO_SUFFIX = /^(none|n\/?a|not applicable|no suffix|-+|—)$/i;
 
 /** The answer and the other ways sites word it, in order of preference. */
 export function answerChoices(answer: string) {
@@ -373,11 +381,17 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
       if (answer) return { ...question, answer, source: "saved", evidence: null };
     }
     if (sensitive || question.sensitive) return { ...question, sensitive: true, answer: null, source: null, evidence: null };
+    // No suffix (most students): "None" where the list offers it, otherwise left empty. Never another suffix.
+    if (field === "suffix" && !context.profile.suffix?.trim()) {
+      // A dropdown whose options aren't known yet gets "None", which the page only picks if its list has it.
+      const none = question.options.length ? question.options.find((option) => NO_SUFFIX.test(option.trim())) ?? null : question.kind === "select" ? "None" : null;
+      return { ...question, answer: none, source: none ? "default" : null, evidence: null };
+    }
     const fileMatches = (field === "resume" || field === "coverLetter") === (question.kind === "file");
     if (field && fileMatches && question.label.length <= 70 && question.kind !== "checkbox" && question.kind !== "multiselect") {
       const found = standardAnswer(field, context, question.label);
       if (found) {
-        const answer = question.kind === "select" ? matchOption(found.answer, question.options) : found.answer;
+        const answer = field === "phoneCountry" && question.options.length ? dialCodeOption(found.answer, question.options) : question.kind === "select" ? matchOption(found.answer, question.options) : found.answer;
         if (answer) return { ...question, answer, source: found.source, evidence: null };
       }
     }

@@ -90,3 +90,45 @@ export function degreeAnswer(degree: string, options: string[]) {
   }
   return null;
 }
+
+/** Dialing codes for the countries students most often apply from. */
+const DIAL_CODES: Record<string, string> = {
+  "united states": "1", "united states of america": "1", usa: "1", us: "1", canada: "1", "united kingdom": "44", uk: "44", "great britain": "44",
+  ireland: "353", india: "91", china: "86", "hong kong": "852", taiwan: "886", japan: "81", "south korea": "82", korea: "82", singapore: "65",
+  australia: "61", "new zealand": "64", mexico: "52", brazil: "55", germany: "49", france: "33", spain: "34", italy: "39", netherlands: "31",
+  switzerland: "41", sweden: "46", israel: "972", nigeria: "234", kenya: "254", ghana: "233", "south africa": "27", pakistan: "92", bangladesh: "880",
+  vietnam: "84", philippines: "63", indonesia: "62", turkey: "90", egypt: "20", "united arab emirates": "971", "saudi arabia": "966",
+};
+/** The names an option may use for a country: "United States" is also "US", "USA" and the flag. */
+const COUNTRY_NAMES: Record<string, RegExp> = {
+  "1us": /\b(united states|u\.?s\.?a?\.?|america)\b|🇺🇸/i,
+  "1ca": /\b(canada|ca|can)\b|🇨🇦/i,
+  "44": /\b(united kingdom|u\.?k\.?|great britain|britain)\b|🇬🇧/i,
+};
+
+/** The dialing code an option shows: "+1", "(+44)", "US +1", or an option that's only the digits. */
+function codeIn(option: string) {
+  const plus = option.match(/\+\s?(\d{1,4})(?!\d)/);
+  if (plus) return plus[1];
+  const digits = option.trim().match(/^(\d{1,4})$/);
+  return digits ? digits[1] : null;
+}
+
+/**
+ * The option for a phone's country code, however the site words it: "United States of America (+1)",
+ * "US +1", "+1", "🇺🇸 +1", or "1". The student's country, with the United States when none is set. Where
+ * several options share a code (+1 is the US and Canada), the one naming the country wins; a list of bare
+ * codes takes the first.
+ */
+export function dialCodeOption(country: string, options: string[]) {
+  const named = country.trim() || "United States";
+  const direct = bestOption(named, options);
+  if (direct) return direct;
+  const key = bare(named);
+  const code = codeIn(named) ?? DIAL_CODES[key] ?? DIAL_CODES[key.replace(/^the /, "")];
+  if (!code) return null;
+  const same = options.filter((option) => codeIn(option) === code);
+  if (same.length <= 1) return same[0] ?? null;
+  const nameTest = code === "1" ? COUNTRY_NAMES[/canada/i.test(named) ? "1ca" : "1us"] : COUNTRY_NAMES[code] ?? new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+  return same.find((option) => nameTest.test(option)) ?? (same.every((option) => !/[a-z]/i.test(option)) ? same[0] : null);
+}

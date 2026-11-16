@@ -1,7 +1,7 @@
-import { bestOption } from "@/lib/apply/options";
+import { bestOption, dialCodeOption } from "@/lib/apply/options";
 import { answerChoices } from "@/lib/apply/questions";
 import type { Answer, DropdownMethod, FileData, FillAttempt, FillFailure, PageField } from "../shared/types";
-import { attachFile, chooseCustom, chooseNativeSelect, FillError, isDropdownInput, press, shownChoice, sleep, typeInto, typeKeys, waysFrom, YES } from "./dom";
+import { attachFile, chooseCustom, chooseNativeSelect, FillError, isDropdownInput, opensList, press, shownChoice, sleep, typeInto, typeKeys, waysFrom, YES } from "./dom";
 import { findMarked, isEmpty, labelOf, rootOf } from "./scan";
 
 /**
@@ -68,6 +68,9 @@ function pickLabel(answer: string, labels: string[]) {
 }
 
 const COUNTRY_CODE = /country (phone )?code|phone (country )?code|dialing code|^country code$|calling code/i;
+
+/** Lists matched in their own way: a phone's country code ("+1", "US +1", "United States (+1)"). */
+const pickFor = (field: PageField, value: string) => (COUNTRY_CODE.test(field.label) ? (texts: string[]) => dialCodeOption(value, texts) : undefined);
 const PHONE_NUMBER = /\b(phone|mobile|cell)\b/i;
 
 /**
@@ -158,7 +161,7 @@ async function fillOne(field: PageField, answer: Answer, files: { resume: FileDa
     }
     case "select":
       if (way > 0) return null;
-      chooseNativeSelect(el as HTMLSelectElement, value);
+      chooseNativeSelect(el as HTMLSelectElement, value, pickFor(field, value));
       return "select";
     case "combobox": {
       // A skills box takes one skill at a time: each is searched for and added.
@@ -181,7 +184,7 @@ async function fillOne(field: PageField, answer: Answer, files: { resume: FileDa
       if (way > 1) return null;
       const ways = way === 0 ? dropdownWays : [...dropdownWays].reverse();
       // Searchable boxes filter as you type; button dropdowns just open.
-      return chooseCustom(el, value, { type: el instanceof HTMLInputElement ? value : undefined, ways });
+      return chooseCustom(el, value, { type: el instanceof HTMLInputElement ? value : undefined, ways, pick: pickFor(field, value) });
     }
     case "file": {
       if (way > 0) return null;
@@ -192,9 +195,9 @@ async function fillOne(field: PageField, answer: Answer, files: { resume: FileDa
     }
     default: {
       // A box that opens a list only takes a listed choice: never typed words.
-      if (isDropdownInput(el)) {
+      if (isDropdownInput(el) || (way === 0 && el instanceof HTMLInputElement && field.type === "text" && (await opensList(el)))) {
         if (way > 1) return null;
-        return chooseCustom(el, value, { type: value, ways: way === 0 ? dropdownWays : [...dropdownWays].reverse() });
+        return chooseCustom(el, value, { type: value, ways: way === 0 ? dropdownWays : [...dropdownWays].reverse(), pick: pickFor(field, value) });
       }
       if (way >= TEXT_WAYS.length) return null;
       const box = el as HTMLInputElement | HTMLTextAreaElement;

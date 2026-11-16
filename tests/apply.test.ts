@@ -1036,6 +1036,20 @@ describe("people after applying", () => {
 });
 
 describe("questions from the latest round", () => {
+  it("picks a phone country code however the list words it, and answers suffix and title only from the profile", () => {
+    const plan = (label: string, options: string[], extra = {}) => planAnswers([q("x", label, "select", options)], { ...context, profile: { ...profile, ...extra } })[0].answer;
+    expect(plan("Country Code", ["+44", "+1"])).toBe("+1");
+    expect(plan("Phone Country Code", ["CA +1", "US +1", "UK +44"])).toBe("US +1");
+    expect(plan("Country Code", ["CA +1", "US +1"], { country: "Canada" })).toBe("CA +1");
+    expect(plan("Country Code", ["Afghanistan (+93)", "United States (+1)"])).toBe("United States (+1)");
+    expect(classifyQuestion("Name Suffix").field).toBe("suffix");
+    expect(plan("Suffix", ["Jr.", "Sr.", "III"])).toBeNull();
+    expect(plan("Suffix", ["None", "Jr.", "Sr."])).toBe("None");
+    expect(plan("Suffix", ["None", "Jr.", "Sr."], { suffix: "Jr" })).toBe("Jr.");
+    expect(plan("Salutation", ["Mr.", "Ms.", "Dr."])).toBeNull();
+    expect(plan("Salutation", ["Mr.", "Ms.", "Dr."], { salutation: "Ms" })).toBe("Ms.");
+  });
+
   it("fills a middle name, or its first letter for a middle initial, and nothing when there isn't one", () => {
     const withMiddle = { ...context, profile: { ...profile, middleName: "alex" } };
     const [name, initial] = planAnswers([q("m", "Middle Name", "text"), q("mi", "Middle Initial", "text")], withMiddle);
