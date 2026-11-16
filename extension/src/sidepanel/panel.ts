@@ -1,5 +1,6 @@
 import type { SpiderLook } from "@/lib/spiders";
 import { notJobTitle } from "@/lib/apply/job-title";
+import { notCompanyName } from "@/lib/apply/company-name";
 import { heroSpiderSvg, typingSpiderSvg } from "../shared/hero-spider";
 import { PASSWORD_RULES, unmetRules } from "../shared/password";
 import { spiderRects, H as SPRITE_H, W as SPRITE_W } from "../shared/sprite";
@@ -390,7 +391,7 @@ function toolsPage(state: PanelState, extra = "") {
         <button type="button" class="tile add-tile" data-popup="addjob">${PLUS}<span class="tile-text"><span class="tile-name">Add a job</span><span class="tile-sub${asking ? " out" : ""}">${asking ? `${asking} detected` : "Log one you applied to"}</span></span></button>
       </div>
       ${manualJob.note && !popup ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
-      ${here.note && !popup ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
+      ${toolsNote() && !popup ? `<p class="small" role="status">${escape(toolsNote())}</p>` : ""}
       <div class="tool-lines">${resumeLine(state)}${letterLine()}<div id="password-slot"></div></div>
       ${extra}
     </div>`;
@@ -403,7 +404,7 @@ const PLUS = `<svg class="big-tool-icon" width="20" height="20" viewBox="0 0 24 
  * caught, each answered with one tap, then a form for one it didn't see.
  */
 function addJobPopup(state: PanelState) {
-  const onTab = jobFound(state) ? `<div class="add-part">${hereLinks()}${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}</div>` : "";
+  const onTab = jobFound(state) ? `<div class="add-part">${hereLinks()}${toolsNote() ? `<p class="small" role="status">${escape(toolsNote())}</p>` : ""}</div>` : "";
   return popupShell("Add a job", `${onTab}${detectedMenu(true)}<div class="add-part">${manualJobFields()}</div>`, 0, 0, "mini");
 }
 
@@ -695,14 +696,18 @@ async function readJobLink(url: string): Promise<LinkRead> {
   linkReading = false;
   return result;
 }
-const keepTyped = (typed: string, read: string) => (typed.trim() && !BOARD_COMPANY.test(typed.trim()) && !STATUS_TITLE.test(typed.trim()) ? typed : read || typed);
+const keepTyped = (typed: string, read: string) => (typed.trim() && !BOARD_COMPANY.test(typed.trim()) && !notCompanyName(typed) && !STATUS_TITLE.test(typed.trim()) ? typed : read || typed);
 // A status line a page shows after applying, never a job's name.
 const STATUS_TITLE = /^(applied( on .+| \d+ \w+ ago| today| yesterday)?|application (sent|submitted|received).*|job title missing)$/i;
 
 // What a job board calls itself, which isn't the employer.
 const BOARD_COMPANY = /^(handshake|joinhandshake|ziprecruiter|indeed|glassdoor|linkedin|wellfound|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|localhost|jobs?|careers?)$/i;
 type OpenedRead = { title: string; company: string; description: string; url: string; link: string; from: string };
-const here = { key: "", step: "idle" as "idle" | "reading" | "check" | "saving" | "saved", applied: true, job: null as OpenedRead | null, note: "", auto: false, savedUrl: "" };
+const here = { key: "", step: "idle" as "idle" | "reading" | "check" | "saving" | "saved", applied: true, job: null as OpenedRead | null, note: "", auto: false, savedUrl: "", savedAt: 0 };
+/** How long "✓ Success! … is added to your Applied jobs" stays on the Tools tab. The Jobs tab keeps it until the tab changes. */
+const SAVED_ON_TOOLS_MS = 3000;
+/** The job note for the Tools tab: a saved job's Success line only for its first few seconds; anything else as it is. */
+const toolsNote = () => (here.step === "saved" && Date.now() - here.savedAt > SAVED_ON_TOOLS_MS ? "" : here.note);
 function openedCard(state: PanelState) {
   const key = state.tab ? `${state.tab.id}|${state.tab.url}` : "";
   if (here.key !== key && here.step !== "saving") Object.assign(here, { key, step: "idle", job: null, note: "" });
@@ -750,6 +755,13 @@ function wireOpened(state: PanelState) {
     // Saved with one press. Whatever the page didn't say (the company, the description) is read from the
     // job's link, here and on Unnepo, so the student never has to type it.
     here.job = result.job;
+    // A company that's really one of the page's badges ("Verified listing"): the student says which company it is.
+    const readName = result.job.company.trim();
+    if (readName && (notCompanyName(readName) || BOARD_COMPANY.test(readName))) {
+      Object.assign(here, { step: "check", auto: false, note: `The page says "${readName}", which doesn't look like a company. Type the company's name, then save.` });
+      here.job.company = "";
+      return void render();
+    }
     here.auto = true;
     return save();
   };
@@ -763,7 +775,8 @@ function wireOpened(state: PanelState) {
     const result = await ask<Saved>({ type: "save-opened-job", tabId, applied: here.applied, job: here.job }).catch((): Saved => ({ ok: false, error: "Couldn't reach Unnepo." }));
     const named = result.companyMissing ? (result.title ?? "The job") : `${result.title} at ${result.company}`;
     if (result.ok) void loadTracker(true);
-    if (result.ok) Object.assign(here, { step: "saved", savedUrl: result.id ?? "", note: `✓ Success! ${named} ${here.applied ? "is added to your Applied jobs" : "is saved for later"}.${result.companyMissing ? " Unnepo is finding the company from the job's link." : ""}` });
+    if (result.ok) setTimeout(() => void render(), SAVED_ON_TOOLS_MS + 100);
+    if (result.ok) Object.assign(here, { step: "saved", savedUrl: result.id ?? "", savedAt: Date.now(), note: `✓ Success! ${named} ${here.applied ? "is added to your Applied jobs" : "is saved for later"}.${result.companyMissing ? " Unnepo is finding the company from the job's link." : ""}` });
     else Object.assign(here, { step: "check", note: result.error ?? "Couldn't save it." });
     void render();
   };

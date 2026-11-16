@@ -10,6 +10,7 @@ import { readResumeProfile, resumeFieldAnswer, resumeHash } from "@/lib/apply/re
 import { buildMapping, fastApplyOn, greenhouseSchema, knownAnswers, logTimings, questionsFromMapping, type Timings } from "@/lib/apply/fast/pipeline";
 import { MAX_REVEALS, checkBeforeWriting, findPeopleForApplication, hunterReady, revealHiddenPerson, siteDomain, writeOutreachEmails } from "@/lib/apply/contacts";
 import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
+import { notCompanyName } from "@/lib/apply/company-name";
 import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyFor, parseJobUrl, plainJobKey } from "@/lib/apply/extract";
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
@@ -263,10 +264,10 @@ export function titleMissing(title: string) {
 // What a page calls itself when it isn't the employer: job boards, and the first part of a site address.
 const BOARD_NAME = /^(handshake|joinhandshake|ziprecruiter|zip recruiter|linkedin|indeed|glassdoor|simplyhired|monster|wellfound|angellist|builtin|built in|app|www|careers?|jobs?|unknown|n\/a|company|employer|\?)$/i;
 
-/** Whether the job was saved without a real company: blank, a job site's name, or a website address. */
+/** Whether the job was saved without a real company: blank, a job site's name, a page badge ("Verified listing"), or a website address. */
 export function companyMissing(app: Pick<JobApplication, "company" | "jobUrl">) {
   const name = app.company.replace(/\s+/g, " ").trim();
-  if (isJobSiteName(name) || BOARD_NAME.test(name) || /©|\(c\) \d{4}|\ball rights reserved\b|\bcopyright\b/i.test(name)) return true;
+  if (isJobSiteName(name) || BOARD_NAME.test(name) || notCompanyName(name) || /©|\(c\) \d{4}|\ball rights reserved\b|\bcopyright\b/i.test(name)) return true;
   if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(name)) return true;
   // The scanner's last resort is the site address's first part ("mealpal" from mealpal.applytojob.com is fine,
   // "jobs" from jobs.example.com isn't): a lowercase single word that's only the host.
@@ -819,13 +820,14 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   } catch (error) {
     // Apollo's own messages mention search credits, which don't apply here; the application credit covers this.
     const reason = error instanceof ServiceError ? error.message.replace(/\s*No credits were used\.?/i, "") : "Couldn't look up people right now.";
-    await applications.update(userId, app.id, { contactsStatus: "failed", contactsMessage: `${reason} Try again.` });
+    await applications.update(userId, app.id, { contactsStatus: "failed", contactsMessage: `${reason} Try again.${free ? " Your unlock wasn't used." : ""}` });
     return;
   }
-  // Free's unlock is one person: the one the posting names, else the first with an email. The rest stay locked.
+  // Free's unlock is one person with an email: the one the posting names, else the first with one. The rest stay
+  // locked. No one with an email: nothing kept and nothing counted, so the unlock is still there to try again.
   if (free) {
     const best = freePick(found.people);
-    found = { ...found, people: best ? [best] : [], hidden: {}, locked: found.locked + Math.max(0, found.people.length - 1) + Object.keys(found.hidden).length };
+    found = { ...found, people: best?.email ? [best] : [], hidden: {}, locked: found.locked + Math.max(0, found.people.length - 1) + Object.keys(found.hidden).length };
   }
   let charged = alreadyPaid;
   // 1 credit for the job's list of people, once, and only when someone on it has an email (checked or written
@@ -843,7 +845,8 @@ export async function runContactDiscovery(userId: string, applicationId: string,
   const latest = (await applications.get(userId, app.id)) ?? app;
   const report = latest.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null };
   // Emails are written only when the student asks, one person at a time.
-  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: found.notes.join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, peoplePreview: undefined, peopleLocked: free ? found.locked : undefined, ...(charged ? { personCharged: true } : {}) } });
+  const unused = free && !charged && !found.people.length ? `No one with an email turned up at ${app.company}, so this didn't use an unlock.` : "";
+  await applications.update(userId, app.id, { companyDomain: found.domain, contactsStatus: "done", contactsMessage: [unused, ...found.notes].filter(Boolean).join(" "), fillReport: { ...report, peopleHidden: found.hidden, peopleReveals: found.reveals, peopleSearch: found.search, peopleLinks, peoplePreview: undefined, peopleLocked: free ? found.locked : undefined, ...(charged ? { personCharged: true } : {}) } });
 }
 
 /** The person Free keeps from a search: the one the posting names, else the first with an email, else the first. */
@@ -856,6 +859,7 @@ function freePick<T extends { role: string; email: string | null }>(people: T[])
  * company is already unlocked on another job (Free's unlocks are for different companies).
  */
 async function freeUnlockBlocked(userId: string, app: JobApplication) {
+  if (companyMissing(app) && !app.companyDomain) return "Add the company first, so Unnepo knows who to look for. Your unlock wasn't used.";
   const others = (await applications.list(userId)).filter((other) => other.id !== app.id && other.fillReport?.personCharged && sameCompany(other.company, app.company));
   if (others.length) return `You already unlocked someone at ${app.company} on your ${others[0].title} job. Free's unlocks are for different companies.`;
   const { people } = await planUsage(userId);
@@ -933,7 +937,7 @@ export async function retryContacts(userId: string, raw: unknown) {
   if (website && !domain) throw new ServiceError("That doesn't look like the company's own website. Try something like acme.com.", "website", 400);
   // Free: said right away when there's no unlock to spend, before anything is marked as searching.
   if (!app.fillReport?.personCharged && (await isFree(userId))) {
-    const blocked = await freeUnlockBlocked(userId, app);
+    const blocked = await freeUnlockBlocked(userId, domain ? { ...app, companyDomain: domain } : app);
     if (blocked) throw new ServiceError(blocked, "people", 402);
   }
   await applications.update(userId, app.id, { ...(domain ? { companyDomain: domain } : {}), contactsStatus: "finding", contactsMessage: "Finding the best person to connect with…" });
