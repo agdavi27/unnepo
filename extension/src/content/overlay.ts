@@ -1,0 +1,286 @@
+import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
+import type { TrackerContact, TrackerJob } from "../shared/types";
+
+/**
+ * Unnepo on the page, like Grammarly: a card in the bottom-right of a job page, in its own shadow root so the
+ * site's CSS can't touch it. The background worker puts this script on the page and tells it when an application
+ * was caught here. The card has two steps:
+ *   1. Logged: the job is saved (Undo), or Unnepo asks "Did you apply?" when it isn't sure.
+ *   2. Reach out: the people at the company, each with Email ↗, which writes the email and opens it in Gmail ready
+ *      to send (the draft never shows here), then asks "Sent?". No one yet: Find on LinkedIn or Find verified.
+ * Nothing on the page is read, and nothing is sent until a button is pressed. Later shrinks it to a small tab.
+ */
+
+type Free = { free: boolean; peopleLeft: number | null };
+type CardState = { ok: boolean; item: { id: string; title: string; company: string; state: string; sure: string } | null; applicationId: string; job: TrackerJob | null; opened: string[] } & Free;
+
+declare global { interface Window { __unnepoOverlay?: boolean } }
+
+if (!window.__unnepoOverlay) {
+  window.__unnepoOverlay = true;
+  start();
+}
+
+function start() {
+  const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
+  const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const CLOSED = "unnepoCardsClosed";
+  const closedIds = () => { try { return JSON.parse(sessionStorage.getItem(CLOSED) || "[]") as string[]; } catch { return []; } };
+  const close = (key: string) => { try { sessionStorage.setItem(CLOSED, JSON.stringify([...closedIds(), key].slice(-20))); } catch { /* storage off: closed for now */ } };
+
+  const host = document.createElement("div");
+  host.setAttribute("data-unnepo-card", "");
+  const root = host.attachShadow({ mode: "closed" });
+  let spider = spiderRects(0);
+  void storedSpiderColors().then((colors) => { spider = spiderRects(0, colors); draw(); });
+
+  /** What the card shows. `id`: the Detected jobs entry; `applicationId` once it's saved. */
+  const card = {
+    id: "", applicationId: "", data: null as CardState | null, small: false, busy: new Set<string>(), note: "",
+    /** People whose email was just opened, waiting on "Sent?". */
+    opened: new Set<string>(), sent: new Set<string>(), poll: 0,
+    /** Slid in already: redraws don't play it again. */
+    shown: false,
+  };
+
+  const AV = ["#3D8BFF", "#8B5CF6", "#EC4899", "#14B8A6", "#F59E0B", "#22C55E", "#EF4444", "#06B6D4"];
+  const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]!.toUpperCase()).join("");
+  const color = (name: string) => AV[[...name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % AV.length];
+
+  const STYLE = `
+    :host { all: initial; position: fixed; right: 20px; bottom: 20px; z-index: 2147483646; font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #111114; }
+    * { box-sizing: border-box; }
+    .card { width: 320px; max-height: calc(100vh - 40px); overflow: auto; background: #fff; border: 1px solid #E4E4EA; border-radius: 16px; box-shadow: 0 12px 32px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.08); }
+    .card.enter { animation: ${reduce ? "none" : "in .28s cubic-bezier(.2,1.2,.4,1) both"}; }
+    @keyframes in { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
+    .head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px 14px; }
+    .head svg { width: 22px; height: ${Math.round((22 * H) / W)}px; flex: none; }
+    .brand { font-weight: 700; font-size: 14px; letter-spacing: -.01em; flex: 1; }
+    .brand span { color: #3D8BFF; }
+    .icon { all: unset; cursor: pointer; width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; color: #6A6A74; font-size: 16px; }
+    .icon:hover { background: #F2F2F6; color: #111114; }
+    .icon:focus-visible, button:focus-visible, a:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
+    .step { display: flex; gap: 10px; padding: 10px 14px; border-top: 1px solid #EFEFF3; }
+    .num { flex: none; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 11px system-ui, sans-serif; background: #EFEFF3; color: #45454E; }
+    .num.done { background: #DCFCE7; color: #15803D; }
+    .num.now { background: #3D8BFF; color: #fff; }
+    .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .label { font: 600 11px system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: #6A6A74; }
+    .job { font-weight: 600; }
+    .sub { font-size: 12px; color: #5C5C66; }
+    .row { display: flex; align-items: center; gap: 8px; }
+    .person { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+    .av { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 10px system-ui, sans-serif; }
+    .who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .who b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .who span { font-size: 11.5px; color: #5C5C66; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .btn { all: unset; cursor: pointer; height: 30px; padding: 0 11px; border-radius: 9px; font: 600 12px system-ui, sans-serif; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; background: #3D8BFF; color: #fff; }
+    .btn:hover { background: #2F6FEB; }
+    .btn.ghost { background: transparent; color: #111114; box-shadow: inset 0 0 0 1px #D7D7DE; font-weight: 500; }
+    .btn.ghost:hover { background: #F5F5F7; }
+    .btn.ok { background: #16A34A; } .btn.ok:hover { background: #15803D; }
+    .btn[disabled] { cursor: default; opacity: .6; }
+    .btn.wide { flex: 1; justify-content: center; }
+    .quiet { all: unset; cursor: pointer; font-size: 12px; color: #5C5C66; text-decoration: underline; text-underline-offset: 3px; }
+    .done { font-size: 12px; color: #15803D; font-weight: 600; }
+    .note { font-size: 12px; color: #B45309; }
+    .bar { height: 4px; border-radius: 2px; background: #EFEFF3; overflow: hidden; }
+    .bar i { display: block; height: 100%; width: 40%; background: #3D8BFF; border-radius: 2px; animation: ${reduce ? "none" : "slide 1.2s ease-in-out infinite"}; }
+    @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+    .foot { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px 12px; border-top: 1px solid #EFEFF3; }
+    .pill { all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 10px; background: #fff; border: 1px solid #E4E4EA; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,.14); font-weight: 600; }
+    .pill svg { width: 20px; height: ${Math.round((20 * H) / W)}px; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #3D8BFF; }
+  `;
+
+  const spiderSvg = () => `<svg viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges" aria-hidden="true"><g transform="rotate(180 ${W / 2} ${H / 2})">${spider}</g></svg>`;
+
+  /** Step 1: the job is logged, or Unnepo asks. */
+  function stepOne(data: CardState) {
+    const item = data.item;
+    const job = data.job;
+    const title = job?.title || item?.title || "This job";
+    const company = job?.company || item?.company || "";
+    const saved = Boolean(card.applicationId);
+    const asking = !saved && item?.state === "ask";
+    return `
+      <div class="step">
+        <span class="num ${saved ? "done" : "now"}" aria-hidden="true">${saved ? "✓" : "1"}</span>
+        <div class="body">
+          <span class="label">${saved ? "Saved to your jobs" : "Did you apply?"}</span>
+          <span class="job">${escape(title)}</span>
+          ${company ? `<span class="sub">${escape(company)}</span>` : ""}
+          ${asking ? `<div class="row"><button type="button" class="btn" data-act="yes" ${card.busy.has("answer") ? "disabled" : ""}>${card.busy.has("answer") ? "Saving…" : "Yes, I applied"}</button><button type="button" class="btn ghost" data-act="no">No</button></div>`
+            : saved ? `<button type="button" class="quiet" data-act="undo" style="width: fit-content">Not applied? Undo</button>` : ""}
+        </div>
+      </div>`;
+  }
+
+  /** Free sees the one person it unlocked (the posting's first); Pro, the first three. */
+  function people(data: CardState) {
+    const list = data.job?.contacts ?? [];
+    if (!data.free) return list.slice(0, 3);
+    const pick = list.find((person) => person.role === "job_poster") ?? list.find((person) => person.email) ?? list[0];
+    return pick ? [pick] : [];
+  }
+
+  function personRow(person: TrackerContact) {
+    const key = `email:${person.id}`;
+    const emailed = card.sent.has(person.id) || person.outreachStatus !== "not_contacted";
+    const action = card.opened.has(person.id)
+      ? `<span class="row"><button type="button" class="btn ok" data-act="sent" data-id="${escape(person.id)}">Sent</button><button type="button" class="btn ghost" data-act="notyet" data-id="${escape(person.id)}">Not yet</button></span>`
+      : emailed ? `<span class="done">Emailed ✓</span>`
+      : person.email ? `<button type="button" class="btn" data-act="email" data-id="${escape(person.id)}" ${card.busy.has(key) ? "disabled" : ""}>${card.busy.has(key) ? "Writing…" : "Email ↗"}</button>`
+      : `<span class="sub">No email</span>`;
+    return `<div class="person"><span class="av" style="background:${color(person.name)}">${escape(initials(person.name))}</span><span class="who"><b>${escape(person.name)}</b><span>${escape(person.title || "")}</span></span>${action}</div>`;
+  }
+
+  /** Step 2: who to email, or finding them. */
+  function stepTwo(data: CardState) {
+    const job = data.job;
+    const saved = Boolean(card.applicationId);
+    const company = job?.company || data.item?.company || "the company";
+    let inner = `<span class="sub">Once it's saved, Unnepo finds who to email at ${escape(company)}.</span>`;
+    if (saved && job) {
+      const shown = people(data);
+      const finding = job.contactsStatus === "finding" || job.contactsStatus === "writing" || card.busy.has("find");
+      if (shown.length) {
+        inner = `${shown.map(personRow).join("")}<span class="sub">Email ↗ writes it from your resume and opens Gmail, ready to send.</span>`;
+      } else if (finding) {
+        inner = `<span class="sub">${escape(job.contactsMessage || `Finding people at ${company}…`)}</span><div class="bar" role="progressbar" aria-label="Finding people"><i></i></div>`;
+      } else {
+        const left = data.peopleLeft ?? 0;
+        const verified = data.free ? (left ? `Find verified · ${left} left` : "Verified · Pro") : "Find verified";
+        inner = `<span class="sub">${job.contactsStatus === "done" || job.contactsStatus === "failed" ? `No one found at ${escape(company)} yet.` : `Find a recruiter or someone on the team at ${escape(company)}.`}</span>
+          <div class="row"><button type="button" class="btn ghost wide" data-act="linkedin">Find on LinkedIn</button><button type="button" class="btn wide" data-act="find" ${data.free && !left ? "disabled" : ""}>${verified}</button></div>`;
+      }
+    }
+    return `
+      <div class="step">
+        <span class="num ${saved ? "now" : ""}" aria-hidden="true">2</span>
+        <div class="body"><span class="label">Reach out</span>${inner}</div>
+      </div>`;
+  }
+
+  function draw() {
+    if (!card.data) return;
+    if (!host.isConnected) document.documentElement.appendChild(host);
+    if (card.small) {
+      root.innerHTML = `<style>${STYLE}</style><button type="button" class="pill" data-act="open" aria-label="Open the Unnepo card">${spiderSvg()}<span>Reach out</span><span class="dot" aria-hidden="true"></span></button>`;
+      return;
+    }
+    root.innerHTML = `<style>${STYLE}</style>
+      <section class="card${card.shown ? "" : " enter"}" role="dialog" aria-label="Unnepo: you applied">
+        <div class="head">${spiderSvg()}<span class="brand">unnepo<span>.</span></span>
+          <button type="button" class="icon" data-act="later" aria-label="Shrink" title="Later">–</button>
+          <button type="button" class="icon" data-act="close" aria-label="Close" title="Close">×</button>
+        </div>
+        ${stepOne(card.data)}
+        ${stepTwo(card.data)}
+        ${card.note ? `<div class="step"><span class="note" role="status">${escape(card.note)}</span></div>` : ""}
+        <div class="foot"><button type="button" class="quiet" data-act="off">Don't show these cards</button>${card.sent.size ? `<button type="button" class="btn ghost" data-act="close">Done</button>` : `<button type="button" class="btn ghost" data-act="later">Later</button>`}</div>
+      </section>`;
+    card.shown = true;
+  }
+
+  async function load(fresh = false) {
+    const data = await ask<CardState>({ type: "card-state", id: card.id, applicationId: card.applicationId, fresh }).catch(() => null);
+    if (!data?.ok) return;
+    if (data.applicationId) card.applicationId = data.applicationId;
+    for (const id of data.opened) card.opened.add(id);
+    card.data = data;
+    draw();
+    // While people are being found, look again every few seconds.
+    clearTimeout(card.poll);
+    const finding = data.job && (data.job.contactsStatus === "finding" || data.job.contactsStatus === "writing");
+    if (finding) card.poll = window.setTimeout(() => void load(), 3000);
+  }
+
+  const busy = async (key: string, work: () => Promise<void>) => {
+    card.busy.add(key);
+    card.note = "";
+    draw();
+    try { await work(); } finally { card.busy.delete(key); draw(); }
+  };
+
+  root.addEventListener("click", (event) => {
+    const button = (event.target as HTMLElement).closest<HTMLElement>("[data-act]");
+    if (!button || (button as HTMLButtonElement).disabled) return;
+    const id = button.dataset.id ?? "";
+    switch (button.dataset.act) {
+      case "open": card.small = false; return draw();
+      case "later": card.small = true; return draw();
+      case "close":
+        close(card.applicationId || card.id);
+        host.remove();
+        return;
+      case "off":
+        void ask({ type: "card-off" });
+        host.remove();
+        return;
+      case "yes":
+        return void busy("answer", async () => {
+          type Answered = { ok: boolean; applicationId?: string; error?: string };
+          const result = await ask<Answered>({ type: "card-answer", id: card.id, applied: true }).catch((): Answered => ({ ok: false, error: "Couldn't reach Unnepo." }));
+          if (result.ok && result.applicationId) { card.applicationId = result.applicationId; await load(true); }
+          else card.note = result.error ?? "Couldn't save it.";
+        });
+      case "no":
+        void ask({ type: "card-answer", id: card.id, applied: false });
+        close(card.id);
+        host.remove();
+        return;
+      case "undo":
+        return void busy("undo", async () => {
+          const result = await ask<{ ok: boolean; error?: string }>({ type: "card-undo", id: card.id, applicationId: card.applicationId }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+          if (result.ok) { close(card.applicationId || card.id); host.remove(); }
+          else card.note = result.error ?? "Couldn't undo it.";
+        });
+      case "find":
+        return void busy("find", async () => {
+          const result = await ask<{ ok: boolean; error?: string }>({ type: "card-people", body: { action: "find", applicationId: card.applicationId } }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+          if (!result.ok) card.note = result.error ?? "Couldn't start the search.";
+          await load(true);
+        });
+      case "linkedin":
+        void ask<{ ok: boolean; error?: string }>({ type: "card-linkedin", applicationId: card.applicationId }).then((result) => {
+          if (!result?.ok) { card.note = result?.error ?? "Click the Unnepo icon in your toolbar."; draw(); }
+        });
+        return;
+      case "email":
+        return void busy(`email:${id}`, async () => {
+          type Wrote = { ok: boolean; error?: string; mailto?: string; cut?: boolean; body?: string };
+          const result = await ask<Wrote>({ type: "card-email", applicationId: card.applicationId, contactId: id }).catch((): Wrote => ({ ok: false, error: "Couldn't reach Unnepo." }));
+          if (!result.ok) { card.note = result.error ?? "Couldn't write the email."; return; }
+          card.opened.add(id);
+          if (result.cut && result.body) {
+            await navigator.clipboard.writeText(result.body).catch(() => undefined);
+            card.note = "The email was long, so it's copied: paste it into the email that opened.";
+          }
+          if (result.mailto) window.location.href = result.mailto;
+        });
+      case "sent":
+        card.opened.delete(id);
+        card.sent.add(id);
+        draw();
+        void ask({ type: "card-people", body: { action: "status", applicationId: card.applicationId, contactId: id, status: "emailed" } }).then(() => load());
+        return;
+      case "notyet":
+        card.opened.delete(id);
+        draw();
+        return;
+    }
+  });
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type !== "applied-card") return;
+    const key = String(message.applicationId || message.id);
+    if (closedIds().includes(key)) return;
+    // A new application on the same page (a job board's next job) takes the card over.
+    if (card.id !== message.id) Object.assign(card, { small: false, note: "", data: null, shown: false });
+    card.id = String(message.id);
+    card.applicationId = String(message.applicationId || "");
+    void load(true);
+  });
+}

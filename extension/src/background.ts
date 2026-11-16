@@ -7,6 +7,7 @@ import { dueCount, reminders } from "./shared/reminders";
 import { notJobTitle } from "@/lib/apply/job-title";
 import { notCompanyName } from "@/lib/apply/company-name";
 import { APPLIED_LINE, appliedDay } from "./shared/applied-line";
+import { composeLink, type Mailer } from "@/lib/apply/compose-link";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -417,7 +418,7 @@ async function savesByItself() {
 }
 const siteName = (url: string) => { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } };
 /** Adds a job to the menu, or updates it when it's already there (the same application, page, or job name). */
-async function noteDetected(item: Omit<Detected, "id" | "at" | "site">) {
+async function noteDetected(item: Omit<Detected, "id" | "at" | "site">, tabId?: number) {
   const list = await detectedList();
   const index = list.findIndex((other) => (item.applicationId && other.applicationId === item.applicationId) || (other.url && item.url && sameJobPage(other.url, item.url) && sameJobTitle(other, item)) || (item.company && sameJobTitle(other, item)));
   const before = index >= 0 ? list[index] : null;
@@ -426,7 +427,71 @@ async function noteDetected(item: Omit<Detected, "id" | "at" | "site">) {
   const next: Detected = keep ? { ...before!, at: Date.now() } : { ...before, ...item, id: before?.id ?? crypto.randomUUID(), at: Date.now(), site: siteName(item.url) || before?.site || "" };
   if (index >= 0) list.splice(index, 1);
   await saveDetectedList([next, ...list]);
+  // Saved, or asking: the card on the page where it happened says so and offers who to email.
+  if (tabId !== undefined && (next.state === "saved" || next.state === "ask")) void showAppliedCard(tabId, next);
   return next;
+}
+
+/**
+ * The card on the job page (content/overlay.ts): put on the page if it isn't there yet, then told which job.
+ * Not while signed out, nor when the student turned the cards off.
+ */
+async function showAppliedCard(tabId: number, item: Detected) {
+  const { token } = await settings();
+  const { overlayOff } = await chrome.storage.local.get("overlayOff");
+  if (!token || overlayOff === true) return;
+  try {
+    await chrome.scripting.executeScript({ target: { tabId, frameIds: [0] }, files: ["content/overlay.js"] });
+    await chrome.tabs.sendMessage(tabId, { type: "applied-card", id: item.id, applicationId: item.applicationId ?? "" }, { frameId: 0 });
+  } catch {
+    // A page the extension can't reach (closed, or the browser's own): the job is still under Detected jobs.
+  }
+}
+
+/** ✓ or ✗ on a detected job, from the panel or the card on the page. ✓ saves it as applied. */
+async function answerDetected(id: string, applied: boolean): Promise<{ ok: boolean; applicationId?: string; needsForm?: boolean; error?: string }> {
+  const list = await detectedList();
+  const item = list.find((entry) => entry.id === id);
+  if (!item) return { ok: false, error: "That job isn't on the list any more." };
+  if (!applied) {
+    item.state = "no";
+    await saveDetectedList(list);
+    return { ok: true };
+  }
+  try {
+    if (item.applicationId) await api("POST", "status", { applicationId: item.applicationId, applied: true });
+    else if (item.title.trim() && item.company.trim()) {
+      const saved = await saveSubmission({ url: item.url, title: item.title, company: item.company, description: item.description, poster: item.poster, confidence: "likely", text: "You said you applied.", how: "you_marked" });
+      item.applicationId = saved.application.id;
+    } else return { ok: false, needsForm: true, error: "Unnepo didn't catch the company. Add it with + Add a job." };
+    // Added: it's in the student's jobs now, so it leaves Detected jobs.
+    await saveDetectedList(list.filter((entry) => entry.id !== item.id));
+    await readTracker().catch(() => undefined);
+    return { ok: true, applicationId: item.applicationId };
+  } catch (error) {
+    item.error = error instanceof Error ? error.message : "Couldn't save it.";
+    await saveDetectedList(list);
+    return failed(error, "Couldn't save it.");
+  }
+}
+
+/** Undo on a job saved by itself (or a ✓): back to not applied, and it asks again. */
+async function undoDetected(id: string, applicationId = ""): Promise<{ ok: boolean; error?: string }> {
+  const list = await detectedList();
+  const item = list.find((entry) => entry.id === id);
+  const appId = item?.applicationId || applicationId;
+  if (!item && !appId) return { ok: false, error: "That job isn't on the list any more." };
+  try {
+    if (appId) await api("POST", "submissions/undo", { applicationId: appId });
+    if (item) {
+      item.state = "undone";
+      await saveDetectedList(list);
+    }
+    await readTracker().catch(() => undefined);
+    return { ok: true };
+  } catch (error) {
+    return failed(error, "Couldn't undo it.");
+  }
 }
 
 /**
@@ -522,7 +587,7 @@ async function recordSeen(tabId: number, text: string, how: AppliedHow = "page_s
   // Only a job board saving the application is sure enough to save it without asking.
   const caught = how !== "you_marked";
   if (caught && !(SURE_HOWS.has(how) && (await savesByItself()))) {
-    await noteDetected({ url: seen.url, title: seen.title, company: seen.company, description: seen.description, poster: seen.poster, sure: "likely", state: "ask" });
+    await noteDetected({ url: seen.url, title: seen.title, company: seen.company, description: seen.description, poster: seen.poster, sure: "likely", state: "ask" }, tabId);
     return void log(`The page looks applied (${HOW_SAID[how]}). It's under Detected jobs on Home.`);
   }
   let screenshot: string | undefined;
@@ -537,7 +602,7 @@ async function recordSeen(tabId: number, text: string, how: AppliedHow = "page_s
     celebrate(tabId);
     await saveJob(tabId, { applicationId: saved.application.id, title: saved.application.title, company: saved.application.company, url: seen.url, host: new URL(seen.url).hostname, submission: "likely", clickedAt: Date.now(), step: `Saved to your tracker: ${saved.application.title} at ${saved.application.company}.` });
     void log(`Saved: ${saved.application.title} at ${saved.application.company} (${HOW_SAID[how]}).`);
-    if (caught) await noteDetected({ url: seen.url, title: saved.application.title, company: saved.application.company, applicationId: saved.application.id, sure: SURE_HOWS.has(how) ? "confirmed" : "likely", state: "saved" });
+    if (caught) await noteDetected({ url: seen.url, title: saved.application.title, company: saved.application.company, applicationId: saved.application.id, sure: SURE_HOWS.has(how) ? "confirmed" : "likely", state: "saved" }, tabId);
   } catch (error) {
     await saveJob(tabId, { error: error instanceof Error ? `Couldn't save this application: ${error.message}` : "Couldn't save this application." });
     await addMaybe({ url: seen.url, title: seen.title, company: seen.company, description: seen.description });
@@ -1171,7 +1236,7 @@ async function record(tabId: number, confidence: "confirmed" | "likely", text: s
   // The site confirmed it: saved by itself (with Undo on Home). Anything weaker waits on Home for ✓ or ✗.
   const caught = how !== "you_marked";
   if (caught && !(confidence === "confirmed" && SURE_HOWS.has(how) && (await savesByItself()))) {
-    await noteDetected({ url: job.url, title: job.title, company: job.company, applicationId: job.applicationId, sure: confidence, state: "ask" });
+    await noteDetected({ url: job.url, title: job.title, company: job.company, applicationId: job.applicationId, sure: confidence, state: "ask" }, tabId);
     return void log(`The page looks applied (${HOW_SAID[how]}). It's under Detected jobs on Home.`);
   }
   await saveJob(tabId, { submission: confidence });
@@ -1188,7 +1253,7 @@ async function record(tabId: number, confidence: "confirmed" | "likely", text: s
   try {
     await saveSubmission({ applicationId: job.applicationId, url: job.url, postingUrl, confidence, text, screenshot, how });
     void log(`Saved: ${job.title} at ${job.company} (${HOW_SAID[how]}).`);
-    if (caught) await noteDetected({ url: job.url, title: job.title, company: job.company, applicationId: job.applicationId, sure: confidence, state: "saved" });
+    if (caught) await noteDetected({ url: job.url, title: job.title, company: job.company, applicationId: job.applicationId, sure: confidence, state: "saved" }, tabId);
     // It went through and it's saved: any spiders still out dance, then leave. After the screenshot, so the receipt is clean.
     celebrate(tabId);
     await saveJob(tabId, { step: confidence === "confirmed" ? "Submitted. The site accepted your application, and it's in your Unnepo tracker." : "Looks submitted. It's in your Unnepo tracker; check your email for the site's confirmation." });
@@ -1386,17 +1451,17 @@ async function saveBoardApplied(tabId: number, text: string, day: string) {
   const fresh = !day || day === localDay();
   void log(`The board says "${text.slice(0, 50)}" for ${job.title} at ${job.company}.`);
   if (!(await savesByItself())) {
-    await noteDetected({ ...job, description: scan.description, poster: scan.poster, sure: "confirmed", state: "ask" });
+    await noteDetected({ ...job, description: scan.description, poster: scan.poster, sure: "confirmed", state: "ask" }, tabId);
     return void log("It's under Detected jobs on Home.");
   }
   try {
     const saved = await saveSubmission({ ...job, description: scan.description, poster: scan.poster, confidence: "confirmed", text, how: "board_saved", ...(day ? { appliedOn: day } : {}), ...(fresh ? {} : { noPeople: true }) });
     if (fresh) celebrate(tabId);
-    await noteDetected({ ...job, title: saved.application.title, company: saved.application.company, applicationId: saved.application.id, sure: "confirmed", state: "saved" });
+    await noteDetected({ ...job, title: saved.application.title, company: saved.application.company, applicationId: saved.application.id, sure: "confirmed", state: "saved" }, tabId);
     void log(`Saved: ${saved.application.title} at ${saved.application.company} (the job board says you applied${day && !fresh ? ` on ${day}` : ""}).`);
     void readTracker().then(() => chrome.runtime.sendMessage({ type: "tracker-changed" }).catch(() => undefined), () => undefined);
   } catch (error) {
-    await noteDetected({ ...job, description: scan.description, sure: "likely", state: "ask" });
+    await noteDetected({ ...job, description: scan.description, sure: "likely", state: "ask" }, tabId);
     void log(error instanceof Error ? `Couldn't save it: ${error.message}` : "Couldn't save it.");
   }
 }
@@ -1490,6 +1555,8 @@ chrome.notifications.onClicked.addListener((id) => {
 
 /** The side panel, or one of the extension's own pages in a tab (the dashboard), never a web page. */
 const fromExtension = (sender: chrome.runtime.MessageSender) => sender.id === chrome.runtime.id && (!sender.tab || (sender.url ?? "").startsWith(chrome.runtime.getURL("")));
+/** This extension's own script in a web page (the applied card), not another extension or the extension's pages. */
+const fromOwnContent = (sender: chrome.runtime.MessageSender) => sender.id === chrome.runtime.id && Boolean(sender.tab);
 const failed = (error: unknown, fallback: string) => ({ ok: false, error: error instanceof Error ? error.message : fallback });
 
 /** Waits for a tab to finish loading, or gives up after `ms`. */
@@ -2271,31 +2338,90 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (!fromExtension(sender)) return reply({ ok: false });
         return reply({ ok: true, list: await detectedList() });
       // ✓ or ✗ on a detected job. ✓ saves it as applied; one with no company asks the student to add it by hand.
+      // The applied card on a job page (content/overlay.ts). Only from this extension's own scripts in a tab.
+      case "card-state": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const item = (await detectedList()).find((entry) => entry.id === message.id) ?? null;
+        const applicationId = String(message.applicationId || item?.applicationId || "");
+        let copy = await trackerCopy();
+        let job = applicationId ? copy?.data.jobs.find((entry) => entry.id === applicationId) ?? null : null;
+        // Not in the copy yet, or people are being found: read the tracker again.
+        if (applicationId && (!job || job.contactsStatus === "finding" || job.contactsStatus === "writing" || message.fresh === true)) {
+          await readTracker().catch(() => undefined);
+          copy = await trackerCopy();
+          job = copy?.data.jobs.find((entry) => entry.id === applicationId) ?? null;
+        }
+        const { openedEmails } = await chrome.storage.local.get("openedEmails");
+        const opened = Object.entries((openedEmails as OpenedEmails | undefined) ?? {}).filter(([, value]) => value.applicationId === applicationId).map(([contactId]) => contactId);
+        return reply({ ok: true, item, applicationId, job, free: copy?.data.free ?? false, peopleLeft: copy?.data.peopleLeft ?? null, opened });
+      }
+      case "card-answer":
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        return reply(await answerDetected(String(message.id), Boolean(message.applied)));
+      case "card-undo":
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        return reply(await undoDetected(String(message.id), String(message.applicationId ?? "")));
+      // Find verified people at the job, or mark someone emailed: the same requests as the panel's People card.
+      case "card-people": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const body = (message.body ?? {}) as Record<string, unknown>;
+        if (body.action !== "find" && body.action !== "status") return reply({ ok: false });
+        try {
+          const result = await api<Record<string, unknown>>("POST", "people", body);
+          if (body.action === "status" && body.contactId) {
+            const stored = await chrome.storage.local.get("openedEmails");
+            const opened = (stored.openedEmails as OpenedEmails | undefined) ?? {};
+            delete opened[String(body.contactId)];
+            await chrome.storage.local.set({ openedEmails: opened });
+          }
+          await readTracker().catch(() => undefined);
+          return reply({ ok: true, ...result });
+        } catch (error) {
+          return reply(failed(error, "Couldn't do that."));
+        }
+      }
+      // Email ↗ on the card: the email is written, then opened ready to send in Gmail (or the student's mail app).
+      // The card never shows the draft.
+      case "card-email": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const applicationId = String(message.applicationId ?? "");
+        const contactId = String(message.contactId ?? "");
+        const followUp = message.followUp === true;
+        try {
+          await api("POST", "people", { action: "write", applicationId, contactId, followUp });
+          await readTracker().catch(() => undefined);
+          const job = (await trackerCopy())?.data.jobs.find((entry) => entry.id === applicationId);
+          const person = job?.contacts.find((entry) => entry.id === contactId);
+          if (!job || !person?.email || !person.emailBody) return reply({ ok: false, error: "Couldn't write the email." });
+          const { mailer } = await chrome.storage.local.get("mailer");
+          const link = composeLink((mailer as Mailer | undefined) ?? "gmail", person.email, person.emailSubject ?? "", person.emailBody);
+          if (!link.url.startsWith("mailto:")) await chrome.tabs.create({ url: link.url, active: true });
+          const stored = await chrome.storage.local.get("openedEmails");
+          const opened = (stored.openedEmails as OpenedEmails | undefined) ?? {};
+          opened[contactId] = { at: Date.now(), applicationId, name: person.name, company: job.company, followUp };
+          await chrome.storage.local.set({ openedEmails: opened });
+          return reply({ ok: true, mailto: link.url.startsWith("mailto:") ? link.url : "", cut: link.cut, body: link.cut ? person.emailBody : "" });
+        } catch (error) {
+          return reply(failed(error, "Couldn't write the email."));
+        }
+      }
+      // Find on LinkedIn: the side panel opens on that job's LinkedIn page.
+      case "card-linkedin":
+        if (!fromOwnContent(sender) || tabId === undefined) return reply({ ok: false });
+        await chrome.storage.local.set({ panelOpen: { view: "linkedin", jobId: String(message.applicationId ?? ""), at: Date.now() } });
+        try {
+          await chrome.sidePanel.open({ tabId });
+          return reply({ ok: true });
+        } catch {
+          return reply({ ok: false, error: "Click the Unnepo icon in your toolbar to open it." });
+        }
+      case "card-off":
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        await chrome.storage.local.set({ overlayOff: true });
+        return reply({ ok: true });
       case "detected-answer": {
         if (!fromExtension(sender)) return reply({ ok: false });
-        const list = await detectedList();
-        const item = list.find((entry) => entry.id === message.id);
-        if (!item) return reply({ ok: false, error: "That job isn't on the list any more." });
-        if (!message.applied) {
-          item.state = "no";
-          await saveDetectedList(list);
-          return reply({ ok: true });
-        }
-        try {
-          if (item.applicationId) await api("POST", "status", { applicationId: item.applicationId, applied: true });
-          else if (item.title.trim() && item.company.trim()) {
-            const saved = await saveSubmission({ url: item.url, title: item.title, company: item.company, description: item.description, poster: item.poster, confidence: "likely", text: "You said you applied.", how: "you_marked" });
-            item.applicationId = saved.application.id;
-          } else return reply({ ok: false, needsForm: true, error: "Unnepo didn't catch the company. Add it with + Add a job." });
-          // Added: it's in the student's jobs now, so it leaves Detected jobs.
-          await saveDetectedList(list.filter((entry) => entry.id !== item.id));
-          await readTracker().catch(() => undefined);
-          return reply({ ok: true });
-        } catch (error) {
-          item.error = error instanceof Error ? error.message : "Couldn't save it.";
-          await saveDetectedList(list);
-          return reply(failed(error, "Couldn't save it."));
-        }
+        return reply(await answerDetected(String(message.id), Boolean(message.applied)));
       }
       // Undo on a job saved by itself (or a ✓): back to not applied, and it asks again.
       // "Clear list": empties the Detected jobs menu. Saved jobs stay in the tracker.
@@ -2303,21 +2429,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (!fromExtension(sender)) return reply({ ok: false });
         await saveDetectedList([]);
         return reply({ ok: true });
-      case "detected-undo": {
+      case "detected-undo":
         if (!fromExtension(sender)) return reply({ ok: false });
-        const list = await detectedList();
-        const item = list.find((entry) => entry.id === message.id);
-        if (!item) return reply({ ok: false, error: "That job isn't on the list any more." });
-        try {
-          if (item.applicationId) await api("POST", "submissions/undo", { applicationId: item.applicationId });
-          item.state = "undone";
-          await saveDetectedList(list);
-          await readTracker().catch(() => undefined);
-          return reply({ ok: true });
-        } catch (error) {
-          return reply(failed(error, "Couldn't undo it."));
-        }
-      }
+        return reply(await undoDetected(String(message.id)));
       case "refresh-badge":
         void updateBadge();
         return reply({ ok: true });
