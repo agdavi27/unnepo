@@ -632,6 +632,39 @@ async function state(): Promise<PanelState> {
   return { connected: Boolean(token && me), me, page, tab: tab?.id !== undefined ? { id: tab.id, url: tab.url ?? "", title: tab.title ?? "" } : null, job, autoSubmit, apiBase, maybe, applying, boardList };
 }
 
+/**
+ * A cover letter for the job on a tab, for the panel and for "Write with unnepo" on the page: from a pasted job
+ * description, the job in the tracker for that tab, or the job as the page shows it. Writing a letter never adds a
+ * job to the tracker: jobs come only from forwarded emails or "Add a job". `options` carries the student's answers
+ * (how it's built, length, tone, what to mention), an edit request, or their edited text to save.
+ */
+type LetterAsk = { description?: unknown; job?: unknown; options?: unknown };
+async function writeLetter(tabId: number, message: LetterAsk): Promise<{ ok: boolean; doc?: { text: string; fileName: string; pdfBase64: string }; error?: string }> {
+  try {
+    // No job on the page: the student pasted the job description in the panel.
+    if (typeof message.description === "string") {
+      const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { description: message.description, ...((message.options ?? {}) as object) });
+      return { ok: true, doc: letter };
+    }
+    // A job already in the tracker for this tab is used; otherwise the job as the page shows it.
+    const earlier = (await jobs())[tabId];
+    const scan = earlier?.applicationId ? await look(tabId) : null;
+    const applicationId = earlier?.applicationId && (!scan || earlier.running || sameApplication(earlier.url, scan.url)) ? earlier.applicationId : undefined;
+    if (!applicationId) {
+      const given = message.job as Partial<JobDetails> | undefined;
+      const job = given?.title ? given : await readJobDetails(tabId);
+      if (!job?.title) throw new Error("Open the job posting or its application in this tab first.");
+      const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { job: { title: job.title, company: job.company || job.site || "", description: job.description ?? "" }, ...((message.options ?? {}) as object) });
+      return { ok: true, doc: letter };
+    }
+    // The student's quick answers (length, tone, what to mention) or their edit request ride along.
+    const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId, ...((message.options ?? {}) as object) });
+    return { ok: true, doc: letter };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn't write the cover letter." };
+  }
+}
+
 /** The frame the application form is in, per tab: 0 for the page itself, or an embedded form's frame. */
 const formFrame = new Map<number, number>();
 const send = <T>(tabId: number, message: unknown, frameId = formFrame.get(tabId) ?? 0) => chrome.tabs.sendMessage(tabId, message, { frameId }) as Promise<T>;
@@ -1681,33 +1714,24 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Upload failed." });
         }
       // The panel's cover letter: for the job on this tab. The job is opened in Unnepo first if it isn't yet.
-      case "generate-letter": {
+      case "generate-letter":
         if (sender.tab) return reply({ ok: false });
-        const tabId = Number(message.tabId);
-        try {
-          // No job on the page: the student pasted the job description in the panel.
-          if (typeof message.description === "string") {
-            const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { description: message.description, ...(message.options ?? {}) });
-            return reply({ ok: true, doc: letter });
-          }
-          // A job already in the tracker for this tab is used; otherwise the job as the page shows it. Writing a
-          // letter never adds a job to the tracker: jobs come only from forwarded emails or "Add a job".
-          const earlier = (await jobs())[tabId];
-          const scan = earlier?.applicationId ? await look(tabId) : null;
-          const applicationId = earlier?.applicationId && (!scan || earlier.running || sameApplication(earlier.url, scan.url)) ? earlier.applicationId : undefined;
-          if (!applicationId) {
-            const given = message.job as Partial<JobDetails> | undefined;
-            const job = given?.title ? given : await readJobDetails(tabId);
-            if (!job?.title) throw new Error("Open the job posting or its application in this tab first.");
-            const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { job: { title: job.title, company: job.company || job.site || "", description: job.description ?? "" }, ...(message.options ?? {}) });
-            return reply({ ok: true, doc: letter });
-          }
-          // The student's quick answers (length, tone, what to mention) or their edit request ride along.
-          const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId, ...(message.options ?? {}) });
-          return reply({ ok: true, doc: letter });
-        } catch (error) {
-          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't write the cover letter." });
-        }
+        return reply(await writeLetter(Number(message.tabId), message));
+      // "Write with unnepo" beside a cover letter question on the page: what its button and popup show.
+      case "letter-page-state": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const { token } = await settings();
+        const me = token ? await currentMe(token) : null;
+        if (!me) return reply({ ok: false });
+        const free = Boolean(me.usage?.free && !me.unlimitedCredits);
+        return reply({ ok: true, free, left: free ? me.usage?.letters.left ?? null : null, highlights: me.highlights ?? [] });
+      }
+      // Its popup's Write (and saving the student's edits): the cover letter for the job on that tab.
+      case "letter-page-write": {
+        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
+        const result = await writeLetter(sender.tab.id, { options: message.options });
+        if (result.ok) void log("Wrote a cover letter from the button on the page.");
+        return reply(result);
       }
       // The panel's "My jobs".
       case "list-jobs":
