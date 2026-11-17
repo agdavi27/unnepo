@@ -73,52 +73,37 @@ export function friendAsks() {
     </section>`).join("")}${flash}`;
 }
 
-/** Week's friends box: each friend's applications this week, most first. Shown only once a friend is added. */
+/**
+ * Home's friends card: a row to add someone, with requests to answer (orange, "Accept") and ones sent (faded),
+ * then this week's board, you and every friend by how many they applied to. Tapping anyone opens a small popup.
+ */
 export function friendsWeekCard(myWeek: number) {
   ensureFriends();
-  const head = (extra = "") => `<div class="row-between"><span class="eyebrow">Friends this week</span>${extra}</div>`;
-  if (!friends.list) return "";
-  const requests = friends.incoming.length ? `<button type="button" class="note warn nudge" data-go="settings">${friends.incoming.length} friend ${friends.incoming.length === 1 ? "request" : "requests"} waiting. See ${friends.incoming.length === 1 ? "it" : "them"} →</button>` : "";
-  // No friends yet: the giveaway and a request waiting, if there is one. Friends are added under Me.
-  if (!friends.list.length) return `<section class="page friends-card" aria-label="Friends this week">${head(`<button type="button" class="quiet-link tight" data-go="settings">Add</button>`)}${giveawayRow()}${requests}</section>`;
-  const rows = [{ id: "me", name: "You", applied: myWeek }, ...friends.list].sort((a, b) => b.applied - a.applied);
-  const top = Math.max(1, ...rows.map((row) => row.applied));
-  return `<section class="page friends-card" aria-label="Friends this week">
-    ${head(`<button type="button" class="quiet-link tight" data-go="settings">Add</button>`)}
-    ${giveawayRow()}
-    <ul class="friend-list">${rows.map((row) => `
-      <li class="friend${row.id === "me" ? " me" : ""}">
-        <span class="friend-av" aria-hidden="true">${escape(row.id === "me" ? "★" : initials(row.name))}</span>
-        <span class="friend-name">${escape(row.name)}</span>
-        <span class="friend-bar" aria-hidden="true"><span style="width:${Math.round((row.applied / top) * 100)}%"></span></span>
-        <span class="friend-count">${row.applied}</span>
-      </li>`).join("")}</ul>
-    ${requests}
-  </section>`;
-}
-
-/**
- * Me's friends strip: a + to add someone, then each person as a round avatar with their count this week.
- * Requests to answer come first (orange, "Accept"), sent ones last (faded). Tapping one opens a small popup.
- */
-export function friendsStrip() {
-  ensureFriends();
-  const list = [...(friends.list ?? [])].sort((a, b) => b.applied - a.applied);
+  if (!friends.list) return friends.error ? `<section class="page friends-card" aria-label="Friends this week"><span class="eyebrow">Friends this week</span><p class="small">${escape(friends.error)}</p></section>` : "";
   const person = (key: string, label: string, sub: string, kind: string, name: string) => `<button type="button" class="strip-person ${kind}" data-friend-open="${key}" aria-label="${escape(name)}"><span class="friend-av" aria-hidden="true">${escape(label)}</span><span class="strip-sub">${escape(sub)}</span></button>`;
-  const people = [
+  const strip = [
     `<button type="button" class="strip-person add" data-friend-open="add" aria-label="Add a friend"><span class="friend-av" aria-hidden="true">+</span><span class="strip-sub">Add</span></button>`,
     ...friends.incoming.map((item) => person(`in:${item.id}`, initials(item.name), "Accept", "asking gold", `${item.name} added you`)),
-    ...list.map((item) => person(`f:${item.id}`, initials(item.name), String(item.applied), "", `${item.name}: ${item.applied} this week`)),
     ...friends.outgoing.map((item) => person(`out:${item.id}`, initials(item.email.split("@")[0]!.replace(/[._-]+/g, " ")), "Sent", "waiting", `Request sent to ${item.email}`)),
   ].join("");
-  return `
-    <section class="friends-strip" aria-label="Friends this week">
-      <span class="eyebrow">Friends this week</span>
-      ${giveawayRow()}
-      <div class="strip-row">${people}</div>
-      ${friends.note ? `<p class="small" role="status"${friends.noteBad ? ' style="color: var(--warn)"' : ""}>${escape(friends.note)}</p>` : ""}
-      ${friends.error && !friends.list ? `<p class="small">${escape(friends.error)}</p>` : ""}
-    </section>`;
+  const rows = friends.list.length ? [{ id: "me", name: "You", applied: myWeek }, ...friends.list].sort((a, b) => b.applied - a.applied) : [];
+  const top = Math.max(1, ...rows.map((row) => row.applied));
+  const board = rows.length ? `<ul class="friend-list">${rows.map((row) => {
+    const inside = `<span class="friend-av" aria-hidden="true">${escape(row.id === "me" ? "★" : initials(row.name))}</span>
+        <span class="friend-name">${escape(row.name)}</span>
+        <span class="friend-bar" aria-hidden="true"><span style="width:${Math.round((row.applied / top) * 100)}%"></span></span>
+        <span class="friend-count">${row.applied}</span>`;
+    return row.id === "me"
+      ? `<li class="friend me">${inside}</li>`
+      : `<li><button type="button" class="friend tap" data-friend-open="f:${row.id}" aria-label="${escape(row.name)}: ${row.applied} this week">${inside}</button></li>`;
+  }).join("")}</ul>` : `<p class="small">Add friends to see who applied to the most jobs this week.</p>`;
+  return `<section class="page friends-card" aria-label="Friends this week">
+    <span class="eyebrow">Friends this week</span>
+    ${giveawayRow()}
+    <div class="strip-row">${strip}</div>
+    ${board}
+    ${friends.note ? `<p class="small" role="status"${friends.noteBad ? ' style="color: var(--warn)"' : ""}>${escape(friends.note)}</p>` : ""}
+  </section>`;
 }
 
 /** The small popup for one spot on the strip: adding someone, a request, a friend, or a request sent. Null once it's gone. */

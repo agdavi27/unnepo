@@ -7,7 +7,7 @@ import { AUTOFILL_ENABLED, type Detected, type Issue, type JobDetails, type Mail
 import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, verifiedPage, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { guessedPage, wireGuessedPage } from "../shared/guessed";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
-import { friendAsks, friendPopup, friendRequests, friendsStrip, giveawayPopup, wireFriends } from "../shared/friends";
+import { friendAsks, friendPopup, friendRequests, giveawayPopup, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
 import { accountTheme, chooseTheme, onThemeChange, startTheme, theme } from "../shared/theme";
 import { UPGRADE_URL } from "@/lib/plan";
@@ -26,14 +26,14 @@ const app = document.getElementById("app")!;
 const passwordSection = document.getElementById("password")!;
 const tabBar = document.getElementById("tabs")!;
 const jobsBadge = document.getElementById("jobs-count")!;
-const meBadge = document.getElementById("me-count")!;
+const homeBadge = document.getElementById("home-count")!;
 const planBadge = document.getElementById("plan-badge")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-/** The three tabs along the bottom (home = Jobs, jobs = Tools, settings = Me; shown under those names), and the pages opened from them. */
-type View = "home" | "jobs" | "feedback" | "settings" | "job" | "linkedin" | "verified";
-const TABS: View[] = ["home", "jobs", "settings"];
-// The panel opens on Home (the tools and the graph).
+/** The four tabs along the bottom (jobs = Home, tools = Tools, home = Jobs, settings = Me; shown under those names), and the pages opened from them. */
+type View = "home" | "jobs" | "tools" | "feedback" | "settings" | "job" | "linkedin" | "verified";
+const TABS: View[] = ["home", "jobs", "tools", "settings"];
+// The panel opens on Home (the graph and friends).
 let view: View = "jobs";
 /** The job open on the "job" page, and the person to show on it. */
 let openedJob = { id: "", contact: "" };
@@ -305,7 +305,7 @@ function jobFillPage(state: PanelState) {
       ${here.note ? `<p class="small" role="status">${escape(here.note)}</p>` : ""}
     </section>
     <div class="job-foot">
-      <button type="button" class="more-row" data-go="jobs">Cover letter, resume, more <span aria-hidden="true">›</span></button>
+      <button type="button" class="more-row" data-go="tools">Cover letter, resume, more <span aria-hidden="true">›</span></button>
       ${goalBar(state)}
     </div>`;
 }
@@ -382,7 +382,7 @@ const tileCount = (line?: { left: number; badge?: string }) => (line?.badge ? `<
  * The tools as four tiles, every one a tap away: a cover letter, answering a question, Autofill and adding a job
  * (a small popup with the jobs Unnepo caught and a form for one it didn't). Under them, the resume and password.
  */
-function toolsPage(state: PanelState, extra = "") {
+function toolsPage(state: PanelState) {
   const asking = (store.detected ?? []).filter((item) => item.state === "ask").length;
   return `
     <div class="tools">
@@ -395,7 +395,6 @@ function toolsPage(state: PanelState, extra = "") {
       ${manualJob.note && !popup ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
       ${toolsNote() && !popup ? `<p class="small" role="status">${escape(toolsNote())}</p>` : ""}
       <div class="tool-lines">${resumeLine(state)}${transcriptLine(state)}${letterLine()}<div id="password-slot"></div></div>
-      ${extra}
     </div>`;
 }
 
@@ -590,11 +589,11 @@ function pageView(state: PanelState) {
     linkedin: () => contactsView("linkedin"),
     verified: () => contactsView("verified"),
     jobs: () => jobsView(state),
+    tools: () => toolsPage(state),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     // Me: who you are and your plan, friends, how Unnepo behaves, then help. Sign out and the version last.
     // Me: you first (plan, what's left today, profile), friends as a strip, the switches, then one quiet line.
     settings: () => `${profileCard(state)}
-      ${friendsStrip()}
       ${trackingSettings(state)}
       <button type="button" class="btn me-tour" id="show-tour">Show me how it works</button>
       <div class="me-foot">
@@ -1409,7 +1408,10 @@ async function replaceResume(file: File) {
   void render();
 }
 
-/** Me's top: you in the middle (plan and profile under your name), then what's left today and the way up. */
+/**
+ * Me's top, in three rows: who you are (name, email, plan), how complete your profile is, then your plan's card,
+ * with what's left (today on Free, this month on Pro) and the way up.
+ */
 function profileCard(state: PanelState) {
   const me = state.me!;
   const missing = me.missing ?? [];
@@ -1418,21 +1420,36 @@ function profileCard(state: PanelState) {
   const name = me.user.name || me.user.email;
   const initials = name.split(/[\s@.]+/).filter(Boolean).slice(0, 2).map((part) => part[0]!.toUpperCase()).join("");
   const profileUrl = `${state.apiBase}/home?edit=profile`;
-  const profile = me.completeness < 100
-    ? `<a class="me-link${!me.profileReady ? " warn" : ""}" href="${escape(profileUrl)}" target="_blank" rel="noreferrer" title="${missing.length ? `Missing: ${escape(missing.join(", "))}` : ""}">${me.completeness}% profile · Finish</a>`
-    : `<a class="me-link" href="${escape(profileUrl)}" target="_blank" rel="noreferrer">Edit profile</a>`;
+  const done = Math.max(0, Math.min(100, me.completeness));
+  const profile = done < 100
+    ? `<a class="me-profile${!me.profileReady ? " warn" : ""}" href="${escape(profileUrl)}" target="_blank" rel="noreferrer" title="${missing.length ? `Missing: ${escape(missing.join(", "))}` : ""}">
+        <span class="me-profile-text"><span>Profile ${done}% done</span><span class="me-link${!me.profileReady ? " warn" : ""}">Finish ↗</span></span>
+        <span class="bar" aria-hidden="true"><div style="width:${done}%"></div></span>
+      </a>`
+    : "";
   const stat = (count: number | string | undefined, label: string) => `<span class="me-stat"><b>${escape(String(count ?? 0))}</b><span>${label}</span></span>`;
-  const credits = me.unlimitedCredits ? "Unlimited" : me.trial ? `${me.trial.daysLeft} ${me.trial.daysLeft === 1 ? "day" : "days"} left` : `${me.usage?.credits ?? me.credits * 5} credits`;
+  const credits = me.unlimitedCredits ? "Unlimited" : me.trial ? `${me.trial.daysLeft} ${me.trial.daysLeft === 1 ? "day" : "days"}` : `${me.usage?.credits ?? me.credits * 5}`;
+  const creditLabel = me.unlimitedCredits ? "writing" : me.trial ? "trial left" : "credits";
+  const companies = me.usage && me.usage.people.left < 999 ? stat(me.usage.people.left, "companies") : "";
+  const card = free
+    ? `<section class="me-plan" aria-label="Left today">
+        <div class="me-plan-head"><span class="eyebrow">Left today</span><span class="sub">Resets ${escape(resetTime())}</span></div>
+        <div class="me-stats">${stat(me.usage?.letters.left, "letters")}${stat(me.usage?.answers.left, "answers")}${stat(me.usage?.autofills.left, "fills")}${stat(me.usage?.people.left, "unlocks")}</div>
+        <a class="btn accent me-up" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade to Pro</a>
+      </section>`
+    : `<section class="me-plan" aria-label="Your plan">
+        <div class="me-plan-head"><span class="eyebrow">${companies ? "Left this month" : "Your plan"}</span><a class="me-link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a></div>
+        <div class="me-stats two">${stat(credits, creditLabel)}${companies}</div>
+      </section>`;
   return `
-    <section class="me-hero" aria-label="Account">
-      <span class="account-av big" aria-hidden="true">${escape(initials || "?")}</span>
-      <span class="account-name" title="${escape(me.user.email)}">${escape(name)}</span>
-      <span class="me-line"><span>${escape(plan)}</span><span aria-hidden="true">·</span>${profile}</span>
-      <div class="me-stats" aria-label="${free ? "Left today" : "Your plan"}">
-        ${free ? `${stat(me.usage?.letters.left, "letters")}${stat(me.usage?.answers.left, "answers")}${stat(me.usage?.autofills.left, "fills")}${stat(me.usage?.people.left, "unlocks")}`
-          : `${stat(credits, me.unlimitedCredits ? "writing" : "")}${me.unlimitedCredits && me.usage && me.usage.people.left < 999 ? stat(me.usage.people.left, "companies left this month") : ""}<a class="me-link" href="${escape(state.apiBase)}/home?tab=settings#plans" target="_blank" rel="noreferrer">Plans ↗</a>`}
+    <section class="me-top" aria-label="Account">
+      <div class="me-id">
+        <span class="account-av" aria-hidden="true">${escape(initials || "?")}</span>
+        <span class="me-who"><span class="account-name">${escape(name)}</span>${me.user.name ? `<span class="sub me-email">${escape(me.user.email)}</span>` : ""}</span>
+        <span class="plan-badge${free ? "" : " pro"}">${escape(plan)}</span>
       </div>
-      ${free ? `<div class="me-reset"><span>Left today · resets at ${escape(resetTime())} tonight</span><a class="btn accent small-btn" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade</a></div>` : ""}
+      <div class="me-actions">${profile || `<a class="me-link" href="${escape(profileUrl)}" target="_blank" rel="noreferrer">Edit profile ↗</a>`}</div>
+      ${card}
       ${me.admin ? adminPlanSwitch(me.planPreview ?? null) : ""}
     </section>`;
 }
@@ -1682,14 +1699,10 @@ function wireManualJob(state: PanelState) {
   });
 }
 
-/**
- * Home: the graph of every day you did something, then four tiles (a cover letter, answering a question,
- * Autofill, adding a job), the resume and password, and friends.
- */
+/** Home: the graph of every day you did something, then friends this week. The tools have their own tab. */
 function jobsView(state: PanelState) {
   ensureTracker();
-  // The graph first, the tools under it, then friends.
-  return weekView(new Date(), (friends) => toolsPage(state, friends), `${state.apiBase}/home?tab=goals`);
+  return weekView(new Date(), "", `${state.apiBase}/home?tab=goals`);
 }
 
 /** Settings for catching applications, email links and reminders. Kept on this computer. */
@@ -1913,7 +1926,8 @@ function draw(state: PanelState): boolean {
   // Jobs counts jobs with nobody emailed yet, plus caught jobs asking "Did you apply?".
   const asking = (store.detected ?? []).filter((item) => item.state === "ask").length;
   badge(jobsBadge, state.connected ? firstEmailCount() + asking : 0);
-  badge(meBadge, state.connected ? friendRequests() : 0);
+  // Home counts friend requests waiting (friends live on Home).
+  badge(homeBadge, state.connected ? friendRequests() : 0);
   tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => {
     const on = tab.dataset.tab === tabNow;
     tab.classList.toggle("on", on);
@@ -2072,7 +2086,7 @@ function openContacts(id: string, kind: "linkedin" | "verified") {
 /** "✓ I applied" on a detected job Unnepo couldn't name: the add-a-job form, filled in with what it saw. */
 function addDetected(item: Detected) {
   Object.assign(manualJob, { open: true, key: item.url, title: item.title, company: item.company, url: item.url, stage: "applied", note: "Unnepo didn't catch the company. Fill it in, then add it.", saving: false, readFor: "", description: item.description ?? "" });
-  go("jobs");
+  go("tools");
 }
 
 /** "Find on LinkedIn" on the card on a job page: the panel opens on that job's LinkedIn page. */

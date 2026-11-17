@@ -2553,7 +2553,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         }
         const { openedEmails } = await chrome.storage.local.get("openedEmails");
         const opened = Object.entries((openedEmails as OpenedEmails | undefined) ?? {}).filter(([, value]) => value.applicationId === applicationId).map(([contactId]) => contactId);
-        return reply({ ok: true, item, applicationId, job, free: copy?.data.free ?? false, peopleLeft: copy?.data.peopleLeft ?? null, opened });
+        return reply({ ok: true, item, applicationId, job, free: copy?.data.free ?? false, peopleLeft: copy?.data.peopleLeft ?? null, peopleCount: copy?.data.peopleCount ?? null, opened });
       }
       case "card-answer":
         if (!fromOwnContent(sender)) return reply({ ok: false });

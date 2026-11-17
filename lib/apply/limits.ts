@@ -123,18 +123,18 @@ export async function planUsage(userId: string) {
   const autofills = { ...fills, basic: free && fills.left === 0, badge: free && fills.left === 0 ? "Basic only today" : fills.badge };
   const credits = account?.balance ?? 0;
   const people = (() => {
-    if (shownUnlimited) return { used: 0, left: 999, allowance: 999, credits, paid: true, note: "", badge: "Unlimited" };
+    if (shownUnlimited) return { used: 0, left: 999, allowance: 999, credits, paid: true, note: "", badge: "Unlimited", limit: null as number | null, per: null as "today" | "this month" | null };
     if (paid) {
       // Counted apart from "people", so the Free unlocks used earlier in the month don't come out of Pro's.
       const left = Math.max(0, config.proPeopleLimit - monthly("companies"));
-      return { used: monthly("companies"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, config.proPeopleLimit), badge: `${left} of ${config.proPeopleLimit} companies left this month` };
+      return { used: monthly("companies"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, config.proPeopleLimit), badge: `${left} of ${config.proPeopleLimit} companies left this month`, limit: config.proPeopleLimit as number | null, per: "this month" as const };
     }
     // Free unlocks FREE_UNLOCKS_PER_DAY people a day, credits or not. The trial spends its credits on whole lists.
     if (free) {
       const left = Math.max(0, FREE_UNLOCKS_PER_DAY - daily("people"));
-      return { used: daily("people"), left, allowance: FREE_UNLOCKS_PER_DAY, credits, paid: false, note: usesNote("people", left, true, FREE_UNLOCKS_PER_DAY), badge: unlocksBadge(left) };
+      return { used: daily("people"), left, allowance: FREE_UNLOCKS_PER_DAY, credits, paid: false, note: usesNote("people", left, true, FREE_UNLOCKS_PER_DAY), badge: unlocksBadge(left), limit: FREE_UNLOCKS_PER_DAY as number | null, per: "today" as const };
     }
-    return { used: weekly("people"), left: credits, allowance: 0, credits, paid: false, note: "", badge: credits ? `${credits} left` : "1 person per job" };
+    return { used: weekly("people"), left: credits, allowance: 0, credits, paid: false, note: "", badge: credits ? `${credits} left` : "1 person per job", limit: null, per: null };
   })();
   const writing = free ? letters.left * CREDIT_COST.letters + answers.left * CREDIT_COST.answers + emails.left * CREDIT_COST.emails : 0;
   return {
