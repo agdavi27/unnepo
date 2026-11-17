@@ -7,6 +7,7 @@ import { AUTOFILL_ENABLED, type Detected, type Issue, type JobDetails, type Mail
 import { resetDetectedPager, detectedMenu, firstEmailCount, ensureTracker, jobById, jobPage, loadTracker, refreshDetected, setHost, store, todayList, verifiedPage, wireBubbles, wireDetected, wireJobPage, wireJobRows, wireReminders } from "../shared/tracker-view";
 import { guessedPage, wireGuessedPage } from "../shared/guessed";
 import { jobsList, showJobs, weekView, wireJobsList, wireWeek } from "../shared/week";
+import { followCount, followView, wireFollow } from "./follow-up";
 import { friendAsks, friendPopup, friendRequests, giveawayPopup, wireFriends } from "../shared/friends";
 import { dueCount } from "../shared/reminders";
 import { accountTheme, chooseTheme, onThemeChange, startTheme, theme } from "../shared/theme";
@@ -27,12 +28,13 @@ const passwordSection = document.getElementById("password")!;
 const tabBar = document.getElementById("tabs")!;
 const jobsBadge = document.getElementById("jobs-count")!;
 const homeBadge = document.getElementById("home-count")!;
+const followBadge = document.getElementById("follow-count")!;
 const planBadge = document.getElementById("plan-badge")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-/** The four tabs along the bottom (jobs = Home, tools = Tools, home = Jobs, settings = Me; shown under those names), and the pages opened from them. */
-type View = "home" | "jobs" | "tools" | "feedback" | "settings" | "job" | "linkedin" | "verified";
-const TABS: View[] = ["home", "jobs", "tools", "settings"];
+/** The five tabs along the bottom (jobs = Home, tools = Tools, home = Jobs, follow = Follow up, settings = Me; shown under those names), and the pages opened from them. */
+type View = "home" | "jobs" | "tools" | "follow" | "feedback" | "settings" | "job" | "linkedin" | "verified";
+const TABS: View[] = ["home", "jobs", "tools", "follow", "settings"];
 // The panel opens on Home (the graph and friends).
 let view: View = "jobs";
 /** The job open on the "job" page, and the person to show on it. */
@@ -590,6 +592,7 @@ function pageView(state: PanelState) {
     verified: () => contactsView("verified"),
     jobs: () => jobsView(state),
     tools: () => toolsPage(state),
+    follow: () => followView(),
     feedback: () => `${heading("Feedback")}${issuesCard()}`,
     // Me: who you are and your plan, friends, how Unnepo behaves, then help. Sign out and the version last.
     // Me: you first (plan, what's left today, profile), friends as a strip, the switches, then one quiet line.
@@ -1938,6 +1941,7 @@ function draw(state: PanelState): boolean {
   badge(jobsBadge, state.connected ? firstEmailCount() + asking : 0);
   // Home counts friend requests waiting (friends live on Home).
   badge(homeBadge, state.connected ? friendRequests() : 0);
+  badge(followBadge, state.connected ? followCount() : 0);
   tabBar.querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((tab) => {
     const on = tab.dataset.tab === tabNow;
     tab.classList.toggle("on", on);
@@ -2007,6 +2011,17 @@ function draw(state: PanelState): boolean {
     wireDetected(app);
     wireReminders(app);
     wireBubbles(app);
+    wireFollow(app, {
+      redraw: () => void render(),
+      refresh: () => loadTracker(true),
+      // An application Unnepo missed, from the inbox: the add-a-job form, with the company filled in.
+      addJob: (item) => {
+        Object.assign(manualJob, { open: true, key: item.url, title: item.jobTitle, company: item.company, url: "", stage: "applied", note: `From your email: "${item.subject.slice(0, 80)}". Add the job title, then add it.`, saving: false, readFor: "", description: "" });
+        popup = { kind: "addjob", step: 0 };
+        resetDetectedPager();
+        go("tools");
+      },
+    });
     wireWeek(app);
     wireFriends(app);
     app.querySelectorAll<HTMLButtonElement>("[data-friend-open]").forEach((button) => button.addEventListener("click", () => {
