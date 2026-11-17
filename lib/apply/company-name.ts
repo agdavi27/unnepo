@@ -18,6 +18,8 @@ const NOT_A_COMPANY = new RegExp(
     String.raw`^(company logo|logo|about (us|the company|the job)|company (name|overview|info)|employer (name|info))$`,
     String.raw`^(confidential|undisclosed|private|hidden|anonymous|unknown|not specified|stealth)( (company|employer|client))?$`,
     String.raw`^(jobs|careers|openings|positions) (at|with|for)\b`,
+    // LinkedIn's lines under a job: "No response insights available yet", "Response insights", "Applicants insights".
+    String.raw`^(no )?(response|applicant|hiring|job|company) insights?\b|\binsights? (are )?(not )?(available|unavailable)\b|^no response|^responses? (managed|usually)|^(be among|among) the first`,
   ].join("|"),
   "i",
 );
@@ -29,4 +31,23 @@ export function notCompanyName(name: string) {
   // A price, a rating or a plain number: "$25/hr", "4.2", "4.2 ★".
   if (/^[$€£]|^\d+(\.\d+)?$|\/(hr|hour|yr|year)$/i.test(plain)) return true;
   return NOT_A_COMPANY.test(plain);
+}
+
+/** Job sites' own names: a page on Handshake that reads "Handshake" as the company hasn't named the company. */
+const JOB_BOARD = /^(handshake|joinhandshake|ziprecruiter|zip recruiter|indeed|glassdoor|linkedin|linked in|wellfound|angellist|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|app|www|jobs?|careers?|unknown|n\/a|company|employer|\?)$/i;
+
+/** Whether a name read off a page is no company at all: a badge, a count, a LinkedIn line or a job site's name. Blank is left for the student to fill. */
+export function junkCompanyName(name: string) {
+  const plain = name.replace(/[•·|★✓✔]/g, " ").replace(/\s+/g, " ").trim().replace(/[.!:]+$/, "");
+  return notCompanyName(plain) || JOB_BOARD.test(plain) || /\bresponse insights\b/i.test(name);
+}
+
+/**
+ * The company to show for the student to check: the real name from what the page read, with job sites' names and
+ * LinkedIn's lines dropped ("Stripe · LinkedIn" → "Stripe"), or blank when nothing left is a company.
+ */
+export function companyGuess(read: string) {
+  const parts = read.split(/\s*[·•|]\s*|\s+[–—-]\s+/).map((part) => part.trim()).filter(Boolean);
+  const kept = parts.filter((part) => !junkCompanyName(part));
+  return kept.length === 1 ? kept[0]! : "";
 }
