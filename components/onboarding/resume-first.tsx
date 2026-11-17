@@ -192,8 +192,8 @@ function Sections({ profile, set }: { profile: StudentProfile; set: (next: Stude
             <Text title="Degree" value={item.degree} onChange={(value) => updateList("education", i, { degree: value })} placeholder="e.g. B.A." tag={tag(`education.${i}.degree`)} />
             <Text title="Major" value={item.major} onChange={(value) => updateList("education", i, { major: value })} tag={tag(`education.${i}.major`)} />
             <Text title="Minor (optional)" value={item.minor} onChange={(value) => updateList("education", i, { minor: value })} tag={tag(`education.${i}.minor`)} />
-            <Text title="From" value={item.startDate} onChange={(value) => updateList("education", i, { startDate: value })} placeholder="e.g. Sep 2023" tag={tag(`education.${i}.startDate`)} />
-            <Text title="To (actual or expected)" value={item.gradDate} onChange={(value) => updateList("education", i, { gradDate: value })} placeholder="e.g. May 2027" tag={tag(`education.${i}.gradDate`)} />
+            <Text title="From (MM/YYYY)" value={item.startDate} onChange={(value) => updateList("education", i, { startDate: value })} placeholder="09/2023" tag={tag(`education.${i}.startDate`)} />
+            <Text title="To, actual or expected (MM/YYYY)" value={item.gradDate} onChange={(value) => updateList("education", i, { gradDate: value })} placeholder="05/2027" tag={tag(`education.${i}.gradDate`)} />
             <Text title="GPA (optional)" value={item.gpa} onChange={(value) => updateList("education", i, { gpa: value })} tag={tag(`education.${i}.gpa`)} />
             {i === 0 && <div className="sm:col-span-2"><Choice title="Year in school" value={classYearOf(item) ?? undefined} options={CLASS_YEARS} onChange={(value) => updateList("education", i, { classYear: value })} /></div>}
             <button type="button" className="justify-self-start text-xs text-[#8B8B94] hover:text-red-300" onClick={() => removeAt("education", i)}>Remove</button>
@@ -207,8 +207,8 @@ function Sections({ profile, set }: { profile: StudentProfile; set: (next: Stude
           <div key={i} className="grid gap-3 rounded-xl border border-[#17171B] p-4 sm:grid-cols-2">
             <Text title="Title" value={item.title} onChange={(value) => updateList("experience", i, { title: value })} tag={tag(`experience.${i}.title`)} />
             <Text title="Company" value={item.company} onChange={(value) => updateList("experience", i, { company: value })} tag={tag(`experience.${i}.company`)} />
-            <Text title="Start" value={item.startDate} onChange={(value) => updateList("experience", i, { startDate: value })} placeholder="e.g. May 2024" tag={tag(`experience.${i}.startDate`)} />
-            <Text title="End" value={item.current ? "Present" : item.endDate} onChange={(value) => updateList("experience", i, { endDate: value, current: /present/i.test(value) })} placeholder="e.g. Aug 2024, or Present" tag={tag(`experience.${i}.endDate`)} />
+            <Text title="From (MM/YYYY)" value={item.startDate} onChange={(value) => updateList("experience", i, { startDate: value })} placeholder="05/2024" tag={tag(`experience.${i}.startDate`)} />
+            <Text title="To (MM/YYYY, or Present)" value={item.current ? "Present" : item.endDate} onChange={(value) => updateList("experience", i, { endDate: value, current: /present/i.test(value) })} placeholder="08/2024 or Present" tag={tag(`experience.${i}.endDate`)} />
             <div className="sm:col-span-2"><Area title="What you did (one per line)" value={lines(item.bullets)} onChange={(value) => updateList("experience", i, { bullets: fromLines(value) })} tag={tag(`experience.${i}.bullets`)} /></div>
             <button type="button" className="justify-self-start text-xs text-[#8B8B94] hover:text-red-300" onClick={() => removeAt("experience", i)}>Remove</button>
           </div>

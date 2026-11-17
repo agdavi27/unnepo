@@ -142,6 +142,41 @@ const list = (value: unknown, max = 30, length = 120) => (Array.isArray(value) ?
 const yesNo = (value: unknown): YesNo => (value === true || value === "yes" ? true : value === false || value === "no" ? false : null);
 const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T => (allowed.includes(value as T) ? (value as T) : fallback);
 
+const MONTH_NAMES = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const SEASON_MONTHS: Record<string, number> = { spring: 1, winter: 1, summer: 6, fall: 9, autumn: 9 };
+
+/**
+ * A start or end date as MM/YYYY, the way application forms ask for it (Workday's From and To): "May 2024",
+ * "2024-05" and "5/24" all become "05/2024". "Present" stays "Present"; a year alone or anything else unreadable
+ * stays as it was typed.
+ */
+export function monthYear(raw: string | undefined) {
+  const value = (raw ?? "").trim();
+  if (!value) return "";
+  if (/^(present|current|now|ongoing)$/i.test(value)) return "Present";
+  const lower = value.toLowerCase();
+  const pad = (month: number) => String(month).padStart(2, "0");
+  const iso = lower.match(/^((?:19|20)\d{2})[-/.](0?[1-9]|1[0-2])(?:[-/.]\d{1,2})?$/);
+  if (iso) return `${pad(Number(iso[2]))}/${iso[1]}`;
+  const numeric = lower.match(/^(0?[1-9]|1[0-2])\s*[-/.]\s*(?:\d{1,2}\s*[-/.]\s*)?((?:19|20)?\d{2})$/);
+  if (numeric) return `${pad(Number(numeric[1]))}/${numeric[2].length === 2 ? `20${numeric[2]}` : numeric[2]}`;
+  const year = lower.match(/\b(19|20)\d{2}\b/)?.[0];
+  if (!year) return value;
+  const named = MONTH_NAMES.findIndex((month) => new RegExp(`\\b${month}`).test(lower));
+  if (named >= 0) return `${pad(named + 1)}/${year}`;
+  const season = Object.keys(SEASON_MONTHS).find((key) => lower.includes(key));
+  return season ? `${pad(SEASON_MONTHS[season])}/${year}` : value;
+}
+
+/** Every school's and job's dates as MM/YYYY. */
+export function withMonthYears(profile: StudentProfile): StudentProfile {
+  return {
+    ...profile,
+    education: profile.education.map((item) => ({ ...item, startDate: item.startDate ? monthYear(item.startDate) : item.startDate, gradDate: monthYear(item.gradDate) })),
+    experience: profile.experience.map((item) => ({ ...item, startDate: monthYear(item.startDate), endDate: item.current ? "Present" : item.endDate ? monthYear(item.endDate) : item.endDate })),
+  };
+}
+
 /** Cleans a profile coming from the page: lengths capped, unknown keys dropped, options checked. */
 export function cleanStudentProfile(raw: unknown, base: StudentProfile): StudentProfile {
   const r = (raw ?? {}) as Partial<Record<keyof StudentProfile, unknown>>;
@@ -168,11 +203,11 @@ export function cleanStudentProfile(raw: unknown, base: StudentProfile): Student
     links: { linkedin: text(l.linkedin, 300) || undefined, github: text(l.github, 300) || undefined, portfolio: text(l.portfolio, 300) || undefined, other: list(l.other, 5, 300) },
     education: entries(r.education, base.education, (item) => ({
       school: text(item.school, 160), degree: text(item.degree, 120), major: text(item.major, 120), minor: text(item.minor, 120) || undefined, gpa: text(item.gpa, 10) || undefined,
-      startDate: text(item.startDate, 40) || undefined, gradDate: text(item.gradDate, 40), coursework: list(item.coursework, 20),
+      startDate: monthYear(text(item.startDate, 40)) || undefined, gradDate: monthYear(text(item.gradDate, 40)), coursework: list(item.coursework, 20),
       classYear: CLASS_YEARS.some(([value]) => value === item.classYear) ? (item.classYear as ClassYear) : undefined,
     }), (item) => Boolean(item.school || item.degree || item.major)),
     experience: entries(r.experience, base.experience, (item) => ({
-      company: text(item.company, 160), title: text(item.title, 160), location: text(item.location, 120) || undefined, startDate: text(item.startDate, 40), endDate: text(item.endDate, 40) || undefined,
+      company: text(item.company, 160), title: text(item.title, 160), location: text(item.location, 120) || undefined, startDate: monthYear(text(item.startDate, 40)), endDate: monthYear(text(item.endDate, 40)) || undefined,
       current: Boolean(item.current), bullets: list(item.bullets, 8, 400),
     }), (item) => Boolean(item.company || item.title)),
     projects: entries(r.projects, base.projects, (item) => ({

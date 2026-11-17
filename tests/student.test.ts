@@ -111,7 +111,7 @@ describe("profile service", () => {
     const pdf = await coverLetterPdf(RESUME, { name: "Pat Doe", contact: [] });
     const uploaded = await uploadProfileResume(userId, { name: "Pat Doe Resume.pdf", type: "application/pdf", bytes: new Uint8Array(pdf) });
     expect(uploaded.read).toBe(true);
-    expect(uploaded.profile.education[0]).toMatchObject({ school: "Colby College", degree: "B.A.", gradDate: "Expected May 2027" });
+    expect(uploaded.profile.education[0]).toMatchObject({ school: "Colby College", degree: "B.A.", gradDate: "05/2027" });
     expect(uploaded.profile.sources["contact.phone"]).toBe("resume");
     expect(uploaded.missing[0].id).toBe("work_auth");
 
@@ -126,7 +126,7 @@ describe("profile service", () => {
     const stored = (await applicationProfiles.get(userId))!;
     expect(stored).toMatchObject({ firstName: "Pat", phone: "207-555-1234", state: "ME", eligibility: { workAuthorized: "Yes", needsSponsorship: "No", over18: "Yes" } });
     expect(stored.resumeProfile?.education[0]).toMatchObject({ school: "Colby College", degree: "B.A." });
-    expect(stored.resumeProfile?.experience[0]).toMatchObject({ company: "Maine Credit Union", start: "May 2024" });
+    expect(stored.resumeProfile?.experience[0]).toMatchObject({ company: "Maine Credit Union", start: "05/2024" });
 
     // A second upload doesn't undo the student's phone.
     model.replies.push(JSON.stringify(EXTRACTED));
@@ -157,5 +157,27 @@ describe("self-identification on forms", () => {
       q("v", "Veteran Status", ["I am not a protected veteran", "I identify as one or more of the classifications of a protected veteran", "I don't wish to answer"]),
     ], context).map((item) => [item.answer, item.source]);
     expect(answers).toEqual([["Female", "student"], ["I don't wish to answer", "default"], ["No", "student"], ["I am not a protected veteran", "student"]]);
+  });
+});
+
+describe("profile dates", () => {
+  it("writes every start and end date as MM/YYYY, the way forms ask", async () => {
+    const { monthYear } = await import("@/lib/profile/student");
+    expect(monthYear("May 2024")).toBe("05/2024");
+    expect(monthYear("Sept. 2023")).toBe("09/2023");
+    expect(monthYear("2027-05")).toBe("05/2027");
+    expect(monthYear("5/2024")).toBe("05/2024");
+    expect(monthYear("08/24")).toBe("08/2024");
+    expect(monthYear("Summer 2025")).toBe("06/2025");
+    expect(monthYear("present")).toBe("Present");
+    expect(monthYear("2026")).toBe("2026");
+    expect(monthYear("")).toBe("");
+  });
+
+  it("reads MM/YYYY and YYYY-MM back for Workday's From and To boxes", async () => {
+    const { formatDate } = await import("@/lib/apply/resume-profile");
+    expect(formatDate("05/2024", "MM")).toBe("05");
+    expect(formatDate("05/2024", "YYYY")).toBe("2024");
+    expect(formatDate("2024-09", "MM")).toBe("09");
   });
 });
