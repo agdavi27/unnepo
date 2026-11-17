@@ -7,6 +7,7 @@ import { parseGreenhouse, type GreenhouseJobJson } from "@/lib/apply/fast/schema
 import { askedLength, fitsLength, fullUrl, nameCase, planAnswers, plainWriting, shortAnswer } from "@/lib/apply/questions";
 import { degreeAnswer, keepStated, resumeFieldAnswer } from "@/lib/apply/resume-profile";
 import type { ApplicationProfile } from "@/lib/apply/types";
+import { emptyStudentProfile, missingDates } from "@/lib/profile/student";
 
 /** Saved copies of real public Greenhouse postings (Job Board API, questions=true). */
 const fixture = (name: string) => JSON.parse(readFileSync(path.join(__dirname, "fixtures", name), "utf8")) as GreenhouseJobJson;
@@ -227,5 +228,28 @@ describe("a single checkbox", () => {
     expect(shortAnswer("Why do you want to work here?", long)).toBe("I ran the campus coffee shop's books for two years. That taught me to close a month on time.");
     expect(shortAnswer("Why do you want to work here? (at least 100 words)", long)).toBe(long);
     expect(shortAnswer("Tell us about yourself (250 characters max)", "One sentence. Two sentences.")).toBe("One sentence. Two sentences.");
+  });
+});
+
+describe("repeating entries on Workday", () => {
+  const two = keepStated({ education: [{ school: "Colby College", degree: "B.A.", field: "Economics", end: "Expected May 2027" }, { school: "Pat High School", degree: "High school diploma", end: "June 2023" }] }, "Colby College B.A. Economics Expected May 2027. Pat High School High school diploma June 2023.", "h2");
+  it("fills the second school in Education 2, not the first one again", () => {
+    expect(resumeFieldAnswer(two, { label: "School or University", section: "Education 2", kind: "text", options: [] })).toBe("Pat High School");
+    expect(resumeFieldAnswer(two, { label: "Degree", section: "Education 2", kind: "select", options: ["BA", "BS", "High School Diploma"] })).toBe("High School Diploma");
+  });
+  it("puts the portfolio and LinkedIn in their own Websites entries", () => {
+    const both = knownAnswers({ answerFor: () => null, profile: { ...profile, website: "patdoe.com" }, school: "", resumeProfile: two });
+    const field = (section: string) => ({ id: section, label: "Website URL", type: "text" as const, required: false, options: [], section: "question" as const, sensitive: false, sectionLabel: section });
+    expect(both(field("Websites 1"))?.value).toBe("https://patdoe.com");
+    expect(both(field("Websites 2"))?.value).toBe("https://linkedin.com/in/patdoe");
+    const one = knownAnswers({ answerFor: () => null, profile, school: "", resumeProfile: two });
+    expect(one(field("Websites 1"))?.value).toBe("https://linkedin.com/in/patdoe");
+    expect(one(field("Websites 2"))).toBeNull();
+  });
+  it("lists every blank From and To date, so the profile can't be saved without them", () => {
+    const student = emptyStudentProfile("pat@colby.edu", "Pat Doe");
+    student.education = [{ school: "Colby College", degree: "", major: "", startDate: "09/2023", gradDate: "" }];
+    student.experience = [{ company: "Acme", title: "Intern", startDate: "", current: true, bullets: [] }];
+    expect(missingDates(student)).toEqual(["Colby College: To", "Acme: From"]);
   });
 });

@@ -227,3 +227,19 @@ export function cleanStudentProfile(raw: unknown, base: StudentProfile): Student
     done: [...new Set([...(base.done ?? []), ...list(r.done, 20, 30)])],
   };
 }
+
+/** Every From and To date left blank, by entry. Saving waits until they're all in. */
+export function missingDates(profile: StudentProfile) {
+  const gaps: string[] = [];
+  profile.education.forEach((item, i) => {
+    const name = item.school?.trim() || `School ${i + 1}`;
+    if (!item.startDate?.trim()) gaps.push(`${name}: From`);
+    if (!item.gradDate?.trim()) gaps.push(`${name}: To`);
+  });
+  profile.experience.forEach((item, i) => {
+    const name = item.company?.trim() || item.title?.trim() || `Job ${i + 1}`;
+    if (!item.startDate?.trim()) gaps.push(`${name}: From`);
+    if (!item.current && !item.endDate?.trim()) gaps.push(`${name}: To`);
+  });
+  return gaps;
+}

@@ -59,7 +59,8 @@ async function profileEntries(): Promise<{ experience: number; education: number
     return {
       experience: Math.min(profile.experience?.length ?? 0, 10),
       education: Math.min(profile.education?.length ?? 0, 5),
-      websites: profile.links?.portfolio?.trim() || profile.links?.linkedin?.trim() ? 1 : 0,
+      // One entry each for the portfolio and LinkedIn, when the student has them.
+      websites: [profile.links?.portfolio, profile.links?.linkedin].filter((link) => link?.trim()).length,
     };
   } catch {
     return { experience: 0, education: 0, websites: 0 };
@@ -2175,6 +2176,19 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         } catch (error) {
           if (!stopped()) quickRuns.delete(id);
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't fill these." });
+        }
+      }
+      // "Save to Unnepo" beside an answer the student typed: that question and answer go in their profile.
+      case "form-save-answer": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const question = String(message.question ?? "").trim().slice(0, 300);
+        const answer = String(message.answer ?? "").trim().slice(0, 2000);
+        if (!question || !answer) return reply({ ok: false, error: "Nothing to save" });
+        try {
+          const result = await api<{ saved: number }>("POST", "answers", { answers: [{ question, answer, section: String(message.section ?? "").slice(0, 120) }] });
+          return reply({ ok: true, saved: result.saved });
+        } catch {
+          return reply({ ok: false, error: "Couldn't save. Sign in to Unnepo" });
         }
       }
       // Its Answer button: finds the written-answer questions, writes each one, and types it into its box.

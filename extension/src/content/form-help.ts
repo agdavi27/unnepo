@@ -1,5 +1,6 @@
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
 import { isComplexQuestion } from "./question-kinds";
+import { watchTypedAnswers } from "./save-answer";
 
 /**
  * Unnepo on an application form, like Grammarly. Boxes it can fill from the profile get a soft blue outline,
@@ -357,6 +358,8 @@ export function watchForms(isJobPage: () => boolean) {
     if (boxes.length < 4) { clearAll(); return "later"; }
     layer = mount("layer");
     bar = mount("bar");
+    // Answers the student types themselves get a "Save to Unnepo" chip.
+    watchTypedAnswers();
     draw();
     document.addEventListener("input", onInput, true);
     document.addEventListener("change", onInput, true);

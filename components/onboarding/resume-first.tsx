@@ -2,7 +2,7 @@
 
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
 import { useCallback, useEffect, useId, useState } from "react";
-import { CLASS_YEARS, EEO_OPTIONS, classYearOf, type Education, type Experience, type GapId, type Project, type StudentProfile } from "@/lib/profile/student";
+import { CLASS_YEARS, EEO_OPTIONS, classYearOf, missingDates, type Education, type Experience, type GapId, type Project, type StudentProfile } from "@/lib/profile/student";
 
 /**
  * Resume-first onboarding: upload a resume, confirm what Unnepo read, then answer only what's missing,
@@ -41,12 +41,13 @@ function FromResume({ show }: { show: boolean }) {
   return show ? <span className="ml-1.5 rounded border border-[#1F1F24] px-1 py-px font-mono text-[10px] uppercase tracking-wide text-[#8B8B94]">from your resume</span> : null;
 }
 
-function Text({ title, value, onChange, placeholder, tag = false, type = "text" }: { title: string; value: string | undefined; onChange: (value: string) => void; placeholder?: string; tag?: boolean; type?: string }) {
+function Text({ title, value, onChange, placeholder, tag = false, type = "text", needed = false }: { title: string; value: string | undefined; onChange: (value: string) => void; placeholder?: string; tag?: boolean; type?: string; needed?: boolean }) {
   const id = useId();
+  const empty = needed && !value?.trim();
   return (
     <div>
-      <label htmlFor={id} className={label}>{title}<FromResume show={tag} /></label>
-      <input id={id} type={type} className={input} value={value ?? ""} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+      <label htmlFor={id} className={label}>{title}<FromResume show={tag} />{empty && <span className="ml-1.5 text-[11px] text-[#F5A524]">needed</span>}</label>
+      <input id={id} type={type} className={`${input}${empty ? " !border-[#F5A524]" : ""}`} aria-invalid={empty || undefined} value={value ?? ""} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }
@@ -142,6 +143,41 @@ function Choice<T extends string | boolean | null>({ title, value, options, onCh
   );
 }
 
+/** The degree a school gave, as a choice. What a resume wrote ("B.A.") opens on the matching one. */
+const DEGREES = ["High school diploma", "Associate's degree", "Bachelor of Arts (B.A.)", "Bachelor of Science (B.S.)", "Master's degree", "MBA", "PhD", "Other"];
+function degreeChoice(raw: string | undefined) {
+  const text = (raw ?? "").trim();
+  if (!text || DEGREES.includes(text)) return text;
+  if (/high school|diploma|\bged\b/i.test(text)) return DEGREES[0];
+  if (/associate/i.test(text)) return DEGREES[1];
+  if (/\bm\.?\s?b\.?\s?a\b/i.test(text)) return "MBA";
+  if (/ph\.?\s?d|doctor/i.test(text)) return "PhD";
+  if (/master|\bm\.?\s?[as]\b|\bm\.?\s?sc\b/i.test(text)) return DEGREES[4];
+  if (/bachelor of science|\bb\.?\s?s\b|\bb\.?\s?sc\b/i.test(text)) return DEGREES[3];
+  if (/bachelor|\bb\.?\s?a\b/i.test(text)) return DEGREES[2];
+  return text;
+}
+
+function Degree({ value, onChange, tag }: { value: string | undefined; onChange: (value: string) => void; tag: boolean }) {
+  const id = useId();
+  const current = degreeChoice(value);
+  const options = current && !DEGREES.includes(current) ? [current, ...DEGREES] : DEGREES;
+  return (
+    <div>
+      <label htmlFor={id} className={label}>Degree<FromResume show={tag} /></label>
+      <select id={id} className={input} value={current} onChange={(event) => onChange(event.target.value)}>
+        <option value="">Choose a degree…</option>
+        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function DatesNeeded({ gaps }: { gaps: string[] }) {
+  if (!gaps.length) return null;
+  return <p role="status" className="w-full text-xs text-[#F5A524]">Fill in every date to save. Still blank: {gaps.slice(0, 4).join(", ")}{gaps.length > 4 ? `, and ${gaps.length - 4} more` : ""}.</p>;
+}
+
 const YES_NO: Array<[boolean, string]> = [[true, "Yes"], [false, "No"]];
 const lines = (values: string[] | undefined) => (values ?? []).join("\n");
 const fromLines = (value: string) => value.split("\n").map((item) => item.trim()).filter(Boolean);
@@ -189,11 +225,11 @@ function Sections({ profile, set }: { profile: StudentProfile; set: (next: Stude
         {profile.education.map((item, i) => (
           <div key={i} className="grid gap-3 rounded-xl border border-[#17171B] p-4 sm:grid-cols-2">
             <Text title="School" value={item.school} onChange={(value) => updateList("education", i, { school: value })} tag={tag(`education.${i}.school`)} />
-            <Text title="Degree" value={item.degree} onChange={(value) => updateList("education", i, { degree: value })} placeholder="e.g. B.A." tag={tag(`education.${i}.degree`)} />
+            <Degree value={item.degree} onChange={(value) => updateList("education", i, { degree: value })} tag={tag(`education.${i}.degree`)} />
             <Text title="Major" value={item.major} onChange={(value) => updateList("education", i, { major: value })} tag={tag(`education.${i}.major`)} />
             <Text title="Minor (optional)" value={item.minor} onChange={(value) => updateList("education", i, { minor: value })} tag={tag(`education.${i}.minor`)} />
-            <Text title="From (MM/YYYY)" value={item.startDate} onChange={(value) => updateList("education", i, { startDate: value })} placeholder="09/2023" tag={tag(`education.${i}.startDate`)} />
-            <Text title="To, actual or expected (MM/YYYY)" value={item.gradDate} onChange={(value) => updateList("education", i, { gradDate: value })} placeholder="05/2027" tag={tag(`education.${i}.gradDate`)} />
+            <Text title="From (MM/YYYY)" value={item.startDate} onChange={(value) => updateList("education", i, { startDate: value })} placeholder="09/2023" tag={tag(`education.${i}.startDate`)} needed />
+            <Text title="To, actual or expected (MM/YYYY)" value={item.gradDate} onChange={(value) => updateList("education", i, { gradDate: value })} placeholder="05/2027" tag={tag(`education.${i}.gradDate`)} needed />
             <Text title="GPA (optional)" value={item.gpa} onChange={(value) => updateList("education", i, { gpa: value })} tag={tag(`education.${i}.gpa`)} />
             {i === 0 && <div className="sm:col-span-2"><Choice title="Year in school" value={classYearOf(item) ?? undefined} options={CLASS_YEARS} onChange={(value) => updateList("education", i, { classYear: value })} /></div>}
             <button type="button" className="justify-self-start text-xs text-[#8B8B94] hover:text-red-300" onClick={() => removeAt("education", i)}>Remove</button>
@@ -207,8 +243,8 @@ function Sections({ profile, set }: { profile: StudentProfile; set: (next: Stude
           <div key={i} className="grid gap-3 rounded-xl border border-[#17171B] p-4 sm:grid-cols-2">
             <Text title="Title" value={item.title} onChange={(value) => updateList("experience", i, { title: value })} tag={tag(`experience.${i}.title`)} />
             <Text title="Company" value={item.company} onChange={(value) => updateList("experience", i, { company: value })} tag={tag(`experience.${i}.company`)} />
-            <Text title="From (MM/YYYY)" value={item.startDate} onChange={(value) => updateList("experience", i, { startDate: value })} placeholder="05/2024" tag={tag(`experience.${i}.startDate`)} />
-            <Text title="To (MM/YYYY, or Present)" value={item.current ? "Present" : item.endDate} onChange={(value) => updateList("experience", i, { endDate: value, current: /present/i.test(value) })} placeholder="08/2024 or Present" tag={tag(`experience.${i}.endDate`)} />
+            <Text title="From (MM/YYYY)" value={item.startDate} onChange={(value) => updateList("experience", i, { startDate: value })} placeholder="05/2024" tag={tag(`experience.${i}.startDate`)} needed />
+            <Text title="To (MM/YYYY, or Present)" value={item.current ? "Present" : item.endDate} onChange={(value) => updateList("experience", i, { endDate: value, current: /present/i.test(value) })} placeholder="08/2024 or Present" tag={tag(`experience.${i}.endDate`)} needed />
             <div className="sm:col-span-2"><Area title="What you did (one per line)" value={lines(item.bullets)} onChange={(value) => updateList("experience", i, { bullets: fromLines(value) })} tag={tag(`experience.${i}.bullets`)} /></div>
             <button type="button" className="justify-self-start text-xs text-[#8B8B94] hover:text-red-300" onClick={() => removeAt("experience", i)}>Remove</button>
           </div>
@@ -403,6 +439,7 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
 
   if (!state || !draft) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <SpiderLoader label="Loading your profile…" />;
   const gap = revisit ?? state.missing[0];
+  const datesLeft = missingDates(draft);
 
   /** Saves the gap card showing (answered or skipped) and moves to the next one. */
   async function finishGap(current: Gap) {
@@ -469,9 +506,10 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
           <Sections profile={draft} set={setDraft} />
           {mode === "onboarding" && (
             <div className="flex flex-wrap gap-3 border-t border-[#17171B] pt-6">
-              <button type="button" className={primary} disabled={Boolean(busy)} onClick={async () => { const next = await save({}, true); if (next) { setNote(""); setStep(next.missing.length ? "gaps" : "extension"); } }}>
+              <button type="button" className={primary} disabled={Boolean(busy) || datesLeft.length > 0} onClick={async () => { const next = await save({}, true); if (next) { setNote(""); setStep(next.missing.length ? "gaps" : "extension"); } }}>
                 {busy === "save" ? "Saving…" : "Looks right, continue"}
               </button>
+              <DatesNeeded gaps={datesLeft} />
             </div>
           )}
         </div>
@@ -498,9 +536,10 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
             </section>
           ))}
           <div className="sticky bottom-4 flex flex-wrap items-center gap-3 rounded-2xl border border-[#17171B] bg-bg/95 p-3 backdrop-blur">
-            <button type="button" className={primary} disabled={Boolean(busy)} onClick={async () => { if (await save({}, true)) setNote("Saved. Every application uses these details from now on."); }}>{busy === "save" ? "Saving…" : "Save profile"}</button>
+            <button type="button" className={primary} disabled={Boolean(busy) || datesLeft.length > 0} onClick={async () => { if (await save({}, true)) setNote("Saved. Every application uses these details from now on."); }}>{busy === "save" ? "Saving…" : "Save profile"}</button>
             <button type="button" className={secondary} onClick={onDone}>Done</button>
             {note && <span className="text-xs text-[#9A9AA3]">{note}</span>}
+            <DatesNeeded gaps={datesLeft} />
           </div>
         </div>
       )}
