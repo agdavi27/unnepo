@@ -740,7 +740,7 @@ describe("people after applying", () => {
     expect((await applicationContacts.list(userId, [paid.id])).length).toBeGreaterThan(1);
     expect(await debits()).toBe(0);
     // Free's unlocks earlier in the month don't come out of Pro's 50.
-    expect((await planUsage(userId)).people.badge).toBe("49 of 50 companies left this month");
+    expect((await planUsage(userId)).people.badge).toBe("99 of 100 companies left this month");
   });
 
   it("charges nothing for a list with no emails, and never charges an unlimited account", async () => {

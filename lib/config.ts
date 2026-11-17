@@ -66,7 +66,7 @@ export const FREE_LIMITS = { letters: 3, answers: 3, autofills: 3, emails: 3 };
 /** People Free unlocks each day: one person at each of two companies, with a checked email. */
 export const FREE_UNLOCKS_PER_DAY = 2;
 /** Companies Pro finds people at each month: up to 3 people at each, with verified emails. Shown on the plan. */
-export const PRO_COMPANIES_PER_MONTH = 50;
+export const PRO_COMPANIES_PER_MONTH = 100;
 export const CREDIT_COST = { letters: 2, answers: 1, autofills: 1, emails: 1, people: 5 };
 /** What Free gets each day, in credits. */
 export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers + FREE_LIMITS.emails * CREDIT_COST.emails;

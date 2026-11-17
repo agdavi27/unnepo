@@ -124,7 +124,7 @@ describe("structured profile", () => {
 
   it("offers Free and Pro, monthly or yearly, with Free counted by the day and Pro's companies by the month", () => {
     expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.yearLabel, plan.credits])).toEqual([["free", "$0", null, 2], ["pro", "$29.99", "or $199 a year (save 45%)", 20]]);
-    expect(PUBLIC_PLANS[1].features).toContain("Verified contacts at 50 companies a month: up to 3 people at each, with verified emails");
+    expect(PUBLIC_PLANS[1].features).toContain("Verified contacts at 100 companies a month: up to 3 people at each, with verified emails");
     expect(PUBLIC_PLANS.flatMap((plan) => plan.features).some((feature) => /unlimited (verified )?contacts|every company/i.test(feature))).toBe(false);
     expect(creditMath(1)).toBe("People at 1 company");
     expect(creditMath(40)).toBe("People at 40 companies");
@@ -132,7 +132,7 @@ describe("structured profile", () => {
     delete process.env.SIGNUP_CREDITS;
     expect(serverConfig().signupCredits).toBe(3);
     expect(FREE_CREDITS).toBe(12);
-    expect(serverConfig().proPeopleLimit).toBe(50);
+    expect(serverConfig().proPeopleLimit).toBe(100);
     expect(serverConfig().proMonthlyCredits).toBe(20);
     expect(serverConfig().proYearCredits).toBe(240);
     expect(serverConfig().premiumMonthlyCredits).toBe(75);

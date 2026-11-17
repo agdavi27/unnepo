@@ -113,7 +113,7 @@ This environment cannot attach the repository to your Vercel team. After you imp
 | Successful work-email unlock | 1 |
 | Failed or duplicate unlock | 0 |
 | Cover letters, answers, autofill | Free 5 of each a day (Eastern time); then autofill fills basic details only. Pro unlimited (hidden `PRO_AI_LIMIT` 1,000/month guard) |
-| People (names and emails at a company) | Free 1 company a week, plus trial credits. Pro unlimited (hidden `PRO_PEOPLE_LIMIT` 100/month guard) |
+| People (names and emails at a company) | Free 1 company a week, plus trial credits. Pro unlimited (`PRO_PEOPLE_LIMIT` 100 companies a month) |
 | Sending | 0 contact credits, and only after you approve |
 | Qualified referral | 25 promotional credits to the referrer |
 | Pro | $25/month or $75/semester, everything unlimited. New purchases. |
