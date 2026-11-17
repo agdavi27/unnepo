@@ -12,9 +12,16 @@ export async function readGmailResults(): Promise<{ state: "ok" | "signin" | "ti
   // Gmail draws the search a moment after the page loads: wait until rows (or "No messages matched") and they stop changing.
   let last = -1;
   let still = 0;
+  // Gmail with Chat on can open a search on its Conversations or Spaces tab: the Mail tab is where the emails are.
+  const mailTab = () => Array.from(document.querySelectorAll<HTMLElement>('[role="button"], [role="tab"]')).find((el) => shown(el) && el.textContent?.trim() === "Mail");
+  const conversationsShown = () => Array.from(document.querySelectorAll<HTMLElement>('[role="button"], [role="tab"]')).some((el) => shown(el) && el.textContent?.trim() === "Conversations");
   for (let tries = 0; tries < 60; tries += 1) {
     await sleep(500);
     if (empty()) return { state: "ok", rows: [] };
+    if (tries % 4 === 3 && !rowsNow().length && conversationsShown()) {
+      const tab = mailTab();
+      if (tab) for (const type of ["mousedown", "mouseup", "click"]) tab.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
     const count = rowsNow().length;
     if (count && count === last) still += 1;
     else still = 0;
