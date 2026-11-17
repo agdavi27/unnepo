@@ -281,7 +281,7 @@ const TERMS = /\b(attest|(is|are) true,? (correct |accurate )?and (complete|corr
 // "Are you able to travel, up to 10%?" Yes up to half the time; more than that is the student's call.
 const TRAVEL = /\b(able|willing|available|open) to travel\b|\btravel(ing)? (up to|requirements?|is required|required)\b|\brequires? (some |occasional |frequent )?travel\b/i;
 // "Are you able to commute multiple times a week into a Philadelphia or New York City office?"
-const COMMUTE = /\b(commute|commuting)\b|\b(come|report|go) (in)?to (the|an|our) office\b|\bin[- ]office\b.*\b(days?|times?) (a|per) week\b|\bwork (on[- ]?site|in[- ]office|from (the|our) office)\b/i;
+const COMMUTE = /\b(commute|commuting)\b|\b(come|report|go) (in)?to (the|an|our) office\b|\b(in[- ]office|on[- ]?site|hybrid)\b.*\b(days?|times?) (a|per) week\b|\b(days?|times?) (a|per) week\b.*\b(in[- ]office|on[- ]?site|in (the|our) office)\b|\bhybrid (schedule|work|model|role|arrangement|setup)\b|\bwork (on[- ]?site|in[- ]office|from (the|our) office)\b/i;
 // "What is your current notice period?" Two weeks is the standard answer.
 const NOTICE = /\bnotice period\b|how much notice|\bnotice (do you|would you) (need|have to give)/i;
 // Signing these away is the student's call, not a standard answer.
