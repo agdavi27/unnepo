@@ -191,8 +191,9 @@ const editing = { jobId: "", title: "", company: "", url: "", busy: false, error
 let menuOpenFor = "";
 
 /**
- * A job's page, top card: its name, company and date, a ⋯ menu (posting, edit, hide, delete) in the corner, the
- * status, then what to do next in its own box with the button that does it. The people at the company follow.
+ * A job's page, laid out like the card on job pages: step 1, the job (title, company, when, its status and a ⋯
+ * menu); step 2, reach out: the people with one Email ↗ each, or finding them. Tapping a person shows the rest
+ * (the email to edit, follow-ups, LinkedIn).
  */
 export function jobPage(job: TrackerJob, focus?: string) {
   if (focus) openPeople.add(focus);
@@ -200,7 +201,6 @@ export function jobPage(job: TrackerJob, focus?: string) {
   const stage = stageOf(job as never);
   const pick = (value: string, label: string) => `<option value="${value}"${(stage === "no_response" ? "submitted" : stage) === value ? " selected" : ""}>${label}</option>`;
   const note = store.notes[job.id];
-  const progress = progressOf(job);
   const status = applied
     ? `<select class="status-mini" data-outcome="${job.id}" aria-label="Status">${pick("submitted", "Applied")}${pick("follow_up", "Follow up")}${stage === "assessment" ? pick("assessment", "Assessment") : ""}${pick("interviewing", "Interviewing")}${pick("offer", "Offer")}${pick("rejected", "Rejected")}</select>`
     : "";
@@ -217,66 +217,95 @@ export function jobPage(job: TrackerJob, focus?: string) {
             ${menuItem(`data-delete-job="${job.id}"`, ICON.trash, "Delete job", true)}
           </div>
         </details>`;
-  // What to do next: its step, the words, and the one button that does it.
-  const step = Math.min(progress.done, STEPS.length - 1);
-  const tone = progress.ended === "Rejected" ? " ended" : progress.ended === "Offer" ? " ok" : progress.due ? " due" : "";
-  const eyebrow = progress.ended ? progress.ended : applied ? `Next · step ${step + 1} of ${STEPS.length}` : "Next";
-  const action = !applied
-    ? `<button type="button" class="btn primary next-btn" data-mark-applied="${job.id}">I applied</button>`
-    : !progress.ended && (progress.done === 1 || progress.due)
-      ? `<button type="button" class="btn primary next-btn" data-see-people>See people <span aria-hidden="true">↓</span></button>`
-      : "";
-  const bars = STEPS.map((_, index) => `<i class="${index < progress.done ? "d" : index === progress.done && !progress.ended ? (progress.due ? "w" : "n") : ""}"></i>`).join("");
   return `
-    <section class="page job-view" aria-label="${escape(job.title)}">
-      <div class="job-head">
-        <div class="job-head-text">
-          <div class="job-name small-name">${escape(job.titleMissing ? "Job title missing" : job.title)}</div>
-          <div class="job-detail">${escape(company)}${job.location ? ` · ${escape(job.location)}` : ""} · ${escape(date)}${job.confirmation?.confidence === "confirmed" ? ' <span class="confirmed" title="The site confirmed it">✓</span>' : ""}</div>
+    <section class="page job-simple" aria-label="${escape(job.title)}">
+      <div class="js-step">
+        <span class="js-num ${applied ? "done" : "now"}" aria-hidden="true">${applied ? "✓" : "1"}</span>
+        <div class="js-body">
+          <div class="js-top"><span class="js-label">${escape(date)}${job.confirmation?.confidence === "confirmed" ? ' <span class="confirmed" title="The site confirmed it">✓</span>' : ""}</span>${status}${menu}</div>
+          <span class="js-job">${escape(job.titleMissing ? "Job title missing" : job.title)}</span>
+          <span class="sub">${escape(company)}${job.location ? ` · ${escape(job.location)}` : ""}</span>
+          ${editing.jobId === job.id ? editForm(job) : job.companyMissing ? companyAsk(job) : ""}
+          ${applied ? "" : `<button type="button" class="btn primary js-btn" data-mark-applied="${job.id}">I applied</button>`}
         </div>
-        ${menu}
       </div>
-      ${status ? `<div class="job-status">${status}</div>` : ""}
-      ${editing.jobId === job.id ? editForm(job) : job.companyMissing ? companyAsk(job) : ""}
-      <div class="next-box${tone}">
-        <div class="next-top"><span class="next-eyebrow">${escape(eyebrow)}</span><span class="dots" aria-hidden="true">${bars}</span></div>
-        <p class="next-text">${escape(progress.next)}</p>
+      <div class="js-step">
+        <span class="js-num ${applied ? "now" : ""}" aria-hidden="true">2</span>
+        <div class="js-body"><span class="js-label">Reach out</span>${reachOut(job)}</div>
+      </div>
+      ${note ? `<p class="small js-note" role="status">${escape(note)}</p>` : ""}
+    </section>`;
+}
+
+/** Step 2 on a job's page: the people with Email ↗, or how to find them. */
+function reachOut(job: TrackerJob) {
+  const company = job.companyMissing ? "the company" : job.company;
+  const guessed = guessedCount(job.id);
+  const linkedin = (words: string) => `<button type="button" class="quiet-link js-more" data-open-contacts="linkedin">${words}</button>`;
+  if (!isAppliedJob(job)) return `<span class="sub">Once you apply, Unnepo finds who to email at ${escape(company)}.</span>`;
+  if (job.contacts.length) {
+    const people = shownPeople(job);
+    const mailer = MAILER_NAME[store.mailer];
+    return `<ul class="js-people">${people.map((person) => simpleRow(job, person)).join("")}</ul>
+      <span class="sub">Email ↗ writes it from your resume and opens ${escape(mailer)}, ready to send.</span>
+      ${store.tracker?.free ? unlockCard(job) : ""}
+      ${linkedin(guessed ? `LinkedIn people (${guessed}) ›` : "Find more on LinkedIn ›")}`;
+  }
+  const finding = job.contactsStatus === "finding" || job.contactsStatus === "writing" || store.busy.has(`find:${job.id}`);
+  const stale = job.contactsStatus === "finding" && Date.now() - Date.parse(job.updatedAt) > 2 * 60 * 1000;
+  if (finding && !stale) return findingPeople(job, company);
+  const preview = job.contactsStatus === "done" ? job.fillReport?.peoplePreview : undefined;
+  if (preview?.rows.length && store.tracker?.free) {
+    return `<span class="sub">Unnepo found ${preview.rows.length} ${preview.rows.length === 1 ? "person" : "people"} at ${escape(company)}.</span>
+      <ul class="people-list">${preview.rows.map((row) => freeRow(null, row.title, row.role)).join("")}</ul>${linkedin("Or find them on LinkedIn (free) ›")}`;
+  }
+  const count = store.tracker?.peopleCount;
+  const left = count ? Math.max(0, Math.min(count.left, count.of)) : null;
+  const meter = count && left != null
+    ? `<div class="js-count"><b class="${left ? "" : "out"}">${left}</b><span>of ${count.of} companies left ${count.per}</span></div>
+       <div class="bar js-meter${left / count.of <= 0.2 ? " low" : ""}" aria-hidden="true"><div style="width:${Math.round((left / count.of) * 100)}%"></div></div>`
+    : "";
+  if (job.contactsStatus === "done" || job.contactsStatus === "failed" || stale) {
+    return `<span class="sub">${stale || job.contactsStatus === "failed" ? "That search didn't finish." : `No one found at ${escape(company)} yet.`} Add the company's website and search again.</span>
+      <div class="connect-code"><input class="field" data-website="${job.id}" value="${escape(websites[job.id] ?? "")}" placeholder="Company website, like acme.com" aria-label="Company website"><button type="button" class="solid" data-find-people="${job.id}">Search again</button></div>
+      ${linkedin("Or find people on LinkedIn (free) ›")}`;
+  }
+  const blocked = job.contactsMessage && !/^Finding|^Searching/.test(job.contactsMessage) ? job.contactsMessage : "";
+  if (left === 0) {
+    return `${meter}<span class="sub">${store.tracker?.free ? "None left today. More tomorrow, or Pro finds people at 50 companies a month." : "None left this month. More next month."}</span>
+      <button type="button" class="btn js-btn" data-open-contacts="linkedin">Find on LinkedIn instead</button>
+      ${store.tracker?.free ? `<button type="button" class="quiet-link js-more" data-upgrade>Get Pro ›</button>` : ""}`;
+  }
+  return `${meter}<span class="sub">Unnepo finds a recruiter or someone on the team at ${escape(company)}, with a work email.</span>
+    <button type="button" class="btn primary js-btn" data-find-people="${job.id}">Find people at ${escape(short(company, 22))}</button>
+    ${linkedin(guessed ? `LinkedIn people (${guessed}) ›` : "Or find on LinkedIn (free) ›")}
+    ${blocked ? `<p class="small" style="color: var(--warn)">${escape(blocked)}</p>` : ""}`;
+}
+
+/** One person, like the card: their initials, name and title, and one action. Tapping them shows the rest. */
+function simpleRow(job: TrackerJob, person: TrackerContact) {
+  const open = openPeople.has(person.id);
+  const busy = store.busy.has(`write:${person.id}`);
+  const draft = drafts[person.id] ?? { subject: person.emailSubject ?? "", body: person.emailBody ?? "" };
+  const hidden = job.hidden.includes(person.name.toLowerCase());
+  const status = { not_contacted: "", emailed: "Emailed ✓", replied: "Replied ✓", no_response: "No reply" }[person.outreachStatus];
+  const action = justOpened.has(person.id)
+    ? `<span class="js-actions"><button type="button" class="solid ok" data-sent="${person.id}" data-follow="${justOpened.get(person.id)}">Sent</button><button type="button" class="btn small-btn" data-not-yet="${person.id}">Not yet</button></span>`
+    : status ? `<span class="js-done${person.outreachStatus === "no_response" ? " muted" : ""}">${status}</span>`
+    : hidden ? `<button type="button" class="solid" data-reveal="${person.id}" ${store.busy.has(`reveal:${person.id}`) ? "disabled" : ""}>Show</button>`
+    : !person.email ? `<span class="js-done muted">No email</span>`
+    : draft.body ? `<a class="solid" href="#" data-email-link="${person.id}">Email ↗</a>`
+    : `<button type="button" class="solid" data-write-open="${person.id}" ${busy ? "disabled" : ""}>${busy ? "Writing…" : "Email ↗"}</button>`;
+  return `<li class="js-person${open ? " open" : ""}">
+      <div class="js-row">
+        <button type="button" class="js-who" data-person-toggle="${person.id}" aria-expanded="${open}" aria-label="${escape(person.name)}: more">
+          ${initialsAvatar(person.name)}
+          <span class="js-text"><span class="person-name">${escape(person.name)}</span><span class="sub">${escape(person.title || ROLE_LABEL[person.role] || "")}</span></span>
+        </button>
         ${action}
       </div>
-      ${note ? `<p class="small" role="status">${escape(note)}</p>` : ""}
-    </section>
-    ${applied ? `<section class="page" aria-label="People you emailed">${reachPicker(job)}</section>` : ""}
-    ${contactsChoice(job)}`;
-}
-
-const LINKEDIN_ICON = `<svg class="contact-icon" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4.98 3.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM3 9.75h4V21H3zM9.5 9.75h3.8v1.6h.06c.53-1 1.83-2.05 3.77-2.05 4.03 0 4.77 2.6 4.77 6V21h-4v-5c0-1.2-.02-2.73-1.66-2.73-1.67 0-1.92 1.3-1.92 2.65V21h-4z"/></svg>`;
-const VERIFIED_ICON = `<svg class="contact-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/><path d="m9 12 2 2 4-4"/></svg>`;
-
-/** What the verified button says under its name: people found, searching, uses left on Free, or Pro. */
-function verifiedSub(job: TrackerJob) {
-  const found = job.contacts.length;
-  if (found) return `${found} ${found === 1 ? "person" : "people"} found`;
-  if (job.contactsStatus === "finding" || job.contactsStatus === "writing") return "Searching…";
-  if (!store.tracker?.free) return "Pro · checked work emails";
-  const left = store.tracker.peopleLeft ?? 0;
-  return left ? `${left} ${left === 1 ? "use" : "uses"} left today` : "Pro · none left today";
-}
-
-/**
- * Under the job: two ways to find who to email, each opening its own page. LinkedIn (free): names read off
- * LinkedIn, emails guessed from the company's format. Verified: Unnepo's search, with checked emails (Pro, or a
- * Free unlock).
- */
-function contactsChoice(job: TrackerJob) {
-  const guessed = guessedCount(job.id);
-  const free = Boolean(store.tracker?.free);
-  const out = free && !job.contacts.length && (store.tracker?.peopleLeft ?? 0) === 0;
-  return `
-    <section class="page contacts-choice" aria-label="Find people to email">
-      <span class="eyebrow">Find people to email</span>
-      <button type="button" class="contact-choice" data-open-contacts="linkedin">${LINKEDIN_ICON}<span class="contact-text"><span class="contact-name">Find with LinkedIn + guessed emails</span><span class="contact-sub">${guessed ? `${guessed} ${guessed === 1 ? "person" : "people"} saved` : "Free · names from LinkedIn, emails from the company's format"}</span></span><span class="chev" aria-hidden="true">›</span></button>
-      <button type="button" class="contact-choice" data-open-contacts="verified">${VERIFIED_ICON}<span class="contact-text"><span class="contact-name">Find verified emails</span><span class="contact-sub${out ? " out" : ""}">${escape(verifiedSub(job))}</span></span><span class="chev" aria-hidden="true">›</span></button>
-    </section>`;
+      ${open ? personBody(job, person) : ""}
+    </li>`;
 }
 
 /** The verified people at a job, on their own page. */
@@ -326,20 +355,6 @@ function editForm(job: TrackerJob) {
           <button type="button" class="link" data-edit-cancel>Cancel</button>
         </div>
       </div>`;
-}
-
-/** "People you emailed: None · 1 · 2 · 3+", one tap to say how many people were reached out to. */
-function reachPicker(job: TrackerJob) {
-  const count = emailedCount(job);
-  const busy = store.busy.has(`reach:${job.id}`);
-  const option = (value: number, label: string) => {
-    const on = value === 3 ? count >= 3 : count === value;
-    return `<button type="button" class="seg-btn${on ? " on" : ""}" data-reach="${value}" data-reach-job="${job.id}" aria-pressed="${on}" ${busy ? "disabled" : ""}>${label}</button>`;
-  };
-  return `<div class="question" role="group" aria-label="People you emailed about this job">
-    <span class="q-label">People you emailed</span>
-    <div class="seg">${option(0, "None yet")}${option(1, "1")}${option(2, "2")}${option(3, "3+")}</div>
-  </div>`;
 }
 
 /** Saves how many people were emailed; the job leaves the Follow up tab's "No email yet" list once it's 1 or more. */
@@ -510,25 +525,9 @@ function personInfo(person: TrackerContact) {
 }
 
 function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
-  const key = person.name.toLowerCase();
-  const hidden = job.hidden.includes(key);
-  const revealsLeft = (job.fillReport?.peopleReveals ?? 0) < 3;
+  const hidden = job.hidden.includes(person.name.toLowerCase());
   const open = openPeople.has(person.id);
-  const followUps = store.followUps[person.id] ?? 0;
-  const due = person.outreachStatus === "emailed" && Boolean(job.fillReport?.emailedAt?.[person.id]);
-  const busy = (what: string) => store.busy.has(`${what}:${person.id}`);
-  const draft = drafts[person.id] ?? { subject: person.emailSubject ?? "", body: person.emailBody ?? "" };
-  const link = person.email && draft.body ? composeLink(store.mailer, person.email, draft.subject, draft.body) : null;
-  const followUp = person.outreachStatus === "emailed" || person.outreachStatus === "no_response";
   const status = { not_contacted: "", emailed: "Emailed", replied: "Replied", no_response: "No reply" }[person.outreachStatus];
-  // The main button opens the email, written and filled in, ready to send (or writes it first).
-  const send = person.email
-    ? link
-      ? `<a class="solid send-mail" href="${escape(link.url)}" ${link.url.startsWith("mailto:") ? "" : 'target="_blank" rel="noreferrer"'} data-email-link="${person.id}" data-cut="${link.cut}">${store.mailer === "gmail" ? GMAIL : ""}${followUp ? "Open again" : "Send"} in ${MAILER_NAME[store.mailer]} ↗</a>`
-      : `<button type="button" class="solid send-mail" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing your email…" : `Write email${typeof store.tracker?.emailsLeft === "number" ? ` (${store.tracker.emailsLeft} left today)` : ""}`}</button>`
-    : hidden
-      ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>` : `<span class="small">You've shown 3 people for this job.</span>`
-      : `<span class="small">No email found.</span>`;
   const tag = status
     ? `<span class="card-tag${person.outreachStatus === "replied" ? " ok" : ""}">${status}</span>`
     : person.emailBody ? `<span class="card-tag written">Written</span>` : "";
@@ -545,7 +544,28 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
         </span>
         <span class="person-side">${tag}<span class="chev" aria-hidden="true">›</span></span>
       </button>
-      ${open ? `<div class="person-body">
+      ${open ? personBody(job, person) : ""}
+    </li>`;
+}
+
+/** What shows under a person when they're tapped: the email to edit, the button that opens it, follow-ups and LinkedIn. */
+function personBody(job: TrackerJob, person: TrackerContact) {
+  const hidden = job.hidden.includes(person.name.toLowerCase());
+  const revealsLeft = (job.fillReport?.peopleReveals ?? 0) < 3;
+  const followUps = store.followUps[person.id] ?? 0;
+  const due = person.outreachStatus === "emailed" && Boolean(job.fillReport?.emailedAt?.[person.id]);
+  const busy = (what: string) => store.busy.has(`${what}:${person.id}`);
+  const draft = drafts[person.id] ?? { subject: person.emailSubject ?? "", body: person.emailBody ?? "" };
+  const link = person.email && draft.body ? composeLink(store.mailer, person.email, draft.subject, draft.body) : null;
+  const followUp = person.outreachStatus === "emailed" || person.outreachStatus === "no_response";
+  const send = person.email
+    ? link
+      ? `<a class="solid send-mail" href="${escape(link.url)}" ${link.url.startsWith("mailto:") ? "" : 'target="_blank" rel="noreferrer"'} data-email-link="${person.id}" data-cut="${link.cut}">${store.mailer === "gmail" ? GMAIL : ""}${followUp ? "Open again" : "Send"} in ${MAILER_NAME[store.mailer]} ↗</a>`
+      : `<button type="button" class="solid send-mail" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing your email…" : `Write email${typeof store.tracker?.emailsLeft === "number" ? ` (${store.tracker.emailsLeft} left today)` : ""}`}</button>`
+    : hidden
+      ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>` : `<span class="small">You've shown 3 people for this job.</span>`
+      : `<span class="small">No email found.</span>`;
+  return `<div class="person-body">
         ${justOpened.has(person.id) ? `
           <div class="sent-check" role="status"><span class="small">${justOpened.get(person.id) ? "Sent the follow-up?" : "Sent it?"}</span>
             <button type="button" class="solid" data-sent="${person.id}" data-follow="${justOpened.get(person.id)}">${justOpened.get(person.id) ? "I sent the follow-up" : "I emailed them"}</button></div>` : ""}
@@ -563,8 +583,7 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
           ${followUp && due ? `${followUps < MAX_FOLLOW_UPS ? `<button type="button" class="quiet-link" data-follow-up="${person.id}" ${busy("follow") ? "disabled" : ""}>${busy("follow") ? "Writing…" : "Write follow-up"}</button>` : ""}<button type="button" class="quiet-link" data-status="${person.id}" data-value="replied">They replied</button><button type="button" class="quiet-link" data-status="${person.id}" data-value="no_response">No reply, stop</button>` : ""}
           <button type="button" class="quiet-link" data-bounced="${person.id}">It bounced</button>
         </div>` : ""}
-      </div>` : ""}
-    </li>`;
+      </div>`;
 }
 
 /** Starts Unnepo's search for verified people at a job (with the website typed in, if any). */
@@ -752,6 +771,10 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     const id = button.dataset.sent!;
     justOpened.delete(id);
     await run("status", id, { action: "status", status: "emailed", followedUp: button.dataset.follow === "true" });
+  }));
+  root.querySelectorAll<HTMLButtonElement>("[data-not-yet]").forEach((button) => button.addEventListener("click", () => {
+    justOpened.delete(button.dataset.notYet!);
+    host.redraw();
   }));
   root.querySelectorAll<HTMLButtonElement>("[data-status]").forEach((button) => button.addEventListener("click", () => {
     justOpened.delete(button.dataset.status!);

@@ -941,3 +941,42 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .me-top .row-between { width: 100%; }
 .friend.tap { width: 100%; padding: 2px 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; border-radius: 8px; }
 .friend.tap:hover .friend-name { text-decoration: underline; text-underline-offset: 3px; }
+
+/* A job's page, laid out like the card on job pages: numbered steps, the job, then the people. */
+.job-simple { padding: 0; gap: 0; }
+.js-step { display: flex; gap: 12px; padding: 16px; }
+.js-step + .js-step { border-top: 1px solid var(--line-2); }
+.js-num { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font: 600 12px Geist, sans-serif; background: var(--control); color: var(--muted-3); }
+.js-num.done { background: rgba(34, 197, 94, .16); color: var(--ok); }
+.js-num.now { background: var(--accent); color: #fff; }
+.js-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.js-top { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.js-top .js-label { flex: 1; }
+.js-top .status-mini { margin-top: 0; }
+.js-label { font: 600 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.js-job { font-size: 15px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.js-btn { width: 100%; margin-top: 4px; }
+.js-more { align-self: flex-start; min-height: 28px; font-size: 12px; }
+.js-note { padding: 0 16px 14px; margin: 0; }
+.js-people { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.js-person + .js-person { border-top: 1px solid var(--line); }
+.js-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.js-who { all: unset; box-sizing: border-box; flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; cursor: pointer; border-radius: 8px; }
+.js-who:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.js-who:hover .person-name { text-decoration: underline; text-underline-offset: 3px; }
+.js-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.js-text .person-name { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.js-text .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.js-row .solid { flex: none; height: 30px; padding: 0 12px; font-size: 12px; text-decoration: none; display: inline-flex; align-items: center; }
+.js-row .solid { background: var(--accent); border-color: var(--accent); color: #fff; }
+.js-row .solid.ok { background: #16A34A; border-color: #16A34A; }
+.js-actions { flex: none; display: inline-flex; gap: 6px; }
+.js-done { flex: none; font-size: 12px; font-weight: 600; color: var(--ok); }
+.js-done.muted { color: var(--muted); font-weight: 500; }
+.js-person .person-body { padding: 4px 0 12px; }
+.js-count { display: flex; align-items: baseline; gap: 6px; }
+.js-count b { font: 700 26px/1 Geist, sans-serif; letter-spacing: -.02em; }
+.js-count b.out { color: var(--warn); }
+.js-count span { font-size: 12px; color: var(--muted); }
+.js-meter { height: 6px; }
+.js-meter.low div { background: var(--warn); }
