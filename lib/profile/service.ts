@@ -7,7 +7,7 @@ import { normalizeLabel } from "@/lib/apply/questions";
 import type { ApplicationProfile } from "@/lib/apply/types";
 import { storeResume } from "@/lib/services/resume";
 import { extractProfileFromResume, mergeResume } from "@/lib/profile/extract";
-import { cleanStudentProfile, completeness, emptyStudentProfile, missingGaps, type StudentProfile } from "@/lib/profile/student";
+import { cleanStudentProfile, completeness, emptyStudentProfile, missingGaps, withMonthYears, type StudentProfile } from "@/lib/profile/student";
 
 /**
  * The resume-first profile: read it, update it from a resume, save the student's edits, and keep the
@@ -49,7 +49,8 @@ async function load(userId: string) {
   const [user, stored, document, resume] = await Promise.all([repo.getUserById(userId), applicationProfiles.get(userId), repo.getProfileDocument(userId), repo.getLatestResume(userId)]);
   if (!user) throw new ServiceError("Sign in to continue.", "auth", 401);
   const form = document?.form;
-  const student = stored?.student ?? fromLegacy(stored, user, form ? { school: form.school, major: form.major, graduationYear: form.graduationYear } : null);
+  // Dates read as MM/YYYY, the way forms ask for them, however they were typed or read off the resume.
+  const student = withMonthYears(stored?.student ?? fromLegacy(stored, user, form ? { school: form.school, major: form.major, graduationYear: form.graduationYear } : null));
   // Students who finished the old onboarding don't have to do it again.
   const ready = Boolean(student.confirmedAt) || Boolean(document?.ready);
   return { user, stored, student, ready, resume };

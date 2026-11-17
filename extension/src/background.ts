@@ -897,6 +897,11 @@ async function run(tabId: number) {
   // How many times each step, and each page, was filled on this run.
   const stepFills = new Map<string, number>();
   const filledKeys = new Set<string>();
+  // How many jobs and schools the profile has: Workday's My Experience gets one entry for each.
+  let entryCounts: Promise<{ experience: number; education: number }> | null = null;
+  const entriesFor = () => (entryCounts ??= api<{ profile: { experience?: unknown[]; education?: unknown[] } }>("GET", "profile")
+    .then(({ profile }) => ({ experience: Math.min(profile.experience?.length ?? 0, 10), education: Math.min(profile.education?.length ?? 0, 5) }))
+    .catch(() => ({ experience: 0, education: 0 })));
   /** After a press: waits for a new page, new fields, or new buttons (Workday's "how to apply" choice). */
   const waitForChange = async (key: string, buttonsBefore: string, known: boolean, timeout = 12_000) => {
     const until = Date.now() + timeout;
@@ -1005,6 +1010,17 @@ async function run(tabId: number) {
       // over and over was how a run went round in circles.
       const key = signature(scan);
       const stepKey = status.step ? `${status.step.index}/${status.step.total}` : "";
+      // Workday's My Experience starts with one job (or none) and no school: Add Another until each one in the
+      // profile has its own entry, then the page is read again with them all.
+      if (scan.ats === "workday" && hasForm(scan) && key !== filledKey && !filledKeys.has(key)) {
+        const want = await entriesFor();
+        const added = want.experience || want.education ? await send<{ added: number }>(tabId, { type: "add-entries", want }).catch(() => ({ added: 0 })) : { added: 0 };
+        if (added.added) {
+          note(`added ${added.added} ${added.added === 1 ? "entry" : "entries"} for the profile's jobs and schools`);
+          await wait(700);
+          continue;
+        }
+      }
       if (hasForm(scan) && key !== filledKey && !stepKey && filledKeys.has(key)) {
         throw new Error("Unnepo is back on a page it already filled, so it stopped instead of filling it again. Go to where you were and press Fill. What happened is on your issues list (Profile).");
       }

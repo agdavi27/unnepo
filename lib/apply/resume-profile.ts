@@ -101,6 +101,8 @@ export function parseResumeDate(raw: string): { month: number | null; year: numb
   if (!year) return null;
   const numeric = text.match(/\b(0?[1-9]|1[0-2])\s*[/.-]\s*(19|20)\d{2}\b/);
   if (numeric) return { month: Number(numeric[1]), year: Number(year) };
+  const iso = text.match(/\b(?:19|20)\d{2}[-/.](0?[1-9]|1[0-2])\b/);
+  if (iso) return { month: Number(iso[1]), year: Number(year) };
   const name = MONTHS.findIndex((month) => new RegExp(`\\b${month.slice(0, 3)}`).test(text));
   if (name >= 0) return { month: name + 1, year: Number(year) };
   const season = Object.keys(SEASONS).find((key) => text.includes(key));
