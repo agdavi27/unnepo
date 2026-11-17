@@ -77,9 +77,30 @@ export class FillError extends Error {
   }
 }
 
-/** Any open listbox's options on the page. */
+/**
+ * Any open listbox's options on the page. Paylocity's lists are a role="list" of role="listitem" rows in a
+ * "…-dropdown-list-container" (its Country and State), so those count too, but only inside a dropdown's list.
+ */
+const OPTIONS = "[role=option], [data-automation-id='promptOption'], [id*='dropdown-list'] [role=listitem], [class*='menu-list'] [role=listitem]";
 export function visibleOptions(scope: ParentNode = document) {
-  return deepAll<HTMLElement>("[role=option], [data-automation-id='promptOption']", scope).filter((el) => el.getBoundingClientRect().height > 0);
+  return deepAll<HTMLElement>(OPTIONS, scope).filter((el) => el.getBoundingClientRect().height > 0);
+}
+
+/**
+ * A street address box that suggests addresses as you type (Paylocity, Google Places): it says it's a combobox,
+ * but it takes typed text. Picking a suggestion would change the address ("Hill" to "Hl"), so the address is typed
+ * and the suggestions are closed.
+ */
+export const ADDRESS_LINE = /^(street |home |mailing |current )?address( line)?\s*(1|2|one|two)?\b|^street( address)?\b/i;
+
+/** Closes an address box's suggestions: a press on the form outside it (Escape doesn't close Paylocity's). */
+export async function dismissSuggestions(input: HTMLElement) {
+  await sleep(300);
+  const outside = input.closest("form") ?? input.parentElement?.parentElement?.parentElement?.parentElement ?? document.body;
+  for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) {
+    outside.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+  }
+  await sleep(150);
 }
 
 /** The element that has the keyboard, looking inside shadow roots. */
@@ -124,7 +145,8 @@ export async function typeKeys(el: HTMLInputElement | HTMLTextAreaElement, value
   if (blur) leave(el);
 }
 
-const BLANK_CHOICE = /^(select( one)?(\.{1,3}|…)?|choose( one)?(\.{1,3}|…)?|please select|search|--.*|)$/i;
+// "Select a state" and "Choose a country" too: Paylocity shows its placeholder where the choice goes.
+const BLANK_CHOICE = /^((select|choose|pick)( one| an?( \w+){1,2}| your( \w+){1,2})?(\.{1,3}|…)?|please select|search|--.*|)$/i;
 const CHOSEN = "[class*='single-value'], [class*='singleValue'], [class*='multi-value'], [class*='multiValue'], [data-automation-id='selectedItem'], [class*='selected-value'], [class*='selectedValue']";
 const loose = (text: string) => text.toLowerCase().replace(/\s*\([^)]*\)/g, "").replace(/[^a-z0-9]+/g, " ").trim();
 
@@ -142,7 +164,7 @@ function chosenBeside(trigger: HTMLElement) {
 /** What a custom dropdown shows as chosen ("" when it shows nothing, like "Select One"), or null when it can't tell. */
 export function shownChoice(trigger: HTMLElement): string | null {
   const beside = chosenBeside(trigger);
-  if (beside) return beside;
+  if (beside) return BLANK_CHOICE.test(beside) ? "" : beside;
   if (trigger instanceof HTMLInputElement) return trigger.value.trim();
   const shown = (trigger.innerText || trigger.textContent || "").replace(/\s+/g, " ").trim();
   if (BLANK_CHOICE.test(shown)) return "";
@@ -250,6 +272,9 @@ async function byClicking(trigger: HTMLElement, answer: string, options: ChooseO
     throw new FillError(`no option matching "${answer}"`, "no_option", seen.slice(0, 100));
   }
   const firstList = list();
+  // A row scrolled out of the list's view ignores a click (Paylocity's State list): it's brought into view first.
+  item.scrollIntoView({ block: "nearest" });
+  await sleep(60);
   press(item);
   await sleep(250);
   const final = await nestedChoice(trigger, answer, choice, before, firstList, options.pick);
@@ -311,7 +336,12 @@ async function byKeyboard(trigger: HTMLElement, answer: string, options: ChooseO
   }
   if (moved) key(focused() ?? trigger, "Enter");
   // A list that doesn't say which option the keyboard is on: the option gets a plain click instead.
-  else (list().find((el) => optionText(el) === choice) ?? item).click();
+  else {
+    const row = list().find((el) => optionText(el) === choice) ?? item;
+    row.scrollIntoView({ block: "nearest" });
+    await sleep(60);
+    press(row);
+  }
   await sleep(250);
   const final = await nestedChoice(trigger, answer, choice, before, firstList, options.pick);
   if (firstList.some((el) => el.isConnected && el.getBoundingClientRect().height > 0) && !multiSelect(trigger)) close(trigger);
@@ -324,16 +354,20 @@ async function byKeyboard(trigger: HTMLElement, answer: string, options: ChooseO
  * more options and loose matching are part of each. Says which way worked; throws when none did.
  *
  * Answers are never typed into a dropdown: it's opened and an option is picked from its list. Only a search
- * box that shows no options at all until something is typed (schools, cities) gets a short search, and that
- * is cleared again when nothing in the results fits. A dropdown either gets a listed choice or stays empty.
+ * box that shows no options until something is typed (schools, cities), or a long list whose choice wasn't
+ * found by scrolling, gets a short search, and that is cleared again when nothing in the results fits. A dropdown either gets a listed choice or stays empty.
  */
 export async function chooseCustom(trigger: HTMLElement, answer: string, options: ChooseOptions = {}): Promise<DropdownMethod> {
   const search = trigger instanceof HTMLInputElement ? searchFor(options.type ?? "") : "";
+  let first: unknown;
   try {
     return await eachWay(trigger, answer, { ...options, type: undefined });
   } catch (error) {
-    const shownNothing = error instanceof FillError && error.problem === "list_didnt_open";
-    if (!search || !shownNothing) {
+    first = error;
+    // A list that didn't open, or a long one that only draws the rows in view (Paylocity's countries),
+    // gets searched: typing narrows it to the choice.
+    const searchable = error instanceof FillError && (error.problem === "list_didnt_open" || error.problem === "no_option");
+    if (!search || !searchable) {
       if (trigger instanceof HTMLInputElement && !chosenBeside(trigger)) clearTyped(trigger);
       throw error;
     }
@@ -343,7 +377,9 @@ export async function chooseCustom(trigger: HTMLElement, answer: string, options
   } catch (error) {
     // Search words left in the box would go in as the answer.
     if (trigger instanceof HTMLInputElement && !chosenBeside(trigger)) clearTyped(trigger);
-    throw error;
+    // The full list seen first is the better one to hand the AI.
+    const firstFull = first instanceof FillError && first.problem === "no_option" && first.options.length;
+    throw firstFull && error instanceof FillError && error.problem === "no_option" ? first : error;
   }
 }
 
@@ -368,7 +404,49 @@ async function eachWay(trigger: HTMLElement, answer: string, options: ChooseOpti
       if ((last.problem === "no_option" && !(trigger instanceof HTMLInputElement && options.type)) || last.problem === "more_choices") break;
     }
   }
+  if (last?.problem === "didnt_stick" && !multiSelect(trigger) && (await viaAnother(trigger, answer, options))) return "click";
   throw last ?? new FillError("couldn't fill", "error");
+}
+
+/**
+ * A box that still looks empty after its choice was picked may already hold that choice unseen (Paylocity's
+ * Country holds United States while it shows "Select a country"), so picking it again changes nothing.
+ * Another option is picked first, then the answer. If the answer still won't show, the box is put back to the
+ * choice it held before, so a stray option is never left in it.
+ */
+async function viaAnother(trigger: HTMLElement, answer: string, options: ChooseOptions) {
+  if (shownChoice(trigger) !== "") return false;
+  if (trigger instanceof HTMLInputElement) clearTyped(trigger);
+  await sleep(150);
+  let other: string | null = null;
+  let held: string | null = null;
+  try {
+    await byClicking(trigger, answer, {
+      ...options,
+      type: undefined,
+      pick: (texts) => {
+        const target = matchOption(answer, texts, options.pick);
+        // An open list shows the choice the box holds unseen; picking that one would change nothing either.
+        held = shownChoice(trigger) || null;
+        other = texts.find((t) => t && !BLANK_CHOICE.test(t) && t !== target && t !== held) ?? null;
+        return other;
+      },
+    });
+    await sleep(150);
+    if (other && showsChoice(trigger, other)) {
+      const choice = await byClicking(trigger, answer, options);
+      await sleep(60);
+      if (showsChoice(trigger, choice)) return true;
+    }
+  } catch {
+    // Falls through to putting the box back.
+  }
+  if (other) {
+    const before = held;
+    await byClicking(trigger, answer, { ...options, type: undefined, pick: (texts) => (before && texts.includes(before) ? before : null) }).catch(() => undefined);
+    if (trigger instanceof HTMLInputElement && !before) clearTyped(trigger);
+  }
+  return false;
 }
 
 /**

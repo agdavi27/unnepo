@@ -1,8 +1,8 @@
 import { bestOption, dialCodeOption } from "@/lib/apply/options";
 import { answerChoices } from "@/lib/apply/questions";
 import type { Answer, DropdownMethod, FileData, FillAttempt, FillFailure, PageField } from "../shared/types";
-import { attachFile, chooseCustom, chooseNativeSelect, FillError, isDropdownInput, opensList, press, shownChoice, sleep, typeInto, typeKeys, waysFrom, YES } from "./dom";
-import { findMarked, isEmpty, labelOf, rootOf } from "./scan";
+import { ADDRESS_LINE, attachFile, chooseCustom, chooseNativeSelect, dismissSuggestions, FillError, isDropdownInput, opensList, press, shownChoice, sleep, typeInto, typeKeys, waysFrom, YES } from "./dom";
+import { findMarked, isEmpty, labelOf, rootOf, uploadButton } from "./scan";
 
 /**
  * Any other form (Lever, Ashby, company career sites): filled by the data-unnepo-id the scanner set on
@@ -54,13 +54,28 @@ function uploadPlan(fields: PageField[], files: { resume: FileData | null; cover
   const boxes = fields.filter((field) => field.type === "file");
   const named = boxes.some((field) => RESUME.test(`${field.label} ${field.section}`));
   let generic = 0;
-  return new Set(boxes.filter((field) => {
+  const chosen = boxes.filter((field) => {
     if (alreadyUploaded(field)) return false;
     const file = fileFor(field, files);
     if (!file) return false;
     if (file !== files.resume || RESUME.test(`${field.label} ${field.section}`)) return true;
     return !named && generic++ === 0;
-  }).map((field) => field.id));
+  });
+  // The resume goes in once. Paylocity asks twice ("Apply with resume" in a popup, and "Select Resume to Upload"
+  // under it): uploading to both reads it twice. The box whose button isn't covered (the popup's) gets it.
+  const resumeBoxes = chosen.filter((field) => fileFor(field, files) === files.resume);
+  const keep = resumeBoxes.length > 1 ? resumeBoxes.find((field) => onTop(field)) ?? resumeBoxes[0] : null;
+  return new Set(chosen.filter((field) => !keep || fileFor(field, files) !== files.resume || field === keep).map((field) => field.id));
+}
+
+/** Whether a file box's button can be pressed now, not covered by a popup. */
+function onTop(field: PageField) {
+  const input = findMarked(field.id);
+  const button = input && uploadButton(input);
+  if (!button) return false;
+  const box = button.getBoundingClientRect();
+  const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+  return Boolean(hit && button.contains(hit));
 }
 
 function pickLabel(answer: string, labels: string[]) {
@@ -194,6 +209,14 @@ async function fillOne(field: PageField, answer: Answer, files: { resume: FileDa
       return "upload";
     }
     default: {
+      // A street address box that suggests addresses: the address is typed and its suggestions closed.
+      if (ADDRESS_LINE.test(field.label) && isDropdownInput(el)) {
+        if (way >= TEXT_WAYS.length) return null;
+        if (way === 0) typeInto(el, value);
+        else await typeKeys(el, value);
+        await dismissSuggestions(el);
+        return TEXT_WAYS[way];
+      }
       // A box that opens a list only takes a listed choice: never typed words.
       if (isDropdownInput(el) || (way === 0 && el instanceof HTMLInputElement && field.type === "text" && (await opensList(el)))) {
         if (way > 1) return null;
@@ -230,7 +253,7 @@ export function readBack(field: PageField, answer: Answer): string | null {
     case "file":
       return isEmpty(el) ? "the page shows no file" : null;
     default: {
-      if (isDropdownInput(el)) return shownChoice(el) === "" ? "the box shows no choice" : null;
+      if (isDropdownInput(el) && !ADDRESS_LINE.test(field.label)) return shownChoice(el) === "" ? "the box shows no choice" : null;
       const shown = (el as HTMLInputElement).value.trim();
       if (!shown) return "the box is empty";
       return sameText(field, shown, value);

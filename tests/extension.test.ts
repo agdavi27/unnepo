@@ -15,6 +15,7 @@ import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
 import { boardEmployerName, boardJobName, jobLink, titleParts, ukgCompanyFrom } from "@/extension/src/content/scan";
+import { ADDRESS_LINE } from "@/extension/src/content/dom";
 import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
 import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromDescription } from "@/lib/apply/extract";
@@ -878,6 +879,9 @@ describe("one link per job", () => {
     expect(ukgCompanyFrom(["Cancel"], "http://www.snipesusa.com")).toBe("Snipes");
     expect(ukgCompanyFrom(["Cancel"], "https://careers.acme.com/")).toBe("Acme");
     expect(ukgCompanyFrom([], "")).toBe("");
+    // Street address boxes that suggest addresses are typed into; other "address" questions aren't.
+    for (const label of ["Address Line 1", "Address Line 2(optional)", "Street Address", "Address", "Home Address", "Address 1"]) expect(ADDRESS_LINE.test(label), label).toBe(true);
+    for (const label of ["Email Address", "Country", "City", "IP address", "Web address"]) expect(ADDRESS_LINE.test(label), label).toBe(false);
   });
 });
 
