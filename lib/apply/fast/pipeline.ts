@@ -4,6 +4,7 @@ import { integrations } from "@/lib/integrations/flags";
 import { safeGetJson } from "@/lib/apply/safe-fetch";
 import type { ResumeProfile } from "@/lib/apply/resume-profile";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication } from "@/lib/apply/types";
+import { fullUrl } from "@/lib/apply/questions";
 import { fitOptions, mapAnswers, type MappedAnswer, type MapperInput } from "@/lib/apply/fast/mapper";
 import { parseGreenhouse, schemaKind, type FormSchema, type GreenhouseJobJson, type SchemaField } from "@/lib/apply/fast/schema";
 
@@ -42,7 +43,15 @@ export type KnownContext = {
 export function knownAnswers(context: KnownContext) {
   return (field: SchemaField): { value: string; source: string } | null => {
     const p = context.profile;
-    const school = context.resumeProfile?.education[0];
+    // "Education 2" (Workday's second school) is the profile's second school, not the first one again.
+    const entry = Math.max(0, Number(field.sectionLabel?.match(/\b(\d{1,2})\b/)?.[1] ?? 1) - 1);
+    const school = context.resumeProfile?.education[entry];
+    // Workday's Websites: the portfolio in one entry and LinkedIn in the next, whichever of the two the student has.
+    if (/^(websites?|web sites?|links)( \d+)?$/i.test(field.sectionLabel?.trim() ?? "") && /\b(url|website|link)\b/i.test(field.label)) {
+      const links = [p.website, p.linkedin].map((link) => fullUrl(link ?? "")).filter(Boolean);
+      return links[entry] ? { value: links[entry], source: "profile" } : null;
+    }
+    if (entry > 0 && (field.type === "school" || field.type === "degree")) return school?.[field.type] ? { value: school[field.type], source: "resume" } : null;
     switch (field.type) {
       case "location": {
         const place = [p.city, p.state].filter((part) => part?.trim()).join(", ");

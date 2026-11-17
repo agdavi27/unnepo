@@ -184,11 +184,17 @@ async function ensureResumeProfile(userId: string) {
 }
 
 /** The answer for a form question: the student's own answers first, then their resume's schools and jobs, then their details. */
+/** A repeating entry on a form: one job, one school, one website. Its answers come from the profile's entries. */
+const ENTRY_SECTION = /\b(work |professional )?experience\b|employment|work history|education|^(websites?|web sites?|links)( \d+)?$/i;
+
 export function answerWith(info: Awaited<ReturnType<typeof student>>, company: string) {
   return (label: string, kind: ApplicationQuestion["kind"], options: string[], where?: { section?: string; format?: string | null }) => {
+    // Inside a job's or school's entry ("Education 2"), that entry in the profile wins: an answer saved from
+    // another form ("School or University: Colby College") would otherwise fill every school with the first one.
+    const fromResume = resumeFieldAnswer(info.profile.resumeProfile, { label, section: where?.section, kind, options, format: where?.format });
+    if (fromResume && ENTRY_SECTION.test(where?.section ?? "")) return fromResume;
     const [planned] = planAnswers([{ key: label, label, kind, required: false, options, sensitive: false, answer: null, source: null, evidence: null }], info.context);
     if (planned.answer && (planned.source === "saved" || planned.source === "student")) return planned.answer;
-    const fromResume = resumeFieldAnswer(info.profile.resumeProfile, { label, section: where?.section, kind, options, format: where?.format });
     if (fromResume) return fromResume;
     if (planned.answer && planned.source && planned.source !== "resume_file") return planned.answer;
     // "Current/Most Recent Employer Name", "Most recent job title": the latest job on the resume.
@@ -237,6 +243,8 @@ export async function learnAnswers(userId: string, info: Awaited<ReturnType<type
   const next: ApplicationProfile = { ...info.profile };
   let learned = 0;
   for (const entry of entries) {
+    // A job's or school's own boxes are the profile's entries, not one answer for every form.
+    if (ENTRY_SECTION.test(entry.section.trim())) continue;
     const { field } = classifyQuestion(entry.label);
     if (field === "resume" || field === "coverLetter" || field === "phoneExtension" || /cover ?letter|password/i.test(entry.label)) continue;
     // A plain contact field fills the student's details if they were blank.
