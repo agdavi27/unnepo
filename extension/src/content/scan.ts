@@ -61,7 +61,16 @@ export const rootOf = (el: Element) => el.getRootNode() as Document | ShadowRoot
 export const parentOf = (el: Element): Element | null => el.parentElement ?? ((el.getRootNode() as ShadowRoot).host ?? null);
 
 /** A field the scanner marked, wherever it is. */
-export const findMarked = (id: string) => deepAll<HTMLElement>(`[data-unnepo-id="${id}"]`)[0] ?? null;
+export function findMarked(id: string) {
+  const found = deepAll<HTMLElement>(`[data-unnepo-id="${id}"]`)[0];
+  if (found) return found;
+  // Workday swaps a box for a new one once it's filled: the new one keeps the page's own id.
+  const pageId = pageIds.get(id);
+  const again = pageId ? deepAll<HTMLElement>(`[id="${CSS.escape(pageId)}"]`)[0] : undefined;
+  if (!again || again.getAttribute("data-unnepo-id")) return null;
+  again.setAttribute("data-unnepo-id", id);
+  return again;
+}
 
 function byIds(ids: string, root: Document | ShadowRoot = document) {
   return ids.split(/\s+/).map((id) => root.getElementById(id)?.textContent ?? "").join(" ");
@@ -218,10 +227,15 @@ export function uploadButton(input: Element) {
 }
 const uploadButtonShown = (input: Element) => Boolean(uploadButton(input));
 
+// The fill script can be loaded into a page more than once: each load numbers its own marks, so a box added later never takes an id already on the page.
+const run = Math.random().toString(36).slice(2, 6);
 let counter = 0;
+const pageIds = new Map<string, string>();
 function mark(el: Element) {
-  if (!el.getAttribute("data-unnepo-id")) el.setAttribute("data-unnepo-id", `u${++counter}`);
-  return el.getAttribute("data-unnepo-id")!;
+  if (!el.getAttribute("data-unnepo-id")) el.setAttribute("data-unnepo-id", `u${run}${++counter}`);
+  const id = el.getAttribute("data-unnepo-id")!;
+  if (el.id) pageIds.set(id, el.id);
+  return id;
 }
 
 /**
@@ -270,7 +284,8 @@ export function scanFields(): PageField[] {
     if ((!dialog && el.closest("[aria-hidden='true']") && !(type === "file" && uploadButtonShown(el))) || el.id.startsWith("g-recaptcha")) continue;
     if (type !== "file" && type !== "radio" && type !== "checkbox" && !visible(el)) continue;
     // Bot traps: a box a person can't see (a pixel or two) or one whose label says to leave it empty. Never filled.
-    if (type !== "file" && type !== "radio" && type !== "checkbox" && (el.getBoundingClientRect().width < 4 || el.getBoundingClientRect().height < 4)) continue;
+    // (Workday's From and To boxes are a hair wide on purpose: a "MM / YYYY" display sits over them.)
+    if (type !== "file" && type !== "radio" && type !== "checkbox" && !dateSegment(el) && (el.getBoundingClientRect().width < 4 || el.getBoundingClientRect().height < 4)) continue;
     if (/robots? only|if you(?:'|’)?re (a )?human|leave (this|it) (field )?(blank|empty)|do not (fill|enter)/i.test(questionText(el as HTMLElement))) continue;
     const labelText = el.closest("label")?.textContent ?? (el.id ? rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent ?? "" : "");
     // Paylocity writes "First Name (required)" instead of marking the box.

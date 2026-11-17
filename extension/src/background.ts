@@ -49,6 +49,23 @@ async function dropdownWay(host: string): Promise<DropdownMethod | undefined> {
   return stored?.[host];
 }
 
+/**
+ * How many entries the profile fills on a form with repeating sections (Workday's My Experience): one per job and
+ * school, and one website (the portfolio, or LinkedIn) when there's a link to give.
+ */
+async function profileEntries(): Promise<{ experience: number; education: number; websites: number }> {
+  try {
+    const { profile } = await api<{ profile: { experience?: unknown[]; education?: unknown[]; links?: { portfolio?: string; linkedin?: string } } }>("GET", "profile");
+    return {
+      experience: Math.min(profile.experience?.length ?? 0, 10),
+      education: Math.min(profile.education?.length ?? 0, 5),
+      websites: profile.links?.portfolio?.trim() || profile.links?.linkedin?.trim() ? 1 : 0,
+    };
+  } catch {
+    return { experience: 0, education: 0, websites: 0 };
+  }
+}
+
 /** Keeps the way that chose the most dropdowns on this page, when one did. */
 async function rememberDropdownWay(host: string, attempts: FillAttempt[]) {
   const worked: Record<DropdownMethod, number> = { click: 0, keyboard: 0, letter: 0 };
@@ -898,10 +915,8 @@ async function run(tabId: number) {
   const stepFills = new Map<string, number>();
   const filledKeys = new Set<string>();
   // How many jobs and schools the profile has: Workday's My Experience gets one entry for each.
-  let entryCounts: Promise<{ experience: number; education: number }> | null = null;
-  const entriesFor = () => (entryCounts ??= api<{ profile: { experience?: unknown[]; education?: unknown[] } }>("GET", "profile")
-    .then(({ profile }) => ({ experience: Math.min(profile.experience?.length ?? 0, 10), education: Math.min(profile.education?.length ?? 0, 5) }))
-    .catch(() => ({ experience: 0, education: 0 })));
+  let entryCounts: ReturnType<typeof profileEntries> | null = null;
+  const entriesFor = () => (entryCounts ??= profileEntries());
   /** After a press: waits for a new page, new fields, or new buttons (Workday's "how to apply" choice). */
   const waitForChange = async (key: string, buttonsBefore: string, known: boolean, timeout = 12_000) => {
     const until = Date.now() + timeout;
@@ -1014,7 +1029,7 @@ async function run(tabId: number) {
       // profile has its own entry, then the page is read again with them all.
       if (scan.ats === "workday" && hasForm(scan) && key !== filledKey && !filledKeys.has(key)) {
         const want = await entriesFor();
-        const added = want.experience || want.education ? await send<{ added: number }>(tabId, { type: "add-entries", want }).catch(() => ({ added: 0 })) : { added: 0 };
+        const added = want.experience || want.education || want.websites ? await send<{ added: number }>(tabId, { type: "add-entries", want }).catch(() => ({ added: 0 })) : { added: 0 };
         if (added.added) {
           note(`added ${added.added} ${added.added === 1 ? "entry" : "entries"} for the profile's jobs and schools`);
           await wait(700);
@@ -2123,6 +2138,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           wasRunning ? saveJob(id, { running: false, step: "Stopped." }) : Promise.resolve(),
         ]);
         return reply({ ok: true });
+      }
+      // Before the page's Fill: an entry for each job, school and website in the profile (Workday's "Add Another"),
+      // so their boxes are on the page to be filled.
+      case "form-prepare": {
+        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
+        const id = sender.tab.id;
+        await chrome.scripting.executeScript({ target: { tabId: id, frameIds: [0] }, files: ["content/fill.js"] }).catch(() => undefined);
+        const want = await profileEntries();
+        if (!want.experience && !want.education && !want.websites) return reply({ ok: true, added: 0 });
+        const result = await send<{ added: number }>(id, { type: "add-entries", want }, 0).catch(() => ({ added: 0 }));
+        if (result.added) void log(`Added ${result.added} ${result.added === 1 ? "entry" : "entries"} for your jobs, schools and websites.`);
+        return reply({ ok: true, added: result.added });
       }
       // Fill on one group of boxes (marked data-unnepo-pick on the page): the student's own details only, no AI,
       // so it's quick. Uploads and links have their own buttons and aren't part of it.

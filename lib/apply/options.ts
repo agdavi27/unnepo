@@ -87,6 +87,7 @@ const DEGREE_NAMES: Array<[RegExp, string[]]> = [
   [/\b(m\.?\s?b\.?\s?a\b|mba\b)/i, ["Master of Business Administration (M.B.A.)", "MBA", "Master of Business Administration", "Master's Degree", "Masters"]],
   [/\b(ph\.?\s?d|doctor)/i, ["Doctor of Philosophy (Ph.D.)", "Doctorate", "PhD", "Doctoral Degree"]],
   [/\b(m\.?\s?a\b\.?|m\.?\s?s\b\.?|m\.?\s?sc|master)/i, ["Master's Degree", "Master's", "Masters", "Master"]],
+  [/\b(b\.?\s?s\b\.?|b\.?\s?sc|bachelor of science)/i, ["Bachelor of Science", "BS", "B.S.", "BSc", "Bachelor's Degree", "Bachelor's", "Bachelors", "Bachelor", "Undergraduate"]],
   [/\b(b\.?\s?a\b\.?|b\.?\s?s\b\.?|b\.?\s?sc|bachelor)/i, ["Bachelor's Degree", "Bachelor's", "Bachelors", "Bachelor", "Bachelor of Arts", "Bachelor of Science", "BA", "BS", "Undergraduate"]],
   [/\bassociate/i, ["Associate's Degree", "Associate Degree", "Associates"]],
   [/high school|diploma|ged/i, ["High School Diploma", "High School", "GED"]],

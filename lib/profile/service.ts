@@ -90,7 +90,7 @@ function syncLegacy(stored: ApplicationProfile | null, student: StudentProfile, 
     sourceHash: resumeHash(resumeText),
     contact: { phone: c.phone ?? "", email: c.email, addressLine1: stored?.addressLine1 ?? "", city: c.city ?? "", state: c.state ?? "", postalCode: c.zip ?? "", country: c.country ?? "", linkedin: student.links.linkedin ?? "", github: student.links.github ?? "", website: student.links.portfolio ?? "" },
     education: student.education.map((item) => ({ school: item.school, degree: item.degree, field: item.major, gpa: item.gpa ?? "", start: item.startDate ?? "", end: item.gradDate, location: "" })),
-    experience: student.experience.map((item) => ({ title: item.title, company: item.company, location: item.location ?? "", start: item.startDate, end: item.endDate ?? "", current: item.current, summary: item.bullets[0] ?? "" })),
+    experience: student.experience.map((item) => ({ title: item.title, company: item.company, location: item.location ?? "", start: item.startDate, end: item.endDate ?? "", current: item.current, summary: item.bullets.join("\n") })),
     skills: student.skills.technical,
   };
   const saved = { ...(stored?.saved ?? {}) };

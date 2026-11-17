@@ -54,7 +54,7 @@ export function keepStated(raw: unknown, resumeText: string, sourceHash: string)
   const experience = list(data.experience)
     .map((item) => {
       const end = stated(item.end, 40);
-      return { title: stated(item.title, 120), company: stated(item.company, 120), location: stated(item.location, 80), start: stated(item.start, 40), end, current: /present|current|now/i.test(end), summary: stated(item.summary, 600) };
+      return { title: stated(item.title, 120), company: stated(item.company, 120), location: stated(item.location, 80), start: stated(item.start, 40), end, current: /present|current|now/i.test(end), summary: stated(item.summary, 2000) };
     })
     .filter((item) => item.title || item.company);
   const skills = (Array.isArray(data.skills) ? data.skills : []).map((skill) => stated(skill, 60)).filter(Boolean).slice(0, 25);
@@ -169,10 +169,11 @@ export function resumeFieldAnswer(resume: ResumeProfile | null | undefined, fiel
     if (!entry) return null;
     // "No" unticks a box the site ticked itself (Workday ticks it from its own read of the resume).
     if (/currently work|current(ly)? (employed|here|role|job|position)|i currently/i.test(label)) return entry.current ? "Yes" : "No";
+    // "Role Description" is the description, not the role: checked before the title.
+    if (/description|responsibilit|duties|summary|accomplish/i.test(label)) return entry.summary || null;
     if (/\b(job )?title\b|position|\brole\b/i.test(label) && !isDate) return entry.title || null;
     if (/company|employer|organi[sz]ation/i.test(label) && !isDate) return entry.company || null;
     if (/location|city/i.test(label)) return entry.location || null;
-    if (/description|responsibilit|duties|summary|accomplish/i.test(label)) return entry.summary || null;
     if (isDate) {
       if (!start && entry.current) return null;
       return formatDate(start ? entry.start : entry.end, field.format ?? null, field.options);
