@@ -176,7 +176,8 @@ function standardAnswer(field: StandardField, context: AnswerContext, label = ""
     case "coverLetter": return null;
     // A student's application number is their own cell; they can change it in the live view.
     case "phoneType": return { answer: "Mobile", source: "default" };
-    case "phoneExtension": return null;
+    // "1" unless the student set their own on Unnepo.
+    case "phoneExtension": return pick(p.phoneExtension ?? "") ?? { answer: "1", source: "default" };
     // Unnepo opened the company's own posting, so its careers site is where the student found it.
     case "hearAbout": return { answer: "Company website", source: "default" };
     case "currentStudent": return Number(context.graduationYear) >= new Date().getFullYear() ? { answer: "Yes", source: "profile" } : null;

@@ -6,7 +6,8 @@ import type { SpiderLook } from "@/lib/spiders";
 export type { FillAttempt, FillProblem };
 
 /** Ways to choose from a custom dropdown: pointer clicks, or the keyboard (arrows, typing, Enter). */
-export type DropdownMethod = "click" | "keyboard";
+/** click: open the list and press the option; keyboard: open it and arrow to it; letter: type the first letter until the box shows it. */
+export type DropdownMethod = "click" | "keyboard" | "letter";
 
 export type FieldType = "text" | "email" | "tel" | "textarea" | "file" | "select" | "combobox" | "radio" | "checkbox" | "multiselect" | "date" | "url" | "number";
 

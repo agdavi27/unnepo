@@ -51,9 +51,8 @@ export async function setPlanPreview(userId: string, raw: unknown) {
   if (!user || !(await isAdminEmail(user))) throw new ServiceError("Only admins can switch plans.", "forbidden", 403);
   const wanted = (raw as { plan?: unknown } | null)?.plan;
   const plan = wanted === "free" || wanted === "pro" ? wanted : undefined;
-  const stored = await applicationProfiles.get(userId);
-  if (!stored) throw new ServiceError("Finish setting up your profile first.", "profile", 409);
-  await applicationProfiles.put(userId, { ...stored, planPreview: plan });
+  const written = await applicationProfiles.change(userId, () => ({ planPreview: plan }));
+  if (!written) throw new ServiceError("Finish setting up your profile first.", "profile", 409);
   return { planPreview: plan ?? null };
 }
 
@@ -61,9 +60,7 @@ export async function setPlanPreview(userId: string, raw: unknown) {
 export async function resetTodayUses(userId: string) {
   const user = await repo.getUserById(userId);
   if (!user || !(await isAdminEmail(user))) throw new ServiceError("Only admins can reset counts.", "forbidden", 403);
-  const stored = await applicationProfiles.get(userId);
-  if (!stored?.uses) return { reset: true };
-  await applicationProfiles.put(userId, { ...stored, uses: { ...stored.uses, day: undefined, daily: undefined, week: undefined, weekly: undefined } });
+  await applicationProfiles.change(userId, (fresh) => (fresh.uses ? { uses: { ...fresh.uses, day: undefined, daily: undefined, week: undefined, weekly: undefined } } : {}));
   return { reset: true };
 }
 
@@ -199,16 +196,14 @@ export async function weekUses(userId: string): Promise<UsageCounts> {
 export async function countUse(userId: string, kind: CountedKind) {
   // An account with no saved profile yet still counts, or it would never run out: its profile is built from the
   // account, as everywhere else (imported here, since the service imports this file).
-  const stored = (await applicationProfiles.get(userId)) ?? (await (await import("@/lib/apply/service")).student(userId)).profile;
   const [day, week, month] = [dayKey(), weekKey(), monthKey()];
-  const uses = stored.uses;
   const bump = (counts: UsageCounts | undefined) => ({ ...counts, [kind]: (counts?.[kind] ?? 0) + 1 });
-  await applicationProfiles.put(userId, { ...stored, uses: {
+  await applicationProfiles.change(userId, ({ uses }) => ({ uses: {
     total: bump(uses?.total),
     month, monthly: bump(uses?.month === month ? uses.monthly : {}),
     day, daily: bump(uses?.day === day ? uses.daily : {}),
     week, weekly: bump(uses?.week === week ? uses.weekly : {}),
-  } });
+  } }), async () => (await (await import("@/lib/apply/service")).student(userId)).profile);
 }
 
 /** Cover letters used, and how many Free has left (null: a paid plan, nothing to count down). */

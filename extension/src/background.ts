@@ -51,10 +51,10 @@ async function dropdownWay(host: string): Promise<DropdownMethod | undefined> {
 
 /** Keeps the way that chose the most dropdowns on this page, when one did. */
 async function rememberDropdownWay(host: string, attempts: FillAttempt[]) {
-  const worked = { click: 0, keyboard: 0 };
-  for (const attempt of attempts) if (attempt.ok && attempt.type === "combobox" && (attempt.method === "click" || attempt.method === "keyboard")) worked[attempt.method] += 1;
-  if (!worked.click && !worked.keyboard) return;
-  const best: DropdownMethod = worked.keyboard > worked.click ? "keyboard" : "click";
+  const worked: Record<DropdownMethod, number> = { click: 0, keyboard: 0, letter: 0 };
+  for (const attempt of attempts) if (attempt.ok && attempt.type === "combobox" && attempt.method && attempt.method in worked) worked[attempt.method as DropdownMethod] += 1;
+  if (!worked.click && !worked.keyboard && !worked.letter) return;
+  const best: DropdownMethod = worked.letter > worked.click && worked.letter > worked.keyboard ? "letter" : worked.keyboard > worked.click ? "keyboard" : "click";
   const stored = ((await chrome.storage.local.get("dropdownWays")).dropdownWays as Record<string, DropdownMethod> | undefined) ?? {};
   if (stored[host] === best) return;
   // A few hundred sites at most; the oldest go first.

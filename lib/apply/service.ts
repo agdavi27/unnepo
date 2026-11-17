@@ -61,6 +61,7 @@ export async function student(userId: string) {
     middleName: stored?.middleName?.trim() ?? "",
     suffix: stored?.suffix?.trim() ?? "",
     salutation: stored?.salutation?.trim() ?? "",
+    phoneExtension: stored?.phoneExtension?.trim() ?? "",
     lastName: pick(stored?.lastName, rest.join(" ")),
     email: pick(stored?.email, user.email),
     phone: pick(stored?.phone, fromResume.phone, fromParsed?.phone),
@@ -179,8 +180,7 @@ async function ensureResumeProfile(userId: string) {
   if (!text.trim() || stored?.resumeProfile?.sourceHash === resumeHash(text)) return;
   const parsed = await readResumeProfile(userId, text);
   if (!parsed) return;
-  const base = stored ?? (await student(userId)).profile;
-  await applicationProfiles.put(userId, { ...base, resumeProfile: parsed });
+  await applicationProfiles.change(userId, () => ({ resumeProfile: parsed }), async () => (await student(userId)).profile);
 }
 
 /** The answer for a form question: the student's own answers first, then their resume's schools and jobs, then their details. */
@@ -214,6 +214,24 @@ export function answerWith(info: Awaited<ReturnType<typeof student>>, company: s
 }
 
 /** Saves answers the student entered on a form, so the same question fills itself next time. */
+/**
+ * What a save changed, laid over the profile as it is now: only the parts that differ between `before` and `after`.
+ * Saved answers are merged one by one, so an answer saved elsewhere meanwhile is kept.
+ */
+export function changedParts(before: ApplicationProfile, after: ApplicationProfile, fresh: ApplicationProfile): Partial<ApplicationProfile> {
+  const patch: Record<string, unknown> = {};
+  for (const key of new Set([...Object.keys(before), ...Object.keys(after)]) as Set<keyof ApplicationProfile>) {
+    if (JSON.stringify(before[key]) === JSON.stringify(after[key])) continue;
+    if (key === "saved") {
+      const saved = { ...(fresh.saved ?? {}) };
+      for (const [label, entry] of Object.entries(after.saved ?? {})) if (JSON.stringify(before.saved?.[label]) !== JSON.stringify(entry)) saved[label] = entry;
+      for (const label of Object.keys(before.saved ?? {})) if (!(label in (after.saved ?? {}))) delete saved[label];
+      patch.saved = saved;
+    } else patch[key] = after[key];
+  }
+  return patch as Partial<ApplicationProfile>;
+}
+
 export async function learnAnswers(userId: string, info: Awaited<ReturnType<typeof student>>, entries: Array<{ label: string; section: string; value: string }>) {
   const saved = { ...info.profile.saved };
   const next: ApplicationProfile = { ...info.profile };
@@ -246,7 +264,7 @@ export async function learnAnswers(userId: string, info: Awaited<ReturnType<type
   }
   if (!learned) return 0;
   next.saved = saved;
-  await applicationProfiles.put(userId, next);
+  await applicationProfiles.change(userId, (fresh) => changedParts(info.profile, next, fresh), async () => info.profile);
   Object.assign(info.profile, next);
   return learned;
 }
@@ -585,7 +603,7 @@ export async function updateAnswers(userId: string, raw: unknown) {
     if (save.has(question.key) && value) saved[normalizeLabel(question.label)] = { label: question.label, answer: value, updatedAt: nowIso() };
     return { ...question, answer: value || null, source: value ? "student" : null, evidence: null };
   });
-  if (Object.keys(saved).length !== Object.keys(info.profile.saved).length || save.size) await applicationProfiles.put(userId, { ...info.profile, saved });
+  if (Object.keys(saved).length !== Object.keys(info.profile.saved).length || save.size) await applicationProfiles.change(userId, (fresh) => ({ saved: { ...fresh.saved, ...Object.fromEntries(Object.entries(saved).filter(([key, entry]) => info.profile.saved[key] !== entry)) } }), async () => info.profile);
   const updated = await applications.update(userId, app.id, { questions });
   return { application: summary(updated!) };
 }
@@ -670,8 +688,8 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
     next.saved = { ...info.profile.saved, [String(given.key)]: { ...current, answer, updatedAt: nowIso() } };
   }
   if (typeof body.accountConsent === "boolean") next.accountConsentAt = body.accountConsent ? (info.profile.accountConsentAt && info.profile.accountConsentAt !== CONSENT_BY_DEFAULT ? info.profile.accountConsentAt : nowIso()) : null;
-  await applicationProfiles.put(userId, next);
-  return { profile: publicProfile(next) };
+  const written = await applicationProfiles.change(userId, (fresh) => changedParts(info.profile, next, fresh), async () => info.profile);
+  return { profile: publicProfile(written ?? next) };
 }
 
 /** Marks a job as tracked. Tracking is free on every plan, however many jobs; only autofill is counted. */
@@ -1096,8 +1114,7 @@ export async function deleteApplication(userId: string, raw: unknown) {
   }));
   if (applied.length) {
     // A student who never saved a profile gets one, so the count isn't lost.
-    const stored = (await applicationProfiles.get(userId)) ?? (await student(userId)).profile;
-    await applicationProfiles.put(userId, { ...stored, deletedApplied: [...(stored.deletedApplied ?? []), ...applied].slice(-1000) });
+    await applicationProfiles.change(userId, (fresh) => ({ deletedApplied: [...(fresh.deletedApplied ?? []), ...applied].slice(-1000) }), async () => (await student(userId)).profile);
   }
   for (const app of apps) await applications.remove(userId, app.id);
   return { ok: true, deleted: apps.length };
