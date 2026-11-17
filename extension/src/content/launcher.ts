@@ -6,6 +6,7 @@ import { watchLetterBoxes } from "./letter-button";
 import { watchLinkBoxes } from "./link-buttons";
 import { watchForms } from "./form-help";
 import { watchPasswordBoxes } from "./password-button";
+import { watchEmailApply } from "./email-apply";
 import { appliedList, appliedStatus, isAppliedListPage } from "./board-status";
 
 /**
@@ -224,6 +225,9 @@ if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^local
 
 // One tap for LinkedIn, GitHub and portfolio boxes: a chip with the link from the student's profile.
 if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) watchLinkBoxes();
+
+// A job that's applied to by email ("send your resume to hi@pennock.co"): a card that writes the email.
+if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$|^mail\.google\.com$|^outlook\./.test(location.hostname)) watchEmailApply();
 
 // A job site's sign-in or create-account form: "Fill with unnepo" by the password box, for the job-site password.
 if (window.top === window && !/unneponew\.vercel\.app$|(^|\.)unnepo\.com$|^localhost$/.test(location.hostname)) watchPasswordBoxes(looksLikeJobPage);
