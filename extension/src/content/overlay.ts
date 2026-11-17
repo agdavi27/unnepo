@@ -6,12 +6,14 @@ import type { TrackerContact, TrackerJob } from "../shared/types";
  * site's CSS can't touch it. The background worker puts this script on the page and tells it when an application
  * was caught here. The card has two steps:
  *   1. Logged: the job is saved (Undo), or Unnepo asks "Did you apply?" when it isn't sure.
+ *   Between them, once it's saved: how many companies Unnepo can still find people at (Free: today, Pro: this
+ *      month), with Find people (or See who to email, when they're already found).
  *   2. Reach out: the people at the company, each with Email ↗, which writes the email and opens it in Gmail ready
  *      to send (the draft never shows here), then asks "Sent?". No one yet: Find on LinkedIn or Find verified.
  * Nothing on the page is read, and nothing is sent until a button is pressed. Later shrinks it to a small tab.
  */
 
-type Free = { free: boolean; peopleLeft: number | null };
+type Free = { free: boolean; peopleLeft: number | null; peopleCount?: { left: number; of: number; per: "today" | "this month" } | null };
 type CardState = { ok: boolean; item: { id: string; title: string; company: string; state: string; sure: string } | null; applicationId: string; job: TrackerJob | null; opened: string[] } & Free;
 
 declare global { interface Window { __unnepoOverlay?: boolean } }
@@ -42,6 +44,8 @@ function start() {
     opened: new Set<string>(), sent: new Set<string>(), poll: 0,
     /** Slid in already: redraws don't play it again. */
     shown: false,
+    /** Past the in-between page (companies left) to the people. */
+    passed: false,
   };
 
   const AV = ["#3D8BFF", "#8B5CF6", "#EC4899", "#14B8A6", "#F59E0B", "#22C55E", "#EF4444", "#06B6D4"];
@@ -88,6 +92,13 @@ function start() {
     .bar { height: 4px; border-radius: 2px; background: #EFEFF3; overflow: hidden; }
     .bar i { display: block; height: 100%; width: 40%; background: #3D8BFF; border-radius: 2px; animation: ${reduce ? "none" : "slide 1.2s ease-in-out infinite"}; }
     @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+    .count { display: flex; align-items: baseline; gap: 6px; }
+    .count b { font: 700 28px/1 system-ui, sans-serif; letter-spacing: -.02em; }
+    .count b.out { color: #B45309; }
+    .count span { font-size: 12px; color: #5C5C66; }
+    .meter { height: 6px; border-radius: 3px; background: #EFEFF3; overflow: hidden; }
+    .meter i { display: block; height: 100%; background: #3D8BFF; border-radius: 3px; }
+    .meter.low i { background: #F59E0B; }
     .foot { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px 12px; border-top: 1px solid #EFEFF3; }
     .pill { all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px 12px 8px 10px; background: #fff; border: 1px solid #E4E4EA; border-radius: 999px; box-shadow: 0 6px 18px rgba(0,0,0,.14); font-weight: 600; }
     .pill svg { width: 20px; height: ${Math.round((20 * H) / W)}px; }
@@ -136,10 +147,41 @@ function start() {
     return `<div class="person"><span class="av" style="background:${color(person.name)}">${escape(initials(person.name))}</span><span class="who"><b>${escape(person.name)}</b><span>${escape(person.title || "")}</span></span>${action}</div>`;
   }
 
+  /**
+   * The in-between page, once the job is saved: how many companies Unnepo can still find people at (Free: today,
+   * Pro: this month), then one button on: See who to email when they're found, else Find people.
+   */
+  function gate(data: CardState, job: TrackerJob, count: NonNullable<CardState["peopleCount"]>) {
+    const company = job.company || data.item?.company || "the company";
+    const shown = people(data);
+    const finding = job.contactsStatus === "finding" || job.contactsStatus === "writing" || card.busy.has("find");
+    const left = Math.max(0, Math.min(count.left, count.of));
+    const out = left === 0;
+    const action = shown.length
+      ? `<div class="row"><button type="button" class="btn wide" data-act="pass">See who to email (${shown.length}) →</button></div>`
+      : finding
+        ? `<span class="sub">${escape(job.contactsMessage || `Finding people at ${company}…`)}</span><div class="bar" role="progressbar" aria-label="Finding people"><i></i></div>`
+        : out
+          ? `<span class="sub">${data.free ? "None left today. More tomorrow, or Pro finds people at 50 companies a month." : "None left this month. More next month."}</span><div class="row"><button type="button" class="btn ghost wide" data-act="linkedin">Find on LinkedIn instead</button></div>`
+          : `<div class="row"><button type="button" class="btn wide" data-act="find">Find people at ${escape(company.length > 18 ? `${company.slice(0, 17)}…` : company)}</button></div><button type="button" class="quiet" data-act="linkedin" style="width: fit-content">Or find on LinkedIn (free)</button>`;
+    return `
+      <div class="step">
+        <span class="num now" aria-hidden="true">2</span>
+        <div class="body">
+          <span class="label">Find people to email</span>
+          <div class="count" aria-label="${left} of ${count.of} companies left ${count.per}"><b class="${out ? "out" : ""}">${left}</b><span>of ${count.of} companies left ${count.per}</span></div>
+          <div class="meter${left / count.of <= 0.2 ? " low" : ""}" aria-hidden="true"><i style="width:${Math.round((left / count.of) * 100)}%"></i></div>
+          <span class="sub">Unnepo finds a recruiter or someone on the team at ${escape(company)}, with a work email.${shown.length || finding ? "" : " Each company uses one."}</span>
+          ${action}
+        </div>
+      </div>`;
+  }
+
   /** Step 2: who to email, or finding them. */
   function stepTwo(data: CardState) {
     const job = data.job;
     const saved = Boolean(card.applicationId);
+    if (saved && job && !card.passed && data.peopleCount) return gate(data, job, data.peopleCount);
     const company = job?.company || data.item?.company || "the company";
     let inner = `<span class="sub">Once it's saved, Unnepo finds who to email at ${escape(company)}.</span>`;
     if (saved && job) {
@@ -237,7 +279,11 @@ function start() {
           if (result.ok) { close(card.applicationId || card.id); host.remove(); }
           else card.note = result.error ?? "Couldn't undo it.";
         });
+      case "pass":
+        card.passed = true;
+        return draw();
       case "find":
+        card.passed = true;
         return void busy("find", async () => {
           const result = await ask<{ ok: boolean; error?: string }>({ type: "card-people", body: { action: "find", applicationId: card.applicationId } }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
           if (!result.ok) card.note = result.error ?? "Couldn't start the search.";
@@ -278,7 +324,7 @@ function start() {
     const key = String(message.applicationId || message.id);
     if (closedIds().includes(key)) return;
     // A new application on the same page (a job board's next job) takes the card over.
-    if (card.id !== message.id) Object.assign(card, { small: false, note: "", data: null, shown: false });
+    if (card.id !== message.id) Object.assign(card, { small: false, note: "", data: null, shown: false, passed: false });
     card.id = String(message.id);
     card.applicationId = String(message.applicationId || "");
     void load(true);

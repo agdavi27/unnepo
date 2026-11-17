@@ -916,3 +916,28 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .guess-mail { overflow-wrap: anywhere; color: var(--fg-2); }
 .guess-actions { flex: none; display: flex; gap: 6px; }
 .guess-actions a.icon-btn { text-decoration: none; font: 700 11px Geist, sans-serif; }
+
+/* Me's top: who you are, the profile bar, then the plan card. */
+.me-top { display: flex; flex-direction: column; gap: 12px; }
+.me-id { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.me-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.me-who .account-name, .me-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.me-email { font-size: 12px; }
+.me-id .plan-badge { flex: none; }
+.me-actions { display: flex; }
+.me-actions > .me-link { padding: 2px 0; }
+.me-profile { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--sheet); color: var(--fg); text-decoration: none; }
+.me-profile:hover { border-color: var(--accent); }
+.me-profile.warn .bar div { background: var(--warn); }
+.me-profile-text { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; }
+.me-plan { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--line-2); border-radius: 14px; background: var(--surface); }
+.me-plan-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.me-plan-head .sub { font: 500 11px var(--mono); }
+.me-plan .me-stats.two { grid-template-columns: repeat(2, 1fr); }
+.me-plan .me-stat { align-items: center; }
+.me-up { width: 100%; justify-content: center; }
+.me-top ~ .settings-card { padding: 12px 16px; gap: 6px; }
+.me-top ~ .settings-card .set-row { min-height: 44px; padding: 4px 0; }
+.me-top .row-between { width: 100%; }
+.friend.tap { width: 100%; padding: 2px 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; text-align: left; cursor: pointer; border-radius: 8px; }
+.friend.tap:hover .friend-name { text-decoration: underline; text-underline-offset: 3px; }

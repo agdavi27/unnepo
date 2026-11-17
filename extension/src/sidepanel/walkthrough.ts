@@ -1,12 +1,12 @@
 /**
  * "How Unnepo works", inside the side panel: the panel dims, and an arrow points at the real part of it each step
- * talks about (the spider, then the Home, Jobs and Me tabs), switching to that tab as it goes. It opens by itself
+ * talks about (the spider, then the Home, Tools, Jobs and Me tabs), switching to that tab as it goes. It opens by itself
  * the first time the panel opens connected, never again after that; Me → "Show me how it works" brings it back.
  */
 
 export const WALKTHROUGH_SEEN = "walkthroughSeen";
 
-type Tab = "home" | "jobs" | "settings";
+type Tab = "home" | "jobs" | "tools" | "settings";
 type Step = { target: string; tab: Tab | null; title: string; body: string };
 
 const STEPS: Step[] = [
@@ -16,7 +16,11 @@ const STEPS: Step[] = [
   },
   {
     target: "[data-tab='jobs']", tab: "jobs", title: "Home",
-    body: "Write a cover letter for the job on your tab, answer questions like \"Why do you want to work here?\", or add a job by hand. Above the tools, the graph shows every day you did something.",
+    body: "The graph shows every day you did something, with your streak and weekly goal. Under it, add friends and see who applied to the most jobs this week.",
+  },
+  {
+    target: "[data-tab='tools']", tab: "tools", title: "Tools",
+    body: "Write a cover letter for the job on your tab, answer questions like \"Why do you want to work here?\", autofill an application, or add a job by hand.",
   },
   {
     target: "[data-tab='home']", tab: "home", title: "Jobs: your tracker",
@@ -28,7 +32,7 @@ const STEPS: Step[] = [
   },
   {
     target: "[data-tab='settings']", tab: "settings", title: "Me",
-    body: "Your plan, resume, friends and settings. Want this tour again? It's here under Show me how it works.",
+    body: "Your profile, your plan and what's left, and settings. Want this tour again? It's here under Show me how it works.",
   },
 ];
 

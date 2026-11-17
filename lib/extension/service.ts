@@ -312,6 +312,8 @@ export async function extensionTracker(userId: string) {
     peopleLeft: usage.free ? usage.people.left : null,
     /** Free: how many unlocks a day. */
     unlocksPerDay: usage.free ? usage.people.allowance : null,
+    /** Companies Unnepo can still find people at: Free per day, Pro per month. Null with no fixed limit (the trial). */
+    peopleCount: usage.people.limit && usage.people.per ? { left: usage.people.left, of: usage.people.limit, per: usage.people.per } : null,
     /** Free: emails it can still have written today, shown on Write email. Null on Pro. */
     emailsLeft: usage.free ? usage.emails.left : null,
   };
