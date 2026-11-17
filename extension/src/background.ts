@@ -2149,6 +2149,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't switch plans." });
         }
       }
+      // Admins: today's Free counts start over on their own account.
+      case "reset-today": {
+        if (sender.tab) return reply({ ok: false });
+        try {
+          await api("POST", "reset-today", {});
+          const { token } = await settings();
+          if (token) await readMe(token).catch(() => undefined);
+          return reply({ ok: true });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't reset today's counts." });
+        }
+      }
       // "Did you apply to these?": ✓ saves it as applied, ✕ drops it.
       case "maybe-answer": {
         if (sender.tab) return reply({ ok: false });

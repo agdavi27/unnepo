@@ -1,5 +1,5 @@
 import { setSession } from "@/lib/apply/activity";
-import { setPlanPreview } from "@/lib/apply/limits";
+import { resetTodayUses, setPlanPreview } from "@/lib/apply/limits";
 import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin, rateLimit, readSession, requireUser, setSessionCookie } from "@/lib/http";
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { persistenceMode, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file-store";
@@ -423,6 +423,7 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   }
   if (action === "me" && method === "GET") return json(await extensionMe(user.id));
   if (action === "plan-preview" && method === "POST") return json(await setPlanPreview(user.id, await request.json()));
+  if (action === "reset-today" && method === "POST") return json(await resetTodayUses(user.id));
   if (action === "setup" && method === "POST") return json(await extensionSetup(user.id, await request.json()));
   if (action === "activity" && method === "POST") return json(await extensionActivity(user.id, await request.json()));
   if (action === "maybe" && method === "POST") return json(await extensionMaybe(user.id, await request.json()));
