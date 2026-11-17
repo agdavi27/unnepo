@@ -166,6 +166,8 @@ const BLANK = /^((select|choose|pick)( one| an?( \w+){1,2}| your( \w+){1,2})?(\.
 /** Whether a control (or the group or wrapper it stands for) has no answer yet. */
 export function isEmpty(el: HTMLElement): boolean {
   const type = (el.getAttribute("type") ?? "").toLowerCase();
+  // A section's Add button standing in for its box: nothing added yet.
+  if (el.tagName === "BUTTON" && /^add\b/i.test(clean(el.innerText)) && el.getAttribute("aria-haspopup") !== "listbox") return true;
   if (el.tagName === "BUTTON" || boxDropdown(el)) return BLANK.test(clean(el.innerText));
   if (el instanceof HTMLSelectElement) return !el.value || BLANK.test(clean(el.selectedOptions[0]?.textContent));
   // A React select keeps its choice beside the input, which itself stays empty.
@@ -186,9 +188,18 @@ export function isEmpty(el: HTMLElement): boolean {
     if (type === "radio") return !rootOf(el).querySelector(`input[type=radio][name="${CSS.escape((el as HTMLInputElement).name)}"]:checked`);
     // A file name shown beside the box ("Drew Davis Resume.pdf"), not a list of types ("Accepted: .pdf, .docx").
     if (type === "file") return !(el as HTMLInputElement).files?.length && !/[\w)\]-]\.(pdf|docx?|txt|rtf)\b/i.test(el.closest("div")?.parentElement?.textContent ?? "");
+    // A name the site copied off the resume in capitals ("DREW"): Unnepo types it again from the profile.
+    if (shouting(el)) return true;
     return !el.value.trim();
   }
   return false;
+}
+
+/** A first, middle, last or legal name box holding its name all in capitals, the way resumes print it. */
+function shouting(el: HTMLInputElement | HTMLTextAreaElement) {
+  const value = el.value.trim();
+  const which = `${el.id} ${el.getAttribute("name") ?? ""} ${el.getAttribute("autocomplete") ?? ""}`;
+  return /^[A-Z][A-Z .'-]+$/.test(value) && /[A-Z]{2}/.test(value) && /first|last|middle|given|family|legal|preferred|fname|lname/i.test(which) && !/company|school|employer|user|file/i.test(which);
 }
 
 function visible(el: Element) {
@@ -307,18 +318,30 @@ export function scanFields(): PageField[] {
     const segment = dateSegment(el);
     const dateOf = segment && /^(month|day|year)$/i.test(label) ? clean(el.closest("[data-automation-id^='formField'], fieldset, [role=group]")?.querySelector("label, legend")?.textContent) : "";
     const asked = segment ? `${dateOf || label} (${segment})`.replace(/^(month|day|year) \((month|day|year)\)$/i, "$1") : label;
+    // Workday's "Websites 1" asks only "URL".
+    const section = sectionOf(target);
     out.push({
       id: mark(target),
-      label: asked.slice(0, 300),
+      label: (/^url$/i.test(asked.trim()) && WEBSITES.test(section) ? "Website URL" : asked).slice(0, 300),
       type: fieldType,
       options: options.slice(0, 100),
       required,
-      section: sectionOf(target),
+      section,
       format: segment ? SEGMENT_FORMAT[segment] : /[my]{2}|dd/i.test(placeholder) ? placeholder : type === "date" ? "YYYY-MM-DD" : null,
     });
   }
+  // A Websites section with nothing in it yet (Workday's "Add any relevant websites."): its Add button stands in
+  // for the box, and is pressed only when there's a link to put in it.
+  for (const group of deepAll<HTMLElement>("[role=group]", dialog ?? document)) {
+    const heading = clean(group.querySelector("h2, h3, h4, h5, legend")?.textContent);
+    if (!WEBSITES.test(heading) || group.querySelector("input:not([type=hidden])")) continue;
+    const add = Array.from(group.querySelectorAll<HTMLButtonElement>("button")).find((button) => /^add\b/i.test(clean(button.textContent)) && visible(button));
+    if (add) out.push({ id: mark(add), label: "Website URL", type: "url", options: [], required: false, section: heading, format: null });
+  }
   return out;
 }
+
+const WEBSITES = /^(\w+ )?(websites?|web sites?|links?|portfolio|online presence|social media)( \d+)?$/i;
 
 /** Fields the page marks required that are still empty. */
 export function emptyRequired(fields = scanFields()) {

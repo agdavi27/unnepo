@@ -160,7 +160,8 @@ function standardAnswer(field: StandardField, context: AnswerContext, label = ""
     case "phone": return pick(p.phone);
     case "linkedin": return pick(fullUrl(p.linkedin));
     case "github": return pick(fullUrl(p.github));
-    case "website": return pick(fullUrl(p.website));
+    // A form's plain "Websites" box takes the portfolio, or the LinkedIn profile when there's no portfolio.
+    case "website": return pick(fullUrl(p.website)) ?? (/^website url$/i.test(label.trim()) ? pick(fullUrl(p.linkedin)) : null);
     case "city": return pick(p.city);
     case "addressLine1": return pick(p.addressLine1 ?? "");
     case "state": return pick(p.state ?? "");
@@ -178,8 +179,8 @@ function standardAnswer(field: StandardField, context: AnswerContext, label = ""
     case "phoneType": return { answer: "Mobile", source: "default" };
     // "1" unless the student set their own on Unnepo.
     case "phoneExtension": return pick(p.phoneExtension ?? "") ?? { answer: "1", source: "default" };
-    // Unnepo opened the company's own posting, so its careers site is where the student found it.
-    case "hearAbout": return { answer: "Company website", source: "default" };
+    // Always LinkedIn, where students find most jobs.
+    case "hearAbout": return { answer: "LinkedIn", source: "default" };
     case "currentStudent": return Number(context.graduationYear) >= new Date().getFullYear() ? { answer: "Yes", source: "profile" } : null;
   }
 }
@@ -247,6 +248,7 @@ const SAME_ANSWER: Record<string, string[]> = {
   mobile: ["Cell", "Cell Phone", "Mobile Phone", "Cellular", "Personal Mobile"],
   freshman: ["First year", "1st year", "Year 1", "First-year"], sophomore: ["Second year", "2nd year", "Year 2"], junior: ["Third year", "3rd year", "Year 3"], senior: ["Fourth year", "4th year", "Year 4"],
   "graduate student": ["Graduate", "Masters", "Master's student", "Graduate Student"],
+  linkedin: ["LinkedIn", "Linked In", "LinkedIn Job Posting", "LinkedIn Jobs", "Social Media", "Job Board", "Online Job Board", "Internet", "Online", "Other"],
   "company website": ["Company Careers Site", "Company Career Site", "Careers Site", "Career Site", "Careers Page", "Career Website", "Corporate Website", "Website", "Company Web Site", "Job Board", "Online Job Board", "Internet", "Online", "Other"],
 };
 
@@ -269,6 +271,8 @@ function matchOption(answer: string, options: string[]) {
 
 // Rules for questions nearly every application asks the same way. Checked before the "sensitive" rule, since
 // several (consent, agree, acknowledge) use words that would otherwise leave them for the student.
+/** "Have you ever been employed by Omnicom or any of its agencies?", "Are you a former employee?": No. */
+const PRIOR_EMPLOYEE = /\b(have|had) you (ever )?(been )?(previously |formerly )?(been )?(employed|worked|work) (by|for|at)\b|\b(ever|previously|formerly) (been )?(employed|worked) (by|for|at)\b|\b(former|previous|past|ex)[- ]?(employee|employer|intern|contractor)s?\b|\bcurrent or former\b|\bare you (currently )?(an? )?(employee|employed) (of|by|at)\b|\bworked (here|for us|for this company) before\b/i;
 const RELATIVES = /\b(relatives?|family members?|related to|spouse|domestic partner|in-laws?)\b.*\b(work|works|working|employ\w*|company|organi[sz]ation|us|our)\b|\b(know|acquainted with|friends with) (anyone|anybody|someone|somebody|any (current )?employees?)\b|\b(friends?|relatives?|family) (who )?(currently )?(work|works|is employed)\b|referred by (a|an) (current )?employee/i;
 const MESSAGE = /message (to|for) (the )?(recruiter|hiring (team|manager)|employer|us)|anything else (you(?:'|’)?d like|you would like|to (share|add|tell)|we should know)|additional (information|comments?|notes?|details)|^(message|comments?|notes?)$|note to (the )?(recruiter|hiring)|^(your )?message( to us)?$|let (the company|the employer|us) know about your interest/i;
 const TEXTS = /\b(texts?|sms|text messages?)\b/i;
@@ -303,7 +307,7 @@ function yesNo(yes: boolean, options: string[]) {
  */
 export function policyAnswer(label: string, kind: ApplicationQuestion["kind"], options: string[], profile: ApplicationProfile): string | null {
   const text = label.trim();
-  if (RELATIVES.test(text) && kind !== "file") return kind === "textarea" ? "No" : yesNo(false, options);
+  if ((RELATIVES.test(text) || PRIOR_EMPLOYEE.test(text)) && kind !== "file") return kind === "textarea" || kind === "text" ? "No" : yesNo(false, options);
   if (MESSAGE.test(text) && (kind === "textarea" || kind === "text") && !/cover letter/i.test(text)) return RECRUITER_NOTE;
   if (TEXTS.test(text) && /\b(consent|agree|opt[- ]?in(to)?|receive|receiving|sign up|subscribe)\b/i.test(text)) return yesNo(!MARKETING.test(text), options);
   if (TERMS.test(text) && !NOT_STANDARD_TERMS.test(text) && profile.accountConsentAt) return yesNo(true, options);
@@ -376,6 +380,11 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
       const found = standardAnswer(named, context, question.label);
       const answer = found ? (question.options.length ? matchOption(found.answer, question.options) : found.answer) : null;
       return { ...question, answer, source: answer ? found!.source : null, evidence: null };
+    }
+    // "How did you hear about us?" is always LinkedIn, whatever was saved before.
+    if (named === "hearAbout" && question.kind !== "file" && question.kind !== "textarea") {
+      const answer = question.options.length ? matchOption("LinkedIn", question.options) : "LinkedIn";
+      return { ...question, answer, source: answer ? "default" : null, evidence: null };
     }
     // The same question the student answered before: worded the same, or worded differently on another site.
     const saved = context.profile.saved[normalizeLabel(question.label)] ?? similarSaved(question.label, context.profile.saved);

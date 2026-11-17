@@ -1,7 +1,7 @@
 import { bestOption, dialCodeOption } from "@/lib/apply/options";
 import { answerChoices } from "@/lib/apply/questions";
 import type { Answer, DropdownMethod, FileData, FillAttempt, FillFailure, PageField } from "../shared/types";
-import { ADDRESS_LINE, attachFile, chooseCustom, chooseNativeSelect, dismissSuggestions, FillError, isDropdownInput, opensList, press, shownChoice, sleep, typeInto, typeKeys, waysFrom, YES } from "./dom";
+import { ADDRESS_LINE, attachFile, chooseCustom, chooseNativeSelect, dismissSuggestions, FillError, isDropdownInput, opensList, press, shownChoice, sleep, typeInto, typeKeys, waitFor, waysFrom, YES } from "./dom";
 import { findMarked, isEmpty, labelOf, rootOf, uploadButton } from "./scan";
 
 /**
@@ -149,8 +149,10 @@ function chosenRadio(el: HTMLElement, value: string) {
  * or null when the field has no way that number.
  */
 async function fillOne(field: PageField, answer: Answer, files: { resume: FileData | null; coverLetter: FileData | null }, way: number): Promise<string | null> {
-  const el = findMarked(field.id);
+  let el = findMarked(field.id);
   if (!el) throw new FillError("not on the page", "not_on_page");
+  // An empty Websites section's Add button: pressed, and the box it adds takes the link.
+  if (el.tagName === "BUTTON" && (field.type === "url" || field.type === "text")) el = await addedBox(el, field.id);
   const value = valueFor(field, answer);
   switch (field.type) {
     case "radio": {
@@ -232,6 +234,17 @@ async function fillOne(field: PageField, answer: Answer, files: { resume: FileDa
 }
 
 /** Reads a field back: null when the answer is there, or what's wrong. Custom dropdowns check themselves. */
+/** Presses a section's Add button and hands back the box it added, marked as the field's own from now on. */
+async function addedBox(button: HTMLElement, id: string) {
+  const group = button.closest<HTMLElement>("[role=group]") ?? button.parentElement!;
+  press(button);
+  const box = await waitFor(() => group.querySelector<HTMLInputElement>("input[type=text], input[type=url], input:not([type])"), 3000);
+  if (!box) throw new FillError("the Add button didn't add a box", "not_on_page");
+  button.removeAttribute("data-unnepo-id");
+  box.setAttribute("data-unnepo-id", id);
+  return box;
+}
+
 export function readBack(field: PageField, answer: Answer): string | null {
   const el = findMarked(field.id);
   if (!el) return "it went from the page";
@@ -313,13 +326,10 @@ export function boardFromLink(search: string) {
   return key ? BOARDS[key] : null;
 }
 
-/** "How did you hear about us?" left at Unnepo's guess: the board in the job link is the true answer. */
+/** "How did you hear about us?" is always LinkedIn. */
 function withBoard(answer: Answer): Answer {
-  // "Company website" is Unnepo's own guess when the student hasn't said; the server marks it as from the profile.
-  const guessed = answer.source === "default" || /^company website$/i.test(answer.values[0]?.trim() ?? "");
-  if (!guessed || !HEARD.test(answer.label.trim())) return answer;
-  const board = boardFromLink(location.search);
-  return board ? { ...answer, values: [board], source: "page" } : answer;
+  if (!HEARD.test(answer.label.trim())) return answer;
+  return { ...answer, values: ["LinkedIn"], source: "default" };
 }
 
 export async function fillGeneric(fields: PageField[], answers: Answer[], files: { resume: FileData | null; coverLetter: FileData | null }, options: { dropdownFirst?: DropdownMethod; dropdownWays?: DropdownMethod[] } = {}) {

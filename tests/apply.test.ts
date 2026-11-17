@@ -170,7 +170,7 @@ describe("answers", () => {
     // Voluntary self-identification declines when the form offers that; nothing else about it is guessed.
     expect(by.gender).toMatchObject({ answer: "Decline", source: "default" });
     expect(planAnswers([q("g2", "Gender", "select", ["Male", "Female"], false)], context)[0]).toMatchObject({ answer: null, sensitive: true });
-    expect(by.hear).toMatchObject({ answer: "Company website", source: "default" });
+    expect(by.hear).toMatchObject({ answer: "LinkedIn", source: "default" });
     expect(missingAnswers(planned).map((item) => item.key)).toEqual(["visa"]);
 
     const withSaved = planAnswers(questions, { ...context, profile: { ...profile, saved: { "will you now or in the future require sponsorship": { label: "x", answer: "No", updatedAt: "" } } } });
@@ -195,8 +195,8 @@ describe("answers", () => {
       q("c", "Are you 18 years of age or older?", "select", ["Yes", "No"]),
       q("hear", "How did you hear about us?", "select", ["LinkedIn", "Careers Site", "Referral"]),
     ];
-    expect(planAnswers(questions, withAnswers).map((item) => item.answer)).toEqual(["Yes", "No", "Yes", "Careers Site"]);
-    expect(planAnswers(questions, context).map((item) => item.answer)).toEqual([null, null, null, "Careers Site"]);
+    expect(planAnswers(questions, withAnswers).map((item) => item.answer)).toEqual(["Yes", "No", "Yes", "LinkedIn"]);
+    expect(planAnswers(questions, context).map((item) => item.answer)).toEqual([null, null, null, "LinkedIn"]);
   });
 
   it("keeps a worked-out answer only with a real source", () => {
@@ -302,7 +302,7 @@ describe("applications", () => {
     expect(by.question_1).toMatchObject({ source: "ai", kind: "textarea" });
     // Sponsorship comes only from the student's own answer; the model's guess is ignored.
     expect(by.question_2).toMatchObject({ answer: "No", sensitive: true });
-    expect(by.question_3.answer).toBe("Company website");
+    expect(by.question_3.answer).toBe("LinkedIn");
     expect(by["school--0"]).toMatchObject({ answer: "Colby College", required: false });
     expect(by.resume_text).toBeUndefined();
     expect(application.fillReport?.timings).toMatchObject({ pipeline: "fast", llmCalls: 1 });
@@ -321,7 +321,7 @@ describe("applications", () => {
     const by = Object.fromEntries(first.application.questions.map((item) => [item.key, item]));
     expect(by.question_1).toMatchObject({ source: "ai", evidence: "Led the Colby Data Club" });
     // The AI's unsupported "LinkedIn" is dropped; the company's own site is the honest default.
-    expect(by.question_3).toMatchObject({ answer: "Company website", source: "default" });
+    expect(by.question_3).toMatchObject({ answer: "LinkedIn", source: "default" });
     expect(by.question_2.answer).toBeNull();
     expect(model.calls[0]).not.toContain("visa sponsorship");
     // No resume uploaded in this test, so the required resume stays missing rather than faked.
@@ -1081,6 +1081,20 @@ describe("questions from the latest round", () => {
     expect(isNameField("Middle Name")).toBe(true);
     expect(isNameField("Prefix")).toBe(true);
     expect(isNameField("How Did You Hear About Us?")).toBe(false);
+  });
+
+  it("says No to worked-here-before and know-anyone-here questions, LinkedIn to how you heard, and a portfolio for Websites", () => {
+    const yn = ["Yes", "No"];
+    for (const label of ["Have you ever been employed by Omnicom or any of its agencies?", "Have you previously worked for this company?", "Are you a current or former employee?", "Do you know anyone who works at Omnicom?", "Do you have relatives who work for us?"]) {
+      expect(planAnswers([q("x", label, "select", yn)], context)[0].answer).toBe("No");
+    }
+    expect(planAnswers([q("x", "Have you ever worked for Acme? If so, when?", "text")], context)[0].answer).toBe("No");
+    expect(planAnswers([q("h", "How did you hear about us?", "select", ["Company Website", "Indeed", "LinkedIn", "Other"])], context)[0].answer).toBe("LinkedIn");
+    expect(planAnswers([q("h", "How did you hear about this job?", "select", ["Referral", "Social Media"])], context)[0].answer).toBe("Social Media");
+    const saved = { "how did you hear about us": { label: "How did you hear about us?", answer: "Indeed", updatedAt: "" } };
+    expect(planAnswers([q("h", "How did you hear about us?", "text")], { ...context, profile: { ...profile, saved } })[0].answer).toBe("LinkedIn");
+    expect(planAnswers([q("w", "Website URL", "text")], { ...context, profile: { ...profile, website: "drew.dev", linkedin: "linkedin.com/in/drew" } })[0].answer).toBe("https://drew.dev");
+    expect(planAnswers([q("w", "Website URL", "text")], { ...context, profile: { ...profile, website: "", linkedin: "linkedin.com/in/drew" } })[0].answer).toBe("https://linkedin.com/in/drew");
   });
 
   it("fills Phone Extension with 1 unless the profile says another", () => {
