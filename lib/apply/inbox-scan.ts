@@ -15,6 +15,8 @@ export type InboxKind = "reply" | "interview" | "offer" | "rejected" | "new" | "
 export type InboxItem = {
   key: string; kind: InboxKind; company: string; jobTitle: string; applicationId: string; contactId: string; contactName: string;
   fromName: string; subject: string; snippet: string; at: number; url: string;
+  /** How many emails this one stands for: everything from one person, about one job, or from one company not in Unnepo. */
+  count: number;
 };
 /** What Scan my email found last, kept on this computer for the Follow up tab. */
 export type InboxScan = { at: number; looked: number; items: InboxItem[]; error?: string };
@@ -78,8 +80,9 @@ export function companyFromEmail(row: MailRow) {
 }
 
 /**
- * Sorts the emails into to-dos: one per email thread, newest first, leaving out what's already true in the tracker
- * (a job already marked Rejected, someone already marked as having replied).
+ * Sorts the emails into to-dos, newest first, leaving out what's already true in the tracker (a job already marked
+ * Rejected, someone already marked as having replied). Several emails from one person, about one job, or from one
+ * company not in Unnepo are one to-do: the newest says what it is, and `count` says how many there were.
  */
 export function sortInbox(rows: MailRow[], jobs: ScanJob[]): InboxItem[] {
   const contacts = new Map<string, { job: ScanJob; contact: ScanJob["contacts"][number] }>();
@@ -109,13 +112,18 @@ export function sortInbox(rows: MailRow[], jobs: ScanJob[]): InboxItem[] {
     if (kind === "new" && !company) continue;
     items.push({
       key: row.id, kind, company, jobTitle: job?.title ?? "", applicationId: job?.id ?? "", contactId: person?.contact.id ?? "", contactName: person?.contact.name ?? "",
-      fromName: row.fromName, subject: row.subject, snippet: row.snippet, at: row.at, url: row.url,
+      fromName: row.fromName, subject: row.subject, snippet: row.snippet, at: row.at, url: row.url, count: 1,
     });
   }
-  // A job's newest news wins: an older "thanks for applying" from a company that has since said no is dropped.
-  const newest = new Map<string, number>();
-  for (const item of items) if (item.applicationId && item.kind !== "reply") newest.set(item.applicationId, Math.max(newest.get(item.applicationId) ?? 0, item.at));
-  return items.filter((item) => item.kind !== "confirmed" || newest.get(item.applicationId) === item.at);
+  // One to-do per person, job or company: the newest email is the one shown (they're already newest first).
+  const groups = new Map<string, InboxItem>();
+  for (const item of items) {
+    const key = item.kind === "reply" ? `p:${item.contactId}` : item.applicationId ? `j:${item.applicationId}` : `n:${companyWords(item.company) || item.company.toLowerCase()}`;
+    const first = groups.get(key);
+    if (first) first.count += 1;
+    else groups.set(key, { ...item, key });
+  }
+  return [...groups.values()];
 }
 
 /** The Gmail searches a scan runs: job emails from the last 60 days, and anything from the people the student emailed. */
