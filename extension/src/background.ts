@@ -2477,6 +2477,32 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply(failed(error, "Couldn't delete it."));
         }
       // An email link was opened: Home asks an hour later whether it was sent.
+      // A job applied to by email: whether to offer the card (signed in), the email written for it, and opening it.
+      case "email-apply-state": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const { token } = await settings();
+        const { mailer } = await chrome.storage.local.get("mailer");
+        return reply({ ok: Boolean(token), mailer: (mailer as Mailer | undefined) ?? "gmail" });
+      }
+      case "email-apply-write": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        try {
+          const email = await api<{ to: string; subject: string; body: string }>("POST", "apply-email", { to: message.to, instructions: message.instructions, title: message.title, company: message.company, description: message.description });
+          return reply({ ok: true, ...email });
+        } catch (error) {
+          return reply(failed(error, "Couldn't write the email."));
+        }
+      }
+      case "email-apply-open": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const to = String(message.to ?? "").trim();
+        if (!/^[^\s@<>()]+@[^\s@<>()]+\.[a-z]{2,}$/i.test(to)) return reply({ ok: false, error: "That isn't an email address." });
+        const { mailer } = await chrome.storage.local.get("mailer");
+        const link = composeLink((mailer as Mailer | undefined) ?? "gmail", to, String(message.subject ?? "").slice(0, 200), String(message.body ?? "").slice(0, 6000));
+        if (link.url.startsWith("mailto:")) return reply({ ok: true, mailto: link.url, cut: link.cut });
+        void openEmailWithResume(link.url);
+        return reply({ ok: true, cut: link.cut });
+      }
       // An email from the panel or dashboard: opened in Gmail or Outlook with the resume attached.
       case "open-email": {
         if (!fromExtension(sender) || !MAIL_HOST.test(String(message.url ?? ""))) return reply({ ok: false });

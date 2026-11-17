@@ -20,6 +20,7 @@ import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { friendAction, listFriends } from "@/lib/social/friends";
+import { writeApplyEmail } from "@/lib/apply/apply-email";
 import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionQuickFill, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSaveTranscript, extensionSubmission, extensionTranscript, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
@@ -504,6 +505,11 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
     return json(await extensionWrite(user.id, await request.json()));
   }
   if (action === "attempts" && method === "POST") return json(await extensionAttempts(user.id, await request.json()));
+  // A job applied to by email: the email, written for it. One small AI call.
+  if (action === "apply-email" && method === "POST") {
+    if (!rateLimit(`extension-apply-email:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of emails in an hour. Try again later.", "rate_limited", 429);
+    return json(await writeApplyEmail(user.id, await request.json()));
+  }
   if (action === "cover-letter" && method === "POST") {
     // Free, but each one is an AI call: a sensible cap per hour.
     if (!rateLimit(`extension-letter:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of cover letters in an hour. Try again later.", "rate_limited", 429);
