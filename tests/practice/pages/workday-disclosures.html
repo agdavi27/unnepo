@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: Workday Voluntary Disclosures</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  fieldset { border: 0; padding: 0; margin: 16px 0; }
+  legend p { margin: 0 0 6px; }
+  .pick { position: relative; width: 344px; }
+  .pick button { width: 100%; text-align: left; font: inherit; padding: 10px; border: 1px solid #889; border-radius: 6px; background: #fff; }
+  .pick input { position: absolute; width: 0; height: 0; padding: 0; border: 0; }
+  textarea { width: 344px; height: 60px; font: inherit; }
+  [role=listbox] { position: absolute; background: #fff; border: 1px solid #999; list-style: none; margin: 0; padding: 4px 0; width: 344px; }
+  [role=option] { padding: 6px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Practice: Workday Voluntary Disclosures</h1>
+<p>Copied from a real Workday step: each self-ID question is a "Select One" button whose choices only show once it's
+  opened, in Workday's own words (ethnicity with "(United States of America)", veteran status in capitals). Gender and
+  ethnicity have no decline choice.</p>
+<div role="group" aria-labelledby="eeo-head">
+  <h2 id="eeo-head">Voluntary Disclosures</h2>
+  <div id="questions"></div>
+</div>
+<script>
+  const QUESTIONS = [
+    ["ethnicity", "Please select the ethnicity which most accurately describes how you identify yourself:", ["American Indian or Alaska Native (United States of America)", "Asian (not including South Asian) (United States of America)", "Black or African American (United States of America)", "Hispanic or Latinx (non-white) (United States of America)", "Middle Eastern or North African (United States of America)", "Native Hawaiian or Other Pacific Islander (United States of America)", "South Asian (United States of America)", "Two or More Races or Ethnicities (United States of America)", "White (United States of America)"]],
+    ["gender", "Please select you gender:", ["Female", "Male"]],
+    ["hispanicOrLatino", "Are you Hispanic or Latino? (Optional)", ["Yes", "No"]],
+    ["veteranStatus", "Please select the veteran status which most accurately describes how you identify yourself:", ["I AM NOT A VETERAN", "IDENTIFY AS A VETERAN, JUST NOT A PROTECTED VETERAN", "IDENTIFY AS ONE OR MORE OF THE CLASSIFICATIONS OF PROTECTED VETERANS", "I DO NOT WISH TO SELF-IDENTIFY"]],
+  ];
+  const holder = document.getElementById("questions");
+  for (const [key, question] of QUESTIONS) {
+    const named = key === "hispanicOrLatino" ? "" : ` aria-label="${question} Select One"`;
+    holder.insertAdjacentHTML("beforeend", `<div data-automation-id="formField-${key}"><label for="personalInfoUS--${key}">${question}</label>
+      <div><div class="pick"><button aria-haspopup="listbox" type="button" value=""${named} name="${key}" id="personalInfoUS--${key}">Select One</button><input type="text" value=""></div></div></div>`);
+  }
+  let open = null;
+  const close = () => { open?.remove(); open = null; };
+  QUESTIONS.forEach(([key, , choices]) => {
+    const button = document.getElementById(`personalInfoUS--${key}`);
+    button.addEventListener("click", () => {
+      if (open) return close();
+      const list = document.createElement("ul");
+      list.setAttribute("role", "listbox");
+      list.innerHTML = `<li role="option" aria-disabled="true" data-value=""><div>Select One</div></li>` + choices.map((choice, i) => `<li role="option" data-value="${key}-${i}"><div>${choice}</div></li>`).join("");
+      const rect = button.getBoundingClientRect();
+      Object.assign(list.style, { left: `${rect.left + scrollX}px`, top: `${rect.bottom + scrollY}px` });
+      list.querySelectorAll("[role=option]:not([aria-disabled])").forEach((option) => option.addEventListener("click", () => {
+        button.textContent = option.textContent;
+        button.value = option.dataset.value;
+        close();
+      }));
+      document.body.append(list);
+      open = list;
+    });
+  });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+  window.pageValues = () => Object.fromEntries(QUESTIONS.map(([key, question]) => [question, document.getElementById(`personalInfoUS--${key}`).textContent]));
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

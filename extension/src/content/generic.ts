@@ -1,5 +1,5 @@
 import { bestOption, degreeAnswer, dialCodeOption } from "@/lib/apply/options";
-import { answerChoices } from "@/lib/apply/questions";
+import { answerChoices, DEMOGRAPHIC, selfIdentifiedOption } from "@/lib/apply/questions";
 import type { Answer, DropdownMethod, FileData, FillAttempt, FillFailure, PageField } from "../shared/types";
 import { ADDRESS_LINE, attachFile, chooseCustom, chooseNativeSelect, dismissSuggestions, FillError, isDropdownInput, opensList, press, shownChoice, sleep, typeInto, typeKeys, waitFor, waysFrom, YES } from "./dom";
 import { findMarked, isEmpty, labelOf, rootOf, uploadButton } from "./scan";
@@ -89,6 +89,8 @@ const COUNTRY_CODE = /country (phone )?code|phone (country )?code|dialing code|^
 const pickFor = (field: PageField, value: string) =>
   COUNTRY_CODE.test(field.label) ? (texts: string[]) => dialCodeOption(value, texts)
   : /\bdegree\b/i.test(field.label) && !/\b(year|date|gpa)\b/i.test(field.label) ? (texts: string[]) => degreeAnswer(value, texts.filter((text) => text.trim() && !/^select\b/i.test(text.trim())))
+  // Self-ID (gender, race, veteran...): the student's choice in the list's own words, or the list's decline.
+  : DEMOGRAPHIC.test(field.label) ? (texts: string[]) => selfIdentifiedOption(field.label, value, texts) ?? (texts.includes(value) ? value : null)
   : undefined;
 const PHONE_NUMBER = /\b(phone|mobile|cell)\b/i;
 
