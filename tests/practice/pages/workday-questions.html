@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: Workday Application Questions</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  fieldset { border: 0; padding: 0; margin: 16px 0; }
+  legend p { margin: 0 0 6px; }
+  .pick { position: relative; width: 344px; }
+  .pick button { width: 100%; text-align: left; font: inherit; padding: 10px; border: 1px solid #889; border-radius: 6px; background: #fff; }
+  .pick input { position: absolute; width: 0; height: 0; padding: 0; border: 0; }
+  textarea { width: 344px; height: 60px; font: inherit; }
+  [role=listbox] { position: absolute; background: #fff; border: 1px solid #999; list-style: none; margin: 0; padding: 4px 0; width: 344px; }
+  [role=option] { padding: 6px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Practice: Workday Application Questions</h1>
+<p>Copied from a real Workday step: each question is a fieldset whose legend holds the question; the answer is a
+  button named only "Select One Required" (with a zero-size input beside it) that opens a Select One / Yes / No list
+  added to the end of the page.</p>
+<div data-automation-id="applyFlowPrimaryQuestionsPage">
+  <div role="group" aria-labelledby="questions-head">
+    <h2 id="questions-head">Application Questions</h2>
+    <div id="questions"></div>
+  </div>
+</div>
+<script>
+  const QUESTIONS = [
+    "Are you able to work on a hybrid schedule of 3 days a week in office?",
+    "Are you authorized to work in the country in which you are applying?",
+    "Do you now or in the future require sponsorship to work where this job is located (e.g. H-1B, etc.)?",
+  ];
+  const holder = document.getElementById("questions");
+  holder.insertAdjacentHTML("beforeend", `<div data-automation-id="formField-salary"><fieldset><legend><div data-automation-id="richText"><p>What are your salary expectations?<abbr title="required">*</abbr></p></div></legend>
+    <div><textarea id="primaryQuestionnaire--salary" aria-required="true"></textarea></div></fieldset></div>`);
+  QUESTIONS.forEach((question, n) => {
+    holder.insertAdjacentHTML("beforeend", `<div data-automation-id="formField-q${n}"><fieldset><legend><div id="rich-label${n}"><div data-automation-id="richText"><p>${question}<abbr title="required">*</abbr></p></div></div></legend>
+      <div><div class="pick"><button aria-haspopup="listbox" type="button" value="" aria-label=" Select One Required" name="q${n}" id="primaryQuestionnaire--q${n}">Select One</button><input type="text" value=""></div></div></fieldset></div>`);
+  });
+  let open = null;
+  const close = () => { open?.remove(); open = null; };
+  document.querySelectorAll(".pick button").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (open) return close();
+      const list = document.createElement("ul");
+      list.setAttribute("role", "listbox");
+      list.innerHTML = `<li role="option" aria-disabled="true" data-value="" id="select-one"><div>Select One</div></li><li role="option" data-value="yes"><div>Yes</div></li><li role="option" data-value="no"><div>No</div></li>`;
+      const rect = button.getBoundingClientRect();
+      Object.assign(list.style, { left: `${rect.left + scrollX}px`, top: `${rect.bottom + scrollY}px` });
+      list.querySelectorAll("[role=option]:not([aria-disabled])").forEach((option) => option.addEventListener("click", () => {
+        button.textContent = option.textContent;
+        button.value = option.dataset.value;
+        close();
+      }));
+      document.body.append(list);
+      open = list;
+    });
+    button.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+  });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape") close(); });
+  window.pageValues = () => Object.fromEntries(QUESTIONS.map((question, n) => [question, document.getElementById(`primaryQuestionnaire--q${n}`).textContent]));
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

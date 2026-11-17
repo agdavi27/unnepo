@@ -20,6 +20,8 @@ const MARK = "data-unnepo-form";
 const PICK = "data-unnepo-pick";
 const HIDDEN = "unnepoFormHidden";
 const CONTROLS = "input:not([type]), input[type=text], input[type=email], input[type=tel], input[type=url], input[type=number], input[type=date], input[type=month], textarea, select";
+/** A site's own dropdown drawn as a button (Workday's "Select One" questions). */
+const LIST_BUTTON = "button[aria-haspopup='listbox']";
 /** Link boxes have their own chip (link-buttons.ts), so they're left out of the groups. */
 const LINK = /linked ?in|git ?hub|portfolio|personal (web ?site|site)|\bweb ?site\b/i;
 
@@ -49,8 +51,13 @@ function labelOf(el: HTMLElement) {
   const input = el as HTMLInputElement;
   const fromLabels = Array.from(input.labels ?? []).map((label) => clean(label.textContent)).join(" ");
   if (fromLabels) return fromLabels;
-  const aria = el.getAttribute("aria-label") || (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).map((id) => clean(document.getElementById(id)?.textContent)).join(" ");
-  if (clean(aria)) return clean(aria);
+  // Workday's own dropdowns are named just "Select One Required": that's the button, not the question.
+  const aria = clean(el.getAttribute("aria-label") || (el.getAttribute("aria-labelledby") ?? "").split(/\s+/).map((id) => clean(document.getElementById(id)?.textContent)).join(" ")).replace(/\b(select one|required)\b/gi, "").trim();
+  if (aria) return aria;
+  // A question asked in its fieldset's legend (Workday's Application Questions).
+  const fieldset = el.closest("fieldset");
+  const legend = clean(fieldset?.querySelector("legend")?.textContent).replace(/\*$/, "").trim();
+  if (legend && fieldset && fieldsIn(fieldset) <= 2) return legend;
   let box: HTMLElement | null = el.parentElement;
   for (let depth = 0; box && depth < 4; depth++, box = box.parentElement) {
     if (fieldsIn(box) > 1) break;
@@ -83,6 +90,8 @@ function outlineFor(el: HTMLElement) {
 
 /** Whether a field has an answer: its value, or for a site's own dropdown, a choice shown in place of "Select…". */
 export function answered(el: HTMLElement, outline: HTMLElement) {
+  // A dropdown button: answered once it shows a choice instead of "Select One".
+  if (el instanceof HTMLButtonElement) return Boolean(clean(el.textContent)) && !/^(select|choose|pick)\b/i.test(clean(el.textContent));
   if (el instanceof HTMLInputElement && el.type === "checkbox") return el.checked || (CURRENT_JOB.test(labelOf(el)) && hasEndDate(el));
   if (el instanceof HTMLSelectElement) return el.selectedIndex > 0 || Boolean(el.value && !/^select/i.test(el.selectedOptions[0]?.text ?? ""));
   if ((el as HTMLInputElement).value?.trim()) return true;
@@ -111,8 +120,10 @@ function hasEndDate(box: HTMLElement) {
 /** Every field on the form Unnepo can help with, in page order. */
 export function findBoxes(): Box[] {
   const boxes: Box[] = [];
-  for (const el of Array.from(document.querySelectorAll<HTMLElement>(`${CONTROLS}, input[type=checkbox]`))) {
-    const combo = el.getAttribute("role") === "combobox";
+  for (const el of Array.from(document.querySelectorAll<HTMLElement>(`${CONTROLS}, input[type=checkbox], ${LIST_BUTTON}`))) {
+    // The site's menus (language, settings) are dropdown buttons too, but not questions.
+    if (el.matches(LIST_BUTTON) && el.closest("[data-automation-id*='utility' i], [data-automation-id*='progress' i], [data-automation-id*='languagePicker' i]")) continue;
+    const combo = el.getAttribute("role") === "combobox" || el.matches(LIST_BUTTON);
     if (ours(el) || (el as HTMLInputElement).disabled || ((el as HTMLInputElement).readOnly && !combo)) continue;
     if (helperInput(el)) continue;
     const rect = el.getBoundingClientRect();
@@ -121,7 +132,7 @@ export function findBoxes(): Box[] {
     const label = datePart(el) ? clean(el.closest("fieldset")?.querySelector("legend")?.textContent) || labelOf(el) : labelOf(el);
     if (!label || /search/i.test(label)) continue;
     if ((el as HTMLInputElement).type === "checkbox" && !CURRENT_JOB.test(label)) continue;
-    const type = el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLSelectElement ? "select" : "text";
+    const type = el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLSelectElement || el instanceof HTMLButtonElement ? "select" : "text";
     const kind = isComplexQuestion(type, label) && !ROLE_TEXT.test(label) ? "write" : "fill";
     if (kind === "fill" && LINK.test(label)) continue;
     const outline = (el as HTMLInputElement).type === "checkbox" ? (el.closest("label, [data-automation-id^='formField']") as HTMLElement | null) ?? el : outlineFor(el);

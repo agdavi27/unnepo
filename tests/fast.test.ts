@@ -253,3 +253,11 @@ describe("repeating entries on Workday", () => {
     expect(missingDates(student)).toEqual(["Colby College: To", "Acme: From"]);
   });
 });
+
+describe("Workday application questions", () => {
+  it("answers hybrid, work authorization and sponsorship from the profile", () => {
+    const asked = ["Are you able to work on a hybrid schedule of 3 days a week in office?", "Are you authorized to work in the country in which you are applying?", "Do you now or in the future require sponsorship to work where this job is located (e.g. H-1B, etc.)?"]
+      .map((label) => ({ key: label, label, kind: "select" as const, required: true, options: ["Yes", "No"], sensitive: false, answer: null, source: null, evidence: null }));
+    expect(planAnswers(asked, context).map((question) => question.answer)).toEqual(["Yes", "Yes", "No"]);
+  });
+});
