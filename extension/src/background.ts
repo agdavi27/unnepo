@@ -9,6 +9,9 @@ import { notCompanyName } from "@/lib/apply/company-name";
 import { APPLIED_LINE, appliedDay } from "./shared/applied-line";
 import { composeLink, type Mailer } from "@/lib/apply/compose-link";
 import { putResumeInDraft } from "./shared/mail-attach";
+import { readGmailResults } from "./shared/gmail-read";
+import { gmailSearches, sortInbox, type InboxScan, type MailRow } from "@/lib/apply/inbox-scan";
+import { stageOf } from "@/lib/apply/stats";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -1653,6 +1656,45 @@ function tabLoaded(tabId: number, ms: number) {
 
 const MAIL_HOST = /^https:\/\/(mail\.google\.com|outlook\.(office|office365|live)\.com)\//;
 
+let scanning: Promise<InboxScan> | null = null;
+
+/**
+ * Scan my email: opens Gmail in a background tab on a search for job emails (and one for the people the student
+ * emailed), reads the results list (sender, subject, preview, date), closes the tab, and sorts what it read into
+ * to-dos. The emails are read on this computer and never sent anywhere.
+ */
+function scanInbox(): Promise<InboxScan> {
+  scanning ??= (async () => {
+    const data = (await trackerCopy())?.data ?? await readTracker();
+    const jobs = data.jobs.map((job) => ({ id: job.id, title: job.title, company: job.companyMissing ? "" : job.company, stage: stageOf(job as never), createdAt: job.createdAt, contacts: job.contacts.map((person) => ({ id: person.id, name: person.name, email: person.email, outreachStatus: person.outreachStatus })) }));
+    const rows: MailRow[] = [];
+    let signin = false;
+    for (const search of gmailSearches(jobs.flatMap((job) => job.contacts.map((person) => person.email ?? "")))) {
+      const tab = await chrome.tabs.create({ url: `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(search)}`, active: false });
+      try {
+        await tabLoaded(tab.id!, 20_000);
+        const [result] = await chrome.scripting.executeScript({ target: { tabId: tab.id! }, func: readGmailResults });
+        const read = result?.result as Awaited<ReturnType<typeof readGmailResults>> | undefined;
+        if (read?.state === "signin") signin = true;
+        rows.push(...(read?.rows ?? []));
+      } catch {
+        // A tab Gmail moved to its sign-in page can't be read.
+        signin = true;
+      } finally {
+        await chrome.tabs.remove(tab.id!).catch(() => undefined);
+      }
+      if (signin) break;
+    }
+    const scan: InboxScan = signin && !rows.length
+      ? { at: Date.now(), looked: 0, items: [], error: "Sign in to Gmail in Chrome, then scan again." }
+      : { at: Date.now(), looked: rows.length, items: sortInbox(rows, jobs) };
+    if (!scan.error) await chrome.storage.local.set({ inboxScan: scan });
+    void updateBadge();
+    return scan;
+  })().finally(() => { scanning = null; });
+  return scanning;
+}
+
 /** Opens an email in Gmail or Outlook on the web with the student's resume attached to the draft. */
 async function openEmailWithResume(url: string) {
   const resume = readyResume();
@@ -2520,6 +2562,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (link.url.startsWith("mailto:")) return reply({ ok: true, mailto: link.url, cut: link.cut });
         void openEmailWithResume(link.url);
         return reply({ ok: true, cut: link.cut });
+      }
+      // Follow up → Scan my email.
+      case "inbox-scan": {
+        if (!fromExtension(sender)) return reply({ ok: false });
+        try {
+          const scan = await scanInbox();
+          return reply(scan.error ? { ok: false, error: scan.error } : { ok: true, scan });
+        } catch (error) {
+          return reply(failed(error, "Couldn't read your email."));
+        }
       }
       // An email from the panel or dashboard: opened in Gmail or Outlook with the resume attached.
       case "open-email": {

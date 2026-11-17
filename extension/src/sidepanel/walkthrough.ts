@@ -1,12 +1,12 @@
 /**
  * "How Unnepo works", inside the side panel: the panel dims, and an arrow points at the real part of it each step
- * talks about (the spider, then the Home, Tools, Jobs and Me tabs), switching to that tab as it goes. It opens by itself
+ * talks about (the spider, then the Home, Tools, Jobs, Follow up and Me tabs), switching to that tab as it goes. It opens by itself
  * the first time the panel opens connected, never again after that; Me → "Show me how it works" brings it back.
  */
 
 export const WALKTHROUGH_SEEN = "walkthroughSeen";
 
-type Tab = "home" | "jobs" | "tools" | "settings";
+type Tab = "home" | "jobs" | "tools" | "follow" | "settings";
 type Step = { target: string; tab: Tab | null; title: string; body: string };
 
 const STEPS: Step[] = [
@@ -29,6 +29,10 @@ const STEPS: Step[] = [
   {
     target: "[data-tab='home']", tab: "home", title: "Find people to email",
     body: "Open a job, then pick Find with LinkedIn (names from LinkedIn, guessed emails, free) or Find verified emails (checked work emails). Unnepo reminds you when to follow up.",
+  },
+  {
+    target: "[data-tab='follow']", tab: "follow", title: "Follow up",
+    body: "Scan my email reads your Gmail for replies, interviews, offers and no's, and turns them into a to-do list. Follow-ups that are due show here too.",
   },
   {
     target: "[data-tab='settings']", tab: "settings", title: "Me",
