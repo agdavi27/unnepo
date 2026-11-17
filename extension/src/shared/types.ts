@@ -156,7 +156,7 @@ export type TrackerJob = {
 
 /** How many companies Unnepo can still find people at, out of how many, and over what time. */
 export type PeopleCount = { left: number; of: number; per: "today" | "this month" };
-export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free: boolean; peopleNote: string; /** The People box's corner: "2 of 2 unlocks left today", "Unlimited". */ peopleBadge?: string; /** Free: unlocks left today, and how many a day. Null on Pro. */ peopleLeft?: number | null; unlocksPerDay?: number | null; /** Companies left to find people at: Free per day, Pro per month. */ peopleCount?: PeopleCount | null; /** Free: written emails left today. */ emailsLeft?: number | null };
+export type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; /** Jobs applied to and then deleted: still counted, never listed. */ gone?: Array<{ at: string; title: string; company: string; notCounted?: boolean }>; free: boolean; peopleNote: string; /** The People box's corner: "2 of 2 unlocks left today", "Unlimited". */ peopleBadge?: string; /** Free: unlocks left today, and how many a day. Null on Pro. */ peopleLeft?: number | null; unlocksPerDay?: number | null; /** Companies left to find people at: Free per day, Pro per month. */ peopleCount?: PeopleCount | null; /** Free: written emails left today. */ emailsLeft?: number | null };
 
 /**
  * A job the extension caught being applied to, for Home's "Detected jobs" menu (the last 5, newest first).

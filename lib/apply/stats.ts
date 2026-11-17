@@ -21,6 +21,18 @@ export function stageOf(app: Pick<JobApplication, "status" | "fillReport"> & Par
 /** False for a job saved from a status email with no sign of applying: it stays out of goals and today's count. */
 export const countsTowardGoals = (app: Pick<JobApplication, "fillReport">) => !app.fillReport?.notCounted;
 
+/**
+ * Jobs applied to and then deleted, as just enough of a job for counting: they still count toward goals, the
+ * streak and the calendar (shown there as "(deleted)"), but they're on no list.
+ */
+export function deletedAsJobs(list: Array<{ at: string; title: string; company: string; notCounted?: boolean }> | null | undefined) {
+  return (list ?? []).map((item, index) => ({
+    id: `deleted:${index}`, status: "submitted" as const, submittedAt: item.at, createdAt: item.at, updatedAt: item.at,
+    title: `${item.title} (deleted)`, company: item.company, titleMissing: false, companyMissing: false, deleted: true as const,
+    fillReport: item.notCounted ? { notCounted: true } : null, contacts: [] as never[],
+  }));
+}
+
 /** The day an application counts for: when it was submitted, else when it was added. */
 export const appliedOn = (app: Pick<JobApplication, "createdAt" | "submittedAt">) => new Date(app.submittedAt ?? app.createdAt);
 

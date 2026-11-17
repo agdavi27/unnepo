@@ -1,4 +1,4 @@
-import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
+import { appliedOn, countsTowardGoals, dayKey, deletedAsJobs, weekStart } from "@/lib/apply/stats";
 import { escape, isAppliedJob, progressDots, progressOf, redraw, store } from "./tracker-view";
 import { friendsWeekCard } from "./friends";
 import { ACTIVITY_HEAT_FINE, ACTIVITY_MARK, activityByDay, activityGrid } from "@/lib/apply/calendar";
@@ -81,7 +81,8 @@ const shortDate = (date: Date) => date.toLocaleDateString("en-US", { month: "sho
  */
 export function weekView(now = new Date(), under: string | ((friends: string) => string) = "", goalsUrl = "") {
   if (!store.tracker) return `<section class="page"><span class="eyebrow">Every day you did something</span><p class="note">${escape(store.error || "Loading your week…")}</p></section>`;
-  const jobs = store.tracker.jobs;
+  // Jobs applied to and then deleted still count: on the calendar, the week's count and the streak.
+  const jobs = [...store.tracker.jobs, ...(deletedAsJobs(store.tracker.gone) as unknown as TrackerJob[])];
   const applied = perDay(jobs);
   const byDay = activityByDay(jobs);
   const [, , weeks, rangeLabel] = RANGES.find(([value]) => value === range)!;

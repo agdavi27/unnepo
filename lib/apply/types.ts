@@ -239,6 +239,9 @@ export type ApplicationContact = {
 export type UsageCounts = { letters?: number; answers?: number; autofills?: number; emails?: number; people?: number; /** Companies searched on a paid plan, counted apart so Free's unlocks don't use up Pro's month. */ companies?: number };
 
 /** Reusable answers for application forms. Only what the student typed or what appears in their resume. */
+/** A deleted job that had been applied to: it still counts as applied. */
+export type DeletedApplied = { at: string; title: string; company: string; notCounted?: boolean };
+
 export type ApplicationProfile = {
   firstName: string;
   /** Optional: only forms that ask for a middle name (or initial) get it. */
@@ -264,6 +267,11 @@ export type ApplicationProfile = {
   resumeProfile?: ResumeProfile | null;
   /** Applications per week the student is aiming for. */
   weeklyGoal?: number;
+  /**
+   * Jobs the student applied to and then deleted: when they applied (and what it was), so goals, streaks, the
+   * calendar and friends still count them. The newest 1000.
+   */
+  deletedApplied?: DeletedApplied[];
   /** Admins only: the plan the account works as, to see what students on it see. Billing is untouched. */
   planPreview?: "free" | "pro";
   dailyGoal?: number;

@@ -1009,3 +1009,4 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .follow-updates summary::-webkit-details-marker { display: none; }
 .follow-updates[open] summary { margin-bottom: 4px; }
 .todo-num { flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; display: grid; place-items: center; background: var(--control); color: var(--muted-3); font: 600 11px Geist, sans-serif; }
+.dash-link { width: 100%; }

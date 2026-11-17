@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { SpiderLoader } from "@/components/unnepo/spider-loader";
-import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
+import { appliedOn, countsTowardGoals, dayKey, deletedAsJobs, weekStart } from "@/lib/apply/stats";
 
 /**
  * Goals: what the student is aiming for, each with how far along they are right now. The weekly goal is the main
- * one (it fills the bar on the extension's Jobs tab); the rest are optional, and a blank box turns one off.
+ * one (it fills the bar on the extension's Jobs tab). Any goal is turned off by taking it to 0 (or emptying the box).
  * Saved to the profile, the same place the extension reads them from.
  */
 
@@ -21,16 +21,16 @@ type Goal = { key: Key; label: string; unit: string; least: number; most: number
 const GROUPS: Array<{ title: string; note: string; goals: Goal[] }> = [
   {
     title: "Applications",
-    note: "How many jobs you want to apply to.",
+    note: "How many jobs you want to apply to. Set one to 0 to turn it off.",
     goals: [
       { key: "weeklyGoal", label: "Per week", unit: "applications", least: 1, most: 200, hint: "Fills the bar on the extension's Jobs tab, Monday to Sunday.", required: true, main: true },
-      { key: "dailyGoal", label: "Per day", unit: "applications", least: 1, most: 50, hint: "Today's bar in the extension. Until you set one, it's a fifth of your weekly goal.", required: true },
+      { key: "dailyGoal", label: "Per day", unit: "applications", least: 1, most: 50, hint: "Today's bar in the extension. Until you set one, it's a fifth of your weekly goal. 0 turns it off.", required: true },
       { key: "monthlyGoal", label: "Per month", unit: "applications", least: 1, most: 800, hint: "Optional. Counts from the 1st of the month." },
     ],
   },
   {
     title: "Momentum",
-    note: "Optional. Leave a box empty to turn that goal off.",
+    note: "Optional. Set one to 0 to turn it off.",
     goals: [
       { key: "streakGoal", label: "Streak", unit: "days in a row", least: 2, most: 365, hint: "Days in a row with at least one application." },
       { key: "weeklyEmailGoal", label: "People emailed", unit: "per week", least: 1, most: 100, hint: "Recruiters and people on the team you reached out to." },
@@ -85,11 +85,12 @@ export function GoalsView() {
       .then(async (response) => {
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || "Couldn't load your goals.");
-        return body as { applications: App[]; profile: Profile };
+        return body as { applications: App[]; profile: Profile & { deletedApplied?: Parameters<typeof deletedAsJobs>[0] } };
       })
       .then((body) => {
         if (cancelled) return;
-        setApps(body.applications);
+        // Jobs applied to and then deleted still count.
+        setApps([...body.applications, ...(deletedAsJobs(body.profile.deletedApplied) as App[])]);
         const profile = Object.fromEntries(ALL.map((goal) => [goal.key, body.profile[goal.key]])) as Profile;
         setSaved(profile);
         setDraft(Object.fromEntries(ALL.map((goal) => [goal.key, profile[goal.key] ? String(profile[goal.key]) : ""])) as Record<Key, string>);
@@ -107,10 +108,9 @@ export function GoalsView() {
     for (const goal of ALL) {
       const text = draft[goal.key].trim();
       const before = saved[goal.key];
-      if (!text) {
-        // The weekly and daily goals can't be turned off once set; the others can.
-        if (before && goal.required) problems.push(`${goal.label} can't be empty. Pick a number from ${goal.least} to ${goal.most}.`);
-        else if (before) out[goal.key] = null;
+      // Empty or 0: that goal is off.
+      if (!text || Number(text) === 0) {
+        if (before) out[goal.key] = 0;
         continue;
       }
       const value = Number(text);
@@ -134,17 +134,18 @@ export function GoalsView() {
     if (!response?.ok) { setStatus(body?.error || "Couldn't save. Try again."); return; }
     const next = { ...saved };
     for (const [key, value] of Object.entries(changes.out) as Array<[Key, number | null]>) {
-      if (value === null) delete next[key];
+      if (!value) delete next[key];
       else next[key] = value;
     }
     setSaved(next);
     setStatus("Saved. The extension shows the new goals the next time it refreshes.");
   }
 
+  /** − below the lowest goal goes to 0, which turns it off; + from off starts at the lowest. */
   const step = (goal: Goal, by: number) => {
-    const current = Number(draft[goal.key]) || (by > 0 ? goal.least - 1 : goal.least);
-    const next = Math.min(goal.most, Math.max(goal.least, current + by));
-    setDraft((old) => ({ ...old, [goal.key]: String(next) }));
+    const current = Number(draft[goal.key]) || 0;
+    const next = by > 0 ? Math.min(goal.most, Math.max(goal.least, current + by)) : current + by < goal.least ? 0 : current + by;
+    setDraft((old) => ({ ...old, [goal.key]: next ? String(next) : "0" }));
     setStatus("");
   };
 
@@ -186,7 +187,7 @@ export function GoalsView() {
                         inputMode="numeric"
                         aria-label={`${goal.label} goal, ${goal.unit}`}
                         value={draft[goal.key]}
-                        placeholder={goal.required ? String(goal.least) : "Off"}
+                        placeholder="Off"
                         onChange={(event) => { setDraft((old) => ({ ...old, [goal.key]: event.target.value.replace(/[^\d]/g, "").slice(0, 3) })); setStatus(""); }}
                         className="field !h-9 !w-16 !px-2 text-center tabular-nums"
                       />
@@ -198,7 +199,7 @@ export function GoalsView() {
                     <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#1C1C21]" role="progressbar" aria-label={`${goal.label} progress`} aria-valuemin={0} aria-valuemax={target || 1} aria-valuenow={Math.min(now, target || now)}>
                       <div className="h-full rounded-full" style={{ width: `${target ? pct : 0}%`, background: done ? "#4ADE80" : "#3D8BFF" }} />
                     </div>
-                    <span className={`w-36 text-right font-mono text-xs ${done ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{target ? `${now} / ${target} ${when}` : `${now} ${when}`}</span>
+                    <span className={`w-36 text-right font-mono text-xs ${done ? "text-[#4ADE80]" : "text-[#9A9AA3]"}`}>{target ? `${now} / ${target} ${when}` : `Off · ${now} ${when}`}</span>
                   </div>
                 </li>
               );

@@ -83,7 +83,7 @@ export async function extensionMe(userId: string) {
   const weekAgo = Date.now() - 8 * 86_400_000;
   return {
     // The panel's Day / Week goal. The panel counts them, so "today" is the student's own day.
-    goal: { weekly: stored?.weeklyGoal ?? null, daily: stored?.dailyGoal ?? null, appliedAt: applied.filter((app) => !app.notCounted).map((app) => app.submittedAt ?? app.createdAt).filter((at) => Date.parse(at) >= weekAgo) },
+    goal: { weekly: stored?.weeklyGoal ?? null, daily: stored?.dailyGoal ?? null, appliedAt: [...applied.filter((app) => !app.notCounted).map((app) => app.submittedAt ?? app.createdAt), ...(stored?.deletedApplied ?? []).filter((item) => !item.notCounted).map((item) => item.at)].filter((at) => Date.parse(at) >= weekAgo) },
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     credits: credits?.balance ?? 0,
     unlimitedCredits: usage.unlimited,
@@ -305,6 +305,8 @@ export async function extensionTracker(userId: string) {
   return {
     jobs: apps.map((app) => trackerJob(app, contacts.filter((contact) => contact.applicationId === app.id))),
     weeklyGoal: stored?.weeklyGoal ?? null,
+    /** Jobs applied to and then deleted: still counted (goals, streak, calendar), never listed. */
+    gone: stored?.deletedApplied ?? [],
     free: usage.free,
     peopleNote: usage.people.note,
     peopleBadge: usage.people.badge,
