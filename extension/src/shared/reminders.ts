@@ -18,7 +18,11 @@ const DAY = 86_400_000;
 function goalCounts(tracker: Tracker, now: Date) {
   const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const weekStart = new Date(dayStart - ((now.getDay() + 6) % 7) * DAY).getTime();
-  const applied = tracker.jobs.filter((job) => isApplied(job.status as never) && !job.fillReport?.notCounted).map((job) => Date.parse(job.submittedAt ?? job.createdAt));
+  const applied = [
+    ...tracker.jobs.filter((job) => isApplied(job.status as never) && !job.fillReport?.notCounted).map((job) => Date.parse(job.submittedAt ?? job.createdAt)),
+    // Jobs applied to and then deleted still count toward the goal.
+    ...(tracker.gone ?? []).filter((item) => !item.notCounted).map((item) => Date.parse(item.at)),
+  ];
   const weekly = tracker.weeklyGoal ?? 0;
   return { today: applied.filter((at) => at >= dayStart).length, daily: weekly ? Math.ceil(weekly / 5) : 0, week: applied.filter((at) => at >= weekStart).length, weekly };
 }

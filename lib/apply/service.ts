@@ -21,7 +21,7 @@ import { profileReady, profileState } from "@/lib/profile/service";
 import { sameCompany } from "@/lib/apply/match";
 import { patternOf } from "@/lib/apply/email-guess";
 import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
-import type { ApplicationProfile, ApplicationQuestion, JobApplication, OutreachState, PostedRecruiter } from "@/lib/apply/types";
+import type { ApplicationProfile, ApplicationQuestion, DeletedApplied, JobApplication, OutreachState, PostedRecruiter } from "@/lib/apply/types";
 
 /** A job's whole description: the list only carries the start of a long one. */
 export async function jobDescription(userId: string, applicationId: unknown) {
@@ -81,6 +81,7 @@ export async function student(userId: string) {
     aiCache: stored?.aiCache,
     weeklyGoal: stored?.weeklyGoal,
     dailyGoal: stored?.dailyGoal,
+    deletedApplied: stored?.deletedApplied,
     monthlyGoal: stored?.monthlyGoal,
     weeklyEmailGoal: stored?.weeklyEmailGoal,
     monthlyInterviewGoal: stored?.monthlyInterviewGoal,
@@ -616,20 +617,28 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
   }
   if (typeof body.fastApply === "boolean") next.fastApply = body.fastApply;
   if (typeof body.autoFindPeople === "boolean") next.autoFindPeople = body.autoFindPeople;
+  // Any goal is turned off with a blank or a 0.
+  const off = (value: unknown) => value === null || value === "" || Number(value) === 0;
   if (body.weeklyGoal !== undefined) {
-    const goal = Math.round(Number(body.weeklyGoal));
-    if (!Number.isFinite(goal) || goal < 1 || goal > 200) throw new ServiceError("Pick a weekly goal between 1 and 200 applications.", "goal", 400);
-    next.weeklyGoal = goal;
+    if (off(body.weeklyGoal)) delete next.weeklyGoal;
+    else {
+      const goal = Math.round(Number(body.weeklyGoal));
+      if (!Number.isFinite(goal) || goal < 1 || goal > 200) throw new ServiceError("Pick a weekly goal between 1 and 200 applications.", "goal", 400);
+      next.weeklyGoal = goal;
+    }
   }
   if (body.dailyGoal !== undefined) {
-    const goal = Math.round(Number(body.dailyGoal));
-    if (!Number.isFinite(goal) || goal < 1 || goal > 50) throw new ServiceError("Pick a daily goal between 1 and 50 applications.", "goal", 400);
-    next.dailyGoal = goal;
+    // 0 is kept: off, rather than unset (unset is a fifth of the weekly goal).
+    if (off(body.dailyGoal)) next.dailyGoal = 0;
+    else {
+      const goal = Math.round(Number(body.dailyGoal));
+      if (!Number.isFinite(goal) || goal < 1 || goal > 50) throw new ServiceError("Pick a daily goal between 1 and 50 applications.", "goal", 400);
+      next.dailyGoal = goal;
+    }
   }
-  // The optional goals: a blank turns one off.
   for (const [key, least, most, words] of OPTIONAL_GOALS) {
     if (body[key] === undefined) continue;
-    if (body[key] === null || body[key] === "") {
+    if (off(body[key])) {
       delete next[key];
       continue;
     }
@@ -640,7 +649,7 @@ export async function saveApplicationProfile(userId: string, raw: unknown) {
   if (body.spiderSkin !== undefined) {
     const skin = SKINS.find((item) => item.id === body.spiderSkin);
     if (!skin) throw new ServiceError("Pick one of the spiders.", "spider", 400);
-    const applied = (await applications.list(userId)).filter((app) => isApplied(app.status)).length;
+    const applied = (await applications.list(userId)).filter((app) => isApplied(app.status)).length + (next.deletedApplied?.length ?? 0);
     if (!skinUnlocked(skin, applied)) throw new ServiceError(`That spider unlocks after ${skin.unlockAt} applications.`, "spider", 403);
     next.spiderSkin = skin.id;
   }
@@ -1068,8 +1077,24 @@ export async function setJobHidden(userId: string, raw: unknown) {
   return { application: summary(updated!) };
 }
 
+/**
+ * Deletes one job (`applicationId`) or several at once (`applicationIds`, up to 200). Jobs that had been applied
+ * to still count as applied: when they were applied to is kept on the profile for goals, streaks and the calendar.
+ */
 export async function deleteApplication(userId: string, raw: unknown) {
-  const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
-  await applications.remove(userId, app.id);
-  return { ok: true };
+  const body = (raw ?? {}) as { applicationId?: unknown; applicationIds?: unknown };
+  const ids = Array.isArray(body.applicationIds) ? [...new Set(body.applicationIds.map((id) => String(id ?? "").slice(0, 80)).filter(Boolean))] : [String(body.applicationId ?? "")];
+  if (!ids.length || ids.length > 200) throw new ServiceError("Pick between 1 and 200 jobs to delete.", "invalid", 400);
+  const apps = ids.length === 1 ? [await requireApp(userId, ids[0])] : (await applications.list(userId)).filter((app) => ids.includes(app.id));
+  if (!apps.length) throw new ServiceError("Those jobs weren't found.", "not_found", 404);
+  const applied = apps.filter((app) => isApplied(app.status)).map((app): DeletedApplied => ({
+    at: app.submittedAt ?? app.createdAt, title: app.title.slice(0, 200), company: app.company.slice(0, 200), ...(app.fillReport?.notCounted ? { notCounted: true } : {}),
+  }));
+  if (applied.length) {
+    // A student who never saved a profile gets one, so the count isn't lost.
+    const stored = (await applicationProfiles.get(userId)) ?? (await student(userId)).profile;
+    await applicationProfiles.put(userId, { ...stored, deletedApplied: [...(stored.deletedApplied ?? []), ...applied].slice(-1000) });
+  }
+  for (const app of apps) await applications.remove(userId, app.id);
+  return { ok: true, deleted: apps.length };
 }

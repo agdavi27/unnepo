@@ -1,4 +1,4 @@
-import { applications } from "@/lib/apply/store";
+import { applicationProfiles, applications } from "@/lib/apply/store";
 import { weekUses } from "@/lib/apply/limits";
 import { isApplied } from "@/lib/apply/stats";
 import { id, nowIso, repo, withLock } from "@/lib/db/file-store";
@@ -48,9 +48,11 @@ export async function claimInvites(userId: string, emailNormalized: string) {
 
 /** One student's week since `since`. Cover letters count from Monday (Eastern), as Free's limits do. */
 async function weekStats(userId: string, since: number): Promise<WeekStats> {
-  const [apps, uses] = await Promise.all([applications.list(userId), weekUses(userId)]);
+  const [apps, uses, stored] = await Promise.all([applications.list(userId), weekUses(userId), applicationProfiles.get(userId)]);
   const after = (at: string | null | undefined) => Boolean(at) && Date.parse(at!) >= since;
   const stats: WeekStats = { applied: 0, emails: 0, followUps: 0, letters: uses.letters ?? 0, replies: 0, interviews: 0 };
+  // Jobs applied to and then deleted still count.
+  stats.applied += (stored?.deletedApplied ?? []).filter((item) => !item.notCounted && after(item.at)).length;
   for (const app of apps) {
     const report = app.fillReport;
     if (isApplied(app.status) && !report?.notCounted && after(app.submittedAt ?? app.createdAt)) stats.applied += 1;
@@ -89,8 +91,9 @@ async function me(userId: string) {
 
 /** Applications that count toward goals since `since`. */
 async function appliedSince(userId: string, since: number) {
-  const times = await applications.appliedTimes(userId);
-  return times.filter((app) => isApplied(app.status) && !app.notCounted && Date.parse(app.submittedAt ?? app.createdAt) >= since).length;
+  const [times, stored] = await Promise.all([applications.appliedTimes(userId), applicationProfiles.get(userId)]);
+  const deleted = (stored?.deletedApplied ?? []).filter((item) => !item.notCounted && Date.parse(item.at) >= since).length;
+  return times.filter((app) => isApplied(app.status) && !app.notCounted && Date.parse(app.submittedAt ?? app.createdAt) >= since).length + deleted;
 }
 
 /**

@@ -6,7 +6,7 @@ import { PeoplePanel } from "@/components/unnepo/people-panel";
 import { Popup } from "@/components/unnepo/popup";
 import { H, ON_DARK, W, spiderRects } from "@/extension/src/shared/sprite";
 import { STEPS, STEP_LABEL, progressOf, type Progress } from "@/lib/apply/progress";
-import { appliedOn, countsTowardGoals, dayKey, weekStart } from "@/lib/apply/stats";
+import { appliedOn, countsTowardGoals, dayKey, deletedAsJobs, weekStart } from "@/lib/apply/stats";
 import type { TrackerJob } from "@/lib/extension/service";
 import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid, activityOf, longestRun } from "@/lib/apply/calendar";
 
@@ -17,7 +17,7 @@ import { ACTIVITY_HEAT, ACTIVITY_MARK, activityByDay, activityGrid, activityOf, 
  * in Gmail. Jobs can be added by hand and deleted here; the extension does the rest.
  */
 
-type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; free?: boolean; peopleBadge?: string; peopleNote?: string; peopleLeft?: number | null; emailsLeft?: number | null };
+type Tracker = { jobs: TrackerJob[]; weeklyGoal: number | null; gone?: Parameters<typeof deletedAsJobs>[0]; free?: boolean; peopleBadge?: string; peopleNote?: string; peopleLeft?: number | null; emailsLeft?: number | null };
 type Row = { job: TrackerJob; progress: Progress };
 type Filter = "all" | "reach" | "waiting" | "follow" | "interview" | "hidden";
 const FILTERS: Array<[Filter, string]> = [["all", "All"], ["reach", "Reach out"], ["waiting", "Waiting"], ["follow", "Follow up"], ["interview", "Interview"], ["hidden", "Hidden"]];
@@ -329,29 +329,35 @@ function InfoPopup({ row, now, tracker, onClose, onDelete, onHide, onChanged, re
   );
 }
 
-function DeletePopup({ job, onCancel, onDeleted }: { job: TrackerJob; onCancel: () => void; onDeleted: () => void }) {
+function DeletePopup({ jobs, onCancel, onDeleted }: { jobs: TrackerJob[]; onCancel: () => void; onDeleted: () => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const one = jobs.length === 1 ? jobs[0] : null;
+  const applied = jobs.filter(isApplied).length;
+  const heading = one ? "Delete this job?" : `Delete ${jobs.length} jobs?`;
   const confirm = async () => {
     setBusy(true);
     setError("");
-    const response = await fetch("/api/apply/applications", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationId: job.id }) }).catch(() => null);
+    const response = await fetch("/api/apply/applications", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ applicationIds: jobs.map((job) => job.id) }) }).catch(() => null);
     const body = await response?.json().catch(() => ({}));
     if (!response?.ok) { setBusy(false); setError(body?.error || "Couldn't delete it. Try again."); return; }
     onDeleted();
   };
   return (
-    <Popup label="Delete this job?" onClose={onCancel} width="max-w-sm">
+    <Popup label={heading} onClose={onCancel} width="max-w-sm">
       <div className="flex flex-col gap-4">
         <span aria-hidden className="grid h-11 w-11 place-items-center rounded-full bg-[#2A1A1A] text-xl text-[#F87171]">!</span>
         <div>
-          <h2 className="m-0 text-lg font-semibold tracking-tight">Delete this job?</h2>
-          <p className="m-0 mt-1.5 text-sm leading-relaxed text-muted"><b className="font-medium text-ink">{titleOf(job)}</b> at <b className="font-medium text-ink">{companyOf(job)}</b> comes off your jobs, your calendar and the extension, with the people on it. You can&apos;t undo this.</p>
+          <h2 className="m-0 text-lg font-semibold tracking-tight">{heading}</h2>
+          <p className="m-0 mt-1.5 text-sm leading-relaxed text-muted">
+            {one ? <><b className="font-medium text-ink">{titleOf(one)}</b> at <b className="font-medium text-ink">{companyOf(one)}</b> comes</> : <>They come</>} off your jobs and the extension, with the people on {one ? "it" : "them"}.
+            {applied ? <> {one ? "You applied, so it still counts" : applied === jobs.length ? "You applied to them, so they still count" : `The ${applied} you applied to still count`} toward your goals, streak and calendar.</> : null} You can&apos;t undo this.
+          </p>
         </div>
         {error && <p className="m-0 text-sm text-[#F87171]">{error}</p>}
         <div className="flex gap-2">
           <button type="button" autoFocus onClick={onCancel} className="h-10 flex-1 rounded-xl border border-line text-sm hover:bg-white/5">Keep it</button>
-          <button type="button" disabled={busy} onClick={() => void confirm()} className="h-10 flex-1 rounded-xl bg-[#EF4444] text-sm font-semibold text-white hover:bg-[#DC2626] disabled:opacity-50">{busy ? "Deleting…" : "Delete"}</button>
+          <button type="button" disabled={busy} onClick={() => void confirm()} className="h-10 flex-1 rounded-xl bg-[#EF4444] text-sm font-semibold text-white hover:bg-[#DC2626] disabled:opacity-50">{busy ? "Deleting…" : one ? "Delete" : `Delete ${jobs.length}`}</button>
         </div>
       </div>
     </Popup>
@@ -441,6 +447,12 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
   const [open, setOpen] = useState<Open>(openJob ? { kind: "info", id: openJob } : null);
   const [toast, setToast] = useState("");
   const [now] = useState(() => new Date());
+  // Select: tick several jobs and delete them at once.
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [bulkDelete, setBulkDelete] = useState(false);
+  const stopSelecting = () => { setSelecting(false); setSelected(new Set()); };
+  const tick = (id: string) => setSelected((list) => { const next = new Set(list); if (next.has(id)) next.delete(id); else next.add(id); return next; });
 
   const load = useCallback(async () => {
     const response = await fetch("/api/app/tracker").catch(() => null);
@@ -464,21 +476,23 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
   }, [toast]);
 
   const rows = useMemo<Row[]>(() => (tracker?.jobs ?? []).map((job) => ({ job, progress: progressOf(job) })), [tracker]);
-  const byDay = useMemo(() => activityByDay(rows.map((row) => row.job)), [rows]);
+  // Jobs applied to and then deleted still count: on the calendar, in Applied and This week. They're never listed.
+  const gone = useMemo(() => deletedAsJobs(tracker?.gone) as unknown as TrackerJob[], [tracker]);
+  const byDay = useMemo(() => activityByDay([...rows.map((row) => row.job), ...gone]), [rows, gone]);
   const grid = useMemo(() => activityGrid(now, WEEKS), [now]);
   const todayKey = dayKey(now);
   const streak = useMemo(() => longestRun(grid, byDay, now), [grid, byDay, now]);
 
   const stats = useMemo(() => {
     const since = weekStart(now).getTime();
-    const applied = rows.filter(({ job }) => isApplied(job));
+    const applied = [...rows.filter(({ job }) => isApplied(job)).map(({ job }) => job), ...gone];
     return {
       applied: applied.length,
-      week: applied.filter(({ job }) => countsTowardGoals(job as never) && appliedOn(job as never).getTime() >= since).length,
+      week: applied.filter((job) => countsTowardGoals(job as never) && appliedOn(job as never).getTime() >= since).length,
       reach: rows.filter((row) => matches(row, "reach")).length,
       interview: rows.filter((row) => matches(row, "interview")).length,
     };
-  }, [rows, now]);
+  }, [rows, gone, now]);
 
   /** Reads the list again, for the people on an open job (it stays open). */
   const reload = useCallback(async () => {
@@ -513,6 +527,7 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
   const shown = rows
     .filter((row) => (!day || pickedIds.has(row.job.id)) && matches(row, filter) && (!words || `${row.job.title} ${row.job.company}`.toLowerCase().includes(words)))
     .sort((a, b) => appliedOn(b.job as never).getTime() - appliedOn(a.job as never).getTime());
+  const allShown = shown.length > 0 && shown.every((row) => selected.has(row.job.id));
   const current = open && open.kind !== "add" ? rows.find((row) => row.job.id === open.id) ?? null : null;
   const pickedDate = day ? grid.flat().find((date) => dayKey(date) === day) : null;
   const streakStart = streak.end ? new Date(streak.end.getFullYear(), streak.end.getMonth(), streak.end.getDate() - streak.length + 1) : null;
@@ -600,13 +615,24 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
             </button>
           ))}
           {day && pickedDate && <button type="button" onClick={() => setDay(null)} className="h-8 rounded-full border border-[#3D8BFF] px-3 text-[13px] text-[#C7D7FF]">{short(pickedDate)} ×</button>}
+          {rows.length > 0 && !selecting && <button type="button" onClick={() => setSelecting(true)} className="ml-auto h-8 rounded-full border border-[#26262C] px-3 text-[13px] font-medium text-[#B4B4BC] hover:text-white">Select</button>}
         </div>
+        {selecting && (
+          <div role="toolbar" aria-label="Selected jobs" className="sticky top-2 z-10 flex flex-wrap items-center gap-2 rounded-xl border border-[#3D8BFF] bg-[#0C0C0E] px-3 py-2 shadow-lg">
+            <span className="text-sm font-medium">{selected.size ? `${selected.size} selected` : "Tick the jobs to delete"}</span>
+            <button type="button" onClick={() => setSelected(allShown ? new Set() : new Set(shown.map((row) => row.job.id)))} className="h-8 rounded-lg border border-line px-3 text-[13px] hover:bg-white/5">{allShown ? "Clear" : `Select all ${shown.length}`}</button>
+            <span className="flex-1" />
+            <button type="button" onClick={stopSelecting} className="h-8 rounded-lg px-3 text-[13px] text-muted hover:text-white">Cancel</button>
+            <button type="button" disabled={!selected.size} onClick={() => setBulkDelete(true)} className="h-8 rounded-lg bg-[#EF4444] px-3 text-[13px] font-semibold text-white hover:bg-[#DC2626] disabled:opacity-40">Delete{selected.size ? ` ${selected.size}` : ""}</button>
+          </div>
+        )}
       </div>
 
       {shown.length ? (
         <ul className="m-0 flex list-none flex-col gap-2 p-0">
           {shown.map((row) => (
-            <li key={row.job.id} className={`flex items-center gap-3 rounded-xl border border-line bg-card px-3 py-3 transition-colors hover:border-[#3A3A42] sm:px-4 ${row.progress.ended === "Rejected" ? "opacity-60" : ""}`}>
+            <li key={row.job.id} onClick={selecting ? () => tick(row.job.id) : undefined} className={`flex items-center gap-3 rounded-xl border bg-card px-3 py-3 transition-colors sm:px-4 ${selecting ? "cursor-pointer" : ""} ${selected.has(row.job.id) ? "border-[#3D8BFF] bg-[#0F1626]" : "border-line hover:border-[#3A3A42]"} ${row.progress.ended === "Rejected" && !selected.has(row.job.id) ? "opacity-60" : ""}`}>
+              {selecting && <input type="checkbox" checked={selected.has(row.job.id)} onChange={() => tick(row.job.id)} onClick={(event) => event.stopPropagation()} aria-label={`Select ${companyOf(row.job)}, ${titleOf(row.job)}`} className="h-4 w-4 flex-none accent-[#3D8BFF]" />}
               <Tile name={companyOf(row.job)} />
               <div className="flex min-w-0 flex-1 flex-col gap-1">
                 <span className="truncate text-[15px] font-medium">{titleOf(row.job)}</span>
@@ -614,6 +640,7 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
                 <span className="sm:hidden"><Status row={row} /></span>
               </div>
               <span className="hidden sm:block"><Status row={row} /></span>
+              {!selecting && <>
               <button type="button" onClick={() => setOpen({ kind: "info", id: row.job.id })} className="h-9 flex-none rounded-lg border border-line px-3 text-[13px] font-medium hover:border-[#F7F7F8] hover:bg-white/5">More info</button>
               {isApplied(row.job) && (
                 <button type="button" title={isHidden(row.job) ? "Show job" : "Hide job"} aria-label={`${isHidden(row.job) ? "Show" : "Hide"} ${companyOf(row.job)}, ${titleOf(row.job)}`} onClick={() => void toggleHidden(row.job)} className="grid h-9 w-9 flex-none place-items-center rounded-lg text-[#5C5C66] hover:bg-white/5 hover:text-white">
@@ -623,6 +650,7 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
               <button type="button" aria-label={`Delete ${companyOf(row.job)}, ${titleOf(row.job)}`} onClick={() => setOpen({ kind: "delete", id: row.job.id })} className="grid h-9 w-9 flex-none place-items-center rounded-lg text-[#5C5C66] hover:bg-[#2A1A1A] hover:text-[#F87171]">
                 <svg aria-hidden viewBox="0 0 16 16" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M2.5 4h11M6 4V2.5h4V4M4 4l.7 9.5h6.6L12 4M6.8 6.5v4.5M9.2 6.5v4.5" /></svg>
               </button>
+              </>}
             </li>
           ))}
         </ul>
@@ -637,10 +665,18 @@ export function JobsView({ openJob }: { openJob?: string | null } = {}) {
       {open?.kind === "add" && <AddPopup onCancel={() => setOpen(null)} onAdded={(company) => { setDay(null); void refresh(`Added ${company}.`); }} />}
       {open?.kind === "info" && current && <InfoPopup row={current} now={now} tracker={tracker} onClose={() => setOpen(null)} onDelete={() => setOpen({ kind: "delete", id: current.job.id })} onHide={() => void toggleHidden(current.job)} onChanged={(note) => { void load().then(setTracker, () => undefined); setToast(note); }} reload={reload} say={setToast} />}
       {open?.kind === "delete" && current && (
-        <DeletePopup job={current.job} onCancel={() => setOpen(null)} onDeleted={() => {
-          setTracker((list) => (list ? { ...list, jobs: list.jobs.filter((job) => job.id !== current.job.id) } : list));
+        <DeletePopup jobs={[current.job]} onCancel={() => setOpen(null)} onDeleted={() => {
           setOpen(null);
           setToast(`Deleted ${companyOf(current.job)}.`);
+          void reload();
+        }} />
+      )}
+      {bulkDelete && selected.size > 0 && (
+        <DeletePopup jobs={rows.filter((row) => selected.has(row.job.id)).map((row) => row.job)} onCancel={() => setBulkDelete(false)} onDeleted={() => {
+          setBulkDelete(false);
+          setToast(`Deleted ${selected.size} ${selected.size === 1 ? "job" : "jobs"}.`);
+          stopSelecting();
+          void reload();
         }} />
       )}
       {toast && <div role="status" className="fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-full border border-line bg-[#141416] px-4 py-2 text-sm shadow-xl">{toast}</div>}

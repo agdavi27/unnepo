@@ -19,8 +19,8 @@ import { supportedBy } from "@/lib/apply/questions";
 import { bestOption } from "@/lib/apply/options";
 import { checkSchool } from "@/lib/school-plans";
 import { classYearOf } from "@/lib/profile/student";
-import { contactBounced, revealContact, applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
-import { applicationStats, stageOf } from "@/lib/apply/stats";
+import { contactBounced, deleteApplication, revealContact, applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
+import { applicationStats, deletedAsJobs, stageOf } from "@/lib/apply/stats";
 import { planUsage } from "@/lib/apply/limits";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication } from "@/lib/apply/types";
 import { useTempDb } from "./helpers";
@@ -474,7 +474,9 @@ describe("tracking outcomes and goals", () => {
   it("keeps a weekly goal between 1 and 200 without touching other settings", async () => {
     const userId = await student();
     await saveApplicationProfile(userId, { accountConsent: true });
-    await expect(saveApplicationProfile(userId, { weeklyGoal: 0 })).rejects.toThrow(/between 1 and 200/);
+    // 0 turns a goal off; anything else outside the range is turned away.
+    await expect(saveApplicationProfile(userId, { weeklyGoal: 201 })).rejects.toThrow(/between 1 and 200/);
+    await expect(saveApplicationProfile(userId, { weeklyGoal: -1 })).rejects.toThrow(/between 1 and 200/);
     await expect(saveApplicationProfile(userId, { dailyGoal: 51 })).rejects.toThrow(/between 1 and 50/);
     // A saved answer is edited in place; a blank one or one that isn't there is turned away.
     const before = await applicationProfiles.get(userId);
@@ -1161,6 +1163,27 @@ describe("jobs added by hand, and jobs missing the company", () => {
     expect(later).toMatchObject({ status: "extracted", submittedAt: null });
     await expect(addJobByHand(userId, { title: "", company: "Acme" })).rejects.toThrow(/job title/);
     await expect(addJobByHand(userId, { title: "Intern", company: "Acme", url: "javascript:alert(1)" })).rejects.toThrow(/https/);
+  });
+
+  it("deletes several jobs at once, and the ones applied to still count", async () => {
+    const userId = await student();
+    const applied = (await addJobByHand(userId, { title: "Analyst", company: "Stripe", appliedOn: "2026-10-20" })).application;
+    const other = (await addJobByHand(userId, { title: "Intern", company: "Ramp" })).application;
+    const later = (await addJobByHand(userId, { title: "Designer", company: "Figma", stage: "in_progress" })).application;
+    const kept = (await addJobByHand(userId, { title: "Associate", company: "Notion" })).application;
+    expect(await deleteApplication(userId, { applicationIds: [applied.id, other.id, later.id] })).toMatchObject({ ok: true, deleted: 3 });
+    expect((await applications.list(userId)).map((app) => app.id)).toEqual([kept.id]);
+    const gone = (await applicationProfiles.get(userId))?.deletedApplied ?? [];
+    // Only the two applied to are kept as counted; the one not applied to is just gone.
+    expect(gone.map((item) => [item.company, item.at]).sort()).toEqual([["Ramp", other.submittedAt], ["Stripe", "2026-10-20T12:00:00.000Z"]]);
+    expect(deletedAsJobs(gone).find((job) => job.company === "Stripe")).toMatchObject({ status: "submitted", submittedAt: "2026-10-20T12:00:00.000Z", title: "Analyst (deleted)" });
+    await expect(deleteApplication(userId, { applicationIds: [] })).rejects.toThrow(/1 and 200/);
+    // Goals at 0 are off.
+    await saveApplicationProfile(userId, { weeklyGoal: 10, dailyGoal: 3 });
+    await saveApplicationProfile(userId, { weeklyGoal: 0, dailyGoal: 0 });
+    const profile = await applicationProfiles.get(userId);
+    expect(profile?.weeklyGoal).toBeUndefined();
+    expect(profile?.dailyGoal).toBe(0);
   });
 
   it("knows a job saved under a job site's name, and takes the company the student types", async () => {

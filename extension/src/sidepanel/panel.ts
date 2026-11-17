@@ -138,7 +138,7 @@ function goalToday(state: PanelState) {
   // The daily goal set on Goals, or else a fifth of the weekly one.
   const weekly = state.me?.goal?.weekly ?? null;
   const daily = state.me?.goal?.daily ?? null;
-  return { done: (state.me?.goal?.appliedAt ?? []).filter((at) => new Date(at) >= dayStart).length, target: daily || (weekly ? Math.ceil(weekly / 5) : null) };
+  return { done: (state.me?.goal?.appliedAt ?? []).filter((at) => new Date(at) >= dayStart).length, target: daily === 0 ? null : daily || (weekly ? Math.ceil(weekly / 5) : null) };
 }
 
 function goalLine(state: PanelState) {
@@ -248,7 +248,9 @@ const isRunning = (state: PanelState) => Boolean(state.job?.running) || (fillPen
 function homeLists(state: PanelState) {
   const noEmail = firstEmailCount();
   const nudge = noEmail ? `<button type="button" class="email-nudge" data-show-jobs="reach"><span>${noEmail} ${noEmail === 1 ? "job needs" : "jobs need"} a first email</span><span aria-hidden="true">See →</span></button>` : "";
-  return `${boardCard(state)}${startCard(state)}${jobsList(nudge, `<a class="btn" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard</a>`)}`;
+  // The dashboard first, so it's a tap away however long the list gets.
+  const dashboard = `<a class="btn dash-link" href="${escape(state.apiBase)}/jobs" target="_blank" rel="noreferrer">Open my dashboard <span aria-hidden="true">↗</span></a>`;
+  return `${boardCard(state)}${startCard(state)}${jobsList(`${dashboard}${nudge}`)}`;
 }
 
 /** "Bring in": on a job board's applications page, the ones Unnepo missed, saved in one press. */
