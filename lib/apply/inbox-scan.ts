@@ -126,15 +126,19 @@ export function sortInbox(rows: MailRow[], jobs: ScanJob[]): InboxItem[] {
   return [...groups.values()];
 }
 
-/** The Gmail searches a scan runs: job emails from the last 60 days, and anything from the people the student emailed. */
+/**
+ * The Gmail searches a scan runs, in the inbox: job emails from the last 60 days, and anything from the people the
+ * student emailed. No "in:chats": with Google Chat on, Gmail opens a search that names chats on its Conversations
+ * tab, which shows no emails.
+ */
 export function gmailSearches(contactEmails: string[]) {
   const words = [
     'subject:(application OR applying OR applied OR interview OR candidacy OR "next steps" OR offer)',
     '"thank you for applying"', '"thanks for applying"', '"application received"', '"received your application"',
     '"not moving forward"', '"other candidates"', '"phone screen"', '"your availability"',
   ];
-  const searches = [`newer_than:60d -in:sent -in:chats -in:drafts {${words.join(" ")}}`];
+  const searches = [`in:inbox newer_than:60d {${words.join(" ")}}`];
   const emails = [...new Set(contactEmails.map((email) => email.toLowerCase()).filter((email) => /^[^\s@()"]+@[^\s@()"]+\.[a-z]{2,}$/.test(email)))].slice(0, 40);
-  if (emails.length) searches.push(`newer_than:120d -in:sent from:(${emails.join(" OR ")})`);
+  if (emails.length) searches.push(`in:inbox newer_than:120d from:(${emails.join(" OR ")})`);
   return searches;
 }

@@ -79,7 +79,10 @@ describe("Scan my email", () => {
   it("searches Gmail for job emails and replies", () => {
     const [words, replies] = gmailSearches(["A@x.com", "a@x.com", "bad email"]);
     expect(words).toContain("newer_than:60d");
-    expect(replies).toBe("newer_than:120d -in:sent from:(a@x.com)");
+    // The inbox, and never "in:chats": that sends Gmail to its Conversations tab, which shows no emails.
+    expect(words.startsWith("in:inbox ")).toBe(true);
+    expect(words).not.toMatch(/in:chats/);
+    expect(replies).toBe("in:inbox newer_than:120d from:(a@x.com)");
     expect(gmailSearches([])).toHaveLength(1);
   });
 });
