@@ -487,17 +487,23 @@ async function showAppliedCard(tabId: number, item: Detected) {
 }
 
 /** ✓ or ✗ on a detected job, from the panel or the card on the page. ✓ saves it as applied. */
-async function answerDetected(id: string, applied: boolean): Promise<{ ok: boolean; applicationId?: string; needsForm?: boolean; error?: string }> {
+async function answerDetected(id: string, applied: boolean, checked?: { title: string; company: string }): Promise<{ ok: boolean; applicationId?: string; needsForm?: boolean; error?: string }> {
   const list = await detectedList();
   const item = list.find((entry) => entry.id === id);
   if (!item) return { ok: false, error: "That job isn't on the list any more." };
+  // The student checked the title and company on the card: those are what's saved.
+  const changed = Boolean(checked && (checked.title !== item.title || checked.company !== item.company));
+  if (checked) Object.assign(item, { title: checked.title || item.title, company: checked.company });
   if (!applied) {
     item.state = "no";
     await saveDetectedList(list);
     return { ok: true };
   }
   try {
-    if (item.applicationId) await api("POST", "status", { applicationId: item.applicationId, applied: true });
+    if (item.applicationId) {
+      await api("POST", "status", { applicationId: item.applicationId, applied: true });
+      if (changed && item.company.trim()) await api("POST", "edit-job", { applicationId: item.applicationId, title: item.title, company: item.company, url: item.url });
+    }
     else if (item.title.trim() && item.company.trim()) {
       const saved = await saveSubmission({ url: item.url, title: item.title, company: item.company, description: item.description, poster: item.poster, confidence: "likely", text: "You said you applied.", how: "you_marked" });
       item.applicationId = saved.application.id;
@@ -2567,9 +2573,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const opened = Object.entries((openedEmails as OpenedEmails | undefined) ?? {}).filter(([, value]) => value.applicationId === applicationId).map(([contactId]) => contactId);
         return reply({ ok: true, item, applicationId, job, free: copy?.data.free ?? false, peopleLeft: copy?.data.peopleLeft ?? null, peopleCount: copy?.data.peopleCount ?? null, opened });
       }
-      case "card-answer":
+      case "card-answer": {
         if (!fromOwnContent(sender)) return reply({ ok: false });
-        return reply(await answerDetected(String(message.id), Boolean(message.applied)));
+        const title = typeof message.title === "string" ? message.title.trim().slice(0, 200) : "";
+        const company = typeof message.company === "string" ? message.company.trim().slice(0, 200) : "";
+        const checked = message.checked === true ? { title, company } : undefined;
+        if (checked && (!title || !company)) return reply({ ok: false, error: "Add the job title and the company." });
+        return reply(await answerDetected(String(message.id), Boolean(message.applied), checked));
+      }
       case "card-undo":
         if (!fromOwnContent(sender)) return reply({ ok: false });
         return reply(await undoDetected(String(message.id), String(message.applicationId ?? "")));
