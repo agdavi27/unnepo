@@ -187,7 +187,7 @@ function start() {
       : finding
         ? `<span class="sub">${escape(job.contactsMessage || `Finding people at ${company}…`)}</span><div class="bar" role="progressbar" aria-label="Finding people"><i></i></div>`
         : out
-          ? `<span class="sub">${data.free ? "None left today. More tomorrow, or Pro finds people at 50 companies a month." : "None left this month. More next month."}</span><div class="row"><button type="button" class="btn ghost wide" data-act="linkedin">Find on LinkedIn instead</button></div>`
+          ? `<span class="sub">${data.free ? "None left today. More tomorrow, or Pro finds people at 100 companies a month." : "None left this month. More next month."}</span><div class="row"><button type="button" class="btn ghost wide" data-act="linkedin">Find on LinkedIn instead</button></div>`
           : `<div class="row"><button type="button" class="btn wide" data-act="find">Find people at ${escape(company.length > 18 ? `${company.slice(0, 17)}…` : company)}</button></div><button type="button" class="quiet" data-act="linkedin" style="width: fit-content">Or find on LinkedIn (free)</button>`;
     return `
       <div class="step">

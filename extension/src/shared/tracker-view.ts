@@ -272,7 +272,7 @@ function reachOut(job: TrackerJob) {
   }
   const blocked = job.contactsMessage && !/^Finding|^Searching/.test(job.contactsMessage) ? job.contactsMessage : "";
   if (left === 0) {
-    return `${meter}<span class="sub">${store.tracker?.free ? "None left today. More tomorrow, or Pro finds people at 50 companies a month." : "None left this month. More next month."}</span>
+    return `${meter}<span class="sub">${store.tracker?.free ? "None left today. More tomorrow, or Pro finds people at 100 companies a month." : "None left this month. More next month."}</span>
       <button type="button" class="btn js-btn" data-open-contacts="linkedin">Find on LinkedIn instead</button>
       ${store.tracker?.free ? `<button type="button" class="quiet-link js-more" data-upgrade>Get Pro ›</button>` : ""}`;
   }
@@ -430,7 +430,7 @@ function peopleCard(job: TrackerJob) {
   const posted = job.postedRecruiter && !job.contacts.some((person) => person.role === "job_poster")
     ? `<p class="small">Posted by <strong>${escape(job.postedRecruiter.name)}</strong>${job.postedRecruiter.title ? `, ${escape(job.postedRecruiter.title)}` : ""}${job.postedRecruiter.linkedinUrl ? ` · <a href="${escape(job.postedRecruiter.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</p>`
     : "";
-  // The corner says how many unlocks are left: "2 of 2 unlocks left today" on Free, "12 of 50 companies left this month" on Pro.
+  // The corner says how many unlocks are left: "2 of 2 unlocks left today" on Free, "12 of 100 companies left this month" on Pro.
   const badge = store.tracker?.peopleBadge;
   const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${job.contacts.length ? ` · ${shownPeople(job).length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
   if (!isAppliedJob(job)) {
