@@ -333,7 +333,7 @@ function trialLine(state: PanelState) {
     return `<span class="small"${me.trial.hoursLeft <= 48 ? ' style="color: var(--warn)"' : ""}>Pro trial: ${left} left. <a href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Keep Pro</a></span>`;
   }
   if (me.trialEnded && me.usage?.free) {
-    return `<span class="small">Your Pro trial ended. Free fills your basic details. <a href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Get Pro back</a></span>`;
+    return `<span class="small">Your Pro trial ended. Autofill still has no limit on Free. <a href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Get Pro back</a></span>`;
   }
   return "";
 }
@@ -362,7 +362,8 @@ const SPARK = SPARK_SMALL.replace('width="13" height="13"', 'class="big-tool-ico
 /** "Write cover letter (4 left today)" on Free, which counts by the day; Pro has no limit, so just the label. */
 const withCost = (label: string, kind: "letters" | "answers" | "autofills") => {
   const usage = lastState?.me?.usage;
-  return usage?.free && !lastState?.me?.unlimitedCredits ? `${label} (${usage[kind].left} left today)` : label;
+  // Autofill has no limit on any plan.
+  return usage?.free && kind !== "autofills" && !lastState?.me?.unlimitedCredits ? `${label} (${usage[kind].left} left today)` : label;
 };
 
 /** The count in a tool box's top-right corner: "4 left today" on Free, "Unlimited" on Pro. */
@@ -375,7 +376,7 @@ function autofillTool(state: PanelState) {
   const ready = jobFound(state) && !state.job?.running && Boolean(state.me?.profileReady);
   const why = !state.me?.profileReady ? "Finish your profile first" : jobFound(state) ? "Fills this application" : "Open an application first";
   return `<button type="button" class="tile autofill-tool" id="beta-fill" ${ready ? "" : "disabled"}>
-      ${SPARK}<span class="tile-text"><span class="tile-name">Autofill <span class="beta">Beta</span></span><span class="tile-sub">${why}</span>${state.me?.usage?.free ? tileCount(state.me.usage.autofills) : ""}</span>
+      ${SPARK}<span class="tile-text"><span class="tile-name">Autofill <span class="beta">Beta</span></span><span class="tile-sub">${why}</span></span>
     </button>`;
 }
 
@@ -1439,7 +1440,7 @@ function profileCard(state: PanelState) {
   const card = free
     ? `<section class="me-plan" aria-label="Left today">
         <div class="me-plan-head"><span class="eyebrow">Left today</span><span class="sub">Resets ${escape(resetTime())}</span></div>
-        <div class="me-stats">${stat(me.usage?.letters.left, "letters")}${stat(me.usage?.answers.left, "answers")}${stat(me.usage?.autofills.left, "fills")}${stat(me.usage?.people.left, "unlocks")}</div>
+        <div class="me-stats">${stat(me.usage?.letters.left, "letters")}${stat(me.usage?.answers.left, "answers")}${stat(me.usage?.people.left, "unlocks")}</div>
         <a class="btn accent me-up" href="${escape(upgradeUrl(state))}" target="_blank" rel="noreferrer">Upgrade to Pro</a>
       </section>`
     : `<section class="me-plan" aria-label="Your plan">

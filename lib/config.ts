@@ -57,8 +57,8 @@ export function serverConfig() {
 }
 
 /**
- * Pricing. Free gets FREE_LIMITS each day (cover letters, answers, written emails, and full autofills that answer the questions
- * too; after those, autofill still fills the basic details) and FREE_UNLOCKS_PER_DAY unlocks: the best person at a
+ * Pricing. Free gets FREE_LIMITS each day (cover letters, answers and written emails; autofill has no limit on any plan,
+ * only Pro's hidden guard against scripts, so its number here is unused) and FREE_UNLOCKS_PER_DAY unlocks: the best person at a
  * company, with a checked email, found when the student presses Unlock. Pro's writing and autofill have no limit (only
  * a hidden guard against scripts, PRO_AI_LIMIT); its people are PRO_COMPANIES_PER_MONTH companies a month, shown on the plan. `balance` on an account counts people searches left from the trial or a pack.
  */
@@ -108,7 +108,7 @@ export const PUBLIC_PLANS = [
     credits: FREE_UNLOCKS_PER_DAY,
     yearCredits: null,
     applicationsLabel: "Free every day",
-    features: [`${FREE_LIMITS.autofills} full autofills a day, then your basic details`, `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_UNLOCKS_PER_DAY} people to email a day, each at a different company`, "Compete with friends", "Tracker and job matches"],
+    features: ["Unlimited autofill that answers the questions too", `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_UNLOCKS_PER_DAY} people to email a day, each at a different company`, "Compete with friends", "Tracker and job matches"],
   },
   {
     id: "pro" as const,

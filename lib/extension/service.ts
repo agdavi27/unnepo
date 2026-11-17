@@ -539,8 +539,7 @@ export async function extensionMap(userId: string, raw: unknown) {
   const app = await requireApp(userId, body.applicationId);
   // Filling a job again is free once it has counted; a new one needs a use left.
   if (!app.fillReport?.autofillCounted) await assertUseAllowed(userId, "autofills");
-  // Free's full autofills answer the questions too, a few a day; after those (or for a job already counted
-  // today, still full) it fills the basic fields from the student's own details.
+  // Every autofill answers the questions too: autofill has no limit on any plan, so `basic` is always false.
   const free = !app.fillReport?.autofillCounted && (await planUsage(userId)).autofills.basic;
   const fields = Array.isArray(body.fields) ? (body.fields as PageField[]) : [];
   // ai: false answers only from the student's data and saved answers, with no model call, so the extension can

@@ -28,7 +28,7 @@ const OBJECTIONS: Array<[string, string]> = [
   ["\"Will recruiters know a tool filled it out?\"", "What they get is your information, in the boxes they asked for. The written answers are drafted from your real experience, and you can edit every word before it goes. It never invents jobs, numbers or skills you don't have."],
   ["\"What happens to my data?\"", "Your resume and profile are used to fill your applications and write your drafts. Nothing is sent to anyone unless you press send, and you can ask to have your account and everything in it deleted at any time."],
   ["\"Cold-emailing strangers is awkward.\"", "That's the part Unnepo is built for. It finds a recruiter or someone on the team, writes a short, specific note from your resume, and reminds you to follow up five business days later. You decide whether it goes."],
-  ["\"I can't afford another subscription.\"", "You don't need one. Free covers unlimited job tracking, three full autofills, three cover letters, three answers and three emails written for you every day, plus 2 people to email a day at different companies. Pro is there if you want more."],
+  ["\"I can't afford another subscription.\"", "You don't need one. Free covers unlimited job tracking, unlimited autofill, three cover letters, three answers and three emails written for you every day, plus 2 people to email a day at different companies. Pro is there if you want more."],
   ["\"Why trust something a student built?\"", "Because he's using it on the same job market you are. If something breaks, you can write to him directly, and he'll answer."],
 ];
 

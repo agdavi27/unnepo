@@ -57,7 +57,6 @@ const PRO_REASONS: Array<[string, string]> = [
   [`Verified contacts at ${PRO_COMPANIES_PER_MONTH} companies a month`, "Up to 3 people at each company (recruiters, hiring managers and the team), each with a verified work email, and more on request. Free unlocks 2 people a day, one per company."],
   ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 3 general ones a day."],
   ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 3 a day."],
-  ["Unlimited autofill that answers the questions too", "Free has 3 full autofills a day, then fills your basic details."],
   ["Unlimited emails and follow-ups written for you", "A short note to each person, ready to send from Gmail or Outlook. Free writes 3 emails a day."],
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
@@ -248,7 +247,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
   const creditsLeft = usage?.credits ?? (data?.credits.balance ?? 0) * CREDIT_COST.people;
   const creditsLabel = data?.credits.unlimited || usage?.unlimited ? "Unlimited" : usage?.free ? "Resets every day" : `${creditsLeft} ${creditsLeft === 1 ? "credit" : "credits"} left`;
   const usesLeft = usage ? [
-    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"} today`, `${usage.answers.left} ${usage.answers.left === 1 ? "answer" : "answers"} today`, `${usage.autofills.left} ${usage.autofills.left === 1 ? "autofill" : "autofills"} today`, `${usage.emails.left} written ${usage.emails.left === 1 ? "email" : "emails"} today`] : []),
+    ...(usage.free ? [`${usage.letters.left} ${usage.letters.left === 1 ? "cover letter" : "cover letters"} today`, `${usage.answers.left} ${usage.answers.left === 1 ? "answer" : "answers"} today`, `${usage.emails.left} written ${usage.emails.left === 1 ? "email" : "emails"} today`] : []),
     ...(usage.unlimited ? [] : [`people: ${usage.people.badge}`]),
   ] : [];
   const initials = (data?.user.name || data?.user.email || "").split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
@@ -292,7 +291,6 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
                     <div className="my-1.5 h-px bg-[#1F1F24]" />
                     {!showOnboarding && <button type="button" onClick={() => { setView("settings"); setMenuOpen(false); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Settings and plans</button>}
                     {!showOnboarding && <button type="button" onClick={() => { setEditing(true); setMenuOpen(false); window.scrollTo({ top: 0 }); }} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Edit my info</button>}
-                    <a href="/demo" className="rounded-lg px-2.5 py-2 text-[#F7F7F8] hover:bg-white/5">See a demo</a>
                     <button type="button" onClick={logout} className="rounded-lg px-2.5 py-2 text-left hover:bg-white/5">Log out</button>
                   </div>
                 )}
@@ -488,9 +486,9 @@ function TrialBanner({ usage, onPlans }: { usage: PlanUsage; onPlans: () => void
     <div role="status" className={`flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${urgent ? "border-[#F5A524]/60 bg-[#F5A524]/[0.07]" : "border-[#3D8BFF]/50 bg-[#3D8BFF]/[0.07]"}`}>
       <p className="m-0 min-w-0 flex-1 basis-72">
         {usage.trial ? (
-          <><strong className="font-semibold">Pro trial: {trialLeftLabel(usage.trial)}.</strong> <span className="text-muted">After that, autofill skips the questions, cover letters aren&apos;t tailored, people stay hidden, and follow-ups aren&apos;t written for you.</span></>
+          <><strong className="font-semibold">Pro trial: {trialLeftLabel(usage.trial)}.</strong> <span className="text-muted">After that, cover letters aren&apos;t tailored, people stay hidden, and follow-ups aren&apos;t written for you.</span></>
         ) : (
-          <><strong className="font-semibold">Your Pro trial ended.</strong> <span className="text-muted">You&apos;re on Free: autofill fills your basic details, and people and follow-up drafts are hidden. Pro brings them back.</span></>
+          <><strong className="font-semibold">Your Pro trial ended.</strong> <span className="text-muted">You&apos;re on Free: autofill still has no limit, but people and follow-up drafts are hidden. Pro brings them back.</span></>
         )}
       </p>
       <button type="button" onClick={onPlans} className="shrink-0 rounded-xl bg-white px-3.5 py-1.5 text-sm font-semibold text-black hover:bg-zinc-200">{usage.trial ? "Keep Pro" : "Get Pro back"}</button>
