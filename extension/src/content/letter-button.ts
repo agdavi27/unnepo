@@ -46,16 +46,52 @@ function findSpots(): Spot[] {
   return spots;
 }
 
+const OTHER_FILE = /resume|r[ée]sum[ée]|\bcv\b|transcript|portfolio|writing sample|photo|headshot/i;
+
+/** The words that say what an upload box is for: its own attributes and labels, then the short text around it. */
+function fileWords(input: HTMLInputElement) {
+  const own = `${input.name} ${input.id} ${input.getAttribute("aria-label") ?? ""} ${input.accept} ${Array.from(input.labels ?? []).map((label) => label.textContent).join(" ")}`;
+  // The nearest wrapper with words in it, as long as it's only this box's: never a whole section or page.
+  let around = "";
+  let node: HTMLElement | null = input.parentElement;
+  for (let depth = 0; node && depth < 4; depth++, node = node.parentElement) {
+    if (node.querySelectorAll("input:not([type=hidden]), textarea, select").length > 1) break;
+    const text = textOf(node);
+    if (text.length > 150) break;
+    if (text) { around = text; break; }
+  }
+  return `${own} ${around}`;
+}
+
+/** A drop area for files (Dropzone, react-dropzone, the site's own): letters can be dropped on it like a dragged file. */
+function dropZoneIn(box: HTMLElement) {
+  return box.querySelector<HTMLElement>("[class*='dropzone' i], [class*='drop-zone' i], [class*='drop_zone' i], [data-testid*='drop' i], [class*='upload' i], [data-testid*='upload' i]");
+}
+
 /**
- * Where the letter goes: the upload box or text box right by the question first, else a cover letter upload box
- * anywhere on the page. None: it's downloaded, for forms that upload through their own button.
+ * Where the letter goes: the upload box or text box right by the question first; else a cover letter upload box
+ * anywhere on the page; else, when the page has just one upload box that isn't for the resume, transcript or the
+ * like, that one; else a drop area by the question. None of those: it's downloaded, for forms that upload through
+ * their own steps.
  */
 function targetsFor(box: HTMLElement) {
   const near = box.querySelector<HTMLInputElement>("input[type=file]");
   const area = box.querySelector<HTMLTextAreaElement>("textarea");
   const text = area && !area.disabled && !area.readOnly ? area : null;
-  const named = near || text ? null : Array.from(document.querySelectorAll<HTMLInputElement>("input[type=file]")).find((input) => !input.files?.length && LETTER.test(`${input.name} ${input.id} ${input.getAttribute("aria-label") ?? ""} ${Array.from(input.labels ?? []).map((label) => label.textContent).join(" ")}`));
-  return { file: near ?? named ?? null, text: near ? null : text };
+  if (near) return { file: near, text: null, drop: null };
+  if (text) return { file: null, text, drop: null };
+  const uploads = Array.from(document.querySelectorAll<HTMLInputElement>("input[type=file]")).filter((input) => !input.disabled && !input.files?.length);
+  const named = uploads.find((input) => LETTER.test(fileWords(input)));
+  const others = uploads.filter((input) => !OTHER_FILE.test(fileWords(input)));
+  const file = named ?? (others.length === 1 ? others[0] : null);
+  return { file, text: null, drop: file ? null : dropZoneIn(box) };
+}
+
+/** Drops the letter on a drop area the way a dragged file arrives. */
+function dropOn(zone: HTMLElement, letter: Letter) {
+  const transfer = new DataTransfer();
+  transfer.items.add(fileFrom(letter));
+  for (const type of ["dragenter", "dragover", "drop"]) zone.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, composed: true, dataTransfer: transfer }));
 }
 
 const fileFrom = (letter: Letter) => {
@@ -236,8 +272,8 @@ function openPopup(box: HTMLElement) {
   function doneBody() {
     const letter = ui.letter!;
     const where = targetsFor(box);
-    const primary = where.file ? ["attach", "Attach to application"] : where.text ? ["paste", "Put it in the box"] : ["download", "Download PDF"];
-    const hint = where.file ? "Attaches it as a PDF to the cover letter upload." : where.text ? "Puts the text in the cover letter box." : "This form uploads through its own button: download it, then pick it there.";
+    const primary = where.file || where.drop ? ["attach", "Attach to application"] : where.text ? ["paste", "Put it in the box"] : ["download", "Download PDF"];
+    const hint = where.file || where.drop ? "Attaches it as a PDF to the cover letter upload." : where.text ? "Puts the text in the cover letter box." : "This form uploads through its own button: download it, then pick it there.";
     const busy = Boolean(ui.busy);
     return `<h2>Your cover letter</h2>
       <div class="sub">Click into it to change anything. ${hint}</div>
@@ -337,6 +373,15 @@ function openPopup(box: HTMLElement) {
         const where = targetsFor(box);
         try {
           if (name === "attach" && where.file) { attach(where.file, letter); ui.placed = "Attached to the application"; }
+          else if (name === "attach" && where.drop) {
+            const before = textOf(box);
+            dropOn(where.drop, letter);
+            await new Promise((done) => setTimeout(done, 700));
+            // The form shows the file's name once it took it; otherwise it downloads, to upload by hand.
+            const took = textOf(box) !== before && textOf(box).includes((letter.fileName || "Cover letter.pdf").replace(/\.pdf$/i, ""));
+            if (took) ui.placed = "Attached to the application";
+            else { download(letter); ui.placed = "This form didn't take it, so it downloaded. Upload it with the form's button"; }
+          }
           else { download(letter); ui.placed = "Downloaded. Upload it with the form's button"; }
         } catch {
           download(letter);
