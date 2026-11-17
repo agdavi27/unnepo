@@ -2633,6 +2633,27 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (checked && (!title || !company)) return reply({ ok: false, error: "Add the job title and the company." });
         return reply(await answerDetected(String(message.id), Boolean(message.applied), checked));
       }
+      // "Is this right?" on a job Unnepo already saved: the title and company the student checked are saved over what was read.
+      case "card-confirm": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const applicationId = String(message.applicationId ?? "");
+        const title = typeof message.title === "string" ? message.title.trim().slice(0, 200) : "";
+        const company = typeof message.company === "string" ? message.company.trim().slice(0, 200) : "";
+        if (!applicationId) return reply({ ok: false, error: "That job isn't saved." });
+        if (!title || !company) return reply({ ok: false, error: "Add the job title and the company." });
+        try {
+          const job = (await trackerCopy())?.data.jobs.find((entry) => entry.id === applicationId);
+          const changes = { ...(!job || job.titleMissing || job.title !== title ? { title } : {}), ...(!job || job.companyMissing || job.company !== company ? { company } : {}) };
+          if (Object.keys(changes).length) await api("POST", "edit-job", { applicationId, ...changes });
+          // Asked and answered: it leaves Detected jobs.
+          const list = await detectedList();
+          if (list.some((entry) => entry.id === message.id)) await saveDetectedList(list.filter((entry) => entry.id !== message.id));
+          await readTracker().catch(() => undefined);
+          return reply({ ok: true, applicationId });
+        } catch (error) {
+          return reply(failed(error, "Couldn't save it."));
+        }
+      }
       case "card-undo":
         if (!fromOwnContent(sender)) return reply({ ok: false });
         return reply(await undoDetected(String(message.id), String(message.applicationId ?? "")));

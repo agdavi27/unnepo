@@ -6,9 +6,9 @@ import { companyGuess } from "@/lib/apply/company-name";
  * Unnepo on the page, like Grammarly: a card in the bottom-right of a job page, in its own shadow root so the
  * site's CSS can't touch it. The background worker puts this script on the page and tells it when an application
  * was caught here. The card has two steps:
- *   1. Logged: the job is saved (Undo), or Unnepo asks "Did you apply?" when it isn't sure. Yes asks "Is this
- *      right?" with the title and company to fix (the company blank when the page only showed a job site's name or
- *      a line like "No response insights available yet").
+ *   1. "Did you apply?", every time (even when Unnepo already saved it). Yes asks "Is this right?" with the title
+ *      and company to fix (the company blank when the page only showed a job site's name or a line like "No response
+ *      insights available yet"); No takes a saved job back out. Then it's Saved, with Undo.
  *   Between them, once it's saved: how many companies Unnepo can still find people at (Free: today, Pro: this
  *      month), with Find people (or See who to email, when they're already found).
  *   2. Reach out: the people at the company, each with Email ↗, which writes the email and opens it in Gmail ready
@@ -51,6 +51,8 @@ function start() {
     passed: false,
     /** After "Yes, I applied": the title and company to check before it's saved. */
     check: null as { title: string; company: string } | null,
+    /** The student said they applied and the title and company are right. */
+    confirmed: false,
   };
 
   const AV = ["#3D8BFF", "#8B5CF6", "#EC4899", "#14B8A6", "#F59E0B", "#22C55E", "#EF4444", "#06B6D4"];
@@ -122,9 +124,9 @@ function start() {
     const item = data.item;
     const job = data.job;
     const title = job?.title || item?.title || "This job";
-    const company = job?.company || companyGuess(item?.company || "");
-    const saved = Boolean(card.applicationId);
-    const asking = !saved && item?.state === "ask";
+    const company = companyGuess(job?.company || item?.company || "") || job?.company || "";
+    const saved = card.confirmed;
+    const asking = !saved;
     if (asking && card.check) {
       const busy = card.busy.has("answer");
       return `
@@ -203,7 +205,7 @@ function start() {
   /** Step 2: who to email, or finding them. */
   function stepTwo(data: CardState) {
     const job = data.job;
-    const saved = Boolean(card.applicationId);
+    const saved = Boolean(card.applicationId) && card.confirmed;
     if (saved && job && !card.passed && data.peopleCount) return gate(data, job, data.peopleCount);
     const company = job?.company || card.check?.company.trim() || companyGuess(data.item?.company || "") || "the company";
     let inner = `<span class="sub">Once it's saved, Unnepo finds who to email at ${escape(company)}.</span>`;
@@ -286,7 +288,8 @@ function start() {
         return;
       case "yes": {
         const item = card.data?.item;
-        card.check = { title: (card.data?.job?.title || item?.title || "").trim(), company: companyGuess(card.data?.job?.company || item?.company || "") };
+        const job = card.data?.job;
+        card.check = { title: (job?.titleMissing ? "" : job?.title || item?.title || "").trim(), company: companyGuess(job?.companyMissing ? "" : job?.company || item?.company || "") };
         card.note = "";
         draw();
         const first = root.querySelector<HTMLInputElement>(card.check.company ? '[data-check="title"]' : '[data-check="company"]');
@@ -308,12 +311,24 @@ function start() {
         }
         return void busy("answer", async () => {
           type Answered = { ok: boolean; applicationId?: string; error?: string };
-          const result = await ask<Answered>({ type: "card-answer", id: card.id, applied: true, checked: true, title: check.title.trim(), company: check.company.trim() }).catch((): Answered => ({ ok: false, error: "Couldn't reach Unnepo." }));
-          if (result.ok && result.applicationId) { card.applicationId = result.applicationId; card.check = null; await load(true); }
+          const fields = { title: check.title.trim(), company: check.company.trim() };
+          // Saved already (Unnepo caught it): only the title and company are fixed. Otherwise it's saved now.
+          const result = card.applicationId
+            ? await ask<Answered>({ type: "card-confirm", id: card.id, applicationId: card.applicationId, ...fields }).catch((): Answered => ({ ok: false, error: "Couldn't reach Unnepo." }))
+            : await ask<Answered>({ type: "card-answer", id: card.id, applied: true, checked: true, ...fields }).catch((): Answered => ({ ok: false, error: "Couldn't reach Unnepo." }));
+          if (result.ok && (result.applicationId || card.applicationId)) { card.applicationId = result.applicationId || card.applicationId; card.check = null; card.confirmed = true; await load(true); }
           else card.note = result.error ?? "Couldn't save it.";
         });
       }
       case "no":
+        // Saved by itself already: No takes it back out of the student's jobs.
+        if (card.applicationId) {
+          return void busy("undo", async () => {
+            const result = await ask<{ ok: boolean; error?: string }>({ type: "card-undo", id: card.id, applicationId: card.applicationId }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+            if (result.ok) { close(card.applicationId || card.id); host.remove(); }
+            else card.note = result.error ?? "Couldn't take it out.";
+          });
+        }
         void ask({ type: "card-answer", id: card.id, applied: false });
         close(card.id);
         host.remove();
@@ -384,7 +399,7 @@ function start() {
     const key = String(message.applicationId || message.id);
     if (closedIds().includes(key)) return;
     // A new application on the same page (a job board's next job) takes the card over.
-    if (card.id !== message.id) Object.assign(card, { small: false, note: "", data: null, shown: false, passed: false, check: null });
+    if (card.id !== message.id) Object.assign(card, { small: false, note: "", data: null, shown: false, passed: false, check: null, confirmed: false });
     card.id = String(message.id);
     card.applicationId = String(message.applicationId || "");
     void load(true);
