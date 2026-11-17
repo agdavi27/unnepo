@@ -30,6 +30,7 @@ function fromLegacy(stored: ApplicationProfile | null, user: { email: string; na
     firstName: stored.firstName || base.contact.firstName,
     middleName: stored.middleName || undefined,
     suffix: stored.suffix || undefined,
+    phoneExtension: stored.phoneExtension || undefined,
     salutation: stored.salutation || undefined,
     lastName: stored.lastName || base.contact.lastName,
     phone: stored.phone || undefined, city: stored.city || undefined, state: stored.state || undefined, zip: stored.postalCode || undefined, country: stored.country || undefined,
@@ -111,6 +112,7 @@ function syncLegacy(stored: ApplicationProfile | null, student: StudentProfile, 
     lastName: c.lastName,
     email: c.email,
     phone: c.phone ?? "",
+    phoneExtension: c.phoneExtension ?? "",
     linkedin: student.links.linkedin ?? "",
     website: student.links.portfolio ?? "",
     github: student.links.github ?? "",
@@ -128,7 +130,8 @@ function syncLegacy(stored: ApplicationProfile | null, student: StudentProfile, 
 async function persist(userId: string, stored: ApplicationProfile | null, student: StudentProfile) {
   const resume = await repo.getLatestResume(userId);
   const next = { ...student, completeness: completeness(student), updatedAt: nowIso() };
-  await applicationProfiles.put(userId, syncLegacy(stored, next, resume?.text ?? ""));
+  // Read again: a resume upload waits on the AI, and something else may have saved meanwhile.
+  await applicationProfiles.put(userId, syncLegacy((await applicationProfiles.get(userId)) ?? stored, next, resume?.text ?? ""));
   return next;
 }
 

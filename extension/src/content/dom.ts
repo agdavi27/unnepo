@@ -194,11 +194,11 @@ function scroller(el: Element | undefined) {
   return null;
 }
 
-/** `ways`: the ways to try, in order (clicks, then the keyboard, unless a site did better with the keyboard first). */
+/** `ways`: the ways to try, in order (clicks, the keyboard, then typing a letter, unless a site did better another way first). */
 type ChooseOptions = { type?: string; list?: () => HTMLElement[]; pick?: (texts: string[]) => string | null; ways?: DropdownMethod[] };
 
 /** The order to try the ways in, given the one that worked on this site before. */
-export const waysFrom = (first?: DropdownMethod): DropdownMethod[] => (first === "keyboard" ? ["keyboard", "click"] : ["click", "keyboard"]);
+export const waysFrom = (first?: DropdownMethod): DropdownMethod[] => (first === "keyboard" ? ["keyboard", "click", "letter"] : first === "letter" ? ["letter", "click", "keyboard"] : ["click", "keyboard", "letter"]);
 
 /** This dropdown's options: the list it says it controls, or the ones that opened after it was pressed. */
 function listFor(trigger: HTMLElement, before: Set<HTMLElement>, options: ChooseOptions) {
@@ -387,6 +387,63 @@ async function byKeyboard(trigger: HTMLElement, answer: string, options: ChooseO
 }
 
 /**
+ * The way a person picks from a dropdown without scrolling its list: the box is pressed, then the answer's first
+ * letter is typed, and the box is checked. The same letter again moves to the next choice that starts with it
+ * ("P": Palau, then Pennsylvania), so it's typed again until the box shows the answer or the choices come round.
+ * A list that opens moves its highlight instead: the highlighted option is checked, and Enter chooses it.
+ */
+async function byLetter(trigger: HTMLElement, answer: string, options: ChooseOptions) {
+  // A search box filters on what's typed; a choice made for the student by `pick` has no letter to type.
+  if (trigger instanceof HTMLInputElement || options.pick) throw new FillError("not a list to type a letter in", "list_didnt_open");
+  const letter = answer.trim().charAt(0).toLowerCase();
+  if (!/[a-z0-9]/.test(letter)) throw new FillError("the answer has no letter to type", "list_didnt_open");
+  const fits = (text: string | null) => Boolean(text && matchOption(answer, [text]));
+  const start = shownChoice(trigger);
+  if (fits(start)) return start!;
+  const before = new Set(visibleOptions());
+  const list = listFor(trigger, before, options);
+  trigger.scrollIntoView({ block: "center" });
+  trigger.focus();
+  // A box that can't take focus by itself is pressed, and the list it opens closed again.
+  if (focused() !== trigger && !trigger.contains(focused())) {
+    press(trigger);
+    await sleep(150);
+    if (list().length) close(focused() ?? trigger);
+    await sleep(100);
+  }
+  const seen = new Set<string>();
+  let still = 0;
+  for (let presses = 0; presses < 40; presses += 1) {
+    key(focused() ?? trigger, letter);
+    await sleep(160);
+    const items = list();
+    const at = items.length ? activeIndex(trigger, items) : -1;
+    const now = at >= 0 ? optionText(items[at]) : shownChoice(trigger);
+    if (at >= 0 && fits(now)) {
+      key(focused() ?? trigger, "Enter");
+      await sleep(200);
+      if (list().length && !multiSelect(trigger)) close(trigger);
+      return now!;
+    }
+    if (at < 0 && fits(now)) return now!;
+    // Round to a choice seen already: the answer isn't under this letter.
+    if (now && seen.has(now)) break;
+    if (now) seen.add(now);
+    // Two letters that changed nothing: this box doesn't take typing.
+    still = now === start || !now ? still + 1 : 0;
+    if (still >= 2) break;
+  }
+  if (list().length) close(trigger);
+  // Never left on a stray choice: back to what the box showed before, by its own letter.
+  const back = start ? start.trim().charAt(0).toLowerCase() : "";
+  for (let presses = 0; back && presses < 40 && shownChoice(trigger) !== start; presses += 1) {
+    key(focused() ?? trigger, back);
+    await sleep(120);
+  }
+  throw new FillError(`typing "${letter}" never showed "${answer}"`, "didnt_stick");
+}
+
+/**
  * A searchable or plain custom dropdown, tried one way after another until the box shows the choice:
  * clicks first, then the keyboard (or the keyboard first, on a site where it worked before). Scrolling for
  * more options and loose matching are part of each. Says which way worked; throws when none did.
@@ -428,7 +485,7 @@ function searchFor(answer: string) {
 }
 
 async function eachWay(trigger: HTMLElement, answer: string, options: ChooseOptions): Promise<DropdownMethod> {
-  const ways: Record<DropdownMethod, typeof byClicking> = { click: byClicking, keyboard: byKeyboard };
+  const ways: Record<DropdownMethod, typeof byClicking> = { click: byClicking, keyboard: byKeyboard, letter: byLetter };
   let last: FillError | null = null;
   for (const method of options.ways ?? waysFrom()) {
     try {

@@ -306,6 +306,17 @@ export const applicationProfiles = {
     return withLock((db) => (db.applicationProfiles ?? []).find((row) => row.userId === userId)?.data ?? null);
   },
 
+  /**
+   * Changes part of the profile: read again right before saving, so a slow step (an AI call, an upload) never saves
+   * an old copy over what the student changed meanwhile (a new name on Unnepo, say). `fallback`: the profile to start
+   * from when none is saved yet; without one, nothing is saved.
+   */
+  async change(userId: string, patch: (fresh: ApplicationProfile) => Partial<ApplicationProfile>, fallback?: () => Promise<ApplicationProfile>) {
+    const fresh = (await this.get(userId)) ?? (fallback ? await fallback() : null);
+    if (!fresh) return null;
+    return this.put(userId, { ...fresh, ...patch(fresh) });
+  },
+
   async put(userId: string, profile: ApplicationProfile) {
     if (onTables()) {
       const { error } = await supabaseTables().from("application_profiles").upsert({ user_id: userId, data: profile, updated_at: nowIso() });

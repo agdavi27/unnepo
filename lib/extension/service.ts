@@ -164,7 +164,7 @@ export async function extensionSaveTranscript(userId: string, file: { name: stri
   const storagePath = await saveResumeBytes(dataDir(), `${userId}/transcript-${id()}-${safeName}`, file.bytes, mime);
   if (!storagePath) throw new ServiceError("Couldn't save your transcript right now. Try again in a moment.", "storage", 503);
   const transcript = { fileName: file.name, mime, byteSize: file.bytes.byteLength, storagePath, uploadedAt: nowIso() };
-  await applicationProfiles.put(userId, { ...stored, transcript });
+  await applicationProfiles.change(userId, () => ({ transcript }), async () => stored);
   return { ok: true, transcript: { fileName: transcript.fileName, uploadedAt: transcript.uploadedAt } };
 }
 
@@ -586,8 +586,11 @@ export async function extensionMap(userId: string, raw: unknown) {
     added += 1;
   }
   if (added && stored) {
-    const entries = Object.entries(cache).sort((a, b) => b[1].at.localeCompare(a[1].at)).slice(0, CACHE_LIMIT);
-    await applicationProfiles.put(userId, { ...stored, aiCache: Object.fromEntries(entries) });
+    const fresh = Object.entries(cache).filter(([key]) => !stored.aiCache?.[key] || stored.aiCache[key] !== cache[key]);
+    await applicationProfiles.change(userId, (latest) => {
+      const entries = Object.entries({ ...(latest.aiCache ?? {}), ...Object.fromEntries(fresh) }).sort((a, b) => b[1].at.localeCompare(a[1].at)).slice(0, CACHE_LIMIT);
+      return { aiCache: Object.fromEntries(entries) };
+    });
   }
 
   const timings = { pipeline: "fast" as const, schemaMs, mappingMs: mapped.ms, llmCalls: mapped.llmCalls, fallback: [] };

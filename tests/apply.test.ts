@@ -19,7 +19,7 @@ import { supportedBy } from "@/lib/apply/questions";
 import { bestOption } from "@/lib/apply/options";
 import { checkSchool } from "@/lib/school-plans";
 import { classYearOf } from "@/lib/profile/student";
-import { contactBounced, deleteApplication, revealContact, applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
+import { changedParts, contactBounced, deleteApplication, revealContact, applyState, saveApplicationProfile, createApplication, markApplied, retryContacts, runContactDiscovery, setDeferForTests, setOutcome, updateAnswers, updateOutreach, writeContactEmail, addJobByHand, companyMissing, setCompany } from "@/lib/apply/service";
 import { applicationStats, deletedAsJobs, stageOf } from "@/lib/apply/stats";
 import { planUsage } from "@/lib/apply/limits";
 import type { ApplicationProfile, ApplicationQuestion, JobApplication } from "@/lib/apply/types";
@@ -184,7 +184,7 @@ describe("answers", () => {
       q("ext", "Phone Extension", "text", [], false),
       q("phone", "Phone Number"),
     ], context);
-    expect(planned.map((item) => item.answer)).toEqual(["Mobile", "Cell", null, "207-555-0100"]);
+    expect(planned.map((item) => item.answer)).toEqual(["Mobile", "Cell", "1", "207-555-0100"]);
   });
 
   it("uses the student's eligibility answers however the form words them, and never without them", () => {
@@ -1081,6 +1081,22 @@ describe("questions from the latest round", () => {
     expect(isNameField("Middle Name")).toBe(true);
     expect(isNameField("Prefix")).toBe(true);
     expect(isNameField("How Did You Hear About Us?")).toBe(false);
+  });
+
+  it("fills Phone Extension with 1 unless the profile says another", () => {
+    expect(planAnswers([q("e", "Phone Extension")], context)[0]).toMatchObject({ answer: "1", source: "default" });
+    expect(planAnswers([q("e", "Phone Extension")], { ...context, profile: { ...profile, phoneExtension: "204" } })[0]).toMatchObject({ answer: "204", source: "profile" });
+  });
+
+  it("saves only what changed, over the profile as it is now", () => {
+    const before = { ...profile, theme: "dark" as const, saved: { a: { label: "A", answer: "1", updatedAt: "" } } };
+    const after = { ...before, theme: "light" as const, saved: { ...before.saved, b: { label: "B", answer: "2", updatedAt: "" } } };
+    // Meanwhile the student renamed themselves and another answer was saved.
+    const fresh = { ...before, firstName: "Andrew", saved: { ...before.saved, c: { label: "C", answer: "3", updatedAt: "" } } };
+    const next = { ...fresh, ...changedParts(before, after, fresh) };
+    expect(next.firstName).toBe("Andrew");
+    expect(next.theme).toBe("light");
+    expect(Object.keys(next.saved).sort()).toEqual(["a", "b", "c"]);
   });
 
   it("answers opt-into texting, phone country code, and current employer", () => {

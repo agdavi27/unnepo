@@ -76,8 +76,7 @@ export async function generateCv(userId: string, raw: unknown) {
   if (text.length < 80) throw new ServiceError("Couldn't write the CV from your profile. Try again.", "ai", 503);
 
   // Counted only once a CV was written.
-  const stored = (await applicationProfiles.get(userId)) ?? info.profile;
-  await applicationProfiles.put(userId, { ...stored, cvCount: count + 1 });
+  await applicationProfiles.change(userId, (fresh) => ({ cvCount: (fresh.cvCount ?? count) + 1 }), async () => info.profile);
   await countUse(userId, "letters");
 
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || "Your Name";

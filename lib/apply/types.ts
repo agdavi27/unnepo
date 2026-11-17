@@ -250,6 +250,8 @@ export type ApplicationProfile = {
   suffix?: string;
   /** "Mr.", "Ms.", "Mx.", "Dr.": only the student's own choice is used. */
   salutation?: string;
+  /** What a form's "Phone Extension" box gets: "1" until the student changes it. */
+  phoneExtension?: string;
   lastName: string;
   email: string;
   phone: string;

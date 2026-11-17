@@ -36,12 +36,11 @@ export async function addActivity(userId: string, applicationId: string, event: 
 
 // "Did you apply?" and sessions live with the student's profile, read fresh right before each save.
 async function updateProfile(userId: string, change: (profile: NonNullable<Awaited<ReturnType<typeof applicationProfiles.get>>>) => void) {
-  const stored = await applicationProfiles.get(userId);
-  if (!stored) return null;
-  const next = structuredClone(stored);
-  change(next);
-  await applicationProfiles.put(userId, next);
-  return next;
+  return applicationProfiles.change(userId, (fresh) => {
+    const next = structuredClone(fresh);
+    change(next);
+    return next;
+  });
 }
 
 export function liveMaybe(list: MaybeApplied[] | undefined) {

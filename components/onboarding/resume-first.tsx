@@ -168,6 +168,7 @@ function Sections({ profile, set }: { profile: StudentProfile; set: (next: Stude
           <Text title="Preferred name (optional)" value={profile.contact.preferredName} onChange={contact("preferredName")} />
           <Text title="Email" type="email" value={profile.contact.email} onChange={contact("email")} tag={tag("contact.email")} />
           <Text title="Phone" type="tel" value={profile.contact.phone} onChange={contact("phone")} tag={tag("contact.phone")} />
+          <Text title="Phone extension" value={profile.contact.phoneExtension ?? "1"} onChange={contact("phoneExtension")} placeholder="1" />
           <Text title="City" value={profile.contact.city} onChange={contact("city")} tag={tag("contact.city")} />
           <Text title="State" value={profile.contact.state} onChange={contact("state")} placeholder="e.g. Maine" tag={tag("contact.state")} />
           <Text title="ZIP code" value={profile.contact.zip} onChange={contact("zip")} tag={tag("contact.zip")} />
