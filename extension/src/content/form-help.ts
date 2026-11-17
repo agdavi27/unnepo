@@ -18,7 +18,6 @@ const WRITE = "#8B5CF6";
 const MARK = "data-unnepo-form";
 const PICK = "data-unnepo-pick";
 const HIDDEN = "unnepoFormHidden";
-const GROUP = 5;
 const CONTROLS = "input:not([type]), input[type=text], input[type=email], input[type=tel], input[type=url], input[type=number], input[type=date], input[type=month], textarea, select";
 /** Link boxes have their own chip (link-buttons.ts), so they're left out of the groups. */
 const LINK = /linked ?in|git ?hub|portfolio|personal (web ?site|site)|\bweb ?site\b/i;
@@ -107,15 +106,10 @@ function findBoxes(): Box[] {
   return boxes;
 }
 
-/**
- * The blue boxes in page order, five to a group: group 1 is the first five, group 2 the next five, and so on,
- * filled one after another. Purple questions aren't in any group (Answer with unnepo writes those).
- */
+/** Every blue box on the form, filled together by one Fill with unnepo. Purple questions are Answer's. */
 function groupsOf(boxes: Box[]): Group[] {
   const fills = boxes.filter((box) => box.kind === "fill");
-  const groups: Group[] = [];
-  for (let at = 0; at < fills.length; at += GROUP) groups.push({ key: fills[at].control, boxes: fills.slice(at, at + GROUP) });
-  return groups;
+  return fills.length ? [{ key: fills[0].control, boxes: fills }] : [];
 }
 
 /* ---------- Outlines ---------- */
@@ -186,17 +180,6 @@ export function watchForms(isJobPage: () => boolean) {
   `;
   const LAYER_STYLE = `
     :host { all: initial; position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2147483644; font: 13px/1.3 system-ui, -apple-system, sans-serif; }
-    .bracket { position: absolute; width: 9px; box-sizing: border-box; border: 3px solid ${FILL}; border-right: 0; border-radius: 7px 0 0 7px; pointer-events: none; opacity: .55; }
-    .bracket.next, .bracket.on { opacity: 1; }
-    .bracket.done { border-color: #22C55E; opacity: .8; }
-    .bracket.theirs { border-color: #A1A1AA; opacity: .6; }
-    .num { position: absolute; left: -14px; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; border-radius: 50%; background: ${FILL}; color: #fff; font: 700 11px/22px system-ui, sans-serif; text-align: center; box-shadow: 0 0 0 2px #fff; }
-    .done .num { background: #22C55E; } .theirs .num { background: #A1A1AA; }
-    .btn.fill.later { background: #fff; color: ${FILL}; box-shadow: inset 0 0 0 1.5px ${FILL}, 0 4px 12px rgba(0,0,0,.1); }
-    .btn.fill.later:hover { background: #F5F9FF; }
-    .link { position: absolute; width: 0; border-left: 2px dashed ${FILL}; opacity: .35; pointer-events: none; }
-    .link.next, .link.on { opacity: .8; } .link.done { border-color: #22C55E; } .link.theirs { border-color: #A1A1AA; }
-    .tag { position: absolute; display: flex; align-items: center; gap: 6px; }
     .btn { height: 28px; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,.14); }
     .btn .n { font-weight: 500; opacity: .85; }
     ${BUTTONS}
@@ -214,12 +197,11 @@ export function watchForms(isJobPage: () => boolean) {
       return;
     }
     const answersLeft = state.free && typeof state.answersLeft === "number" ? state.answersLeft : null;
-    const next = nextGroup();
-    const busyAt = groups.findIndex((group) => group.key === filling);
+    const toTry = boxes.filter((box) => box.kind === "fill" && open(box) && !tried.has(box.control)).length;
     const fillPart = filling
-      ? `<div class="group"><span class="key"><i style="border-color:${FILL}"></i>Filling group ${busyAt + 1} of ${groups.length}…</span><button type="button" class="btn stop" data-act="stop">■ Stop</button></div>`
-      : next >= 0
-        ? `<div class="group"><span class="key"><i style="border-color:${FILL}"></i>Group ${next + 1} of ${groups.length}</span><button type="button" class="btn fill" data-act="next" title="Fills the next five boxes from your profile">⚡ Fill next ${groups[next].boxes.filter(open).length}</button></div>`
+      ? `<div class="group"><span class="key"><i style="border-color:${FILL}"></i>Filling… ${toTry} to go</span><button type="button" class="btn stop" data-act="stop">■ Stop</button></div>`
+      : toTry
+        ? `<div class="group"><span class="key"><i style="border-color:${FILL}"></i>${toTry} Unnepo can fill</span><button type="button" class="btn fill" data-act="next" title="Fills every blue box from your profile">⚡ Fill with unnepo</button></div>`
         : fill
           ? `<span class="key"><i style="border-color:${FILL}"></i>${fill} left for you</span>`
           : `<span class="done">✓ Boxes filled</span>`;
@@ -241,60 +223,10 @@ export function watchForms(isJobPage: () => boolean) {
       </div>`;
   }
 
-  /** The group to fill next: the first, in page order, that still has boxes Unnepo hasn't tried. */
-  const nextGroup = () => groups.findIndex((group) => group.boxes.some((box) => open(box) && !tried.has(box.control)));
 
-  /** Each group's numbered bracket down its left side, and its Fill button beside its first box. */
+  /** The page itself only gets the outlines; Fill with unnepo is in the bar. */
   function drawLayer() {
-    if (!layer) return;
-    const x = window.scrollX;
-    const y = window.scrollY;
-    const next = nextGroup();
-    const parts: string[] = [];
-    groups.forEach((group, index) => {
-      const left = group.boxes.filter(open);
-      const busy = filling === group.key;
-      const rects = group.boxes.map((box) => box.outline.getBoundingClientRect()).filter((rect) => rect.width > 0);
-      if (!rects.length) return;
-      const minLeft = Math.min(...rects.map((rect) => rect.left));
-      const first = rects[0];
-      const theirs = left.length > 0 && left.every((box) => tried.has(box.control));
-      const state = busy ? "on" : !left.length ? "done" : theirs ? "theirs" : index === next ? "next" : "later";
-      // A purple question between two of the group's boxes splits its bracket, joined by a dashed line, so the
-      // bracket only ever covers boxes it fills.
-      const runs: Box[][] = [];
-      let run: Box[] = [];
-      let last = -1;
-      for (const box of group.boxes) {
-        const at = boxes.indexOf(box);
-        if (run.length && boxes.slice(last + 1, at).some((other) => other.kind === "write")) { runs.push(run); run = []; }
-        run.push(box);
-        last = at;
-      }
-      if (run.length) runs.push(run);
-      const edge = Math.max(16, minLeft - 14) + x;
-      let prevBottom: number | null = null;
-      runs.forEach((boxesInRun, runIndex) => {
-        const runRects = boxesInRun.map((box) => box.outline.getBoundingClientRect()).filter((rect) => rect.width > 0);
-        if (!runRects.length) return;
-        const top = Math.min(...runRects.map((rect) => rect.top)) - 4 + y;
-        const bottom = Math.max(...runRects.map((rect) => rect.bottom)) + 4 + y;
-        if (prevBottom !== null) parts.push(`<div class="link ${state}" style="left:${edge}px;top:${prevBottom}px;height:${Math.max(0, top - prevBottom)}px"></div>`);
-        parts.push(`<div class="bracket ${state}" style="left:${edge}px;top:${top}px;height:${bottom - top}px">${runIndex === 0 ? `<span class="num">${state === "done" ? "✓" : index + 1}</span>` : ""}</div>`);
-        prevBottom = bottom;
-      });
-      if (state === "done") return;
-      // Beside the first box on the right when there's room; else just inside its top-right corner.
-      const room = window.innerWidth - first.right > 150;
-      const place = room ? `left:${first.right + 12 + x}px;top:${first.top + y + 4}px` : `left:${first.right - 132 + x}px;top:${first.top + y - 14}px`;
-      const button = busy
-        ? `<button type="button" class="btn stop" data-act="stop">■ Stop</button>`
-        : theirs
-          ? `<span class="btn ghost" title="Unnepo doesn't have these in your profile">${left.length} for you</span>`
-          : `<button type="button" class="btn fill${state === "later" ? " later" : ""}" data-fill="${index}" ${filling ? "disabled" : ""} aria-label="Fill group ${index + 1}: ${left.length} boxes from your profile">⚡ Fill ${index + 1}<span class="n">· ${left.length}</span></button>`;
-      parts.push(`<div class="tag" style="${place}">${button}</div>`);
-    });
-    layer.root.innerHTML = `<style>${LAYER_STYLE}</style>${parts.join("")}`;
+    if (layer) layer.root.innerHTML = "";
   }
 
   function draw() { drawBar(); drawLayer(); }
@@ -303,7 +235,7 @@ export function watchForms(isJobPage: () => boolean) {
     const keep = new Set<HTMLElement>();
     for (const box of boxes) {
       if (!open(box)) continue;
-      paint(box.outline, box.kind === "fill" ? `${FILL}99` : WRITE);
+      paint(box.outline, box.kind === "fill" ? FILL : WRITE);
       keep.add(box.outline);
     }
     for (const el of Array.from(before.keys())) if (!keep.has(el)) paint(el, null);
@@ -332,10 +264,6 @@ export function watchForms(isJobPage: () => boolean) {
     if (!result.ok && !result.stopped) ui.note = result.error ?? "Couldn't fill these.";
     rescan();
     draw();
-    // Then the next five: brought into view when they're off the screen.
-    const upNext = groups[nextGroup()];
-    const at = upNext?.boxes[0]?.outline.getBoundingClientRect();
-    if (result.ok && at && (at.top < 0 || at.bottom > window.innerHeight - 90)) upNext.boxes[0].outline.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "center" });
   }
 
   async function stopNow() {
@@ -351,7 +279,7 @@ export function watchForms(isJobPage: () => boolean) {
     if (name === "small") { ui.small = true; return drawBar(); }
     if (name === "grow") { ui.small = false; return drawBar(); }
     if (name === "stop") return stopNow();
-    if (name === "next") { const group = groups[nextGroup()]; if (group) void fillGroup(group); return; }
+    if (name === "next") { if (groups[0]) void fillGroup(groups[0]); return; }
     if (name === "hide") {
       try { sessionStorage.setItem(HIDDEN, JSON.stringify([...(JSON.parse(sessionStorage.getItem(HIDDEN) || "[]") as string[]), pageKey()].slice(-30))); } catch { /* storage off */ }
       return stop();

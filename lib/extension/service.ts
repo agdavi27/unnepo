@@ -447,7 +447,7 @@ function schemaFromPage(app: JobApplication, fields: PageField[]): FormSchema {
  */
 export async function extensionQuickFill(userId: string, raw: unknown) {
   const body = (raw ?? {}) as { fields?: unknown; company?: unknown; title?: unknown };
-  const fields = Array.isArray(body.fields) ? (body.fields as PageField[]).slice(0, 40) : [];
+  const fields = Array.isArray(body.fields) ? (body.fields as PageField[]).slice(0, 80) : [];
   if (!fields.length) return { answers: [] };
   const company = String(body.company ?? "").slice(0, 120);
   const page = { ats: "other", title: String(body.title ?? "").slice(0, 200), company, description: "", jobUrl: "", applicationUrl: null } as unknown as JobApplication;
