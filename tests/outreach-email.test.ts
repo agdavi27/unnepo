@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { jobIdOf, outreachEmail } from "@/lib/apply/outreach-email";
+import { composeLink, withoutJobId } from "@/lib/apply/compose-link";
 
 const base = {
   firstName: "Jane", studentName: "Drew Davis", year: "Junior", school: "Colby College", major: "Economics",
@@ -12,7 +13,7 @@ describe("outreachEmail", () => {
     expect(email.subject).toBe("Colby College student, applied to Sports Analyst at WPP Media");
     expect(email.body).toBe([
       "Hi Jane,",
-      "I’m Drew Davis, a junior at Colby College studying Economics. I just applied for the Sports Analyst position at WPP Media (Job ID 11922471) and wanted to reach out directly.",
+      "I’m Drew Davis, a junior at Colby College studying Economics. I just applied for the Sports Analyst position at WPP Media and wanted to reach out directly.",
       "I was excited to learn more about WPP Media’s work on its sports partnerships. I ran stats for Colby's hockey team.",
       "If you have a few minutes sometime this week, it would be great to learn more. Happy to connect whenever is most convenient for you. I’ve also attached my resume for your reference.",
       "Best,\nDrew Davis",
@@ -42,5 +43,14 @@ describe("jobIdOf", () => {
   it("leaves out long random ids", () => {
     expect(jobIdOf({ jobUrl: "https://jobs.lever.co/acme/6f1c2b9e-1111-2222-3333-444455556666" })).toBe("");
     expect(jobIdOf({ jobUrl: "https://jobs.ashbyhq.com/acme/0b3f6c1e-aaaa-bbbb-cccc-ddddeeeeffff" })).toBe("");
+  });
+});
+
+describe("withoutJobId", () => {
+  it("takes a job ID out of emails written before IDs were left out", () => {
+    expect(withoutJobId("applied for the Analyst position at WPP Media (Job ID 11922471) and wanted")).toBe("applied for the Analyst position at WPP Media and wanted");
+    expect(withoutJobId("at Acme (Requisition ID: R-20451) and")).toBe("at Acme and");
+    expect(withoutJobId("at Acme (NYC office) and")).toBe("at Acme (NYC office) and");
+    expect(decodeURIComponent(composeLink("gmail", "a@b.co", "Hi", "at Acme (Job ID JR-104233) and").url)).not.toContain("JR-104233");
   });
 });

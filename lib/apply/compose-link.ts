@@ -8,7 +8,11 @@ const MAX_LINK = 2000;
  * The email ready to send, in Gmail, Outlook on the web, or the mail app. `cut`: the body didn't fit in the link.
  * Used by the extension's People card and the website's.
  */
-export function composeLink(mailer: Mailer, to: string, subject: string, body: string) {
+/** Emails written before job IDs were left out still have one ("… at Stripe (Job ID 12345) and …"): taken out. */
+export const withoutJobId = (text: string) => text.replace(/ ?\((?:job|req(?:uisition)?|posting)(?: id| number| no\.?| #)?:? ?[^)]{1,30}\)/gi, "");
+
+export function composeLink(mailer: Mailer, to: string, subject: string, rawBody: string) {
+  const body = withoutJobId(rawBody);
   const q = (pairs: Record<string, string>) => Object.entries(pairs).filter(([, value]) => value).map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
   const build = (text: string) => mailer === "gmail"
     ? `https://mail.google.com/mail/?${q({ view: "cm", fs: "1", to, su: subject, body: text })}`
