@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: Workday Education</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  [data-automation-id^="formField"] { margin: 12px 0; }
+  label { display: block; font-weight: 600; }
+  input[type=text], input:not([type]) { font: inherit; padding: 6px 8px; min-width: 200px; }
+  .date input { min-width: 0; width: 60px; }
+  .chip { display: inline-block; background: #eef; border-radius: 12px; padding: 2px 10px; margin: 2px; }
+  [role=listbox] { border: 1px solid #999; }
+  [role=option] { padding: 4px 10px; cursor: pointer; }
+  [role=group][aria-labelledby$="-panel"] { border: 1px solid #ddd; padding: 8px 12px; margin: 8px 0; }
+</style>
+</head>
+<body>
+<h1>Practice: Workday Education</h1>
+<p>Built like Workday's My Experience: one job with From and To dates and "I currently work here" unticked; Education
+  entries added with "Add Another" and taken away with "Delete"; the school is picked from a search that only runs on
+  Enter and only knows a few colleges.</p>
+<div role="group" aria-labelledby="work-section">
+  <h3 id="work-section">Work Experience</h3>
+  <div role="group" aria-labelledby="job1-panel">
+    <h4 id="job1-panel">Work Experience 1</h4>
+    <div data-automation-id="formField-jobTitle"><label for="job1-title">Job Title</label><input id="job1-title"></div>
+    <div data-automation-id="formField-currentlyWorkHere"><input type="checkbox" id="job1-current"><label for="job1-current">I currently work here</label></div>
+    <div data-automation-id="formField-startDate" class="date"><label for="job1-start-month">From</label>
+      <input id="job1-start-month" data-automation-id="dateSectionMonth-input" role="spinbutton" aria-label="Month">
+      <input id="job1-start-year" data-automation-id="dateSectionYear-input" role="spinbutton" aria-label="Year"></div>
+    <div data-automation-id="formField-endDate" class="date"><label for="job1-end-month">To</label>
+      <input id="job1-end-month" data-automation-id="dateSectionMonth-input" role="spinbutton" aria-label="Month">
+      <input id="job1-end-year" data-automation-id="dateSectionYear-input" role="spinbutton" aria-label="Year"></div>
+  </div>
+</div>
+<div role="group" aria-labelledby="edu-section" id="education">
+  <h3 id="edu-section">Education</h3>
+  <div id="schools"></div>
+  <button type="button" data-automation-id="add-button">Add Another</button>
+</div>
+<script>
+  const COLLEGES = ["Colby College", "Bates College", "Bowdoin College"];
+  const schools = document.getElementById("schools");
+  let made = 0;
+  const renumber = () => schools.querySelectorAll("h4").forEach((head, i) => { head.textContent = `Education ${i + 1}`; });
+  function addSchool() {
+    const n = ++made;
+    schools.insertAdjacentHTML("beforeend", `<div role="group" aria-labelledby="edu${n}-panel" data-school="${n}">
+      <h4 id="edu${n}-panel">Education</h4>
+      <button type="button" data-automation-id="panel-set-delete-button">Delete</button>
+      <div data-automation-id="formField-school"><label for="edu${n}-school">School or University</label>
+        <div class="chips"></div>
+        <input id="edu${n}-school" data-automation-id="searchBox" data-uxi-widget-type="selectinput" placeholder="Search" autocomplete="off">
+        <div class="results"></div></div>
+    </div>`);
+    const panel = schools.lastElementChild;
+    const box = panel.querySelector("input");
+    const results = panel.querySelector(".results");
+    const chips = panel.querySelector(".chips");
+    panel.querySelector("[data-automation-id=panel-set-delete-button]").addEventListener("click", () => { panel.remove(); renumber(); });
+    // Workday searches on Enter only, then empties the box; a pick shows as a chip.
+    box.addEventListener("keyup", (event) => {
+      if (event.key !== "Enter") return;
+      const typed = box.value.trim().toLowerCase();
+      box.value = "";
+      results.innerHTML = "";
+      const list = document.createElement("div");
+      list.setAttribute("role", "listbox");
+      const found = COLLEGES.filter((name) => name.toLowerCase().includes(typed));
+      if (!found.length) list.textContent = "No Items.";
+      for (const name of found) {
+        const row = document.createElement("div");
+        row.setAttribute("role", "option");
+        row.innerHTML = `<div data-automation-id="promptOption">${name}</div>`;
+        row.querySelector("div").addEventListener("click", () => {
+          chips.innerHTML = `<span class="chip" data-automation-id="selectedItem">${name}</span>`;
+          results.innerHTML = "";
+        });
+        list.append(row);
+      }
+      results.append(list);
+    });
+    renumber();
+  }
+  addSchool();
+  document.querySelector("[data-automation-id=add-button]").addEventListener("click", addSchool);
+  window.pageValues = () => ({
+    current: document.getElementById("job1-current").checked,
+    schools: Array.from(schools.children, (panel) => `${panel.querySelector("h4").textContent}: ${panel.querySelector(".chips").textContent || "(none)"}`).join("; "),
+  });
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

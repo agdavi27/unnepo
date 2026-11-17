@@ -82,13 +82,28 @@ function outlineFor(el: HTMLElement) {
 }
 
 /** Whether a field has an answer: its value, or for a site's own dropdown, a choice shown in place of "Select…". */
-function answered(el: HTMLElement, outline: HTMLElement) {
-  if (el instanceof HTMLInputElement && el.type === "checkbox") return el.checked;
+export function answered(el: HTMLElement, outline: HTMLElement) {
+  if (el instanceof HTMLInputElement && el.type === "checkbox") return el.checked || (CURRENT_JOB.test(labelOf(el)) && hasEndDate(el));
   if (el instanceof HTMLSelectElement) return el.selectedIndex > 0 || Boolean(el.value && !/^select/i.test(el.selectedOptions[0]?.text ?? ""));
   if ((el as HTMLInputElement).value?.trim()) return true;
   if (el.getAttribute("role") === "combobox" && outline !== el) {
     const shown = clean(outline.innerText).replace(labelOf(el), "").replace(/[*\s]+/g, " ").trim();
     return Boolean(shown) && !/^select/i.test(shown);
+  }
+  return false;
+}
+
+/**
+ * "I currently work here" needs nothing when the job already has its From and To dates: the job ended. The job's
+ * own entry is the nearest wrapper holding its dates (Workday's month and year boxes, or a To / End date box).
+ */
+function hasEndDate(box: HTMLElement) {
+  let entry: HTMLElement | null = box.parentElement;
+  for (let depth = 0; entry && depth < 10; depth++, entry = entry.parentElement) {
+    const parts = Array.from(entry.querySelectorAll<HTMLInputElement>("input")).filter(datePart);
+    if (parts.length >= 4) return parts.every((part) => part.value.trim());
+    const ends = Array.from(entry.querySelectorAll<HTMLInputElement>("input:not([type=checkbox]):not([type=hidden])")).filter((input) => /\b(to|end)\b|end date|until/i.test(labelOf(input)) && !/\bfrom\b|start/i.test(labelOf(input)));
+    if (ends.length) return ends.every((input) => input.value.trim());
   }
   return false;
 }
