@@ -4,7 +4,7 @@
  *   Subject: {school} student, applied to {role} at {company}
  *   Hi {first_name},
  *   I'm {name}, a {year} at {school} studying {major}. I just applied for the {role} position at {company}
- *   ({job id}) and wanted to reach out directly.
+ *   and wanted to reach out directly. (No job ID: it reads like a form letter.)
  *   I was excited to learn more about {company}'s work on {detail}. {link}
  *   If you have a few minutes sometime this week, … I've also attached my resume for your reference.
  *   Best,
@@ -46,7 +46,7 @@ export function outreachEmail(fields: OutreachFields) {
   const link = f.link && !/[.!?]$/.test(f.link) ? `${f.link}.` : f.link;
   const body = [
     `Hi ${f.firstName || "there"},`,
-    `${intro} I just applied for the ${f.role} position at ${f.company}${f.jobId ? ` (${f.jobId})` : ""} and wanted to reach out directly.`,
+    `${intro} I just applied for the ${f.role} position at ${f.company} and wanted to reach out directly.`,
     [detail ? `I was excited to learn more about ${possessive(f.company)} work on ${detail}.` : `I was excited to learn more about the work ${f.company} is doing.`, link].filter(Boolean).join(" "),
     "If you have a few minutes sometime this week, it would be great to learn more. Happy to connect whenever is most convenient for you. I’ve also attached my resume for your reference.",
     `Best,\n${f.studentName}`,

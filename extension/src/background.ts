@@ -8,6 +8,7 @@ import { notJobTitle } from "@/lib/apply/job-title";
 import { notCompanyName } from "@/lib/apply/company-name";
 import { APPLIED_LINE, appliedDay } from "./shared/applied-line";
 import { composeLink, type Mailer } from "@/lib/apply/compose-link";
+import { putResumeInDraft } from "./shared/mail-attach";
 
 /**
  * The extension's background worker: keeps the Unnepo token, talks to the Unnepo API, runs a fill on the
@@ -1644,6 +1645,30 @@ function tabLoaded(tabId: number, ms: number) {
   });
 }
 
+const MAIL_HOST = /^https:\/\/(mail\.google\.com|outlook\.(office|office365|live)\.com)\//;
+
+/** Opens an email in Gmail or Outlook on the web with the student's resume attached to the draft. */
+async function openEmailWithResume(url: string) {
+  const resume = readyResume();
+  const tab = await chrome.tabs.create({ url, active: true });
+  if (tab.id === undefined) return;
+  const { file } = await resume;
+  if (!file) return void log("The email opened without the resume: Unnepo couldn't get your resume.");
+  // Gmail and Outlook move through sign-in and their own redirects first: it tries again after each page load.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    await tabLoaded(tab.id, 20_000);
+    const now = await chrome.tabs.get(tab.id).catch(() => null);
+    if (!now) return;
+    if (now.url && MAIL_HOST.test(now.url)) {
+      const [ran] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: putResumeInDraft, args: [file] }).catch(() => []);
+      if (ran?.result === "attached") return void log("Attached your resume to the email.");
+      if (ran?.result === "sent") return void log("Added your resume to the email. Check it's attached before you send.");
+    }
+    await new Promise((done) => setTimeout(done, 1500));
+  }
+  void log("The email opened, but your resume couldn't be attached. Attach it before you send.");
+}
+
 export type LinkedInPerson = { name: string; title: string; linkedinUrl: string };
 
 /**
@@ -2452,6 +2477,12 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply(failed(error, "Couldn't delete it."));
         }
       // An email link was opened: Home asks an hour later whether it was sent.
+      // An email from the panel or dashboard: opened in Gmail or Outlook with the resume attached.
+      case "open-email": {
+        if (!fromExtension(sender) || !MAIL_HOST.test(String(message.url ?? ""))) return reply({ ok: false });
+        void openEmailWithResume(String(message.url));
+        return reply({ ok: true });
+      }
       case "email-opened": {
         if (!fromExtension(sender)) return reply({ ok: false });
         const opened = ((await chrome.storage.local.get("openedEmails")).openedEmails as OpenedEmails | undefined) ?? {};
@@ -2538,7 +2569,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           if (!job || !person?.email || !person.emailBody) return reply({ ok: false, error: "Couldn't write the email." });
           const { mailer } = await chrome.storage.local.get("mailer");
           const link = composeLink((mailer as Mailer | undefined) ?? "gmail", person.email, person.emailSubject ?? "", person.emailBody);
-          if (!link.url.startsWith("mailto:")) await chrome.tabs.create({ url: link.url, active: true });
+          if (!link.url.startsWith("mailto:")) void openEmailWithResume(link.url);
           const stored = await chrome.storage.local.get("openedEmails");
           const opened = (stored.openedEmails as OpenedEmails | undefined) ?? {};
           opened[contactId] = { at: Date.now(), applicationId, name: person.name, company: job.company, followUp };

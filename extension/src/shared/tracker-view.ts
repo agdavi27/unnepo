@@ -725,7 +725,8 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
       say("The email was too long for the link: it's copied. Paste it into the email that opened.");
     }
     if (link.url.startsWith("mailto:")) window.location.href = link.url;
-    else void chrome.tabs.create({ url: link.url });
+    // Gmail and Outlook open with the resume attached to the draft.
+    else void ask({ type: "open-email", url: link.url });
     await opened(contact, followUp);
   };
   root.querySelectorAll<HTMLAnchorElement>("[data-email-link]").forEach((anchor) => anchor.addEventListener("click", (event) => {
