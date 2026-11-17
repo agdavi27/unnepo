@@ -7,7 +7,7 @@ import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, openedJob
 import { watchEdits } from "./edits";
 import { appliedStatus } from "./board-status";
 import { keptByStudent } from "./kept";
-import { addEntries } from "./entries";
+import { addEntries, dropUnfoundSchools } from "./entries";
 import { fieldControl, markNeeds, reviewLeft, type CheckItem } from "./needs";
 import { celebrateSpiders, startSpiders, stopSpiders } from "./spiders";
 import { beginApplying, clearQuestionSpiders, jobDetails, putAnswer, showQuestion } from "./apply-help";
@@ -95,6 +95,11 @@ async function fill(plan: FillPlan): Promise<FillReport> {
   const result = plan.useServerSchema
     ? await fillGreenhouse(answers, files)
     : await fillGeneric(planned, answers, files, { dropdownFirst: plan.dropdownFirst });
+  // A school Workday's list doesn't have: the entry Unnepo added for it goes again.
+  if (!plan.useServerSchema && result.failed.length) {
+    const gone = await dropUnfoundSchools(result.failed);
+    if (gone.size) result.failed = result.failed.filter((item) => !item.id || !gone.has(item.id));
+  }
   // What the student typed stays, and counts as answered.
   result.filled.push(...kept.map((answer) => answer.label));
   result.filled.push(...fillPasswords(plan.password));

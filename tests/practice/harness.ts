@@ -7,6 +7,8 @@ import { handshakeJob, openedJob, scanFields, structuredJob } from "@/extension/
 import { appliedList, appliedStatus } from "@/extension/src/content/board-status";
 import { markNeeds, reviewLeft, type CheckItem } from "@/extension/src/content/needs";
 import { watchApplyPresses } from "@/extension/src/content/quick-apply";
+import { addEntries, dropUnfoundSchools } from "@/extension/src/content/entries";
+import { answered, findBoxes } from "@/extension/src/content/form-help";
 import type { Answer, DropdownMethod, PageField } from "@/extension/src/shared/types";
 
 /**
@@ -37,6 +39,12 @@ declare global {
     appliedList: () => unknown;
     /** The page read as Handshake's job page. */
     handshakeJob: () => unknown;
+    /** Workday's Add Another, pressed until each section has this many entries. */
+    addEntries: typeof addEntries;
+    /** Takes away added Education entries whose school wasn't found, from a fill report's failures. */
+    dropUnfoundSchools: (failed: Array<{ label: string; id?: string }>) => Promise<string[]>;
+    /** The boxes the page's Fill bar outlines, and whether each still needs an answer. */
+    formBoxes: () => Array<{ label: string; open: boolean }>;
   }
 }
 
@@ -54,6 +62,9 @@ window.practice = async (answers, ways) => {
   return { scanned: fields.map((field) => `${field.type}: ${field.label}${field.section ? ` [${field.section}]` : ""}${field.format ? ` {${field.format}}` : ""}`), ...report, kept: kept.map((answer) => answer.label), holds: window.pageValues(), ms: Date.now() - started };
 };
 window.celebrate = celebrateSpiders;
+window.addEntries = addEntries;
+window.dropUnfoundSchools = async (failed) => [...(await dropUnfoundSchools(failed))];
+window.formBoxes = () => findBoxes().map((box) => ({ label: box.label, open: !answered(box.control, box.outline) }));
 window.next = async () => {
   const before = workdayStep();
   const action = findAction(false, scanFields().length);
