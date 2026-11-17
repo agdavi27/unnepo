@@ -57,6 +57,10 @@ export async function student(userId: string) {
   const pick = (typed: string | undefined, ...fallbacks: Array<string | undefined>) => typed?.trim() || fallbacks.find((value) => value?.trim())?.trim() || "";
   const profile: ApplicationProfile = {
     firstName: pick(stored?.firstName, firstName),
+    // Middle name, prefix and suffix are only ever the student's own: never guessed from the account name.
+    middleName: stored?.middleName?.trim() ?? "",
+    suffix: stored?.suffix?.trim() ?? "",
+    salutation: stored?.salutation?.trim() ?? "",
     lastName: pick(stored?.lastName, rest.join(" ")),
     email: pick(stored?.email, user.email),
     phone: pick(stored?.phone, fromResume.phone, fromParsed?.phone),

@@ -7,7 +7,7 @@ import { saveStructuredProfile } from "@/lib/services/workspace";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
 import { assertPublicUrl, setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { extractJob, extractRequirements, findPostedRecruiter, jobKeyFor, parseJobUrl } from "@/lib/apply/extract";
-import { acceptAiAnswer, classifyQuestion, headlineAnswer, missingAnswers, planAnswers, policyAnswer, RECRUITER_NOTE, toolExperienceAnswer } from "@/lib/apply/questions";
+import { acceptAiAnswer, classifyQuestion, headlineAnswer, isNameField, missingAnswers, planAnswers, policyAnswer, RECRUITER_NOTE, toolExperienceAnswer } from "@/lib/apply/questions";
 import { applicationProfiles, applications, applicationContacts } from "@/lib/apply/store";
 import { companyNames, coreTitle, departmentOf, domainFits, guessedDomains, postingDomains, siteDomain, swapAnd } from "@/lib/apply/contacts";
 import { extensionCoverLetter, pagePoster } from "@/lib/extension/service";
@@ -1062,6 +1062,25 @@ describe("questions from the latest round", () => {
     expect(name).toMatchObject({ answer: "Alex", source: "profile" });
     expect(initial).toMatchObject({ answer: "A" });
     expect(planAnswers([q("m", "Middle Name", "text")], context)[0].answer).toBeNull();
+  });
+
+  it("takes name parts from the profile in normal capitals, never from an old saved answer", () => {
+    const saved = {
+      "first name": { label: "First Name", answer: "DREW", updatedAt: "" },
+      "middle name": { label: "Middle Name", answer: "Drew", updatedAt: "" },
+      "preferred name": { label: "Preferred name", answer: "dj", updatedAt: "" },
+    };
+    const shouting = { ...context, profile: { ...profile, firstName: "DREW", lastName: "DAVIS", middleName: "ALEX", saved } };
+    const [first, middle, last, preferred] = planAnswers([q("f", "First Name"), q("m", "Middle Name"), q("l", "Last Name"), q("p", "Preferred Name")], shouting);
+    expect(first).toMatchObject({ answer: "Drew", source: "profile" });
+    expect(middle).toMatchObject({ answer: "Alex", source: "profile" });
+    expect(last.answer).toBe("Davis");
+    expect(preferred).toMatchObject({ answer: "Dj", source: "saved" });
+    // No middle name in the profile: blank, even with an old wrong answer saved.
+    expect(planAnswers([q("m", "Middle Name")], { ...context, profile: { ...profile, saved } })[0].answer).toBeNull();
+    expect(isNameField("Middle Name")).toBe(true);
+    expect(isNameField("Prefix")).toBe(true);
+    expect(isNameField("How Did You Hear About Us?")).toBe(false);
   });
 
   it("answers opt-into texting, phone country code, and current employer", () => {

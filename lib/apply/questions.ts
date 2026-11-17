@@ -350,9 +350,32 @@ export function headlineAnswer(label: string, context: AnswerContext, latestJob?
  * Fills what can be filled without guessing: contact fields, education, the resume file, and answers
  * the student saved before. Sensitive questions stay empty unless the student saved an answer.
  */
+/** A person's own name: the profile says it, never an old saved answer or the AI. */
+const NAME_FIELDS = new Set<StandardField>(["firstName", "middleName", "lastName", "fullName", "suffix", "salutation"]);
+
+/** A box for part of the student's name ("Middle Name", "Prefix"): only their profile fills it, or it stays empty. */
+export function isNameField(label: string) {
+  const field = classifyQuestion(label).field;
+  return Boolean(field && NAME_FIELDS.has(field));
+}
+
 export function planAnswers(questions: ApplicationQuestion[], context: AnswerContext) {
   return questions.map((question) => {
     if (question.answer && question.source === "student") return question;
+    const named = classifyQuestion(question.label).field;
+    if (named && NAME_FIELDS.has(named) && question.kind !== "file") {
+      // "Preferred name" can be the student's own saved answer; the legal name parts always come from the profile.
+      const preferred = /^preferred|^nickname/i.test(question.label.trim());
+      const saved = preferred ? context.profile.saved[normalizeLabel(question.label)] : null;
+      if (saved?.answer.trim()) return { ...question, answer: nameCase(saved.answer.trim()), source: "saved", evidence: null };
+      if (named === "suffix" && !context.profile.suffix?.trim()) {
+        const none = question.options.length ? question.options.find((option) => NO_SUFFIX.test(option.trim())) ?? null : question.kind === "select" ? "None" : null;
+        return { ...question, answer: none, source: none ? "default" : null, evidence: null };
+      }
+      const found = standardAnswer(named, context, question.label);
+      const answer = found ? (question.options.length ? matchOption(found.answer, question.options) : found.answer) : null;
+      return { ...question, answer, source: answer ? found!.source : null, evidence: null };
+    }
     // The same question the student answered before: worded the same, or worded differently on another site.
     const saved = context.profile.saved[normalizeLabel(question.label)] ?? similarSaved(question.label, context.profile.saved);
     if (saved) {

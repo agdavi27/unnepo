@@ -231,6 +231,40 @@ async function findChoice(list: () => HTMLElement[], answer: string, pick?: Choo
   return { item: null, choice: null, seen };
 }
 
+/** A choice that opens a group of more choices (Workday shows an arrow on it): "Job Boards" > "LinkedIn". */
+const GROUP = "[data-uxi-multiselectlistitem-hassidecharm='true'], .wd-icon-chevron-right-small";
+const isGroup = (el: HTMLElement) => Boolean((el.closest("[role=option]") ?? el).querySelector(GROUP));
+
+/**
+ * A list of groups with no choice of its own that fits (Workday's "How did you hear about us?": Agency Channels,
+ * Job Boards, Media…): each group is opened in turn and searched, and Workday's back arrow returns to the groups.
+ */
+async function inGroups(list: () => HTMLElement[], answer: string, pick?: ChooseOptions["pick"]) {
+  const names = [...new Set(list().filter(isGroup).map(optionText).filter(Boolean))].slice(0, 12);
+  for (const name of names) {
+    const group = list().find((el) => optionText(el) === name);
+    if (!group) continue;
+    // Workday opens a group from the label inside its row, not from the row itself.
+    press(group.querySelector<HTMLElement>("[data-automation-id='promptOption']") ?? group);
+    // Workday reuses the group rows for the choices inside, so the open list is read as it is now (leaving out
+    // another box's chosen pill, like the phone code's "United States of America (+1)"). Some groups load late.
+    const inside = () => visibleOptions().filter((el) => !names.includes(optionText(el)) && !el.closest("[data-automation-id='selectedItem']"));
+    const items = (await waitFor(() => (inside().length ? inside() : null), 2500)) ?? [];
+    await sleep(150);
+    const texts = items.map(optionText);
+    const choice = matchOption(answer, texts, pick);
+    if (choice) {
+      const item = items[texts.indexOf(choice)];
+      return { item: item.querySelector<HTMLElement>("[data-automation-id='promptOption']") ?? item, choice };
+    }
+    const back = await waitFor(() => Array.from(document.querySelectorAll<HTMLElement>("[data-automation-id='backButton']")).find((el) => el.getBoundingClientRect().height > 0) ?? null, 1500);
+    if (!back) break;
+    press(back);
+    await sleep(600);
+  }
+  return null;
+}
+
 /** Some lists open a second list under the choice (Workday's "How did you hear about us?" > "Job Board"). */
 async function nestedChoice(trigger: HTMLElement, answer: string, choice: string, before: Set<HTMLElement>, firstList: HTMLElement[], pick?: ChooseOptions["pick"]) {
   const nested = visibleOptions().filter((el) => !firstList.includes(el) && !before.has(el));
@@ -266,7 +300,11 @@ async function byClicking(trigger: HTMLElement, answer: string, options: ChooseO
   if (!found) throw notOpened(trigger, options, "the list didn't open");
   // Async lists (cities, schools) keep loading for a moment after the first result.
   if (options.type) await sleep(350);
-  const { item, choice, seen } = await findChoice(list, answer, options.pick);
+  const result = await findChoice(list, answer, options.pick);
+  const { seen } = result;
+  const grouped = result.item ? null : await inGroups(list, answer, options.pick);
+  const item = result.item ?? grouped?.item ?? null;
+  const choice = result.choice ?? grouped?.choice ?? null;
   if (!item || !choice) {
     close(trigger);
     throw new FillError(`no option matching "${answer}"`, "no_option", seen.slice(0, 100));
