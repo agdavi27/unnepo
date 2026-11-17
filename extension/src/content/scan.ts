@@ -1,5 +1,5 @@
 import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
-import { isDropdownInput } from "./dom";
+import { ADDRESS_LINE, isDropdownInput } from "./dom";
 import { QUICK_BOARDS } from "./quick-apply";
 import type { FieldType, PageField, Scan } from "../shared/types";
 
@@ -10,7 +10,7 @@ import type { FieldType, PageField, Scan } from "../shared/types";
  */
 
 // Required markers vary: "*", Lever's "✱", or the word itself.
-const clean = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").replace(/\b(select one|required)\b/gi, "").replace(/[*✱]/g, "").trim();
+const clean = (text: string | null | undefined) => (text ?? "").replace(/\s+/g, " ").replace(/\b(select one|required)\b/gi, "").replace(/[*✱]/g, "").replace(/\(\s*\)/g, "").replace(/\s+/g, " ").trim();
 const machine = (text: string) => !/\s/.test(text) && /[[\]_]/.test(text);
 const FORMAT_ONLY = /^(mm\/yyyy|mm\/dd\/yyyy|dd\/mm\/yyyy|yyyy|mm|month|year|select|search|choose|type to search|start typing)$/i;
 // The site's own controls around a form (its header, menus, footer, language and account switchers), never
@@ -104,6 +104,16 @@ function groupQuestion(el: HTMLInputElement) {
   return "";
 }
 
+/**
+ * A label's words without the control it wraps: Paylocity's <label> holds the whole dropdown, so its text reads
+ * "CountryUnited States" or "StateSelect a state". Only the parts that don't hold the control count.
+ */
+function labelWords(label: Element | null | undefined, el: HTMLElement) {
+  if (!label) return "";
+  if (!label.contains(el)) return label.textContent ?? "";
+  return Array.from(label.childNodes).filter((node) => !node.contains(el)).map((node) => node.textContent ?? "").join(" ");
+}
+
 /** The question a control asks. */
 export function questionText(el: HTMLElement): string {
   const type = (el.getAttribute("type") ?? "").toLowerCase();
@@ -113,10 +123,10 @@ export function questionText(el: HTMLElement): string {
   }
   const labelledBy = el.getAttribute("aria-labelledby");
   const direct = [
-    el.id ? rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent : "",
+    el.id ? labelWords(rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`), el) : "",
     labelledBy ? byIds(labelledBy, rootOf(el)) : "",
     el.closest("[data-automation-id^='formField']")?.querySelector("label")?.textContent,
-    type === "checkbox" ? "" : el.closest("label")?.textContent,
+    type === "checkbox" ? "" : labelWords(el.closest("label"), el),
     el.getAttribute("aria-label"),
     el.closest("fieldset")?.querySelector("legend")?.textContent,
   ].map(clean).find((text) => text && text.length > 1 && !machine(text));
@@ -151,7 +161,7 @@ export function sectionOf(el: Element) {
   return "";
 }
 
-const BLANK = /^(select( one)?(\.{1,3}|…)?|choose( one)?(\.{1,3}|…)?|please select|--.*|)$/i;
+const BLANK = /^((select|choose|pick)( one| an?( \w+){1,2}| your( \w+){1,2})?(\.{1,3}|…)?|please select|--.*|)$/i;
 
 /** Whether a control (or the group or wrapper it stands for) has no answer yet. */
 export function isEmpty(el: HTMLElement): boolean {
@@ -159,10 +169,11 @@ export function isEmpty(el: HTMLElement): boolean {
   if (el.tagName === "BUTTON" || boxDropdown(el)) return BLANK.test(clean(el.innerText));
   if (el instanceof HTMLSelectElement) return !el.value || BLANK.test(clean(el.selectedOptions[0]?.textContent));
   // A React select keeps its choice beside the input, which itself stays empty.
-  if (el.getAttribute("role") === "combobox") {
+  if (el.getAttribute("role") === "combobox" || isDropdownInput(el)) {
     let node = el.parentElement;
     for (let depth = 0; node && depth < 5; depth += 1, node = node.parentElement) {
-      if (node.querySelector("[class*='single-value'], [class*='multi-value'], [data-automation-id='selectedItem']")) return false;
+      const chosen = node.querySelector("[class*='single-value'], [class*='multi-value'], [data-automation-id='selectedItem']");
+      if (chosen) return BLANK.test(clean(chosen.textContent));
       if (node.querySelectorAll("[role=combobox]").length > 1) break;
     }
   }
@@ -185,6 +196,16 @@ function visible(el: Element) {
   const rect = el.getBoundingClientRect();
   return style.display !== "none" && style.visibility !== "hidden" && (rect.width > 0 || rect.height > 0);
 }
+
+/**
+ * The button a hidden file box is pressed through ("Upload Resume"), when it's on screen. Paylocity's "Apply with
+ * resume" popup is marked aria-hidden while it shows, so its box counts when its button can be seen.
+ */
+export function uploadButton(input: Element) {
+  const button = input.parentElement?.querySelector<HTMLElement>("button, [role=button], label");
+  return button && visible(button) ? button : null;
+}
+const uploadButtonShown = (input: Element) => Boolean(uploadButton(input));
 
 let counter = 0;
 function mark(el: Element) {
@@ -233,12 +254,16 @@ export function scanFields(): PageField[] {
     // Plain elements count only as dropdowns: a wrapper around the real control, or a menu, doesn't.
     if (!el.matches("input, select, textarea, button") && !dropdownButton) continue;
     if (el.getAttribute("aria-hidden") === "true" || /honeypot|bee-?catcher/i.test(`${el.getAttribute("name") ?? ""} ${el.getAttribute("data-automation-id") ?? ""}`)) continue;
-    if ((!dialog && el.closest("[aria-hidden='true']")) || el.id.startsWith("g-recaptcha")) continue;
+    // Cookie banners' switches (OneTrust) aren't questions.
+    if (el.closest("#onetrust-consent-sdk, #onetrust-pc-sdk, #CybotCookiebotDialog, [id*='cookie-banner' i], [class*='cookie-consent' i]")) continue;
+    if ((!dialog && el.closest("[aria-hidden='true']") && !(type === "file" && uploadButtonShown(el))) || el.id.startsWith("g-recaptcha")) continue;
     if (type !== "file" && type !== "radio" && type !== "checkbox" && !visible(el)) continue;
     // Bot traps: a box a person can't see (a pixel or two) or one whose label says to leave it empty. Never filled.
     if (type !== "file" && type !== "radio" && type !== "checkbox" && (el.getBoundingClientRect().width < 4 || el.getBoundingClientRect().height < 4)) continue;
     if (/robots? only|if you(?:'|’)?re (a )?human|leave (this|it) (field )?(blank|empty)|do not (fill|enter)/i.test(questionText(el as HTMLElement))) continue;
-    const required = el.hasAttribute("required") || el.getAttribute("aria-required") === "true" || Boolean(el.closest("[aria-required='true']")) || /[*✱]/.test(el.closest("label")?.textContent ?? (el.id ? rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent ?? "" : ""));
+    const labelText = el.closest("label")?.textContent ?? (el.id ? rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`)?.textContent ?? "" : "");
+    // Paylocity writes "First Name (required)" instead of marking the box.
+    const required = el.hasAttribute("required") || el.getAttribute("aria-required") === "true" || Boolean(el.closest("[aria-required='true']")) || /[*✱]|\(required\)/i.test(labelText);
     let fieldType: FieldType;
     let options: string[] = [];
     let target: HTMLElement = el;
@@ -275,6 +300,8 @@ export function scanFields(): PageField[] {
     const source = target === el ? el : (target.querySelector("input") as HTMLElement) ?? el;
     const label = fieldType === "multiselect" ? (clean(target.querySelector("legend")?.textContent) || questionText(source)) : questionText(el);
     if (!label || pageControl(el, label, fieldType === "combobox" || fieldType === "select")) continue;
+    // A street address box that suggests addresses takes typed text, not a pick from its list.
+    if (fieldType === "combobox" && el instanceof HTMLInputElement && ADDRESS_LINE.test(label)) fieldType = "text";
     const placeholder = el.getAttribute("placeholder") ?? "";
     // "From (Month)" and "From (Year)": the date it belongs to, then the part.
     const segment = dateSegment(el);

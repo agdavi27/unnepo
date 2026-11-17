@@ -370,6 +370,10 @@ describe("matching answers to dropdown options", () => {
     expect(bestOption("Yes", ["Yes, I am authorized to work in the US.", "No, I am not authorized"])).toBe("Yes, I am authorized to work in the US.");
     expect(bestOption("No", ["Yes, I will require sponsorship", "No, I will not require sponsorship"])).toBe("No, I will not require sponsorship");
     expect(bestOption("Yes", ["Yes.*", "No.*"])).toBe("Yes.*");
+    // US states and their codes, either way round (Paylocity's State list is codes).
+    expect(bestOption("Maine", ["AL", "AK", "MA", "ME", "MI"])).toBe("ME");
+    expect(bestOption("New York", ["NJ", "NM", "NY", "NC"])).toBe("NY");
+    expect(bestOption("ME", ["Maine", "Maryland", "Massachusetts"])).toBe("Maine");
     expect(bestOption("No", ["Not applicable", "None"])).toBeNull();
     expect(bestOption("Yes", ["Yes - full time", "Yes - part time"])).toBeNull();
   });

@@ -9,6 +9,21 @@ const OPTION_ALIASES: Record<string, string[]> = {
   "uk": ["united kingdom", "great britain"],
 };
 
+/** US states and their codes, so "Maine" picks "ME" from a list of codes (Paylocity) and "ME" picks "Maine". */
+const US_STATES: Record<string, string> = {
+  alabama: "al", alaska: "ak", arizona: "az", arkansas: "ar", california: "ca", colorado: "co", connecticut: "ct", delaware: "de",
+  "district of columbia": "dc", florida: "fl", georgia: "ga", hawaii: "hi", idaho: "id", illinois: "il", indiana: "in", iowa: "ia",
+  kansas: "ks", kentucky: "ky", louisiana: "la", maine: "me", maryland: "md", massachusetts: "ma", michigan: "mi", minnesota: "mn",
+  mississippi: "ms", missouri: "mo", montana: "mt", nebraska: "ne", nevada: "nv", "new hampshire": "nh", "new jersey": "nj",
+  "new mexico": "nm", "new york": "ny", "north carolina": "nc", "north dakota": "nd", ohio: "oh", oklahoma: "ok", oregon: "or",
+  pennsylvania: "pa", "rhode island": "ri", "south carolina": "sc", "south dakota": "sd", tennessee: "tn", texas: "tx", utah: "ut",
+  vermont: "vt", virginia: "va", washington: "wa", "west virginia": "wv", wisconsin: "wi", wyoming: "wy", "puerto rico": "pr",
+};
+for (const [name, code] of Object.entries(US_STATES)) {
+  OPTION_ALIASES[name] = [...(OPTION_ALIASES[name] ?? []), code];
+  OPTION_ALIASES[code] = [...(OPTION_ALIASES[code] ?? []), name];
+}
+
 /** Lowercase, single spaces, no required-markers or trailing punctuation: "Yes.*" and "yes" are the same. */
 const normal = (text: string) => text.replace(/\u00a0/g, " ").replace(/[‘’`]/g, "'").replace(/[*✱]/g, "").replace(/\s+/g, " ").trim().replace(/[.:;!,]+$/, "").trim().toLowerCase();
 
