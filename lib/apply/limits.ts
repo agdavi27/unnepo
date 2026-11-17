@@ -7,7 +7,7 @@ import { effectivePlan, trialEndedAt, trialFor, type StoredPlan } from "@/lib/pl
 import { isAdminEmail } from "@/lib/services/auth";
 
 /**
- * Plan limits. Free has a few cover letters, answers, written emails and full autofills each day, and
+ * Plan limits. Free has a few cover letters, answers and written emails each day (autofill has no limit), and
  * FREE_UNLOCKS_PER_DAY unlocks: the best person at a company, each at a different company, whatever credits it has
  * (the trial spends its credits on whole lists); Pro's writing has no limit, only a hidden monthly guard (PRO_AI_LIMIT)
  * against scripts, and its people are PRO_PEOPLE_LIMIT companies a month, which the student sees. Days, weeks (from Monday) and months are counted in Eastern time, so they turn over at midnight
@@ -98,7 +98,6 @@ function usesNote(kind: CountedKind, left: number, free: boolean, cap: number) {
   if (left > 0) return free && left === 1 && kind !== "people" ? `Only 1 ${one} left today` : "";
   if (!free && kind === "people") return `You've used this month's ${cap} companies. Pro finds people at ${cap} companies a month; more on the 1st.`;
   if (!free) return `That's a lot of ${many} this month (${cap}). More on the 1st, or write to us if you need more sooner.`;
-  if (kind === "autofills") return `Today's ${FREE_LIMITS.autofills} full autofills are used. Autofill still fills your basic details; Pro answers the questions too, with no limit.`;
   return `No ${many} left today. More tomorrow, or Pro has no limit.`;
 }
 
@@ -122,15 +121,16 @@ export async function planUsage(userId: string) {
   const weekly = (kind: CountedKind) => (uses?.week === week ? uses.weekly?.[kind] : 0) ?? 0;
   const monthly = (kind: CountedKind) => (uses?.month === month ? uses.monthly?.[kind] : 0) ?? 0;
   const one = (kind: UsageKind) => {
-    const used = free ? daily(kind) : monthly(kind);
-    const limit = free ? FREE_LIMITS[kind] : fairUse;
+    // Autofill has no limit on any plan: Free gets Pro's hidden fair-use guard against scripts, counted by the month.
+    const byDay = free && kind !== "autofills";
+    const used = byDay ? daily(kind) : monthly(kind);
+    const limit = byDay ? FREE_LIMITS[kind] : fairUse;
     const left = Math.max(0, limit - used);
-    return { used, limit, left, note: usesNote(kind, left, free, limit), badge: free ? `${left} left today` : "Unlimited" };
+    return { used, limit, left, note: usesNote(kind, left, byDay, limit), badge: byDay ? `${left} left today` : "Unlimited" };
   };
   const [letters, answers, emails] = [one("letters"), one("answers"), one("emails")];
-  // Free's full autofills (the questions answered too) are counted; after them it fills the basic details, with no limit.
-  const fills = one("autofills");
-  const autofills = { ...fills, basic: free && fills.left === 0, badge: free && fills.left === 0 ? "Basic only today" : fills.badge };
+  // Every autofill answers the questions too; `basic` (only the student's details) is never on now.
+  const autofills = { ...one("autofills"), basic: false };
   const credits = account?.balance ?? 0;
   const people = (() => {
     if (shownUnlimited) return { used: 0, left: 999, allowance: 999, credits, paid: true, note: "", badge: "Unlimited", limit: null as number | null, per: null as "today" | "this month" | null };
@@ -184,7 +184,7 @@ export async function peopleNote(userId: string) {
 /** Before an AI use: stops at the plan's number. */
 export async function assertUseAllowed(userId: string, kind: UsageKind) {
   const usage = await planUsage(userId);
-  // Free out of full autofills still fills the basic details, which has no limit.
+  // `basic` is never on now that autofill has no limit; kept for older extensions that read it.
   if (kind === "autofills" && usage.autofills.basic) return;
   if (usage[kind].left === 0) throw new ServiceError(usage[kind].note, kind, usage.free ? 402 : 429);
 }

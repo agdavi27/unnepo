@@ -505,7 +505,8 @@ describe("plan limits", () => {
     expect(usage.credits).toBe(22);
     // Each tool's box shows what's left today in its corner.
     expect(usage.letters).toMatchObject({ left: 3, badge: "3 left today", note: "" });
-    expect(usage.autofills).toMatchObject({ left: 3, basic: false, badge: "3 left today" });
+    // Autofill has no limit on Free.
+    expect(usage.autofills).toMatchObject({ basic: false, badge: "Unlimited", note: "" });
     expect(usage.emails).toMatchObject({ left: 3, badge: "3 left today" });
     expect(usage.people).toMatchObject({ left: 2, note: "", badge: "2 of 2 unlocks left today" });
     await repo.setAccountForTests(userId, { balance: 0 });
@@ -577,7 +578,7 @@ describe("Free and the Pro trial", () => {
     { id: "f4", label: "Resume", type: "file", required: true },
   ];
 
-  it("answers the questions in Free's 5 full autofills a day, then fills only the basic fields and says which questions Pro would answer", async () => {
+  it("answers the questions in every autofill on Free, with no daily limit", async () => {
     const userId = await readyStudent();
     process.env.ANTHROPIC_API_KEY = "anthropic";
     const { token } = await issueExtensionToken(userId);
@@ -593,17 +594,15 @@ describe("Free and the Pro trial", () => {
     expect(full.locked).toEqual([]);
     expect(full.answers.find((item: { id: string }) => item.id === "f2").source).toBe("ai");
 
-    // Today's 5 used: the basic fields from the student's details, and the questions Pro would answer.
+    // Well past the old 3 a day, the questions are still answered.
     const ok = [{ site: "example.com", label: "First name", type: "text", answer: "Pat", method: "value", ok: true }];
-    for (let n = 10; n < 15; n += 1) await call("POST", "attempts", token, { applicationId: await job(n), attempts: ok });
+    for (let n = 10; n < 18; n += 1) await call("POST", "attempts", token, { applicationId: await job(n), attempts: ok });
     const out = (await (await call("GET", "me", token)).json()).usage.autofills;
-    expect(out).toMatchObject({ left: 0, basic: true, badge: "Basic only today" });
-    const calls = model.calls;
-    const basic = await (await call("POST", "map", token, { applicationId: await job(20), fields })).json();
-    expect(model.calls).toBe(calls);
-    expect(basic.answers.find((item: { id: string }) => item.id === "f1").values).toEqual(["Pat"]);
-    expect(basic.locked.map((item: { id: string }) => item.id)).toEqual(["f2", "f3"]);
-    expect(basic.aiAvailable).toBe(false);
+    expect(out).toMatchObject({ used: 8, basic: false, badge: "Unlimited" });
+    const later = await (await call("POST", "map", token, { applicationId: await job(20), fields })).json();
+    expect(later.locked).toEqual([]);
+    expect(later.aiAvailable).not.toBe(false);
+    expect(later.answers.find((item: { id: string }) => item.id === "f2").values?.[0] ?? later.answers.find((item: { id: string }) => item.id === "f2").value).toContain("Colby Data Club");
   });
 
   const letterText = "Dear Hiring Team,\n\nI am a Colby College student studying Economics, and I led the Colby Data Club, where I built dashboards for 40 students. I would bring the same care and steady habits to the team at Northwind.\n\nSincerely,\nPat Doe";
