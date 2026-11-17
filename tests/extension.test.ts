@@ -13,7 +13,7 @@ import { GET, OPTIONS, POST } from "@/app/api/[...slug]/route";
 import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
-import { nationalNumber } from "@/extension/src/content/generic";
+import { boardFromLink, nationalNumber } from "@/extension/src/content/generic";
 import { boardEmployerName, boardJobName, jobLink, titleParts, ukgCompanyFrom } from "@/extension/src/content/scan";
 import { ADDRESS_LINE } from "@/extension/src/content/dom";
 import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
@@ -882,6 +882,12 @@ describe("one link per job", () => {
     // Street address boxes that suggest addresses are typed into; other "address" questions aren't.
     for (const label of ["Address Line 1", "Address Line 2(optional)", "Street Address", "Address", "Home Address", "Address 1"]) expect(ADDRESS_LINE.test(label), label).toBe(true);
     for (const label of ["Email Address", "Country", "City", "IP address", "Web address"]) expect(ADDRESS_LINE.test(label), label).toBe(false);
+    // "How did you hear about us?": the board the job link names.
+    expect(boardFromLink("?source=LinkedIn")).toBe("LinkedIn");
+    expect(boardFromLink("?utm_source=indeed&x=1")).toBe("Indeed");
+    expect(boardFromLink("?source=Linkedin_Feed")).toBe("LinkedIn");
+    expect(boardFromLink("?source=careers_page")).toBeNull();
+    expect(boardFromLink("")).toBeNull();
   });
 });
 

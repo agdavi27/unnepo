@@ -30,8 +30,9 @@ function asksFor(input: HTMLInputElement): Kind | null {
   // Its own label can be just the button's word ("Attach" on Greenhouse), which decides nothing: then the words around it do.
   const ownKind = own.trim() ? kindIn(own) : null;
   if (ownKind) return ownKind === "other" ? null : ownKind;
+  // Workday's "Autofill with Resume" names the resume seven wrappers up from its hidden box, above "Drop file here".
   let box: HTMLElement | null = input.parentElement;
-  for (let depth = 0; box && depth < 5; depth++, box = box.parentElement) {
+  for (let depth = 0; box && depth < 9; depth++, box = box.parentElement) {
     const text = (box.innerText || "").replace(/\s+/g, " ").trim();
     if (text.length > 300) break;
     const kind = kindIn(text);

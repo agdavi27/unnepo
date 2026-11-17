@@ -302,12 +302,32 @@ let stopAsked = false;
 export const stopFilling = () => { stopAsked = true; };
 export const fillStopped = () => stopAsked;
 
+const HEARD = /how did you (hear|find out|learn)|where did you (hear|find|see)|^source$/i;
+const BOARDS: Record<string, string> = { linkedin: "LinkedIn", indeed: "Indeed", handshake: "Handshake", glassdoor: "Glassdoor", ziprecruiter: "ZipRecruiter", wellfound: "Wellfound", simplify: "Simplify", monster: "Monster", dice: "Dice" };
+
+/** The job board the job link says the student came from ("…/apply?source=LinkedIn"), if it names one. */
+export function boardFromLink(search: string) {
+  const params = new URLSearchParams(search);
+  const raw = ["source", "src", "utm_source", "gh_src", "s"].map((key) => params.get(key) ?? "").find(Boolean) ?? "";
+  const key = Object.keys(BOARDS).find((board) => raw.toLowerCase().replace(/[^a-z]/g, "").startsWith(board));
+  return key ? BOARDS[key] : null;
+}
+
+/** "How did you hear about us?" left at Unnepo's guess: the board in the job link is the true answer. */
+function withBoard(answer: Answer): Answer {
+  // "Company website" is Unnepo's own guess when the student hasn't said; the server marks it as from the profile.
+  const guessed = answer.source === "default" || /^company website$/i.test(answer.values[0]?.trim() ?? "");
+  if (!guessed || !HEARD.test(answer.label.trim())) return answer;
+  const board = boardFromLink(location.search);
+  return board ? { ...answer, values: [board], source: "page" } : answer;
+}
+
 export async function fillGeneric(fields: PageField[], answers: Answer[], files: { resume: FileData | null; coverLetter: FileData | null }, options: { dropdownFirst?: DropdownMethod; dropdownWays?: DropdownMethod[] } = {}) {
   stopAsked = false;
   const filled: string[] = [];
   const failed: FillFailure[] = [];
   const attempts: FillAttempt[] = [];
-  const byId = new Map(answers.map((answer) => [answer.id, answer]));
+  const byId = new Map(answers.map((answer) => [answer.id, withBoard(answer)]));
   // Uploads go first: many sites read the resume and fill fields from it, which would overwrite answers
   // typed before it finished.
   const ordered = [...fields.filter((field) => field.type === "file"), ...fields.filter((field) => field.type !== "file")];

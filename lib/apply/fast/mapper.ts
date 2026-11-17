@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { acceptFixes, type EmptyField } from "@/lib/apply/fast/fields";
 import { bestOption } from "@/lib/apply/options";
-import { WRITING_STYLE, answerChoices, askedLength, fitsLength, lengthGap, plainWriting, shortAnswer, wordCount } from "@/lib/apply/questions";
+import { WRITING_STYLE, answerChoices, askedLength, fitsLength, isNameField, lengthGap, plainWriting, shortAnswer, wordCount } from "@/lib/apply/questions";
 import type { FormSchema, SchemaField } from "@/lib/apply/fast/schema";
 
 /**
@@ -93,7 +93,11 @@ export async function mapAnswers(input: MapperInput) {
       if (field.id === "cover_letter") answers.set(field.id, { id: field.id, values: ["Cover letter written from your resume"], source: "cover_letter", why: null });
       continue;
     }
-    const known = input.known(field);
+    // A part of the student's name never comes from the AI (or an old AI answer): blank stays blank.
+    const ownName = isNameField(field.label);
+    const found = input.known(field);
+    const known = ownName && found?.source === "ai" ? null : found;
+    if (ownName && !known) continue;
     if (known) {
       // A single checkbox's only choice is "Yes"; "No" from the resume ("I currently work here" on a past job)
       // still counts, so the box gets unticked instead of left to the AI.
