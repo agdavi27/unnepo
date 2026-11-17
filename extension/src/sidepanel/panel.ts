@@ -368,15 +368,10 @@ const withCost = (label: string, kind: "letters" | "answers" | "autofills") => {
 
 /** The count in a tool box's top-right corner: "4 left today" on Free, "Unlimited" on Pro. */
 const toolCount = (line?: { left: number; badge?: string }) => (line?.badge ? `<span class="tool-count${line.left === 0 ? " out" : ""}">${escape(line.badge)}</span>` : "");
-/**
- * Autofill, in beta: fills the application on this tab from the profile and stops at Submit (unless Me says
- * otherwise). Only offered on a job page; everywhere else it says where to go.
- */
-function autofillTool(state: PanelState) {
-  const ready = jobFound(state) && !state.job?.running && Boolean(state.me?.profileReady);
-  const why = !state.me?.profileReady ? "Finish your profile first" : jobFound(state) ? "Fills this application" : "Open an application first";
-  return `<button type="button" class="tile autofill-tool" id="beta-fill" ${ready ? "" : "disabled"}>
-      ${SPARK}<span class="tile-text"><span class="tile-name">Autofill <span class="beta">Beta</span></span><span class="tile-sub">${why}</span></span>
+/** Make spider dance: the spider in the corner comes down to the middle and dances, with the panel blurred behind him. */
+function danceTool() {
+  return `<button type="button" class="tile" id="spider-dance">
+      ${miniSpiderSvg(22, spiderLook, theme() === "light")}<span class="tile-text"><span class="tile-name">Make spider dance</span><span class="tile-sub">Just for fun</span></span>
     </button>`;
 }
 
@@ -384,7 +379,7 @@ function autofillTool(state: PanelState) {
 const tileCount = (line?: { left: number; badge?: string }) => (line?.badge ? `<span class="tile-sub${line.left === 0 ? " out" : ""}">${escape(line.badge)}</span>` : "");
 
 /**
- * The tools as four tiles, every one a tap away: a cover letter, answering a question, Autofill and adding a job
+ * The tools as four tiles, every one a tap away: a cover letter, answering a question, Make spider dance and adding a job
  * (a small popup with the jobs Unnepo caught and a form for one it didn't). Under them, the resume and password.
  */
 function toolsPage(state: PanelState) {
@@ -394,7 +389,7 @@ function toolsPage(state: PanelState) {
       <div class="tiles">
         <button type="button" class="tile" data-popup="cover">${SPARK}<span class="tile-text"><span class="tile-name">Cover letter</span>${tileCount(state.me?.usage?.letters)}</span></button>
         <button type="button" class="tile" data-popup="answer">${SPARK}<span class="tile-text"><span class="tile-name">Answer a question</span>${tileCount(state.me?.usage?.answers)}</span></button>
-        ${autofillTool(state)}
+        ${danceTool()}
         <button type="button" class="tile add-tile" data-popup="addjob">${PLUS}<span class="tile-text"><span class="tile-name">Add a job</span><span class="tile-sub${asking ? " out" : ""}">${asking ? `${asking} detected` : "Log one you applied to"}</span></span></button>
       </div>
       ${manualJob.note && !popup ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
@@ -1862,6 +1857,63 @@ function travel(from: Spot, to: Spot, ms: number, landed: () => void) {
   requestAnimationFrame(frame);
 }
 const stillMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/**
+ * Make spider dance: the spider in the corner goes down his thread to the middle of the panel, which blurs behind
+ * him, grows, dances (hops, sways, spins, singing), then shrinks and climbs back up. A tap or Escape ends it early.
+ */
+const DANCE_MS = 5200;
+function spiderDance() {
+  const { classList } = document.body;
+  if (classList.contains("spider-dancing") || (lastState && isRunning(lastState))) return;
+  classList.add("spider-dancing", "spider-away");
+  const stage = document.createElement("div");
+  stage.className = "dance-stage";
+  stage.setAttribute("role", "img");
+  stage.setAttribute("aria-label", "The Unnepo spider dancing");
+  stage.innerHTML = `<div class="dance-notes" aria-hidden="true">${["♪", "♫", "♪", "♬", "♫", "♪"].map((note, index) => `<span style="--i:${index}">${note}</span>`).join("")}</div>`
+    + `<div class="dancer" aria-hidden="true"><div class="dance-moves">${document.querySelector("#spider svg")!.outerHTML}</div></div>`;
+  document.body.append(stage);
+  const dancer = stage.querySelector<HTMLElement>(".dancer")!;
+  const hero = heroRect();
+  const middle = { left: Math.round((window.innerWidth - hero.width) / 2), top: Math.round((window.innerHeight - hero.height) / 2), width: hero.width, height: hero.height };
+  dancer.style.left = `${middle.left}px`;
+  dancer.style.top = `${middle.top}px`;
+  let sing = 0;
+  let done = false;
+  let timer = 0;
+  requestAnimationFrame(() => stage.classList.add("on"));
+  const start = () => {
+    dancer.classList.add("here");
+    requestAnimationFrame(() => dancer.classList.add("big", "go"));
+    sing = window.setInterval(() => dancer.classList.toggle("sing"), 260);
+    timer = window.setTimeout(finish, stillMotion ? 2400 : DANCE_MS);
+  };
+  const finish = () => {
+    if (done) return;
+    done = true;
+    window.clearTimeout(timer);
+    window.clearInterval(sing);
+    removeEventListener("keydown", onKey);
+    dancer.classList.remove("go", "sing", "big");
+    stage.classList.remove("on");
+    const back = () => {
+      stage.remove();
+      classList.remove("spider-dancing", "spider-away");
+    };
+    if (stillMotion) return void window.setTimeout(back, 250);
+    // Shrunk back to his size, then up his thread to the corner.
+    window.setTimeout(() => {
+      dancer.classList.remove("here");
+      travel(middle, heroRect(), 700, back);
+    }, 260);
+  };
+  const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") finish(); };
+  addEventListener("keydown", onKey);
+  stage.addEventListener("click", finish);
+  if (stillMotion) start();
+  else travel(hero, middle, 800, start);
+}
 /** The last tab drawn and whether it was filling, to tell a fill starting from just opening one that's going. */
 let lastFill: { tab: number | undefined; running: boolean; shown: boolean } | null = null;
 function moveSpider(state: PanelState, shown: boolean, wasAt: Spot | null) {
@@ -2055,14 +2107,7 @@ function draw(state: PanelState): boolean {
     setTimeout(() => { if (fillPending === tabId) { fillPending = null; void render(); } }, 5000);
     void render();
   });
-  document.getElementById("beta-fill")?.addEventListener("click", () => {
-    const tabId = state.tab!.id;
-    fillPending = tabId;
-    void ask({ type: "fill", tabId, beta: true });
-    setTimeout(() => { if (fillPending === tabId) { fillPending = null; void render(); } }, 5000);
-    // The spider types on his laptop on Week while it fills.
-    go("home");
-  });
+  document.getElementById("spider-dance")?.addEventListener("click", () => spiderDance());
   document.getElementById("stop")?.addEventListener("click", () => {
     fillPending = null;
     void ask({ type: "stop", tabId: state.tab!.id });

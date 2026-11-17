@@ -149,6 +149,40 @@ details.part .view { padding: 12px 0 0; }
 .rappel-spider svg { display: block; width: 60px; height: 51px; }
 .rappel-spider .mouth-open { display: none; }
 
+/* Make spider dance: the panel blurs, the spider comes down to the middle and dances. */
+.dance-stage { position: fixed; inset: 0; z-index: 9; overflow: hidden; cursor: pointer; background: color-mix(in srgb, var(--bg, #070708) 35%, transparent); backdrop-filter: blur(0); -webkit-backdrop-filter: blur(0); opacity: 0; transition: opacity .3s, backdrop-filter .3s, -webkit-backdrop-filter .3s; }
+.dance-stage.on { opacity: 1; backdrop-filter: blur(7px); -webkit-backdrop-filter: blur(7px); }
+.dancer { position: absolute; visibility: hidden; transition: transform .3s cubic-bezier(.3, 1.6, .5, 1); }
+.dancer.here { visibility: visible; }
+.dancer { transition: transform .45s cubic-bezier(.3, 1.5, .5, 1); }
+/* He hangs upside down on his thread; for the dance he flips onto his feet. */
+.dancer.big { transform: scale(2.6) rotate(180deg); }
+.dancer svg { display: block; width: 60px; height: 51px; filter: drop-shadow(1px 2px 0 rgba(0, 0, 0, .25)); }
+.dancer .mouth-open, .dancer .mouth-angry { display: none; }
+.dancer.sing .mouth-open { display: inline; }
+.dancer.sing .mouth-shut { display: none; }
+.dancer.go .dance-moves { animation: spider-dance 1.3s steps(1, end) infinite; transform-origin: 50% 90%; }
+@keyframes spider-dance {
+  0%   { transform: translate(0, 0) rotate(0); }
+  12%  { transform: translate(-6px, -8px) rotate(-12deg); }
+  25%  { transform: translate(-8px, 0) rotate(-6deg) scaleY(.9); }
+  37%  { transform: translate(0, -12px) rotate(0); }
+  50%  { transform: translate(8px, 0) rotate(6deg) scaleY(.9); }
+  62%  { transform: translate(6px, -8px) rotate(12deg); }
+  75%  { transform: translate(0, 0) scaleX(-1); }
+  87%  { transform: translate(0, -10px) scaleX(-1) rotate(-8deg); }
+  100% { transform: translate(0, 0) rotate(0); }
+}
+.dance-notes { position: absolute; inset: 0; pointer-events: none; }
+.dance-notes span { position: absolute; left: calc(14% + var(--i) * 14%); bottom: 22%; font: 700 22px/1 Geist, sans-serif; color: var(--accent, #3D8BFF); opacity: 0; }
+.dance-stage.on .dance-notes span { animation: note-float 2.4s ease-out calc(var(--i) * .35s + .6s) infinite; }
+@keyframes note-float { 0% { transform: translateY(0) rotate(-10deg); opacity: 0; } 15% { opacity: 1; } 100% { transform: translateY(-46vh) rotate(14deg); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .dancer, .dance-stage { transition: none; }
+  .dancer.go .dance-moves { animation: none; }
+  .dance-stage.on .dance-notes span { animation: none; opacity: .8; transform: translateY(-30vh); }
+}
+
 /* The tools: two big buttons, and the rest small */
 /* Room above the buttons, so they sit as far from the spider's line as from the panel's sides. */
 .tools { flex: none; display: flex; flex-direction: column; gap: 10px; min-width: 0; padding-top: 16px; }
