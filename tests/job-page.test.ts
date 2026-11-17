@@ -6,6 +6,8 @@ describe("isJobPage", () => {
     expect(isJobPage({ url: "https://boards.greenhouse.io/stripe/jobs/123" })).toBe(true);
     expect(isJobPage({ url: "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Boston/Analyst_R1" })).toBe(true);
     expect(isJobPage({ url: "https://app.joinhandshake.com/stu/jobs/9" })).toBe(true);
+    // UKG Pro Recruiting's new address (UltiPro's old one is ultipro.com).
+    expect(isJobPage({ url: "https://snp98.rec.pro.ukg.net/JAK1500JAKO/JobBoard/74f2e917-c09c-454b-b413-e11f7a62bf4b/OpportunityApply?opportunityId=5777cb78-b281-4c79-a8e7-6a396f0b992c" })).toBe(true);
     // LinkedIn: only a job it has open, never the feed or a search with no job picked.
     expect(isJobPage({ url: "https://www.linkedin.com/jobs/view/4012345678/" })).toBe(true);
     expect(isJobPage({ url: "https://www.linkedin.com/jobs/search/?currentJobId=4012345678&keywords=intern" })).toBe(true);
