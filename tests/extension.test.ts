@@ -14,6 +14,7 @@ import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { boardFromLink, nationalNumber } from "@/extension/src/content/generic";
+import { selfIdentifiedOption } from "@/lib/apply/questions";
 import { boardEmployerName, boardJobName, jobLink, titleParts, ukgCompanyFrom } from "@/extension/src/content/scan";
 import { ADDRESS_LINE } from "@/extension/src/content/dom";
 import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
@@ -1077,5 +1078,30 @@ describe("Workday My Experience", () => {
     expect([got["e-0"], got["e-2"], got["e-3"], got["e-4"]]).toEqual(["Colby College", "Economics", "2023", "2027"]);
     expect(got["e-1"]).toBeTruthy();
     expect(got.web).toBe("https://linkedin.com/in/patdoe");
+  });
+});
+
+describe("Workday Voluntary Disclosures", () => {
+  it("answers self-ID lists whose choices only show once opened, in Workday's own words", async () => {
+    const userId = await readyStudent();
+    await saveStudentProfile(userId, { profile: { eeo: { gender: "man", race: "white", hispanicLatino: "no", veteran: "not_protected", disability: "decline" } } });
+    const { token } = await issueExtensionToken(userId);
+    const labels = ["Please select the ethnicity which most accurately describes how you identify yourself:", "Please select you gender:", "Are you Hispanic or Latino? (Optional)", "Please select the veteran status which most accurately describes how you identify yourself:", "Please indicate if you have a disability"];
+    const fields = labels.map((label, i) => ({ id: `d${i}`, label, type: "combobox", options: [], required: true, section: "Voluntary Disclosures", format: null }));
+    const response = await call("POST", "quick-fill", token, { fields, company: "Omnicom", title: "Assistant Media Planner" });
+    const { answers } = (await response.json()) as { answers: Array<{ id: string; values: string[] }> };
+    const sent = answers.map((answer) => answer.values[0]);
+    expect(sent).toEqual(["White", "Man", "No", "I am not a veteran", "Decline to answer"]);
+    // The page's lists, as Workday shows them once opened.
+    const lists = [
+      ["Select One", "American Indian or Alaska Native (United States of America)", "Asian (not including South Asian) (United States of America)", "Black or African American (United States of America)", "Hispanic or Latinx (non-white) (United States of America)", "South Asian (United States of America)", "Two or More Races or Ethnicities (United States of America)", "White (United States of America)"],
+      ["Select One", "Female", "Male"],
+      ["Select One", "Yes", "No"],
+      ["Select One", "I AM NOT A VETERAN", "IDENTIFY AS A VETERAN, JUST NOT A PROTECTED VETERAN", "IDENTIFY AS ONE OR MORE OF THE CLASSIFICATIONS OF PROTECTED VETERANS", "I DO NOT WISH TO SELF-IDENTIFY"],
+      ["Select One", "Yes, I have a disability", "No, I do not have a disability", "I do not want to answer"],
+    ];
+    expect(labels.map((label, i) => selfIdentifiedOption(label, sent[i], lists[i]))).toEqual(["White (United States of America)", "Male", "No", "I AM NOT A VETERAN", "I do not want to answer"]);
+    // Nothing to decline with on a list that has no decline: left for the student.
+    expect(selfIdentifiedOption(labels[1], "Decline to answer", lists[1])).toBeNull();
   });
 });

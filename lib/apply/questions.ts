@@ -186,27 +186,51 @@ function standardAnswer(field: StandardField, context: AnswerContext, label = ""
 }
 
 export const DEMOGRAPHIC = /\b(gender|sex|race|racial|ethnic|ethnicity|hispanic|latin[oax]|veteran|disabilit|sexual orientation|transgender|lgbt)/i;
-export const DECLINE = /(decline|prefer not|don['’]?t wish|do not wish|not to (say|answer|disclose|self-identify)|choose not|rather not|i don['’]?t want to answer)/i;
+export const DECLINE = /(decline|prefer not|don['’]?t (wish|want) to|do not (wish|want) to|not to (say|answer|disclose|self-identify)|choose not|rather not)/i;
 
 /** The words forms use for each self-identification choice in the student profile. */
 const EEO_WORDS: Record<string, string[]> = {
   woman: ["Woman", "Female"], man: ["Man", "Male"], non_binary: ["Non-binary", "Nonbinary"], other: ["Another gender", "Other"],
   american_indian: ["American Indian or Alaska Native"], asian: ["Asian"], black: ["Black or African American", "Black"], pacific_islander: ["Native Hawaiian or Other Pacific Islander"],
   white: ["White"], two_or_more: ["Two or More Races", "Two or more races"],
-  yes: ["Yes"], no: ["No"], not_protected: ["I am not a protected veteran", "Not a protected veteran"], protected: ["I identify as one or more of the classifications of a protected veteran", "Protected veteran"],
+  // Most students aren't veterans at all: "I am not a veteran" first where the list tells the two apart (Workday).
+  yes: ["Yes"], no: ["No"], not_protected: ["I am not a veteran", "Not a veteran", "I am not a protected veteran", "Not a protected veteran"],
+  protected: ["I identify as one or more of the classifications of a protected veteran", "Identify as one or more of the classifications of protected veterans", "Protected veteran"],
 };
 
 const HISPANIC = /hispanic|latin[oax]/i;
 const NOT_HISPANIC = /\b(not|non)[\s-]+(hispanic|latin)|^no\b.*(hispanic|latin)/i;
 
+/** Which self-ID question a label asks. "Ethnicity" with "Hispanic or Latino" and "Not Hispanic or Latino" is the Hispanic or Latino question. */
+function eeoKey(label: string, options: string[]) {
+  const hispanicChoice = options.some((option) => HISPANIC.test(option) && !NOT_HISPANIC.test(option)) && options.some((option) => NOT_HISPANIC.test(option));
+  return /veteran/i.test(label) ? "veteran" : /disabilit/i.test(label) ? "disability" : /hispanic|latin/i.test(label) || hispanicChoice ? "hispanicLatino" : /race|ethnic/i.test(label) ? "race" : /gender|\bsex\b/i.test(label) ? "gender" : null;
+}
+
 function selfIdentified(label: string, options: string[], profile: ApplicationProfile) {
   const eeo = profile.student?.eeo;
   if (!eeo) return null;
-  // "Ethnicity" with "Hispanic or Latino" and "Not Hispanic or Latino" is the Hispanic or Latino question, whatever its label.
-  const hispanicChoice = options.some((option) => HISPANIC.test(option) && !NOT_HISPANIC.test(option)) && options.some((option) => NOT_HISPANIC.test(option));
-  const key = /veteran/i.test(label) ? "veteran" : /disabilit/i.test(label) ? "disability" : /hispanic|latin/i.test(label) || hispanicChoice ? "hispanicLatino" : /race|ethnic/i.test(label) ? "race" : /gender|\bsex\b/i.test(label) ? "gender" : null;
+  const key = eeoKey(label, options);
   const value = key ? eeo[key as keyof typeof eeo] : "";
   if (!value || value === "decline") return null;
+  if (!options.length) return EEO_WORDS[value]?.[0] ?? null;
+  return eeoOption(key!, value, options);
+}
+
+/**
+ * A self-ID answer as the site's list words it: the student's choice ("White", "I am not a veteran") or, for
+ * "Decline to answer", the list's own decline. Workday's lists only show their choices once opened, so the page
+ * matches the answer here with the choices in front of it. Null when the list has nothing that fits.
+ */
+export function selfIdentifiedOption(label: string, answer: string, options: string[]) {
+  const choices = options.filter((option) => option.trim() && !/^select\b/i.test(option.trim()));
+  if (DECLINE.test(answer)) return choices.find((option) => DECLINE.test(option)) ?? null;
+  const key = eeoKey(label, choices);
+  const value = Object.entries(EEO_WORDS).find(([, words]) => words.some((word) => word.toLowerCase() === answer.trim().toLowerCase()))?.[0];
+  return key && value ? eeoOption(key, value, choices) : null;
+}
+
+function eeoOption(key: string, value: string, options: string[]) {
   if (key === "disability") return options.find((option) => (value === "yes" ? /^yes/i : /^no/i).test(option)) ?? null;
   if (key === "hispanicLatino") {
     const yes = value === "yes";
@@ -406,6 +430,12 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
       if (chosen) return { ...question, answer: chosen, source: "student", evidence: null };
       const decline = question.options.find((option) => DECLINE.test(option));
       if (decline) return { ...question, answer: decline, source: "default", evidence: null };
+    }
+    // A list whose choices aren't known until it's opened (Workday's buttons): the student's choice by name, or
+    // "Decline to answer", which the page matches to the list's own words once it's open.
+    if (DEMOGRAPHIC.test(question.label) && !question.options.length && question.kind === "select") {
+      const chosen = selfIdentified(question.label, [], context.profile);
+      return { ...question, sensitive: true, answer: chosen ?? "Decline to answer", source: chosen ? "student" : "default", evidence: null };
     }
     // Pay, however it's worded ("Annual Salary Expectations"): only the student's own saved answer.
     if (SALARY.test(question.label) && question.kind !== "file" && question.kind !== "checkbox") {
