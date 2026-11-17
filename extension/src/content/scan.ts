@@ -599,12 +599,36 @@ export function workdayCompany(where: { hostname: string; pathname: string } = w
   return tenant.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()).trim();
 }
 
+const UKG_HOST = /(^|\.)(ukg\.net|ultipro\.com)$/i;
+/**
+ * UKG Pro (snp98.rec.pro.ukg.net, recruiting.ultipro.com) never prints the company by itself: it's in the footer's
+ * "Careers at Snipes" link, or the logo's link to the company's site (snipesusa.com → "Snipes"). "" when neither is there.
+ */
+export function ukgCompanyFrom(linkTexts: string[], logoHref: string) {
+  for (const text of linkTexts) {
+    const named = /^careers at (.{2,60}?)\.?$/i.exec(text.replace(/\s+/g, " ").trim());
+    if (named) return named[1].trim();
+  }
+  try {
+    const first = new URL(logoHref).hostname.replace(/^(www|careers|jobs)\./i, "").split(".")[0].replace(/(usa|us|inc|corp|careers|jobs|hq)$/i, "");
+    return first.length >= 2 && !NOT_COMPANY.test(first) ? first.replace(/^./, (letter) => letter.toUpperCase()) : "";
+  } catch {
+    return "";
+  }
+}
+function ukgCompany(host: string) {
+  if (!UKG_HOST.test(host)) return "";
+  const links = Array.from(document.querySelectorAll("a")).map((a) => a.textContent ?? "");
+  return ukgCompanyFrom(links, document.querySelector("ukg-logo[href], header a[href^='http']")?.getAttribute("href") ?? "");
+}
+
 /**
  * The last guess at the company, from the site's address: "mealpal" from mealpal.applytojob.com. Never on a job
  * board (app.joinhandshake.com is not a company called "app"), and never a generic first part.
  */
 function hostCompany(host: string) {
-  if (QUICK_BOARDS.test(host) || /(^|\.)linkedin\.com$/.test(host)) return "";
+  // A job system's address names the system or a server ("snp98.rec.pro.ukg.net"), never the company.
+  if (QUICK_BOARDS.test(host) || /(^|\.)linkedin\.com$/.test(host) || UKG_HOST.test(host)) return "";
   const first = host.replace(/^(www|jobs|careers|boards|apply|job-boards|hire|recruiting)\./, "").split(".")[0];
   return NOT_COMPANY.test(first) ? "" : first;
 }
@@ -643,7 +667,7 @@ export function scanPage(): Scan {
   const waiting = Boolean(posting && "waiting" in posting && posting.waiting);
   const title = waiting ? NO_TITLE : (named(posting?.title) || greenhouseTitle?.[1] || named(fromTitle?.title) || named(heading) || firstHeading || named(meta("og:title")) || named(tabName) || NO_TITLE).slice(0, 200);
   const siteName = meta("og:site_name");
-  const company = waiting ? "" : (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "") || applyDialogCompany()
+  const company = waiting ? "" : (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "") || ukgCompany(host) || applyDialogCompany()
     || (siteName && !JOB_SITE_NAME.test(siteName.trim()) ? siteName : "") || hostCompany(host)).slice(0, 200);
   const frame = document.querySelector<HTMLIFrameElement>("iframe#grnhse_iframe, iframe[src*='greenhouse.io/embed'], iframe[src*='jobs.lever.co'], iframe[src*='ashbyhq.com']");
   const captcha = Array.from(document.querySelectorAll("iframe[src*='hcaptcha'], iframe[title*='recaptcha challenge' i], iframe[src*='recaptcha/api2/bframe']")).some(visible);

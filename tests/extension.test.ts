@@ -14,7 +14,7 @@ import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { nationalNumber } from "@/extension/src/content/generic";
-import { boardEmployerName, boardJobName, jobLink, titleParts } from "@/extension/src/content/scan";
+import { boardEmployerName, boardJobName, jobLink, titleParts, ukgCompanyFrom } from "@/extension/src/content/scan";
 import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
 import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
 import { companyFromDescription } from "@/lib/apply/extract";
@@ -874,6 +874,11 @@ describe("one link per job", () => {
     expect(jobLink("https://www.linkedin.com/jobs/view/growth-intern-at-mealpal-4012345678/?trk=abc")).toBe("https://www.linkedin.com/jobs/view/4012345678/");
     expect(jobLink("https://www.linkedin.com/feed/")).toBe("https://www.linkedin.com/feed/");
     expect(titleParts("Growth Intern | MealPal | LinkedIn")).toEqual({ title: "Growth Intern", company: "MealPal" });
+    // UKG Pro names the company only in "Careers at Snipes" or the logo's link to snipesusa.com.
+    expect(ukgCompanyFrom(["Cancel", "Careers at Snipes", "Download Chrome"], "http://www.snipesusa.com")).toBe("Snipes");
+    expect(ukgCompanyFrom(["Cancel"], "http://www.snipesusa.com")).toBe("Snipes");
+    expect(ukgCompanyFrom(["Cancel"], "https://careers.acme.com/")).toBe("Acme");
+    expect(ukgCompanyFrom([], "")).toBe("");
   });
 });
 

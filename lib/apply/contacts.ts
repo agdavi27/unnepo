@@ -68,7 +68,7 @@ export async function hunterVerify(userId: string, email: string) {
 }
 
 // Job boards: a posting on these says nothing about the company's own website.
-const JOB_BOARDS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkday(jobs|site)?\.com|workday\.com|icims\.com|smartrecruiters\.com|joinhandshake\.com|jobvite\.com|taleo\.net|successfactors\.(com|eu)|paycomonline\.net|workable\.com|bamboohr\.com|recruitee\.com|applytojob\.com|ultipro\.com|ukg\.com|adp\.com|linkedin\.com|indeed\.com|breezy\.hr|teamtailor\.com|rippling\.com|wellfound\.com|ziprecruiter\.com|glassdoor\.com|builtin\.com|handshake\.com)$/i;
+const JOB_BOARDS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkday(jobs|site)?\.com|workday\.com|icims\.com|smartrecruiters\.com|joinhandshake\.com|jobvite\.com|taleo\.net|successfactors\.(com|eu)|paycomonline\.net|workable\.com|bamboohr\.com|recruitee\.com|applytojob\.com|ultipro\.com|ukg\.(com|net)|adp\.com|linkedin\.com|indeed\.com|breezy\.hr|teamtailor\.com|rippling\.com|wellfound\.com|ziprecruiter\.com|glassdoor\.com|builtin\.com|handshake\.com)$/i;
 
 /** The company's own website from a posting on it ("careers.globex.com" is "globex.com"); null for job boards. */
 export function siteDomain(url: string | null) {
