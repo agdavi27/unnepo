@@ -83,7 +83,8 @@ export class FillError extends Error {
  */
 const OPTIONS = "[role=option], [data-automation-id='promptOption'], [id*='dropdown-list'] [role=listitem], [class*='menu-list'] [role=listitem]";
 export function visibleOptions(scope: ParentNode = document) {
-  return deepAll<HTMLElement>(OPTIONS, scope).filter((el) => el.getBoundingClientRect().height > 0);
+  // A choice already made shows as a chip built like an option (Workday): it isn't one to pick.
+  return deepAll<HTMLElement>(OPTIONS, scope).filter((el) => el.getBoundingClientRect().height > 0 && !el.closest("[data-automation-id='selectedItem']"));
 }
 
 /**
@@ -109,6 +110,9 @@ function focused(): HTMLElement | null {
   while (el?.shadowRoot?.activeElement) el = el.shadowRoot.activeElement as HTMLElement;
   return el && el !== document.body ? el : null;
 }
+
+/** Workday's search boxes (School, Field of Study, Skills) look the words up only when Enter is pressed. */
+const searchesOnEnter = (el: Element) => el.getAttribute("data-automation-id") === "searchBox" || el.getAttribute("data-uxi-widget-type") === "selectinput";
 
 /** One key press, the way a keyboard sends it: keydown, keypress for characters, keyup. */
 export function key(el: Element, name: string) {
@@ -276,6 +280,8 @@ async function nestedChoice(trigger: HTMLElement, answer: string, choice: string
   const nested = visibleOptions().filter((el) => !firstList.includes(el) && !before.has(el));
   if (!nested.length) return choice;
   const nestedTexts = nested.map(optionText);
+  // The same list drawn again (Workday's Field of Study stays open after a pick): not a second list.
+  if (nestedTexts.includes(choice) || (shownChoice(trigger) && showsChoice(trigger, choice))) return choice;
   const second = matchOption(answer, nestedTexts, pick) ?? nestedTexts.find((text) => /^other\b/i.test(text)) ?? (nested.length === 1 ? nestedTexts[0] : null);
   if (!second) {
     close(trigger);
@@ -301,7 +307,10 @@ async function byClicking(trigger: HTMLElement, answer: string, options: ChooseO
   const control = (trigger.closest("[class*='select__control'], [class*='-control']") as HTMLElement | null) ?? trigger;
   press(control);
   if (trigger instanceof HTMLInputElement) trigger.focus();
-  if (options.type && trigger instanceof HTMLInputElement) typeInto(trigger, options.type.slice(0, 40), false);
+  if (options.type && trigger instanceof HTMLInputElement) {
+    typeInto(trigger, options.type.slice(0, 40), false);
+    if (searchesOnEnter(trigger)) key(trigger, "Enter");
+  }
   const found = await waitFor(() => (list().length ? list() : null), options.type ? 6000 : 3000);
   if (!found) throw notOpened(trigger, options, "the list didn't open");
   // Async lists (cities, schools) keep loading for a moment after the first result.
@@ -322,7 +331,8 @@ async function byClicking(trigger: HTMLElement, answer: string, options: ChooseO
   // A row scrolled out of the list's view ignores a click (Paylocity's State list): it's brought into view first.
   item.scrollIntoView({ block: "nearest" });
   await sleep(60);
-  press(item);
+  // Workday's row only reacts to a click on the option inside it (Field of Study).
+  press(item.querySelector<HTMLElement>("[data-automation-id='promptOption']") ?? item);
   await sleep(250);
   const final = await nestedChoice(trigger, answer, choice, before, firstList, options.pick);
   // A list left open would mix its options into the next dropdown's.
@@ -353,6 +363,10 @@ async function byKeyboard(trigger: HTMLElement, answer: string, options: ChooseO
   trigger.focus();
   const typing = trigger instanceof HTMLInputElement && options.type;
   if (typing) await typeKeys(trigger as HTMLInputElement, options.type!.slice(0, 40), false);
+  if (typing && searchesOnEnter(trigger)) {
+    key(trigger, "Enter");
+    await waitFor(() => (list().length ? list() : null), 6000);
+  }
   key(focused() ?? trigger, "ArrowDown");
   let found = await waitFor(() => (list().length ? list() : null), typing ? 6000 : 1200);
   // Buttons open on Space or Enter instead.
@@ -387,7 +401,7 @@ async function byKeyboard(trigger: HTMLElement, answer: string, options: ChooseO
     const row = list().find((el) => optionText(el) === choice) ?? item;
     row.scrollIntoView({ block: "nearest" });
     await sleep(60);
-    press(row);
+    press(row.querySelector<HTMLElement>("[data-automation-id='promptOption']") ?? row);
   }
   await sleep(250);
   const final = await nestedChoice(trigger, answer, choice, before, firstList, options.pick);
@@ -463,6 +477,16 @@ async function byLetter(trigger: HTMLElement, answer: string, options: ChooseOpt
  */
 export async function chooseCustom(trigger: HTMLElement, answer: string, options: ChooseOptions = {}): Promise<DropdownMethod> {
   const search = trigger instanceof HTMLInputElement ? searchFor(options.type ?? "") : "";
+  // Workday's search boxes (School, Field of Study) open a long list that only draws the rows in view:
+  // searching for the answer first finds it straight away.
+  if (search && searchesOnEnter(trigger)) {
+    try {
+      return await eachWay(trigger, answer, { ...options, type: search });
+    } catch {
+      if (!chosenBeside(trigger as HTMLInputElement)) clearTyped(trigger as HTMLInputElement);
+      close(trigger);
+    }
+  }
   let first: unknown;
   try {
     return await eachWay(trigger, answer, { ...options, type: undefined });
@@ -557,7 +581,10 @@ async function viaAnother(trigger: HTMLElement, answer: string, options: ChooseO
  * A plain-looking text box that opens a list of options when clicked: it's a dropdown too, and is marked so it's
  * only ever given a listed choice. Checked once, just before Unnepo would type in it.
  */
+const isDatePart = (el: Element) => /dateSection(Month|Day|Year)/i.test(`${el.getAttribute("data-automation-id") ?? ""} ${el.id}`);
+
 export async function opensList(input: HTMLInputElement) {
+  if (isDatePart(input)) return false;
   if (input.hasAttribute("data-unnepo-dropdown")) return true;
   if (!["text", "search", ""].includes(input.type) || input.value) return false;
   const before = new Set(visibleOptions());
@@ -603,6 +630,10 @@ function clearTyped(input: HTMLInputElement) {
  */
 export function isDropdownInput(el: Element): el is HTMLInputElement {
   if (!(el instanceof HTMLInputElement) || !["text", "search", ""].includes(el.type)) return false;
+  // A date part (Workday's From and To boxes) is typed into, never a list.
+  if (isDatePart(el)) return false;
+  // Workday's search boxes (School, Field of Study): typed into, then picked from the results.
+  if (el.getAttribute("data-uxi-widget-type") === "selectinput") return true;
   if (el.getAttribute("role") === "combobox" || el.hasAttribute("data-unnepo-dropdown")) return true;
   const popup = (el.getAttribute("aria-haspopup") ?? "").toLowerCase();
   if (popup && popup !== "false" && popup !== "dialog") return true;

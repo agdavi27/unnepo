@@ -32,8 +32,14 @@ const ours = (el: Element) => Boolean(el.closest(`[${MARK}], [data-unnepo-letter
 const pageKey = () => location.origin + location.pathname;
 const escapeText = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
 
+/** Workday's From and To: a month and a year box, a hair wide under a "MM / YYYY" display. */
+const datePart = (el: Element) => /dateSection(Month|Day|Year)-input/i.test(`${el.getAttribute("data-automation-id") ?? ""} ${el.id}`);
+/** A job's "Role Description": filled from the profile's bullets, not written by AI. */
+const ROLE_TEXT = /^(role|job|position) description|^(description|responsibilities|duties)( of (role|duties))?$|^key responsibilities/i;
+/** "I currently work here": ticked for a job the profile says is current. */
+const CURRENT_JOB = /currently work here|current(ly)? (employed|job|position)|i currently/i;
 /** The hidden inputs some sites keep behind their own dropdowns, only there to make the form "required". */
-const helperInput = (el: Element) => el.getAttribute("role") !== "combobox" && (el.getAttribute("aria-hidden") === "true" || (el as HTMLElement).tabIndex < 0);
+const helperInput = (el: Element) => !datePart(el) && el.getAttribute("role") !== "combobox" && (el.getAttribute("aria-hidden") === "true" || (el as HTMLElement).tabIndex < 0);
 /** How many real fields are inside a wrapper (not counting those hidden helpers). */
 const fieldsIn = (box: Element) => Array.from(box.querySelectorAll(CONTROLS)).filter((el) => !helperInput(el)).length;
 
@@ -59,6 +65,7 @@ function labelOf(el: HTMLElement) {
  * way), so for those it's the dropdown's visible box.
  */
 function outlineFor(el: HTMLElement) {
+  if (datePart(el)) return el.closest<HTMLElement>("[data-automation-id='dateInputWrapper']") ?? el.parentElement ?? el;
   let visible: HTMLElement | null = null;
   const tiny = el.getBoundingClientRect().width < 20;
   let box: HTMLElement | null = el.parentElement;
@@ -75,6 +82,7 @@ function outlineFor(el: HTMLElement) {
 
 /** Whether a field has an answer: its value, or for a site's own dropdown, a choice shown in place of "Select…". */
 function answered(el: HTMLElement, outline: HTMLElement) {
+  if (el instanceof HTMLInputElement && el.type === "checkbox") return el.checked;
   if (el instanceof HTMLSelectElement) return el.selectedIndex > 0 || Boolean(el.value && !/^select/i.test(el.selectedOptions[0]?.text ?? ""));
   if ((el as HTMLInputElement).value?.trim()) return true;
   if (el.getAttribute("role") === "combobox" && outline !== el) {
@@ -85,22 +93,23 @@ function answered(el: HTMLElement, outline: HTMLElement) {
 }
 
 /** Every field on the form Unnepo can help with, in page order. */
-function findBoxes(): Box[] {
+export function findBoxes(): Box[] {
   const boxes: Box[] = [];
-  for (const el of Array.from(document.querySelectorAll<HTMLElement>(CONTROLS))) {
+  for (const el of Array.from(document.querySelectorAll<HTMLElement>(`${CONTROLS}, input[type=checkbox]`))) {
     const combo = el.getAttribute("role") === "combobox";
     if (ours(el) || (el as HTMLInputElement).disabled || ((el as HTMLInputElement).readOnly && !combo)) continue;
     if (helperInput(el)) continue;
     const rect = el.getBoundingClientRect();
-    if (rect.width < 2 && rect.height < 2 && !combo) continue;
+    if (rect.width < 2 && rect.height < 2 && !combo && !datePart(el)) continue;
     if (el.closest("header, nav, footer, [role=search]") || (el as HTMLInputElement).type === "search") continue;
-    const label = labelOf(el);
+    const label = datePart(el) ? clean(el.closest("fieldset")?.querySelector("legend")?.textContent) || labelOf(el) : labelOf(el);
     if (!label || /search/i.test(label)) continue;
+    if ((el as HTMLInputElement).type === "checkbox" && !CURRENT_JOB.test(label)) continue;
     const type = el instanceof HTMLTextAreaElement ? "textarea" : el instanceof HTMLSelectElement ? "select" : "text";
-    const kind = isComplexQuestion(type, label) ? "write" : "fill";
+    const kind = isComplexQuestion(type, label) && !ROLE_TEXT.test(label) ? "write" : "fill";
     if (kind === "fill" && LINK.test(label)) continue;
-    const outline = outlineFor(el);
-    if (outline.getBoundingClientRect().width < 20) continue;
+    const outline = (el as HTMLInputElement).type === "checkbox" ? (el.closest("label, [data-automation-id^='formField']") as HTMLElement | null) ?? el : outlineFor(el);
+    if (outline.getBoundingClientRect().width < 20 && (el as HTMLInputElement).type !== "checkbox") continue;
     boxes.push({ control: el, outline, kind, label });
   }
   return boxes;
@@ -251,8 +260,17 @@ export function watchForms(isJobPage: () => boolean) {
     if (filling) return;
     filling = group.key;
     ui.note = "";
+    draw();
+    // First an entry for each job, school and website in the profile (Workday's "Add Another"), then every open
+    // blue box, the new ones too.
+    const prepared = await ask<{ ok: boolean; added?: number }>({ type: "form-prepare" }).catch(() => ({ ok: false, added: 0 }));
+    if (filling !== group.key) return;
+    if (prepared.added) {
+      await new Promise((done) => setTimeout(done, 600));
+      rescan();
+    }
     document.querySelectorAll(`[${PICK}]`).forEach((el) => el.removeAttribute(PICK));
-    const left = group.boxes.filter(open);
+    const left = boxes.filter((box) => box.kind === "fill" && open(box));
     for (const box of left) box.control.setAttribute(PICK, "");
     draw();
     type Filled = { ok: boolean; filled?: number; empty?: number; stopped?: boolean; error?: string };

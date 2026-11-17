@@ -1045,3 +1045,37 @@ describe("the Applications list's columns", () => {
     expect(ids(sortByColumn(dated, "applied", true))).toEqual(["old", "new"]);
   });
 });
+
+describe("Workday My Experience", () => {
+  it("answers every job, school and website box from the profile, dates and descriptions too", async () => {
+    const userId = await readyStudent();
+    await saveStudentProfile(userId, { profile: {
+      experience: [
+        { company: "Acme Media", title: "Marketing Intern", location: "Boston, MA", startDate: "May 2025", endDate: "Aug 2025", current: false, bullets: ["Planned paid social budgets", "Built weekly reports"] },
+        { company: "Colby Radio", title: "Station Manager", location: "Waterville, ME", startDate: "09/2024", current: true, bullets: ["Ran a team of 12"] },
+      ],
+      education: [{ school: "Colby College", degree: "B.A.", major: "Economics", startDate: "Sep 2023", gradDate: "May 2027" }],
+      links: { linkedin: "linkedin.com/in/patdoe" },
+    } });
+    const { token } = await issueExtensionToken(userId);
+    const job = (n: number) => ["Job Title", "Company", "Location", "I currently work here", "From (Month)", "From (Year)", "To (Month)", "To (Year)", "Role Description"].map((label, i) => ({
+      id: `w${n}-${i}`, label, type: label === "Role Description" ? "textarea" : label.startsWith("I currently") ? "checkbox" : "text", options: label.startsWith("I currently") ? ["Yes"] : [], required: true,
+      section: `Work Experience ${n}`, format: /\(Month\)/.test(label) ? "MM" : /\(Year\)/.test(label) ? "YYYY" : null,
+    }));
+    const school = ["School or University", "Degree", "Field of Study", "From (Year)", "To (Actual or Expected) (Year)"].map((label, i) => ({
+      id: `e-${i}`, label, type: label === "Degree" ? "combobox" : "text", options: [], required: true, section: "Education 1", format: /\(Year\)/.test(label) ? "YYYY" : null,
+    }));
+    const fields = [...job(1), ...job(2), ...school, { id: "web", label: "Website URL", type: "url", options: [], required: false, section: "Websites", format: null }];
+    const response = await call("POST", "quick-fill", token, { fields, company: "Omnicom", title: "Assistant Media Planner" });
+    const { answers } = (await response.json()) as { answers: Array<{ id: string; values: string[] }> };
+    const got = Object.fromEntries(answers.map((answer) => [answer.id, answer.values.join(" / ")]));
+    expect([got["w1-0"], got["w1-1"], got["w1-2"], got["w1-3"], got["w1-4"], got["w1-5"], got["w1-6"], got["w1-7"]]).toEqual(["Marketing Intern", "Acme Media", "Boston, MA", "No", "05", "2025", "08", "2025"]);
+    expect(got["w1-8"]).toContain("Planned paid social budgets");
+    expect(got["w1-8"]).toContain("Built weekly reports");
+    expect([got["w2-0"], got["w2-1"], got["w2-3"], got["w2-4"], got["w2-5"]]).toEqual(["Station Manager", "Colby Radio", "Yes", "09", "2024"]);
+    expect(got["w2-8"]).toContain("Ran a team of 12");
+    expect([got["e-0"], got["e-2"], got["e-3"], got["e-4"]]).toEqual(["Colby College", "Economics", "2023", "2027"]);
+    expect(got["e-1"]).toBeTruthy();
+    expect(got.web).toBe("https://linkedin.com/in/patdoe");
+  });
+});

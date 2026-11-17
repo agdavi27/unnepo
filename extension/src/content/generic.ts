@@ -1,4 +1,4 @@
-import { bestOption, dialCodeOption } from "@/lib/apply/options";
+import { bestOption, degreeAnswer, dialCodeOption } from "@/lib/apply/options";
 import { answerChoices } from "@/lib/apply/questions";
 import type { Answer, DropdownMethod, FileData, FillAttempt, FillFailure, PageField } from "../shared/types";
 import { ADDRESS_LINE, attachFile, chooseCustom, chooseNativeSelect, dismissSuggestions, FillError, isDropdownInput, opensList, press, shownChoice, sleep, typeInto, typeKeys, waitFor, waysFrom, YES } from "./dom";
@@ -85,7 +85,11 @@ function pickLabel(answer: string, labels: string[]) {
 const COUNTRY_CODE = /country (phone )?code|phone (country )?code|dialing code|^country code$|calling code/i;
 
 /** Lists matched in their own way: a phone's country code ("+1", "US +1", "United States (+1)"). */
-const pickFor = (field: PageField, value: string) => (COUNTRY_CODE.test(field.label) ? (texts: string[]) => dialCodeOption(value, texts) : undefined);
+// A degree list words it its own way: "Bachelor of Arts" is "BA" on Workday, "Bachelor's Degree" elsewhere.
+const pickFor = (field: PageField, value: string) =>
+  COUNTRY_CODE.test(field.label) ? (texts: string[]) => dialCodeOption(value, texts)
+  : /\bdegree\b/i.test(field.label) && !/\b(year|date|gpa)\b/i.test(field.label) ? (texts: string[]) => degreeAnswer(value, texts.filter((text) => text.trim() && !/^select\b/i.test(text.trim())))
+  : undefined;
 const PHONE_NUMBER = /\b(phone|mobile|cell)\b/i;
 
 /**
@@ -283,6 +287,8 @@ const letters = (text: string) => text.replace(/[^\p{L}\p{N}]/gu, "");
  * capitals counts too; other boxes may change capitals on purpose (postcodes).
  */
 function sameText(field: PageField, shown: string, value: string) {
+  // A month box shows "5" for "05".
+  if (/^(MM|DD|YYYY)$/.test(field.format ?? "") && /^\d+$/.test(shown) && Number(shown) === Number(value)) return null;
   const [a, b] = [letters(shown), letters(value)];
   const [low, want] = [a.toLowerCase(), b.toLowerCase()];
   if (!want || low.includes(want) || (low.length >= 20 && want.startsWith(low))) {
