@@ -56,6 +56,21 @@ describe("Scan my email", () => {
     expect(items.map((item) => item.kind)).toEqual(["interview"]);
   });
 
+  it("makes several emails from one person, job or company one to-do", () => {
+    const at = (day: number) => Date.parse(`2026-11-${String(day).padStart(2, "0")}T12:00:00Z`);
+    const items = sortInbox([
+      mail("Robert Berning", "rberning@aircontrolconcepts.com", "Re: E Commerce Associate", "Sounds good", at(9)),
+      mail("Robert Berning", "rberning@aircontrolconcepts.com", "Re: Re: E Commerce Associate", "See you Thursday", at(11)),
+      mail("Stripe", "jobs@stripe.com", "Interview invitation", "Schedule a call", at(5)),
+      mail("Stripe Recruiting", "no-reply@greenhouse.io", "Stripe: your interview", "Your availability", at(7)),
+      mail("Linear", "no-reply@ashbyhq.com", "Thanks for applying to Linear", "", at(3)),
+      mail("Linear Recruiting", "no-reply@ashbyhq.com", "Thank you for applying to Linear", "", at(4)),
+    ], jobs);
+    expect(items.map((item) => [item.kind, item.count])).toEqual([["reply", 2], ["interview", 2], ["new", 2]]);
+    expect(items[0]?.subject).toBe("Re: Re: E Commerce Associate");
+    expect(items[0]?.key).toBe("p:c1");
+  });
+
   it("guesses the company of a job that isn't tracked", () => {
     expect(companyFromEmail(mail("Figma Careers", "no-reply@lever.co", "Application received"))).toBe("Figma");
     expect(companyFromEmail(mail("no-reply", "no-reply@ashbyhq.com", "Thanks for your interest in Linear"))).toBe("Linear");
