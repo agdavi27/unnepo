@@ -1471,9 +1471,19 @@ function adminPlanSwitch(preview: "free" | "pro" | null) {
     const on = (preview ?? "real") === value;
     return `<button type="button" class="chip${on ? " on" : ""}" data-plan-preview="${value}" aria-pressed="${on}" ${planSwitching ? "disabled" : ""}>${label}</button>`;
   };
-  return `<div class="row-between"><span class="small">Admin · view as</span><div class="chips" role="group" aria-label="View Unnepo as">${chip("real", "My plan")}${chip("free", "Free")}${chip("pro", "Pro")}</div></div>`;
+  return `<div class="row-between"><span class="small">Admin · view as</span><div class="chips" role="group" aria-label="View Unnepo as">${chip("real", "My plan")}${chip("free", "Free")}${chip("pro", "Pro")}</div></div>
+    <div class="row-between"><span class="small">Admin · today's Free counts</span><button type="button" class="chip" id="reset-today" ${planSwitching ? "disabled" : ""}>Reset today</button></div>`;
 }
 function wirePlanSwitch() {
+  document.getElementById("reset-today")?.addEventListener("click", async () => {
+    planSwitching = true;
+    void render();
+    const result = await ask<{ ok: boolean; error?: string }>({ type: "reset-today" }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+    planSwitching = false;
+    if (!result.ok) alert(result.error ?? "Couldn't reset today's counts.");
+    void loadTracker(true);
+    void render();
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-plan-preview]").forEach((button) => button.addEventListener("click", async () => {
     const value = button.dataset.planPreview;
     planSwitching = true;

@@ -57,6 +57,16 @@ export async function setPlanPreview(userId: string, raw: unknown) {
   return { planPreview: plan ?? null };
 }
 
+/** Admins only, on their own account: today's Free counts start over (letters, answers, fills, emails, unlocks), for testing Free. */
+export async function resetTodayUses(userId: string) {
+  const user = await repo.getUserById(userId);
+  if (!user || !(await isAdminEmail(user))) throw new ServiceError("Only admins can reset counts.", "forbidden", 403);
+  const stored = await applicationProfiles.get(userId);
+  if (!stored?.uses) return { reset: true };
+  await applicationProfiles.put(userId, { ...stored, uses: { ...stored.uses, day: undefined, daily: undefined, week: undefined, weekly: undefined } });
+  return { reset: true };
+}
+
 /** True when the account works as Free (the trial over, no paid plan). */
 export const isFree = async (userId: string) => (await planState(userId)).free;
 
