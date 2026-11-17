@@ -11,7 +11,7 @@ export const CONTACT_EMAIL = "contact@unnepo.com";
 /** The public site, for canonical URLs, the sitemap, RSS and structured data. */
 export const SITE_URL = "https://www.unnepo.com";
 /** Unnepo on the Chrome Web Store. NEXT_PUBLIC_CHROME_EXTENSION_URL can point somewhere else (a test listing). */
-export const CHROME_STORE_URL = process.env.NEXT_PUBLIC_CHROME_EXTENSION_URL || "https://chromewebstore.google.com/detail/loheheacekocdbngdoehppjhdmdcingb";
+export const CHROME_STORE_URL = process.env.NEXT_PUBLIC_CHROME_EXTENSION_URL || "https://chromewebstore.google.com/detail/unnepo/loheheacekocdbngdoehppjhdmdcingb";
 
 /** Pricing, credit rules, and spend caps. All of these are environment-configurable. */
 export function serverConfig() {
