@@ -294,8 +294,8 @@ function simpleRow(job: TrackerJob, person: TrackerContact) {
     : status ? `<span class="js-done${person.outreachStatus === "no_response" ? " muted" : ""}">${status}</span>`
     : hidden ? `<button type="button" class="solid" data-reveal="${person.id}" ${store.busy.has(`reveal:${person.id}`) ? "disabled" : ""}>Show</button>`
     : !person.email ? `<span class="js-done muted">No email</span>`
-    : draft.body ? `<a class="solid" href="#" data-email-link="${person.id}">Email ↗</a>`
-    : `<button type="button" class="solid" data-write-open="${person.id}" ${busy ? "disabled" : ""}>${busy ? "Writing…" : "Email ↗"}</button>`;
+    : `<span class="js-actions">${draft.body ? `<a class="solid" href="#" data-email-link="${person.id}">Auto email ↗</a>`
+      : `<button type="button" class="solid" data-write-open="${person.id}" ${busy ? "disabled" : ""}>${busy ? "Writing…" : "Auto email ↗"}</button>`}${manualButton(person)}</span>`;
   return `<li class="js-person${open ? " open" : ""}">
       <div class="js-row">
         <button type="button" class="js-who" data-person-toggle="${person.id}" aria-expanded="${open}" aria-label="${escape(person.name)}: more">
@@ -548,6 +548,11 @@ function personRow(job: TrackerJob, person: TrackerContact, first: boolean) {
     </li>`;
 }
 
+/** Opens a blank email to the person in the student's mail site, for them to write themselves. */
+function manualButton(person: TrackerContact) {
+  return `<button type="button" class="btn small-btn" data-email-manual="${person.id}" title="Opens an empty email to ${escape(person.name)} in ${MAILER_NAME[store.mailer]}">Manual email ↗</button>`;
+}
+
 /** What shows under a person when they're tapped: the email to edit, the button that opens it, follow-ups and LinkedIn. */
 function personBody(job: TrackerJob, person: TrackerContact) {
   const hidden = job.hidden.includes(person.name.toLowerCase());
@@ -561,7 +566,7 @@ function personBody(job: TrackerJob, person: TrackerContact) {
   const send = person.email
     ? link
       ? `<a class="solid send-mail" href="${escape(link.url)}" ${link.url.startsWith("mailto:") ? "" : 'target="_blank" rel="noreferrer"'} data-email-link="${person.id}" data-cut="${link.cut}">${store.mailer === "gmail" ? GMAIL : ""}${followUp ? "Open again" : "Send"} in ${MAILER_NAME[store.mailer]} ↗</a>`
-      : `<button type="button" class="solid send-mail" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing your email…" : `Write email${typeof store.tracker?.emailsLeft === "number" ? ` (${store.tracker.emailsLeft} left today)` : ""}`}</button>`
+      : `<button type="button" class="solid send-mail" data-write-open="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing your email…" : `Auto email${typeof store.tracker?.emailsLeft === "number" ? ` (${store.tracker.emailsLeft} left today)` : ""}`}</button>`
     : hidden
       ? revealsLeft ? `<button type="button" class="solid" data-reveal="${person.id}" ${busy("reveal") ? "disabled" : ""}>${busy("reveal") ? "Looking…" : "Show person"}</button>` : `<span class="small">You've shown 3 people for this job.</span>`
       : `<span class="small">No email found.</span>`;
@@ -573,7 +578,7 @@ function personBody(job: TrackerJob, person: TrackerContact) {
             <input class="field" data-subject="${person.id}" value="${escape(draft.subject)}" aria-label="Subject" maxlength="200">
             <textarea class="field letter-input" rows="7" data-body="${person.id}" aria-label="Email to ${escape(person.name)}">${escape(draft.body)}</textarea>
           </div>` : ""}
-        <div class="person-line">${send}${person.linkedinUrl ? `<a class="link" href="${escape(person.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</div>
+        <div class="person-line">${send}${person.email && !hidden ? manualButton(person) : ""}${person.linkedinUrl ? `<a class="link" href="${escape(person.linkedinUrl)}" target="_blank" rel="noreferrer">LinkedIn ↗</a>` : ""}</div>
         ${person.emailSource && person.email ? `<span class="small"${person.emailSource === "likely" || person.emailSource === "guess" ? ' style="color: var(--warn)"' : ""}>${escape(EMAIL_SOURCE[person.emailSource] ?? "")}</span>` : ""}
         ${person.email && !hidden ? `<div class="links">
           ${draft.body ? `<button type="button" class="quiet-link" data-write="${person.id}" ${busy("write") ? "disabled" : ""}>${busy("write") ? "Writing…" : "Write it again"}</button>` : ""}
@@ -753,6 +758,14 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     if (!contact) return;
     event.preventDefault();
     void openLink(contact, contact.outreachStatus !== "not_contacted");
+  }));
+  root.querySelectorAll<HTMLButtonElement>("[data-email-manual]").forEach((button) => button.addEventListener("click", async () => {
+    const contact = person(button.dataset.emailManual!);
+    if (!contact?.email) return;
+    const link = composeLink(store.mailer, contact.email, "", "");
+    if (link.url.startsWith("mailto:")) window.location.href = link.url;
+    else void ask({ type: "open-email", url: link.url });
+    await opened(contact, contact.outreachStatus !== "not_contacted");
   }));
   root.querySelectorAll<HTMLButtonElement>("[data-write-open]").forEach((button) => button.addEventListener("click", async () => {
     const result = await run("write", button.dataset.writeOpen!, { action: "write" });

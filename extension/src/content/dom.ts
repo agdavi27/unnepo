@@ -239,9 +239,12 @@ const isGroup = (el: HTMLElement) => Boolean((el.closest("[role=option]") ?? el)
  * A list of groups with no choice of its own that fits (Workday's "How did you hear about us?": Agency Channels,
  * Job Boards, Media…): each group is opened in turn and searched, and Workday's back arrow returns to the groups.
  */
-async function inGroups(list: () => HTMLElement[], answer: string, pick?: ChooseOptions["pick"]) {
+async function inGroups(list: () => HTMLElement[], answer: string, pick?: ChooseOptions["pick"], only?: string): Promise<{ item: HTMLElement; choice: string } | null> {
   const names = [...new Set(list().filter(isGroup).map(optionText).filter(Boolean))].slice(0, 12);
-  for (const name of names) {
+  // The answer by name ("LinkedIn") is looked for in every group first; a stand-in ("Other") only once none has it.
+  const want = loose(answer);
+  let fallback: string | null = null;
+  for (const name of only ? names.filter((each) => each === only) : names) {
     const group = list().find((el) => optionText(el) === name);
     if (!group) continue;
     // Workday opens a group from the label inside its row, not from the row itself.
@@ -252,7 +255,10 @@ async function inGroups(list: () => HTMLElement[], answer: string, pick?: Choose
     const items = (await waitFor(() => (inside().length ? inside() : null), 2500)) ?? [];
     await sleep(150);
     const texts = items.map(optionText);
-    const choice = matchOption(answer, texts, pick);
+    const named = pick || only ? null : texts.find((text) => loose(text) === want || loose(text).startsWith(`${want} `)) ?? null;
+    const loosely = matchOption(answer, texts, pick);
+    const choice = pick || only ? loosely : named;
+    if (!choice && loosely && !fallback) fallback = name;
     if (choice) {
       const item = items[texts.indexOf(choice)];
       return { item: item.querySelector<HTMLElement>("[data-automation-id='promptOption']") ?? item, choice };
@@ -262,7 +268,7 @@ async function inGroups(list: () => HTMLElement[], answer: string, pick?: Choose
     press(back);
     await sleep(600);
   }
-  return null;
+  return fallback && !only ? inGroups(list, answer, pick, fallback) : null;
 }
 
 /** Some lists open a second list under the choice (Workday's "How did you hear about us?" > "Job Board"). */
@@ -302,9 +308,12 @@ async function byClicking(trigger: HTMLElement, answer: string, options: ChooseO
   if (options.type) await sleep(350);
   const result = await findChoice(list, answer, options.pick);
   const { seen } = result;
-  const grouped = result.item ? null : await inGroups(list, answer, options.pick);
-  const item = result.item ?? grouped?.item ?? null;
-  const choice = result.choice ?? grouped?.choice ?? null;
+  // A group's name chosen only as a stand-in ("Social Media" for LinkedIn): the answer itself, inside a group, wins.
+  const standIn = Boolean(result.item && isGroup(result.item) && !options.pick && loose(result.choice ?? "") !== loose(answer));
+  const grouped = result.item && !standIn ? null : await inGroups(list, answer, options.pick);
+  if (standIn && !grouped?.item) result.item = list().find((el) => optionText(el) === result.choice) ?? result.item;
+  const item = grouped?.item ?? result.item ?? null;
+  const choice = grouped?.choice ?? result.choice ?? null;
   if (!item || !choice) {
     close(trigger);
     throw new FillError(`no option matching "${answer}"`, "no_option", seen.slice(0, 100));
