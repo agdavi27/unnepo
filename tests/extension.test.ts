@@ -15,6 +15,7 @@ import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { boardFromLink, nationalNumber } from "@/extension/src/content/generic";
 import { selfIdentifiedOption } from "@/lib/apply/questions";
+import { withToday } from "@/extension/src/shared/today";
 import { boardEmployerName, boardJobName, jobLink, titleParts, ukgCompanyFrom } from "@/extension/src/content/scan";
 import { ADDRESS_LINE } from "@/extension/src/content/dom";
 import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
@@ -1103,5 +1104,28 @@ describe("Workday Voluntary Disclosures", () => {
     expect(labels.map((label, i) => selfIdentifiedOption(label, sent[i], lists[i]))).toEqual(["White (United States of America)", "Male", "No", "I AM NOT A VETERAN", "I do not want to answer"]);
     // Nothing to decline with on a list that has no decline: left for the student.
     expect(selfIdentifiedOption(labels[1], "Decline to answer", lists[1])).toBeNull();
+  });
+});
+
+describe("Workday Self Identify", () => {
+  it("ticks the disability box from the profile though the question only says to check a box", async () => {
+    const userId = await readyStudent();
+    await saveStudentProfile(userId, { profile: { eeo: { gender: "decline", race: "decline", hispanicLatino: "decline", veteran: "decline", disability: "no" } } });
+    const { token } = await issueExtensionToken(userId);
+    const options = ["Yes, I have a disability, or have had one in the past", "No, I do not have a disability and have not had one in the past", "I do not want to answer"];
+    const fields = [{ id: "box", label: "Please check one of the boxes below:", type: "multiselect", options, required: false, section: "Voluntary Self-Identification of Disability", format: null }];
+    const response = await call("POST", "quick-fill", token, { fields });
+    const { answers } = (await response.json()) as { answers: Array<{ id: string; values: string[] }> };
+    expect(answers[0].values).toEqual([options[1]]);
+    await saveStudentProfile(userId, { profile: { eeo: { gender: "decline", race: "decline", hispanicLatino: "decline", veteran: "decline", disability: "decline" } } });
+    const declined = (await (await call("POST", "quick-fill", token, { fields })).json()) as { answers: Array<{ values: string[] }> };
+    expect(declined.answers[0].values).toEqual([options[2]]);
+  });
+
+  it("fills a signature form's Date with today, by the student's clock, and never a job's dates", () => {
+    const now = new Date(2026, 10, 17);
+    const field = (label: string, format: string | null, section = "Voluntary Self-Identification of Disability") => ({ id: label + section, label, type: "text" as const, options: [], required: false, section, format });
+    const filled = withToday([field("Date (Month)", "MM"), field("Date (Day)", "DD"), field("Date (Year)", "YYYY"), field("Today's Date", null), field("From (Month)", "MM", "Work Experience 1"), field("Date (Month)", "MM", "Education 1")], [], now);
+    expect(filled.map((answer) => [answer.label, answer.values[0]])).toEqual([["Date (Month)", "11"], ["Date (Day)", "17"], ["Date (Year)", "2026"], ["Today's Date", "11/17/2026"]]);
   });
 });

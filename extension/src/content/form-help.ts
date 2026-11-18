@@ -92,7 +92,12 @@ function outlineFor(el: HTMLElement) {
 export function answered(el: HTMLElement, outline: HTMLElement) {
   // A dropdown button: answered once it shows a choice instead of "Select One".
   if (el instanceof HTMLButtonElement) return Boolean(clean(el.textContent)) && !/^(select|choose|pick)\b/i.test(clean(el.textContent));
-  if (el instanceof HTMLInputElement && el.type === "checkbox") return el.checked || (CURRENT_JOB.test(labelOf(el)) && hasEndDate(el));
+  if (el instanceof HTMLInputElement && el.type === "checkbox") {
+    // One question with a box per choice ("Please check one of the boxes below"): answered once any is ticked.
+    const group = checkboxGroup(el);
+    if (group) return Boolean(group.querySelector("input[type=checkbox]:checked"));
+    return el.checked || (CURRENT_JOB.test(labelOf(el)) && hasEndDate(el));
+  }
   if (el instanceof HTMLSelectElement) return el.selectedIndex > 0 || Boolean(el.value && !/^select/i.test(el.selectedOptions[0]?.text ?? ""));
   if ((el as HTMLInputElement).value?.trim()) return true;
   if (el.getAttribute("role") === "combobox" && outline !== el) {
@@ -117,18 +122,41 @@ function hasEndDate(box: HTMLElement) {
   return false;
 }
 
+/** The wrapper of a question answered by ticking one of several boxes, or null for a lone checkbox. */
+function checkboxGroup(el: Element) {
+  const group = el.closest("fieldset, [role=group], [role=radiogroup]");
+  return group && group.querySelectorAll("input[type=checkbox]").length > 1 ? group as HTMLElement : null;
+}
+
+/** The question a group of boxes asks: its field's legend or label, not one box's own choice. */
+function groupQuestion(group: HTMLElement) {
+  const field = group.closest("[data-automation-id^='formField']");
+  const own = clean((field ?? group).querySelector("legend")?.textContent) || clean(group.parentElement?.closest("fieldset")?.querySelector("legend")?.textContent) || clean(group.getAttribute("aria-label"));
+  return own.replace(/\*$/, "").trim();
+}
+
 /** Every field on the form Unnepo can help with, in page order. */
 export function findBoxes(): Box[] {
   const boxes: Box[] = [];
+  const groups = new Set<Element>();
   for (const el of Array.from(document.querySelectorAll<HTMLElement>(`${CONTROLS}, input[type=checkbox], ${LIST_BUTTON}`))) {
     // The site's menus (language, settings) are dropdown buttons too, but not questions.
     if (el.matches(LIST_BUTTON) && el.closest("[data-automation-id*='utility' i], [data-automation-id*='progress' i], [data-automation-id*='languagePicker' i]")) continue;
     const combo = el.getAttribute("role") === "combobox" || el.matches(LIST_BUTTON);
     if (ours(el) || (el as HTMLInputElement).disabled || ((el as HTMLInputElement).readOnly && !combo)) continue;
     if (helperInput(el)) continue;
+    if (el.closest("header, nav, footer, [role=search]") || (el as HTMLInputElement).type === "search") continue;
+    // A question with a box per choice: one outline for the whole group, named by its question.
+    const group = (el as HTMLInputElement).type === "checkbox" ? checkboxGroup(el) : null;
+    if (group) {
+      if (groups.has(group)) continue;
+      groups.add(group);
+      const question = groupQuestion(group);
+      if (question) boxes.push({ control: el, outline: (group.closest("[data-automation-id^='formField']") as HTMLElement | null) ?? group, kind: "fill", label: question });
+      continue;
+    }
     const rect = el.getBoundingClientRect();
     if (rect.width < 2 && rect.height < 2 && !combo && !datePart(el)) continue;
-    if (el.closest("header, nav, footer, [role=search]") || (el as HTMLInputElement).type === "search") continue;
     const label = datePart(el) ? clean(el.closest("fieldset")?.querySelector("legend")?.textContent) || labelOf(el) : labelOf(el);
     if (!label || /search/i.test(label)) continue;
     if ((el as HTMLInputElement).type === "checkbox" && !CURRENT_JOB.test(label)) continue;
