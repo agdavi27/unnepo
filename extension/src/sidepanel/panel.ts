@@ -1279,10 +1279,14 @@ function resumeLine(state: PanelState) {
   const resume = state.me!.resume;
   const name = resume ? escape(resume.fileName) : "None yet";
   const note = resumeNote || (resume && !resume.file ? "Unnepo only has this resume's text, not the file. Change it so it can be attached." : "");
+  // Several resumes: a picker for which one Attach puts in, starting on the one the profile applies with.
+  const resumes = state.me!.resumes ?? [];
+  if (!resumes.some((item) => item.id === resumeAttach.pick)) resumeAttach.pick = resumes.find((item) => item.fileName === resume?.fileName)?.id ?? resumes[0]?.id ?? "";
   return `
     <div class="tool-line">
       <span class="tool-what">Resume</span>
-      ${resume?.file ? `<button type="button" class="resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
+      ${resumes.length > 1 ? `<select class="field resume-pick" id="resume-pick" aria-label="Resume to attach">${resumes.map((item) => `<option value="${escape(item.id)}" ${item.id === resumeAttach.pick ? "selected" : ""}>${escape(item.fileName)}</option>`).join("")}</select>`
+        : resume?.file ? `<button type="button" class="resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
       ${resume?.file ? `<button type="button" class="tool-change" id="attach-resume" title="Attach your resume to the application on this tab" ${resumeAttach.busy ? "disabled" : ""}>${resumeAttach.busy ? "Attaching…" : "Attach"}</button>` : ""}
       <button type="button" class="tool-change" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Change" : "Upload"}</button>
     </div>
@@ -1334,7 +1338,7 @@ async function replaceTranscript(file: File) {
 }
 
 /** "Attach resume to this application": the resume file into the page's resume upload box. */
-const resumeAttach = { busy: false, note: "" };
+const resumeAttach = { busy: false, note: "", pick: "" };
 async function attachResume() {
   const tabId = lastState?.tab?.id;
   if (tabId === undefined || resumeAttach.busy) return;
@@ -1342,7 +1346,7 @@ async function attachResume() {
   resumeAttach.note = "";
   void render();
   type Attached = { ok: boolean; attached?: string[]; error?: string };
-  const result = await ask<Attached>({ type: "attach-resume", tabId }).catch((): Attached => ({ ok: false, error: "Couldn't reach the page. Reload it and try again." }));
+  const result = await ask<Attached>({ type: "attach-resume", tabId, resumeId: (lastState?.me?.resumes?.length ?? 0) > 1 ? resumeAttach.pick : undefined }).catch((): Attached => ({ ok: false, error: "Couldn't reach the page. Reload it and try again." }));
   resumeAttach.busy = false;
   resumeAttach.note = result.ok && result.attached?.length ? `✓ Attached to “${short(result.attached[0], 40)}”. Check it on the page.` : result.error ?? "Couldn't attach it.";
   void render();
@@ -2131,6 +2135,7 @@ function draw(state: PanelState): boolean {
   document.getElementById("open-transcript")?.addEventListener("click", () => void seeTranscript());
   document.getElementById("replace-transcript")?.addEventListener("click", () => transcriptInput.click());
   document.getElementById("attach-resume")?.addEventListener("click", () => void attachResume());
+  document.getElementById("resume-pick")?.addEventListener("change", (event) => { resumeAttach.pick = (event.target as HTMLSelectElement).value; });
   document.querySelectorAll<HTMLButtonElement>("[data-attach-letter]").forEach((button) => button.addEventListener("click", () => void attachLetter()));
   document.getElementById("start-resume")?.addEventListener("click", () => resumeInput.click());
   wireIssues();

@@ -1,17 +1,20 @@
 /**
- * Scan my email: job emails read off the student's own inbox (sender, subject and the preview line), sorted into a
- * to-do list. It all runs in the extension; no email is sent anywhere. No imports, so the extension bundles it.
+ * Scan my email: emails that ask the student to do something next, read off their own inbox (sender, subject and
+ * the preview line) and sorted into a to-do list. It all runs in the extension; no email is sent anywhere. No
+ * imports, so the extension bundles it. Plain "thanks for applying" confirmations are left out.
  *
- *   reply      someone the student emailed wrote back          → Mark replied
- *   interview  an interview, a screen or the next step          → Set Interviewing
- *   offer      an offer                                         → Set Offer
- *   rejected   "unfortunately", "other candidates"              → Set Rejected
- *   new        "thanks for applying" to a job not in Unnepo     → Add job
- *   confirmed  "thanks for applying" to a job in Unnepo          (an update, nothing to do)
+ *   reply      someone the student emailed wrote back               → Mark replied
+ *   offer      an offer                                             → Set Offer
+ *   interview  an interview, a screen or an assessment               → Set Interviewing
+ *   followup   any other next step or follow-up (reply, schedule,    (open the email)
+ *              complete a form, checking in)
+ *   rejected   "unfortunately", "other candidates"                  → Set Rejected
+ *
+ * Emails about a company that isn't in Unnepo count too; they just have no status to set.
  */
 
 export type MailRow = { id: string; fromName: string; fromEmail: string; subject: string; snippet: string; at: number; url: string };
-export type InboxKind = "reply" | "interview" | "offer" | "rejected" | "new" | "confirmed";
+export type InboxKind = "reply" | "interview" | "offer" | "followup" | "rejected";
 export type InboxItem = {
   key: string; kind: InboxKind; company: string; jobTitle: string; applicationId: string; contactId: string; contactName: string;
   fromName: string; subject: string; snippet: string; at: number; url: string;
@@ -27,7 +30,11 @@ export type ScanJob = {
 
 const OFFER = /\b(offer letter|pleased to offer|happy to offer|excited to offer|extend (you )?an offer|job offer|offer of employment)\b/;
 const REJECTED = /\b(unfortunately|regret to inform|not (to )?(be )?mov(e|ing) forward|decided (to )?(pursue|move forward with|proceed with) other|other candidates|no longer (being )?consider|position has been filled|will not be (moving|proceeding)|not (been )?selected|won't be moving forward|not a fit at this time)\b/;
-const INTERVIEW = /\b(interview|phone screen|screening call|schedule (a|some) (time|call|chat)|your availability|times that work|next steps?|move you forward|moving you forward|invite you to|coding (challenge|assessment)|online assessment|take-home|hirevue|codesignal|hackerrank)\b/;
+const INTERVIEW = /\b(interview|phone screen|screening call|schedule (a|some) (time|call|chat)|your availability|times that work|move you forward|moving you forward|invite you to|coding (challenge|assessment)|online assessment|take-home|hirevue|codesignal|hackerrank)\b/;
+/** Any other next step or follow-up: something the student is asked to do, or someone checking in. */
+const FOLLOW_UP = /\b(next steps?|follow(ing)?[ -]up|checking in|check in|action (required|needed)|please (complete|submit|confirm|respond|reply|let (us|me) know|fill out|sign|review|schedule|book|select)|complete (your|the|this) (application|assessment|profile|form|questionnaire|survey)|get back to (you|us|me)|let (me|us) know|would (love|like) to (chat|connect|talk|speak|meet|hear|learn)|reach(ing)? out|update on your application|status of your application|application (status|update)|still interested|are you (still )?(available|free|interested)|when (are you|would you be) (free|available)|book a time|pick a time|calendly)\b/;
+/** Words that say an email from a company not in Unnepo is about a job, so a "let me know" from anyone else isn't. */
+const JOBISH = /\b(application|applied|applying|apply|role|position|candida(te|cy)|recruit(er|ing)?|interview|hiring|opportunit(y|ies)|internship|intern|job|offer|resume)\b/;
 const CONFIRMED = /\b(thank(s| you) for (applying|your application|your interest|submitting)|application (has been |was )?(received|submitted)|received your application|we('ve| have) received|application confirmation|successfully (applied|submitted))\b/;
 
 /** Mail services and job sites whose domain says nothing about the company. */
@@ -95,21 +102,26 @@ export function sortInbox(rows: MailRow[], jobs: ScanJob[]): InboxItem[] {
     const words = plain(`${row.subject} ${row.snippet}`);
     const person = contacts.get(row.fromEmail.toLowerCase());
     const job = person?.job ?? jobFor(row, jobs);
+    // A "thanks for applying" that mentions what happens next ("next steps: we'll review it") is still only a
+    // confirmation: nothing for the student to do.
+    const confirmation = CONFIRMED.test(words);
     const kind: InboxKind | null = person ? "reply"
       : OFFER.test(words) ? "offer"
       : REJECTED.test(words) ? "rejected"
       : INTERVIEW.test(words) ? "interview"
-      : CONFIRMED.test(words) ? (job ? "confirmed" : "new")
+      : FOLLOW_UP.test(words) && !confirmation ? "followup"
       : null;
     if (!kind) continue;
-    if (kind !== "new" && kind !== "reply" && !job) continue;
+    // A company that isn't in Unnepo: only when the email is clearly about a job.
+    if (!job && kind !== "reply" && !JOBISH.test(words)) continue;
     // Already true in the tracker: nothing to do.
     if (kind === "reply" && person && person.contact.outreachStatus === "replied") continue;
     if (kind === "rejected" && job?.stage === "rejected") continue;
     if (kind === "offer" && job?.stage === "offer") continue;
     if (kind === "interview" && (job?.stage === "interviewing" || job?.stage === "offer" || job?.stage === "rejected")) continue;
-    const company = job?.company ?? companyFromEmail(row);
-    if (kind === "new" && !company) continue;
+    if (kind === "followup" && job?.stage === "rejected") continue;
+    const company = job?.company || companyFromEmail(row) || row.fromName;
+    if (!company) continue;
     items.push({
       key: row.id, kind, company, jobTitle: job?.title ?? "", applicationId: job?.id ?? "", contactId: person?.contact.id ?? "", contactName: person?.contact.name ?? "",
       fromName: row.fromName, subject: row.subject, snippet: row.snippet, at: row.at, url: row.url, count: 1,
@@ -127,17 +139,17 @@ export function sortInbox(rows: MailRow[], jobs: ScanJob[]): InboxItem[] {
 }
 
 /**
- * The Gmail searches a scan runs, in the inbox: job emails from the last 60 days, and anything from the people the
- * student emailed. No "in:chats": with Google Chat on, Gmail opens a search that names chats on its Conversations
- * tab, which shows no emails.
+ * The Gmail searches a scan runs, in the inbox: emails about jobs or with a next step or follow-up from the last 60
+ * days (promotions and social left out), and anything from the people the student emailed. No "in:chats": with
+ * Google Chat on, Gmail opens a search that names chats on its Conversations tab, which shows no emails.
  */
 export function gmailSearches(contactEmails: string[]) {
   const words = [
-    'subject:(application OR applying OR applied OR interview OR candidacy OR "next steps" OR offer)',
-    '"thank you for applying"', '"thanks for applying"', '"application received"', '"received your application"',
-    '"not moving forward"', '"other candidates"', '"phone screen"', '"your availability"',
+    'subject:(application OR applying OR applied OR interview OR candidacy OR "next steps" OR "next step" OR offer OR "follow up" OR "following up" OR "checking in" OR assessment OR availability)',
+    '"next steps"', '"next step"', '"follow up"', '"following up"', '"checking in"', '"action required"',
+    '"your application"', '"not moving forward"', '"other candidates"', '"phone screen"', '"your availability"', '"schedule a call"', '"schedule a time"',
   ];
-  const searches = [`in:inbox newer_than:60d {${words.join(" ")}}`];
+  const searches = [`in:inbox newer_than:60d -category:promotions -category:social {${words.join(" ")}}`];
   const emails = [...new Set(contactEmails.map((email) => email.toLowerCase()).filter((email) => /^[^\s@()"]+@[^\s@()"]+\.[a-z]{2,}$/.test(email)))].slice(0, 40);
   if (emails.length) searches.push(`in:inbox newer_than:120d from:(${emails.join(" OR ")})`);
   return searches;

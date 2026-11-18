@@ -14,7 +14,7 @@ import { integrations } from "@/lib/integrations/flags";
 import { SITE_URL } from "@/lib/config";
 import { dismissRecommendedJob, generateWorkspaceCoverLetter, rewriteWorkspaceLetterPart, listRecommendedJobs, jobPreferences, saveJobPreferences, saveRecommendedJob, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
-import { profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
+import { activeResume, profileState, removeResume, resumeList, saveStudentProfile, selectResume, uploadProfileResume } from "@/lib/profile/service";
 import { roleSuggestions } from "@/lib/profile/role-suggestions";
 import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
@@ -312,6 +312,14 @@ async function handle(request: Request, slug: string[]) {
       if (!bytes.byteLength) throw new ServiceError("That file was empty. Choose the resume again.", "file");
       return json(await uploadProfileResume(user.id, { name: file.name, type: file.type, bytes }));
     }
+    // Several resumes: pick the one to apply with (only the work experience changes), or remove one.
+    if (action === "resume" && request.method === "PUT") {
+      const body = (await request.json().catch(() => ({}))) as { id?: unknown };
+      return json(await selectResume(user.id, String(body.id ?? "")));
+    }
+    if (action === "resume" && request.method === "DELETE") {
+      return json(await removeResume(user.id, new URL(request.url).searchParams.get("id") ?? ""));
+    }
   }
 
   if (root === "goals" && request.method === "PUT") {
@@ -399,7 +407,7 @@ async function handle(request: Request, slug: string[]) {
   }
 
   if (root === "resume-file" && request.method === "GET") {
-    const resume = await repo.getLatestResume(user.id);
+    const resume = await activeResume(user.id, new URL(request.url).searchParams.get("id"));
     const bytes = resume ? await readStoredResume(resume.storagePath) : null;
     if (!resume || !bytes) throw new ServiceError("No resume file.", "not_found", 404);
     return new Response(Buffer.from(bytes), { headers: { "Content-Type": resume.mime, "Content-Disposition": `attachment; filename="${resume.fileName}"` } });
@@ -443,8 +451,9 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
     const state = await uploadProfileResume(user.id, { name: file.name, type: file.type, bytes });
     return json({ ok: true, completeness: state.profile.completeness });
   }
+  if (action === "resumes" && method === "GET") return json({ resumes: await resumeList(user.id) });
   if (action === "resume" && method === "GET") {
-    const file = await extensionResume(user.id);
+    const file = await extensionResume(user.id, new URL(request.url).searchParams.get("id"));
     return new Response(Buffer.from(file.bytes), { headers: { "Content-Type": file.mime, "Content-Disposition": `attachment; filename="${file.fileName.replace(/"/g, "")}"`, "Cache-Control": "private, no-store" } });
   }
   // The transcript, kept like the resume: uploaded from the extension's Me tab, attached where a form asks.

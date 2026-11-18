@@ -24,18 +24,19 @@ What makes a letter work (from hiring research; see docs/cover-letter-formats.md
 - Close with one confident, specific sentence on what they'd bring to this team, and a plain request to talk. No begging, no "thank you for your time and consideration" filler, no restating the whole letter.
 
 How it should sound:
-- Like a capable student wrote it themselves: clear, specific and warm, but professional. No slang, no exclamation marks, contractions only now and then.
+- Like a real person wrote it: a capable student talking plainly to a recruiter they respect. Professional, but not stiff. Everyday words over formal ones ("use" not "utilize", "help" not "facilitate"). Contractions are fine. No slang, no exclamation marks.
+- Short and to the point. Every sentence earns its place: if cutting it loses nothing, cut it. No warm-up sentences, no summaries of what was just said.
 - Show, don't claim: describe what the student actually did and what came of it ("built the intake form 40 volunteers now use") instead of adjectives about themselves ("hardworking", "detail-oriented", "passionate").
-- Vary sentence length. Short paragraphs. Each paragraph makes one point.
-- Never use these: "I am writing to express my interest", "I am excited to apply", "I believe I would be a great fit", "passion"/"passionate", "leverage", "synergy", "dynamic", "fast-paced environment", "hit the ground running", "unique opportunity", "honed", "delve", "testament", "tapestry", "I am confident that", "thrilled", em dashes.
-- Don't restate the resume line by line or list every skill. Depth on two experiences beats a tour of five.
+- Vary sentence length. Short paragraphs, two to four sentences each. Each paragraph makes one point.
+- Never use these: "I am writing to express my interest", "I am excited to apply", "I believe I would be a great fit", "passion"/"passionate", "leverage", "synergy", "dynamic", "fast-paced environment", "hit the ground running", "unique opportunity", "honed", "delve", "testament", "tapestry", "I am confident that", "thrilled", "furthermore", "moreover", "additionally", "align with", "I would welcome the opportunity", em dashes.
+- Don't restate the resume line by line or list every skill. Depth on one or two experiences beats a tour of five.
 - Don't copy sentences from the job posting.`;
 
 export const COVER_LETTER_PROMPT = `You write a cover letter for a college student applying to a job.
 ${LETTER_VOICE}
 
-Shape: "Dear Hiring Team," then three short paragraphs. First: the role, who the student is (school, year, major when known) and, in one sentence, the clearest reason they fit, drawn from their real experience. Second: one or two real experiences that answer the posting's main requirements, with what the student did and what came of it. Third: a brief, confident close that says what they'd bring and that they'd welcome a conversation. Then "Sincerely," and the student's full name on the next line.
-Under 250 words. Plain text, paragraphs separated by a blank line. No addresses, no date, no placeholders in brackets, no markdown.
+Shape: "Dear Hiring Team," then three short paragraphs. First (two sentences): the role, who the student is (school, year, major when known) and the clearest reason they fit. Second: one or two real experiences that answer the posting's main requirements, with what the student did and what came of it. Third (one or two sentences): what they'd bring and a plain ask to talk. Then "Sincerely," and the student's full name on the next line.
+About 150 to 200 words. Shorter is better than padded. Plain text, paragraphs separated by a blank line. No addresses, no date, no placeholders in brackets, no markdown.
 Return only the letter.`;
 
 export type CoverLetterStudent = { name: string; resumeText: string; profile: string; /** Topics the student asked never to bring up. */ excluded?: string };
@@ -70,8 +71,8 @@ const FORMATS: Record<LetterFormat, string> = {
 
 const LENGTHS: Record<NonNullable<CoverLetterStyle["length"]>, string> = {
   short: "Under 150 words: two short paragraphs plus the close.",
-  standard: "About 200 to 250 words.",
-  detailed: "About 300 to 350 words, still fitting on one page.",
+  standard: "About 150 to 200 words.",
+  detailed: "About 250 to 300 words, still fitting on one page.",
 };
 
 /** The student's choices as instructions for the model. Their own words count as facts they gave. */

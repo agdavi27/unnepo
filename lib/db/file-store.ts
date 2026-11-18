@@ -372,6 +372,26 @@ export const repo = {
       return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
     });
   },
+  /** Every resume the student uploaded, newest first. */
+  async listResumes(userId: string) {
+    return withLock((db) => db.resumes.filter((resume) => resume.userId === userId).sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  },
+  async updateResume(userId: string, resumeId: string, patch: Partial<Database["resumes"][number]>) {
+    return withLock((db) => {
+      const resume = db.resumes.find((item) => item.userId === userId && item.id === resumeId);
+      if (resume) Object.assign(resume, patch, { id: resume.id, userId: resume.userId });
+      return resume ?? null;
+    });
+  },
+  /** Removes one resume and the facts read from it. */
+  async deleteResume(userId: string, resumeId: string) {
+    return withLock((db) => {
+      const before = db.resumes.length;
+      db.resumes = db.resumes.filter((item) => !(item.userId === userId && item.id === resumeId));
+      db.facts = db.facts.filter((fact) => !(fact.userId === userId && fact.resumeId === resumeId));
+      return db.resumes.length < before;
+    });
+  },
   async getResumeByHash(userId: string, sha256: string) {
     return withLock((db) => db.resumes.find((resume) => resume.userId === userId && resume.sha256 === sha256) ?? null);
   },

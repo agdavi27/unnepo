@@ -17,7 +17,7 @@ import { applicationContacts, applicationProfiles, applications } from "@/lib/ap
 import { assertUseAllowed, countUse, isFree, peopleAccess, peopleNote, planState, planUsage, spendPeople } from "@/lib/apply/limits";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
-import { profileReady, profileState } from "@/lib/profile/service";
+import { activeResume, profileReady, profileState } from "@/lib/profile/service";
 import { sameCompany } from "@/lib/apply/match";
 import { patternOf } from "@/lib/apply/email-guess";
 import { CLASS_YEARS, EEO_OPTIONS, DECLINE, classYearOf } from "@/lib/profile/student";
@@ -46,7 +46,7 @@ const CONSENT_BY_DEFAULT = "default";
 const US_STATE = /^(A[LKZR]|C[AOT]|DE|DC|FL|GA|HI|I[DLNA]|K[SY]|LA|M[EDAINSOT]|N[EVHJMYCD]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[TA]|W[AVIY]|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|District of Columbia|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming)$/i;
 
 export async function student(userId: string) {
-  const [user, document, resume, stored] = await Promise.all([repo.getUserById(userId), repo.getProfileDocument(userId), repo.getLatestResume(userId), applicationProfiles.get(userId)]);
+  const [user, document, resume, stored] = await Promise.all([repo.getUserById(userId), repo.getProfileDocument(userId), activeResume(userId), applicationProfiles.get(userId)]);
   if (!user) throw new ServiceError("Sign in to continue.", "auth", 401);
   const resumeText = resume?.text ?? "";
   const fromResume = contactFromResume(resumeText);
@@ -175,7 +175,7 @@ const resumeReads = new Map<string, number>();
 
 /** Reads the resume into schools, jobs, and contact details once, and again only when the resume changes. */
 async function ensureResumeProfile(userId: string) {
-  const [resume, stored] = await Promise.all([repo.getLatestResume(userId), applicationProfiles.get(userId)]);
+  const [resume, stored] = await Promise.all([activeResume(userId), applicationProfiles.get(userId)]);
   const text = resume?.text ?? "";
   if (!text.trim() || stored?.resumeProfile?.sourceHash === resumeHash(text)) return;
   const parsed = await readResumeProfile(userId, text);

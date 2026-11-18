@@ -10,7 +10,7 @@ import { CLASS_YEARS, EEO_OPTIONS, classYearOf, missingDates, type Education, ty
  */
 
 type Gap = { id: GapId; title: string; why: string; optional: boolean };
-type State = { profile: StudentProfile; missing: Gap[]; ready: boolean; resume: { id: string; fileName: string } | null; extensionUrl: string };
+type State = { profile: StudentProfile; missing: Gap[]; ready: boolean; resume: { id: string; fileName: string } | null; resumes?: Array<{ id: string; fileName: string; uploadedAt: string }>; extensionUrl: string };
 
 const btn = "inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-4 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40";
 const primary = `${btn} bg-white text-black hover:bg-zinc-200`;
@@ -374,6 +374,38 @@ const ALL_GAPS: Array<{ id: GapId; title: string }> = [
   { id: "standard", title: "Common questions" }, { id: "essays", title: "A little about you" }, { id: "account", title: "Job-site accounts" },
 ];
 
+/**
+ * Every resume the student uploaded, with the one Unnepo applies with checked. Picking another one changes only
+ * the work experience below to that resume's; everything else stays.
+ */
+function ResumePicker({ state, busy, onPick, onRemove }: { state: State; busy: string; onPick: (id: string) => void; onRemove: (id: string) => void }) {
+  const list = state.resumes ?? [];
+  if (list.length < 2) return null;
+  const day = (at: string) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return (
+    <fieldset className="space-y-2" disabled={Boolean(busy)}>
+      <legend className={`${eyebrow} mb-2`}>Apply with</legend>
+      <ul className="divide-y divide-[#17171B] overflow-hidden rounded-xl border border-[#17171B]">
+        {list.map((item) => {
+          const on = item.id === state.resume?.id;
+          return (
+            <li key={item.id} className={`flex items-center gap-3 px-3 py-2.5 ${on ? "bg-[#0C0C0E]" : ""}`}>
+              <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                <input type="radio" name="active-resume" checked={on} onChange={() => onPick(item.id)} className="accent-[#3D8BFF]" />
+                <span className="min-w-0 truncate text-sm">{item.fileName}</span>
+                <span className="shrink-0 text-xs text-[#8B8B94]">{busy === `pick:${item.id}` ? "Switching…" : day(item.uploadedAt)}</span>
+              </label>
+              <a href={`/api/resume-file?id=${encodeURIComponent(item.id)}`} target="_blank" rel="noreferrer" className="text-xs text-[#9A9AA3] hover:text-white">Open</a>
+              <button type="button" onClick={() => onRemove(item.id)} className="text-xs text-[#8B8B94] hover:text-red-300">Remove</button>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-xs text-[#8B8B94]">Switching changes only your work experience to that resume&apos;s. The extension attaches the one checked.</p>
+    </fieldset>
+  );
+}
+
 export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onDone: () => void }) {
   const [state, setState] = useState<State | null>(null);
   const [draft, setDraft] = useState<StudentProfile | null>(null);
@@ -416,6 +448,34 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
       if (mode === "onboarding") setStep("confirm");
     } catch (reason) {
       setProblem(reason instanceof Error ? reason.message : "Couldn't read that resume.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function pickResume(id: string) {
+    setBusy(`pick:${id}`);
+    setProblem("");
+    try {
+      const result = await api<State & { switched: boolean }>("/resume", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      take(result);
+      setNote(result.switched ? `Applying with ${result.resume?.fileName}. Work experience updated from it.` : `Applying with ${result.resume?.fileName}. Unnepo couldn't read its work experience, so yours stayed the same.`);
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't switch resumes.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function removeResume(id: string) {
+    const name = state?.resumes?.find((item) => item.id === id)?.fileName ?? "this resume";
+    if (!confirm(`Remove ${name} from Unnepo?`)) return;
+    setBusy("remove");
+    setProblem("");
+    try {
+      take(await api<State>(`/resume?id=${encodeURIComponent(id)}`, { method: "DELETE" }));
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't remove it.");
     } finally {
       setBusy("");
     }
@@ -493,11 +553,12 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
             onDrop={(event) => { event.preventDefault(); setDrag(false); void upload(event.dataTransfer.files?.[0]); }}
             className={`flex cursor-pointer flex-col items-center gap-2 rounded-2xl border border-dashed p-8 text-center ${drag ? "border-white bg-[#0C0C0E]" : "border-[#26262C]"} ${busy === "upload" ? "pointer-events-none opacity-60" : ""}`}
           >
-            <span className="text-sm font-medium">{busy === "upload" ? "Reading your resume…" : state.resume ? `Replace ${state.resume.fileName}` : "Upload your resume"}</span>
+            <span className="text-sm font-medium">{busy === "upload" ? "Reading your resume…" : state.resume ? (mode === "edit" ? "Add another resume" : `Replace ${state.resume.fileName}`) : "Upload your resume"}</span>
             <span className="text-xs text-[#8B8B94]">PDF or DOCX, up to 10 MB. Drop it here or click to choose. Unnepo fills in everything it can.</span>
             <input type="file" className="sr-only" accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void upload(file); }} />
           </label>
           {mode === "onboarding" && <button type="button" className="text-sm text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline" onClick={() => setStep("confirm")}>No resume? Fill it in myself</button>}
+          {mode === "edit" && <ResumePicker state={state} busy={busy} onPick={(id) => void pickResume(id)} onRemove={(id) => void removeResume(id)} />}
         </div>
       )}
 

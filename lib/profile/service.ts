@@ -46,19 +46,36 @@ function fromLegacy(stored: ApplicationProfile | null, user: { email: string; na
 }
 
 async function load(userId: string) {
-  const [user, stored, document, resume] = await Promise.all([repo.getUserById(userId), applicationProfiles.get(userId), repo.getProfileDocument(userId), repo.getLatestResume(userId)]);
+  const [user, stored, document, resumes] = await Promise.all([repo.getUserById(userId), applicationProfiles.get(userId), repo.getProfileDocument(userId), repo.listResumes(userId)]);
   if (!user) throw new ServiceError("Sign in to continue.", "auth", 401);
   const form = document?.form;
   // Dates read as MM/YYYY, the way forms ask for them, however they were typed or read off the resume.
   const student = withMonthYears(stored?.student ?? fromLegacy(stored, user, form ? { school: form.school, major: form.major, graduationYear: form.graduationYear } : null));
   // Students who finished the old onboarding don't have to do it again.
   const ready = Boolean(student.confirmedAt) || Boolean(document?.ready);
-  return { user, stored, student, ready, resume };
+  // The resume the student picked to apply with; the newest one when they haven't picked.
+  const resume = resumes.find((item) => item.id === student.resumeFileId) ?? resumes[0] ?? null;
+  return { user, stored, student, ready, resume, resumes };
+}
+
+/**
+ * The resume the student applies with: the one picked in their profile, else the newest. With `resumeId`,
+ * that one instead (the extension's resume picker).
+ */
+export async function activeResume(userId: string, resumeId?: string | null) {
+  if (resumeId) return repo.getResumeById(userId, resumeId);
+  return (await load(userId)).resume;
+}
+
+/** The student's resumes for a picker, the active one marked. */
+export async function resumeList(userId: string) {
+  const { resume, resumes } = await load(userId);
+  return resumes.map((item) => ({ id: item.id, fileName: item.fileName, uploadedAt: item.createdAt, active: item.id === resume?.id, file: Boolean(item.storagePath) && item.byteSize > 0 }));
 }
 
 /** What the page shows: the profile, how complete it is, the gap cards left, and the resume on file. */
 export async function profileState(userId: string) {
-  const { student, ready, resume, stored } = await load(userId);
+  const { student, ready, resume, resumes, stored } = await load(userId);
   // Answers learned on forms live with the application profile; shown here read-only.
   const savedAnswers = Object.values(stored?.saved ?? {}).map((item) => ({ question: item.label, answer: item.answer, updatedAt: item.updatedAt }));
   return {
@@ -66,6 +83,7 @@ export async function profileState(userId: string) {
     missing: missingGaps(student),
     ready,
     resume: resume ? { id: resume.id, fileName: resume.fileName } : null,
+    resumes: resumes.map((item) => ({ id: item.id, fileName: item.fileName, uploadedAt: item.createdAt })),
     extensionUrl: CHROME_STORE_URL,
   };
 }
@@ -129,7 +147,7 @@ function syncLegacy(stored: ApplicationProfile | null, student: StudentProfile, 
 }
 
 async function persist(userId: string, stored: ApplicationProfile | null, student: StudentProfile) {
-  const resume = await repo.getLatestResume(userId);
+  const resume = (await repo.listResumes(userId)).find((item) => item.id === student.resumeFileId) ?? await repo.getLatestResume(userId);
   const next = { ...student, completeness: completeness(student), updatedAt: nowIso() };
   // Read again: a resume upload waits on the AI, and something else may have saved meanwhile.
   await applicationProfiles.put(userId, syncLegacy((await applicationProfiles.get(userId)) ?? stored, next, resume?.text ?? ""));
@@ -161,8 +179,48 @@ export async function uploadProfileResume(userId: string, file: { name: string; 
   const extracted = await extractProfileFromResume(userId, result.resume.text);
   const merged = extracted ? mergeResume(student, extracted) : student;
   merged.resumeFileId = result.resume.id;
+  if (extracted?.fields.experience) await repo.updateResume(userId, result.resume.id, { experience: extracted.fields.experience });
   await persist(userId, stored, merged);
   return { ...(await profileState(userId)), found: extracted?.paths.length ?? 0, read: Boolean(extracted) };
+}
+
+/**
+ * Picks which resume Unnepo applies with. Only the work experience changes to that resume's: contact, school,
+ * projects and skills stay as they are. The experience is read once per resume and kept.
+ */
+export async function selectResume(userId: string, resumeId: string) {
+  const { stored, student } = await load(userId);
+  const resume = await repo.getResumeById(userId, resumeId);
+  if (!resume) throw new ServiceError("That resume isn't in your profile anymore.", "not_found", 404);
+  let experience = resume.experience;
+  if (!experience) {
+    experience = (await extractProfileFromResume(userId, resume.text))?.fields.experience;
+    if (experience) await repo.updateResume(userId, resume.id, { experience });
+  }
+  const next: StudentProfile = structuredClone(student);
+  next.resumeFileId = resume.id;
+  if (experience?.length) {
+    next.experience = withMonthYears({ ...next, experience }).experience;
+    // The experience is this resume's now, not the student's earlier edits.
+    for (const key of Object.keys(next.sources)) if (key === "experience" || key.startsWith("experience.")) delete next.sources[key];
+    next.experience.forEach((_, index) => { next.sources[`experience.${index}`] = "resume"; });
+  }
+  await persist(userId, stored, next);
+  return { ...(await profileState(userId)), switched: Boolean(experience?.length) };
+}
+
+/** Removes a resume from the profile. The one in use can't be removed while it's the only one left. */
+export async function removeResume(userId: string, resumeId: string) {
+  const { stored, student, resumes } = await load(userId);
+  if (!resumes.some((item) => item.id === resumeId)) throw new ServiceError("That resume isn't in your profile anymore.", "not_found", 404);
+  if (resumes.length < 2) throw new ServiceError("Upload another resume before removing your only one.", "last_resume", 400);
+  await repo.deleteResume(userId, resumeId);
+  if (student.resumeFileId === resumeId) {
+    const next = (await repo.listResumes(userId))[0];
+    if (next) return selectResume(userId, next.id);
+    await persist(userId, stored, { ...student, resumeFileId: undefined });
+  }
+  return profileState(userId);
 }
 
 /** Whether the student has a profile Unnepo can apply with. */

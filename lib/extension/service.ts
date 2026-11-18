@@ -20,7 +20,7 @@ import { applicationContacts, applicationProfiles, applications } from "@/lib/ap
 import { isApplied } from "@/lib/apply/stats";
 import { wornSkin } from "@/lib/spiders";
 import type { ApplicationContact, FillAttempt, FillProblem, JobApplication, PostedRecruiter } from "@/lib/apply/types";
-import { profileReady, profileState, saveStudentProfile } from "@/lib/profile/service";
+import { activeResume, profileReady, profileState, saveStudentProfile } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
 
 /**
@@ -78,7 +78,7 @@ export async function extensionSetup(userId: string, raw: unknown) {
 }
 
 export async function extensionMe(userId: string) {
-  const [user, credits, state, resume, stored, saved, usage] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), repo.getLatestResume(userId), applicationProfiles.get(userId), applications.appliedTimes(userId), planUsage(userId)]);
+  const [user, credits, state, resume, stored, saved, usage] = await Promise.all([repo.getUserById(userId), repo.getAccount(userId), profileState(userId), activeResume(userId), applicationProfiles.get(userId), applications.appliedTimes(userId), planUsage(userId)]);
   const applied = saved.filter((app) => isApplied(app.status));
   const weekAgo = Date.now() - 8 * 86_400_000;
   return {
@@ -109,6 +109,8 @@ export async function extensionMe(userId: string) {
     usage,
     // The resume the extension attaches. `file` is false when only its text was kept, so it must be uploaded again.
     resume: resume ? { fileName: resume.fileName, uploadedAt: resume.createdAt, file: Boolean(resume.storagePath) && resume.byteSize > 0 } : null,
+    // Every resume, for the pickers (Attach on a page, the panel's resume row). Most students have one.
+    resumes: state.resumes,
     // The transcript the extension attaches where a form asks for one.
     transcript: stored?.transcript?.storagePath ? { fileName: stored.transcript.fileName, uploadedAt: stored.transcript.uploadedAt } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
@@ -132,7 +134,7 @@ function resumeHighlights(profile: Pick<StudentProfile, "experience" | "projects
 /** Everything the extension fills forms from. Passwords for job sites stay in the extension. */
 export async function extensionProfile(userId: string) {
   const [state, stored] = await Promise.all([profileState(userId), applicationProfiles.get(userId)]);
-  const resume = await repo.getLatestResume(userId);
+  const resume = await activeResume(userId);
   return {
     profile: state.profile,
     ready: state.ready,
@@ -142,8 +144,8 @@ export async function extensionProfile(userId: string) {
   };
 }
 
-export async function extensionResume(userId: string) {
-  const resume = await repo.getLatestResume(userId);
+export async function extensionResume(userId: string, resumeId?: string | null) {
+  const resume = await activeResume(userId, resumeId);
   const bytes = resume?.storagePath ? await readStoredResume(resume.storagePath) : null;
   if (!resume) throw new ServiceError("Upload a resume in Unnepo first.", "no_resume", 404);
   if (!bytes?.byteLength) throw new ServiceError("Unnepo has your resume's text but not the file. Upload it again.", "no_resume_file", 404);
