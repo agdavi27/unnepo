@@ -125,7 +125,8 @@ export function followView() {
   const status = inbox.busy ? "Reading your Gmail…" : scan ? `Scanned ${ago(scan.at)} · ${scan.looked} ${scan.looked === 1 ? "email" : "emails"}` : "Not scanned yet";
   return `
     <section class="page follow-scan" aria-label="Scan my email">
-      <div class="row-between"><span class="eyebrow">Your inbox</span><span class="sub mono">${escape(status)}</span></div>
+      <div class="row-between"><span class="eyebrow">Your inbox <span class="demo-badge">Demo</span></span><span class="sub mono">${escape(status)}</span></div>
+      <p class="small demo-note">Follow up is a demo: it works, but it's still being finished.</p>
       <p class="small">Unnepo looks through your Gmail for replies, interviews, offers, no's and applications it missed. Your emails are read on this computer and never leave it.</p>
       <button type="button" class="btn primary big" id="scan-mail" ${inbox.busy ? "disabled" : ""}>${inbox.busy ? "Scanning…" : scan ? "Scan again" : "Scan my email"}</button>
       ${inbox.busy ? `<div class="bar scan-bar" role="progressbar" aria-label="Scanning your email"><div></div></div><span class="sub">A Gmail tab opens in the background for a few seconds, then closes.</span>` : ""}

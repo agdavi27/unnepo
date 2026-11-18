@@ -11,6 +11,7 @@ import { Logo } from "@/components/brand/logo";
 import { SpiderSettings } from "@/components/unnepo/spider-settings";
 import { JobsView } from "@/components/unnepo/jobs-view";
 import { GoalsView } from "@/components/unnepo/goals-view";
+import { ResourcesView, type GuideLink } from "@/components/unnepo/resources-view";
 import { extensionHere } from "@/lib/extension-bridge";
 import { trialLeftLabel } from "@/lib/plan";
 
@@ -42,11 +43,13 @@ const readStoredTheme = (): Theme => {
 // The tracker, reminders, people and follow-ups live in the Chrome extension. The site keeps the profile and the
 // plans, and shows the jobs applied to.
 // Jobs is the first page; what the old Home page said about the extension now sits at the top of Settings.
-type View = "jobs" | "goals" | "settings" | "pro";
+type View = "jobs" | "goals" | "resources" | "settings" | "pro";
 const VIEWS: { id: View; label: string }[] = [
   { id: "jobs", label: "Jobs" },
   // What the student is aiming for; the extension's "Edit goals" opens it (/home?tab=goals).
   { id: "goals", label: "Goals" },
+  // Tips for the resume and the search, with the /guides articles.
+  { id: "resources", label: "Resources" },
   { id: "settings", label: "Settings and plans" },
   // Only on Free: why Pro, and the button to get it.
   { id: "pro", label: "Upgrade to Pro" },
@@ -61,7 +64,7 @@ const PRO_REASONS: Array<[string, string]> = [
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 
-export function AppHome({ start = "jobs" }: { start?: View } = {}) {
+export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?: GuideLink[] } = {}) {
   const router = useRouter();
   const [data, setData] = useState<Workspace | null>(null);
   const [error, setError] = useState("");
@@ -100,7 +103,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
     }
   }
   const menu = useRef<HTMLDivElement>(null);
-  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans, ?tab=jobs the Jobs tab, ?tab=goals Goals.
+  // The extension's "Edit my info" opens /home?edit=profile; /home?tab=settings opens Settings and plans, ?tab=jobs the Jobs tab, ?tab=goals Goals, ?tab=resources Resources.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
@@ -108,7 +111,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
       setEditing(true);
       window.history.replaceState(null, "", window.location.pathname);
-    } else if (tab === "settings" || tab === "jobs" || tab === "goals" || tab === "pro") {
+    } else if (tab === "settings" || tab === "jobs" || tab === "goals" || tab === "resources" || tab === "pro") {
       setView(tab);
       window.history.replaceState(null, "", "/home" + window.location.hash);
     } else if (params.get("connected")) {
@@ -258,7 +261,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
           <div className="flex min-w-0 flex-wrap items-center gap-x-9 gap-y-2">
             <Logo />
             {data && !showOnboarding && (
-              <nav aria-label="App" className="flex gap-1">
+              <nav aria-label="App" className="flex max-w-full gap-1 overflow-x-auto [scrollbar-width:none]">
                 {VIEWS.filter((item) => item.id !== "pro" || onFree).map((item) => (
                   <button
                     key={item.id}
@@ -323,6 +326,7 @@ export function AppHome({ start = "jobs" }: { start?: View } = {}) {
         )}
         {data && !showOnboarding && view === "jobs" && <JobsView />}
         {data && !showOnboarding && view === "goals" && <GoalsView />}
+        {data && !showOnboarding && view === "resources" && <ResourcesView guides={guides} />}
         {data && !showOnboarding && view === "pro" && (
           onFree ? <UpgradePage busy={billingBusy} admin={admin} onUpgrade={(billing) => (admin ? void switchPlanView("pro") : void goToBilling("checkout", { plan: "pro", billing }))} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />
             : <p className="text-sm text-muted">You&apos;re on Pro. Your plan is under <button type="button" onClick={() => setView("settings")} className="underline underline-offset-4 hover:text-white">Settings and plans</button>.</p>
