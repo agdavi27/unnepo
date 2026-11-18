@@ -271,7 +271,7 @@ function found(contact: Contact, role: ContactRole, relevance: string): FoundPer
 }
 
 /** How many people the list shows for a job (a company). */
-export const LIST_SIZE = 3;
+export const LIST_SIZE = 2;
 /** Paid reveals: the search stops after this many on its own, and "Show person" stops at the second number. */
 export const AUTO_REVEALS = 2;
 export const MAX_REVEALS = 3;

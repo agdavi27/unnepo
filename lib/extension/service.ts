@@ -374,10 +374,10 @@ export async function extensionPeople(userId: string, raw: unknown) {
 
 /** A job's status from the extension: applied (the student says so), or what happened after (interviewing, rejected…). */
 export async function extensionStatus(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { applicationId?: unknown; applied?: unknown; outcome?: unknown; reachedOut?: unknown; hidden?: unknown };
+  const body = (raw ?? {}) as { applicationId?: unknown; applied?: unknown; outcome?: unknown; reachedOut?: unknown; hidden?: unknown; noPeople?: unknown };
   if (typeof body.hidden === "boolean") return setJobHidden(userId, { applicationId: body.applicationId, hidden: body.hidden });
   if (body.reachedOut !== undefined && body.reachedOut !== null) return setReachedOut(userId, { applicationId: body.applicationId, count: body.reachedOut });
-  if (body.applied === true) return markApplied(userId, { applicationId: body.applicationId });
+  if (body.applied === true) return markApplied(userId, { applicationId: body.applicationId }, { findPeople: body.noPeople !== true });
   return setOutcome(userId, { applicationId: body.applicationId, outcome: body.outcome || null });
 }
 
