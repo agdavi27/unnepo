@@ -595,7 +595,7 @@ describe("people after applying", () => {
     return { userId, application: (await applications.get(userId, application.id))!, contacts: await applicationContacts.list(userId, [application.id]), searches };
   }
 
-  it("lists up to 3 people, most relevant first, on the company's real website, with emails in the company's format", async () => {
+  it("lists up to 2 people, most relevant first, on the company's real website, with emails in the company's format", async () => {
     // An old wrong match for Acme is tried first and turns up no one; it's replaced by the site that does.
     await repo.setCompanyDomains("Acme Corp", ["acme.org"]);
     const { userId, application, contacts, searches } = await appliedWith((search) => {
@@ -605,11 +605,10 @@ describe("people after applying", () => {
       return [person("t1", "Riley", "Chen", "Product Lead"), person("t2", "Jo", "Ray", "Analyst")];
     }, { verified: ["a1"] });
     // The posting's recruiter first, then campus recruiters, then recruiters; the school, the team and executives
-    // come after them, so they're left off a list of three.
+    // come after them, so they're left off a list of two.
     expect(contacts.map((item) => [item.rank, item.role, item.name, item.email, item.emailSource])).toEqual([
       [1, "job_poster", "Jordan Smith", "jordan.smith@acme.com", "job_posting"],
       [2, "recruiter", "Sam Lee", "sam.lee@acme.com", "likely"],
-      [3, "recruiter", "Avery Kim", "avery.kim@acme.com", "likely"],
     ]);
     // No email is written until the student asks, then just that person's, which they can edit.
     expect(contacts.every((item) => item.emailBody === null)).toBe(true);
@@ -886,9 +885,10 @@ describe("people after applying", () => {
     it("reveals only the top person, and leaves the rest for Show person", async () => {
       const { userId, application, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? [blurred("r1", "Sam", "Le***e", "University Recruiter"), blurred("r2", "Avery", "Ki***m", "Recruiter"), blurred("r3", "Pat", "Do***e", "Recruiter")] : []), { poster: false, verified: ["r1"], reveal: { r1: { last_name: "Leone" }, r2: { last_name: "Kim" } } });
       expect(await paid(userId, "apollo", "enrich")).toBe(1);
-      expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Sam Leone", "r1@acme.com", "apollo"], ["Avery K.", null, null], ["Pat D.", null, null]]);
+      // A list of two: the third recruiter isn't kept.
+      expect(contacts.map((item) => [item.name, item.email, item.emailSource])).toEqual([["Sam Leone", "r1@acme.com", "apollo"], ["Avery K.", null, null]]);
       const hidden = application.fillReport?.peopleHidden ?? {};
-      expect(Object.keys(hidden)).toEqual(["avery k.", "pat d."]);
+      expect(Object.keys(hidden)).toEqual(["avery k."]);
       // Showing one more pays for one more, and fills them in.
       setContactFetcherOnce(contacts);
       await revealContact(userId, { applicationId: application.id, contactId: contacts[1].id });
@@ -897,10 +897,10 @@ describe("people after applying", () => {
       expect(await paid(userId, "apollo", "enrich")).toBe(2);
       const report = (await applications.get(userId, application.id))!.fillReport!;
       expect(report.peopleReveals).toBe(2);
-      expect(Object.keys(report.peopleHidden ?? {})).toEqual(["pat d."]);
+      expect(Object.keys(report.peopleHidden ?? {})).toEqual([]);
       // The job's limit.
-      await applications.update(userId, application.id, { fillReport: { ...report, peopleReveals: 3 } });
-      await expect(revealContact(userId, { applicationId: application.id, contactId: after[2].id })).rejects.toThrow(/limit/);
+      await applications.update(userId, application.id, { fillReport: { ...report, peopleHidden: { "avery kim": hidden["avery k."] }, peopleReveals: 3 } });
+      await expect(revealContact(userId, { applicationId: application.id, contactId: after[1].id })).rejects.toThrow(/limit/);
     });
     function setContactFetcherOnce(contacts: Array<{ id: string }>) {
       void contacts;
@@ -924,7 +924,7 @@ describe("people after applying", () => {
       const three = [blurred("r1", "Avery", "Ki***m", "Recruiter"), blurred("r2", "Sam", "Le***e", "Recruiter"), blurred("r3", "Pat", "Do***e", "Recruiter")];
       const { userId, contacts } = await appliedWith((search) => (search.person_titles?.includes("recruiter") ? three : []), { poster: false, hunterValid: ["nobody@acme.com"], reveal: { r1: { last_name: "Kim" }, r2: { last_name: "Leone" }, r3: { last_name: "Doe" } } });
       expect(await paid(userId, "apollo", "enrich")).toBe(2);
-      expect(contacts.map((item) => item.name)).toEqual(["Avery Kim", "Sam Leone", "Pat D."]);
+      expect(contacts.map((item) => item.name)).toEqual(["Avery Kim", "Sam Leone"]);
     });
 
     it("drops someone Apollo says has left for another company", async () => {

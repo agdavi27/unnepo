@@ -9,10 +9,11 @@ import { companyGuess } from "@/lib/apply/company-name";
  *   1. "Did you apply?", every time (even when Unnepo already saved it). Yes asks "Is this right?" with the title
  *      and company to fix (the company blank when the page only showed a job site's name or a line like "No response
  *      insights available yet"); No takes a saved job back out. Then it's Saved, with Undo.
- *   Between them, once it's saved: how many companies Unnepo can still find people at (Free: today, Pro: this
- *      month), with Find people (or See who to email, when they're already found).
- *   2. Reach out: the people at the company, each with Email ↗, which writes the email and opens it in Gmail ready
- *      to send (the draft never shows here), then asks "Sent?". No one yet: Find on LinkedIn or Find verified.
+ *   Between them, once it's saved, on every plan: "Reach out to <company>?", with how many companies are left
+ *      (Free: today, Pro: this month). Yes finds the people, which uses one of them; No leaves it.
+ *   2. Reach out: up to two people at the company, each with Auto write email (written from the resume and opened
+ *      in Gmail ready to send; the draft never shows here) and Manual write email (an empty email to them). Once one
+ *      opens, "Sent?" asks; the buttons stay, so the student can still write it the other way.
  * Nothing on the page is read, and nothing is sent until a button is pressed. Later shrinks it to a small tab.
  */
 
@@ -47,8 +48,10 @@ function start() {
     opened: new Set<string>(), sent: new Set<string>(), poll: 0,
     /** Slid in already: redraws don't play it again. */
     shown: false,
-    /** Past the in-between page (companies left) to the people. */
+    /** Said yes to reaching out: past the question to the people. */
     passed: false,
+    /** Said no to reaching out. */
+    declined: false,
     /** After "Yes, I applied": the title and company to check before it's saved. */
     check: null as { title: string; company: string } | null,
     /** The student said they applied and the title and company are right. */
@@ -82,6 +85,8 @@ function start() {
     .sub { font-size: 12px; color: #5C5C66; }
     .row { display: flex; align-items: center; gap: 8px; }
     .person { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+    .person-block { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; }
+    .person-block + .person-block { border-top: 1px solid #EFEFF3; padding-top: 8px; }
     .av { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 10px system-ui, sans-serif; }
     .who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .who b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -153,50 +158,59 @@ function start() {
       </div>`;
   }
 
-  /** Free sees the one person it unlocked (the posting's first); Pro, the first three. */
+  /** Free sees the one person it unlocked (the posting's first); Pro, the first two. */
   function people(data: CardState) {
     const list = data.job?.contacts ?? [];
-    if (!data.free) return list.slice(0, 3);
+    if (!data.free) return list.slice(0, 2);
     const pick = list.find((person) => person.role === "job_poster") ?? list.find((person) => person.email) ?? list[0];
     return pick ? [pick] : [];
   }
 
+  /**
+   * One person: Auto write email and Manual write email always show (so the student can change their mind), with
+   * "Sent?" under them once an email opened, or Emailed ✓ once it went.
+   */
   function personRow(person: TrackerContact) {
-    const key = `email:${person.id}`;
+    const auto = card.busy.has(`email:${person.id}`);
+    const manual = card.busy.has(`manual:${person.id}`);
     const emailed = card.sent.has(person.id) || person.outreachStatus !== "not_contacted";
-    const action = card.opened.has(person.id)
-      ? `<span class="row"><button type="button" class="btn ok" data-act="sent" data-id="${escape(person.id)}">Sent</button><button type="button" class="btn ghost" data-act="notyet" data-id="${escape(person.id)}">Not yet</button></span>`
-      : emailed ? `<span class="done">Emailed ✓</span>`
-      : person.email ? `<button type="button" class="btn" data-act="email" data-id="${escape(person.id)}" ${card.busy.has(key) ? "disabled" : ""}>${card.busy.has(key) ? "Writing…" : "Email ↗"}</button>`
-      : `<span class="sub">No email</span>`;
-    return `<div class="person"><span class="av" style="background:${color(person.name)}">${escape(initials(person.name))}</span><span class="who"><b>${escape(person.name)}</b><span>${escape(person.title || "")}</span></span>${action}</div>`;
+    const id = escape(person.id);
+    const buttons = person.email
+      ? `<div class="row"><button type="button" class="btn wide" data-act="email" data-id="${id}" ${auto ? "disabled" : ""}>${auto ? "Writing…" : "Auto write email"}</button><button type="button" class="btn ghost wide" data-act="manual" data-id="${id}" ${manual ? "disabled" : ""}>Manual write email</button></div>`
+      : `<span class="sub">No email for them.</span>`;
+    const status = card.opened.has(person.id)
+      ? `<div class="row"><span class="sub" style="flex:1">Sent it?</span><button type="button" class="btn ok" data-act="sent" data-id="${id}">Sent</button><button type="button" class="btn ghost" data-act="notyet" data-id="${id}">Not yet</button></div>`
+      : emailed ? `<span class="done">Emailed ✓</span>` : "";
+    return `<div class="person-block"><div class="person"><span class="av" style="background:${color(person.name)}">${escape(initials(person.name))}</span><span class="who"><b>${escape(person.name)}</b><span>${escape(person.title || "")}</span></span></div>${buttons}${status}</div>`;
   }
 
   /**
-   * The in-between page, once the job is saved: how many companies Unnepo can still find people at (Free: today,
-   * Pro: this month), then one button on: See who to email when they're found, else Find people.
+   * Once the job is saved, on every plan: "Reach out to <company>?", with how many companies are left (Free: today,
+   * Pro: this month). Yes finds the people (one company used); No leaves it, with a way back.
    */
-  function gate(data: CardState, job: TrackerJob, count: NonNullable<CardState["peopleCount"]>) {
+  function gate(data: CardState, job: TrackerJob, count: CardState["peopleCount"]) {
     const company = job.company || data.item?.company || "the company";
-    const shown = people(data);
-    const finding = job.contactsStatus === "finding" || job.contactsStatus === "writing" || card.busy.has("find");
-    const left = Math.max(0, Math.min(count.left, count.of));
+    const short = escape(company.length > 22 ? `${company.slice(0, 21)}…` : company);
+    const left = count ? Math.max(0, Math.min(count.left, count.of)) : null;
     const out = left === 0;
-    const action = shown.length
-      ? `<div class="row"><button type="button" class="btn wide" data-act="pass">See who to email (${shown.length}) →</button></div>`
-      : finding
-        ? `<span class="sub">${escape(job.contactsMessage || `Finding people at ${company}…`)}</span><div class="bar" role="progressbar" aria-label="Finding people"><i></i></div>`
-        : out
-          ? `<span class="sub">${data.free ? "None left today. More tomorrow, or Pro finds people at 100 companies a month." : "None left this month. More next month."}</span><div class="row"><button type="button" class="btn ghost wide" data-act="linkedin">Find on LinkedIn instead</button></div>`
-          : `<div class="row"><button type="button" class="btn wide" data-act="find">Find people at ${escape(company.length > 18 ? `${company.slice(0, 17)}…` : company)}</button></div><button type="button" class="quiet" data-act="linkedin" style="width: fit-content">Or find on LinkedIn (free)</button>`;
+    const meter = count && left !== null
+      ? `<div class="count" aria-label="${left} of ${count.of} companies left ${count.per}"><b class="${out ? "out" : ""}">${left}</b><span>of ${count.of} companies left ${count.per}</span></div>
+          <div class="meter${left / count.of <= 0.2 ? " low" : ""}" aria-hidden="true"><i style="width:${Math.round((left / count.of) * 100)}%"></i></div>`
+      : "";
+    // Found already (on the website, say): Yes just shows them, nothing more is used.
+    const found = people(data).length > 0;
+    const action = card.declined
+      ? `<span class="sub">Okay, not reaching out to ${escape(company)}.</span><button type="button" class="quiet" data-act="undecline" style="width: fit-content">Changed your mind?</button>`
+      : out && !found
+        ? `<span class="sub">${data.free ? "None left today. More tomorrow, or Pro finds people at 100 companies a month." : "None left this month. More next month."}</span><div class="row"><button type="button" class="btn ghost wide" data-act="linkedin">Find on LinkedIn instead</button><button type="button" class="btn ghost" data-act="decline">No</button></div>`
+        : `<div class="row"><button type="button" class="btn wide" data-act="reach">Yes, reach out</button><button type="button" class="btn ghost wide" data-act="decline">No</button></div>`;
     return `
       <div class="step">
         <span class="num now" aria-hidden="true">2</span>
         <div class="body">
-          <span class="label">Find people to email</span>
-          <div class="count" aria-label="${left} of ${count.of} companies left ${count.per}"><b class="${out ? "out" : ""}">${left}</b><span>of ${count.of} companies left ${count.per}</span></div>
-          <div class="meter${left / count.of <= 0.2 ? " low" : ""}" aria-hidden="true"><i style="width:${Math.round((left / count.of) * 100)}%"></i></div>
-          <span class="sub">Unnepo finds a recruiter or someone on the team at ${escape(company)}, with a work email.${shown.length || finding ? "" : " Each company uses one."}</span>
+          <span class="label">Reach out to ${short}?</span>
+          ${meter}
+          <span class="sub">${found ? `Unnepo already found people at ${escape(company)}.` : `Yes finds a recruiter or someone on the team at ${escape(company)}, with a work email, and uses one company.`}</span>
           ${action}
         </div>
       </div>`;
@@ -206,14 +220,14 @@ function start() {
   function stepTwo(data: CardState) {
     const job = data.job;
     const saved = Boolean(card.applicationId) && card.confirmed;
-    if (saved && job && !card.passed && data.peopleCount) return gate(data, job, data.peopleCount);
+    if (saved && job && !card.passed) return gate(data, job, data.peopleCount);
     const company = job?.company || card.check?.company.trim() || companyGuess(data.item?.company || "") || "the company";
     let inner = `<span class="sub">Once it's saved, Unnepo finds who to email at ${escape(company)}.</span>`;
     if (saved && job) {
       const shown = people(data);
       const finding = job.contactsStatus === "finding" || job.contactsStatus === "writing" || card.busy.has("find");
       if (shown.length) {
-        inner = `${shown.map(personRow).join("")}<span class="sub">Email ↗ writes it from your resume and opens Gmail, ready to send.</span>`;
+        inner = `${shown.map(personRow).join("")}<span class="sub">Auto writes it from your resume and opens Gmail, ready to send. Manual opens an empty email to them.</span>`;
       } else if (finding) {
         inner = `<span class="sub">${escape(job.contactsMessage || `Finding people at ${company}…`)}</span><div class="bar" role="progressbar" aria-label="Finding people"><i></i></div>`;
       } else {
@@ -339,9 +353,21 @@ function start() {
           if (result.ok) { close(card.applicationId || card.id); host.remove(); }
           else card.note = result.error ?? "Couldn't undo it.";
         });
-      case "pass":
-        card.passed = true;
+      case "decline":
+        card.declined = true;
         return draw();
+      case "undecline":
+        card.declined = false;
+        return draw();
+      case "reach":
+        card.passed = true;
+        // People already found: they show, and nothing more is used.
+        if (card.data && people(card.data).length) return draw();
+        return void busy("find", async () => {
+          const result = await ask<{ ok: boolean; error?: string }>({ type: "card-people", body: { action: "find", applicationId: card.applicationId } }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+          if (!result.ok) card.note = result.error ?? "Couldn't start the search.";
+          await load(true);
+        });
       case "find":
         card.passed = true;
         return void busy("find", async () => {
@@ -364,6 +390,14 @@ function start() {
             await navigator.clipboard.writeText(result.body).catch(() => undefined);
             card.note = "The email was long, so it's copied: paste it into the email that opened.";
           }
+          if (result.mailto) window.location.href = result.mailto;
+        });
+      case "manual":
+        return void busy(`manual:${id}`, async () => {
+          type Opened = { ok: boolean; error?: string; mailto?: string };
+          const result = await ask<Opened>({ type: "card-email", applicationId: card.applicationId, contactId: id, manual: true }).catch((): Opened => ({ ok: false, error: "Couldn't reach Unnepo." }));
+          if (!result.ok) { card.note = result.error ?? "Couldn't open the email."; return; }
+          card.opened.add(id);
           if (result.mailto) window.location.href = result.mailto;
         });
       case "sent":
@@ -399,7 +433,7 @@ function start() {
     const key = String(message.applicationId || message.id);
     if (closedIds().includes(key)) return;
     // A new application on the same page (a job board's next job) takes the card over.
-    if (card.id !== message.id) Object.assign(card, { small: false, note: "", data: null, shown: false, passed: false, check: null, confirmed: false });
+    if (card.id !== message.id) Object.assign(card, { small: false, note: "", data: null, shown: false, passed: false, declined: false, check: null, confirmed: false });
     card.id = String(message.id);
     card.applicationId = String(message.applicationId || "");
     void load(true);

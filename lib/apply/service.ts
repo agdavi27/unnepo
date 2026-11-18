@@ -778,14 +778,14 @@ export async function receiptImage(userId: string, applicationId: string) {
 }
 
 /** The student applied on their own. Shown as "Applied (you)", never as confirmed by Unnepo. */
-export async function markApplied(userId: string, raw: unknown) {
+export async function markApplied(userId: string, raw: unknown, options: { findPeople?: boolean } = {}) {
   const app = await requireApp(userId, (raw as { applicationId?: unknown } | null)?.applicationId);
   if (app.status === "submitted" || app.status === "applied_manual") return { application: summary(app) };
   await ensureCharged(userId, app);
   const updated = await applications.update(userId, app.id, { status: "applied_manual", browserSessionId: null, submittedAt: nowIso(), statusMessage: "You marked this as applied." });
   await addActivity(userId, app.id, { kind: "applied", how: "you_marked" });
   await dropMaybe(userId, { applicationId: app.id });
-  await findPeopleOnApply(userId, app.id);
+  if (options.findPeople !== false) await findPeopleOnApply(userId, app.id);
   return { application: summary((await applications.get(userId, app.id)) ?? updated!) };
 }
 

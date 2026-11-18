@@ -523,7 +523,7 @@ async function answerDetected(id: string, applied: boolean, checked?: { title: s
   }
   try {
     if (item.applicationId) {
-      await api("POST", "status", { applicationId: item.applicationId, applied: true });
+      await api("POST", "status", { applicationId: item.applicationId, applied: true, noPeople: true });
       if (changed && item.company.trim()) await api("POST", "edit-job", { applicationId: item.applicationId, title: item.title, company: item.company, url: item.url });
     }
     else if (item.title.trim() && item.company.trim()) {
@@ -1393,7 +1393,10 @@ function celebrate(tabId: number) {
 }
 
 /** Saves an application as submitted, trying again once: a lost save is a job missing from the tracker. */
-async function saveSubmission(body: Record<string, unknown>) {
+async function saveSubmission(raw: Record<string, unknown>) {
+  // People are found only when the student says yes to reaching out (on the page's card or in the panel), so each
+  // company counts once they choose it, on every plan.
+  const body = { ...raw, noPeople: true };
   try {
     return await api<{ application: { id: string; title: string; company: string; companyMissing?: boolean } }>("POST", "submissions", body);
   } catch (error) {
@@ -2743,14 +2746,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const applicationId = String(message.applicationId ?? "");
         const contactId = String(message.contactId ?? "");
         const followUp = message.followUp === true;
+        // Manual write email: an empty email to them, nothing written.
+        const manual = message.manual === true;
         try {
-          await api("POST", "people", { action: "write", applicationId, contactId, followUp });
-          await readTracker().catch(() => undefined);
+          if (!manual) {
+            await api("POST", "people", { action: "write", applicationId, contactId, followUp });
+            await readTracker().catch(() => undefined);
+          }
           const job = (await trackerCopy())?.data.jobs.find((entry) => entry.id === applicationId);
           const person = job?.contacts.find((entry) => entry.id === contactId);
-          if (!job || !person?.email || !person.emailBody) return reply({ ok: false, error: "Couldn't write the email." });
+          if (!job || !person?.email || (!manual && !person.emailBody)) return reply({ ok: false, error: manual ? "There's no email for them." : "Couldn't write the email." });
           const { mailer } = await chrome.storage.local.get("mailer");
-          const link = composeLink((mailer as Mailer | undefined) ?? "gmail", person.email, person.emailSubject ?? "", person.emailBody);
+          const link = manual ? composeLink((mailer as Mailer | undefined) ?? "gmail", person.email, "", "") : composeLink((mailer as Mailer | undefined) ?? "gmail", person.email, person.emailSubject ?? "", person.emailBody ?? "");
           if (!link.url.startsWith("mailto:")) void openEmailWithResume(link.url);
           const stored = await chrome.storage.local.get("openedEmails");
           const opened = (stored.openedEmails as OpenedEmails | undefined) ?? {};
