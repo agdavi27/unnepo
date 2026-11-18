@@ -1,4 +1,5 @@
 import { stepText, wentBack, type Step } from "./shared/steps";
+import { withToday } from "./shared/today";
 import { generatePassword, unmetRules } from "./shared/password";
 import { AUTOFILL_ENABLED, LINKEDIN, type Answer, type Applying, type BeginResult, type Detected, type JobDetails, type DropdownMethod, type FileData, type PageField, type FillAttempt, type FillPlan, type FillReport, type Issue, type OpenedEmails, type PanelState, type ReminderMarks, type Scan, type Tracker } from "./shared/types";
 import { QUICK_BOARDS } from "./content/quick-apply";
@@ -1086,6 +1087,8 @@ async function run(tabId: number) {
         // 1. Everything Unnepo already knows, with no AI call, so typing starts right away.
         await step("Filling the form…");
         const known = applicationId && formFields ? await api<{ answers: Answer[]; llmCalls: number }>("POST", "map", { applicationId, fields: formFields, ai: false }).catch(() => ({ answers: [] as Answer[], llmCalls: 0 })) : { answers: [] as Answer[], llmCalls: 0 };
+        // "Date" on a signature or self-ID form: today, by this computer's clock.
+        if (!scan.useServerSchema) known.answers = withToday(scan.fields, known.answers);
         // Greenhouse's own list of fields names the cover letter box ("cover_letter"); its label just says "Attach".
         if (scan.useServerSchema && known.answers.some((answer) => answer.id === "cover_letter")) wantsCoverLetter = true;
         if (wantsResume && resume === undefined) {
@@ -2167,7 +2170,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           const tracked = (await jobs())[id];
           const known = await api<{ answers: Answer[] }>("POST", "quick-fill", { fields, company: tracked?.company ?? "", title: tracked?.title ?? "" });
           if (stopped()) return reply({ ok: false, stopped: true });
-          const answers = known.answers.filter((answer) => answer.values.length);
+          const answers = withToday(fields, known.answers).filter((answer) => answer.values.length);
           if (!answers.length) return reply({ ok: true, filled: 0, empty: fields.length });
           const report = await send<FillReport>(id, { type: "fill", plan: { ats: "other", useServerSchema: false, answers, resume: null, coverLetter: null, autoSubmit: false, password: null, quick: true } satisfies FillPlan }, 0);
           if (!stopped()) quickRuns.delete(id);

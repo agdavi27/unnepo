@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Practice: Workday Self Identify</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 32px; max-width: 640px; }
+  fieldset { border: 0; padding: 0; margin: 16px 0; }
+  legend p { margin: 0 0 6px; }
+  .pick { position: relative; width: 344px; }
+  .pick button { width: 100%; text-align: left; font: inherit; padding: 10px; border: 1px solid #889; border-radius: 6px; background: #fff; }
+  .pick input { position: absolute; width: 0; height: 0; padding: 0; border: 0; }
+  textarea { width: 344px; height: 60px; font: inherit; }
+  [role=listbox] { position: absolute; background: #fff; border: 1px solid #999; list-style: none; margin: 0; padding: 4px 0; width: 344px; }
+  [role=option] { padding: 6px 10px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Practice: Workday Self Identify</h1>
+<p>Copied from a real Workday step: a Name box, a Date split into Month, Day and Year boxes under a legend that just
+  says "Date", and the disability question as three checkboxes under "Please check one of the boxes below:".</p>
+<div role="group" aria-labelledby="self-head">
+  <h2 id="self-head">Voluntary Self-Identification of Disability</h2>
+  <div data-automation-id="formField-name"><label for="sid-name">Name</label><div><input type="text" id="sid-name" name="name" aria-required="false" value=""></div></div>
+  <div data-automation-id="formField-dateSignedOn"><fieldset><legend><label id="label125">Date</label></legend>
+    <div id="sid-date" role="group" data-automation-id="dateInputWrapper" class="date">
+      <input role="spinbutton" aria-label="Month" id="sid-date-dateSectionMonth-input" data-automation-id="dateSectionMonth-input" value=""> /
+      <input role="spinbutton" aria-label="Day" id="sid-date-dateSectionDay-input" data-automation-id="dateSectionDay-input" tabindex="-1" value=""> /
+      <input role="spinbutton" aria-label="Year" id="sid-date-dateSectionYear-input" data-automation-id="dateSectionYear-input" value="">
+    </div></fieldset></div>
+  <div data-automation-id="formField-disabilityStatus"><fieldset><legend><label id="label126">Please check one of the boxes below:</label></legend>
+    <div><fieldset data-automation-id="disabilityStatus-CheckboxGroup" id="sid-status"><div role="grid" aria-label="grid">
+      <div role="row"><div role="cell"><input id="box-yes" type="checkbox"><label for="box-yes">Yes, I have a disability, or have had one in the past</label></div></div>
+      <div role="row"><div role="cell"><input id="box-no" type="checkbox"><label for="box-no">No, I do not have a disability and have not had one in the past</label></div></div>
+      <div role="row"><div role="cell"><input id="box-skip" type="checkbox"><label for="box-skip">I do not want to answer</label></div></div>
+    </div></fieldset></div></fieldset></div>
+</div>
+<style>.date input { width: 48px; }</style>
+<script>
+  window.pageValues = () => ({
+    name: document.getElementById("sid-name").value,
+    date: ["Month", "Day", "Year"].map((part) => document.getElementById(`sid-date-dateSection${part}-input`).value).join("/"),
+    ticked: Array.from(document.querySelectorAll("#sid-status input:checked"), (box) => document.querySelector(`label[for="${box.id}"]`).textContent).join(", "),
+  });
+</script>
+<script src="harness.js"></script>
+</body>
+</html>

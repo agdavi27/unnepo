@@ -425,8 +425,10 @@ export function planAnswers(questions: ApplicationQuestion[], context: AnswerCon
     if (standard) return { ...question, answer: standard, source: "default", evidence: null };
     const { field, sensitive } = classifyQuestion(question.label);
     // Voluntary self-identification: the student's own choice when they made one, otherwise decline when offered.
-    if (DEMOGRAPHIC.test(question.label) && question.options.length) {
-      const chosen = selfIdentified(question.label, question.options, context.profile);
+    // A self-ID question can be worded only "Please check one of the boxes below": its choices say what it asks.
+    const aboutMe = DEMOGRAPHIC.test(question.label) ? question.label : question.options.filter((option) => DEMOGRAPHIC.test(option)).length >= 2 ? `${question.label} ${question.options.join(" ")}` : "";
+    if (aboutMe && question.options.length) {
+      const chosen = selfIdentified(aboutMe, question.options, context.profile);
       if (chosen) return { ...question, answer: chosen, source: "student", evidence: null };
       const decline = question.options.find((option) => DECLINE.test(option));
       if (decline) return { ...question, answer: decline, source: "default", evidence: null };

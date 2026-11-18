@@ -9,6 +9,7 @@ import { markNeeds, reviewLeft, type CheckItem } from "@/extension/src/content/n
 import { watchApplyPresses } from "@/extension/src/content/quick-apply";
 import { addEntries, dropUnfoundSchools } from "@/extension/src/content/entries";
 import { answered, findBoxes } from "@/extension/src/content/form-help";
+import { withToday } from "@/extension/src/shared/today";
 import type { Answer, DropdownMethod, PageField } from "@/extension/src/shared/types";
 
 /**
@@ -45,6 +46,9 @@ declare global {
     dropUnfoundSchools: (failed: Array<{ label: string; id?: string }>) => Promise<string[]>;
     /** The boxes the page's Fill bar outlines, and whether each still needs an answer. */
     formBoxes: () => Array<{ label: string; open: boolean }>;
+    /** The answers with today's date added for a signature form's Date boxes, as the extension sends them. */
+    withToday: typeof withToday;
+    scanFields: typeof scanFields;
   }
 }
 
@@ -63,6 +67,8 @@ window.practice = async (answers, ways) => {
 };
 window.celebrate = celebrateSpiders;
 window.addEntries = addEntries;
+window.withToday = withToday;
+window.scanFields = scanFields;
 window.dropUnfoundSchools = async (failed) => [...(await dropUnfoundSchools(failed))];
 window.formBoxes = () => findBoxes().map((box) => ({ label: box.label, open: !answered(box.control, box.outline) }));
 window.next = async () => {
