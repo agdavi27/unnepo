@@ -174,8 +174,10 @@ function installEmail(kind: "now" | "reminder", input: InstallEmailInput) {
     : "Yesterday you asked for Unnepo. Next time you're on your laptop, add it to Chrome and your next application takes about a minute.";
   const points = [
     "Fills applications from your resume on Workday, Greenhouse, Lever and more",
+    "Attaches your resume and portfolio in one click",
     "Writes a cover letter for each job",
     "Finds people at the company to follow up with",
+    "Logs every job you apply to in one tracker",
   ];
   const footer = now
     ? "We'll send one reminder tomorrow, then nothing else."
