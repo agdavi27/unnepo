@@ -30,21 +30,20 @@ const POINTS = [
 function Demo() {
   if (DEMO_MEDIA.ready) {
     return (
-      <video
-        autoPlay
-        muted
-        loop
-        playsInline
-        preload="metadata"
-        poster={DEMO_MEDIA.poster}
-        width={DEMO_MEDIA.width}
-        height={DEMO_MEDIA.height}
-        aria-label="Unnepo filling a job application"
-        className="block h-auto w-full border-4 border-[#F7F7F8] bg-[#0C0C0E] shadow-[8px_8px_0_#3D8BFF]"
-      >
-        <source src={DEMO_MEDIA.webm} type="video/webm" />
-        <source src={DEMO_MEDIA.mp4} type="video/mp4" />
-      </video>
+      // An animated WebP (no video player, no script). People who turn off motion get the still; on a phone it's
+      // below the form, so it loads lazily.
+      <picture>
+        <source srcSet={DEMO_MEDIA.still} media="(prefers-reduced-motion: reduce)" />
+        <img
+          src={DEMO_MEDIA.webp}
+          width={DEMO_MEDIA.width}
+          height={DEMO_MEDIA.height}
+          loading="lazy"
+          decoding="async"
+          alt="Unnepo's spider drops onto a job application, fills every field, writes a cover letter and lists people at the company to email"
+          className="block h-auto w-full border-4 border-[#F7F7F8] bg-[#0C0C0E] shadow-[8px_8px_0_#3D8BFF]"
+        />
+      </picture>
     );
   }
   return (
