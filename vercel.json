@@ -3,5 +3,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": [
     "iad1"
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/install-reminders",
+      "schedule": "0 15 * * *"
+    }
   ]
 }

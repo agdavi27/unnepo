@@ -614,6 +614,26 @@ export type Database = {
   friendships?: Friendship[];
   /** People who asked to hear when Unnepo launches, from the landing page popup. */
   waitlist?: WaitlistEntry[];
+  /** People on a phone (or a browser that isn't Chrome) who asked /get to email them the extension's install link. */
+  installLinks?: InstallLinkSignup[];
+};
+
+/**
+ * One address that asked for the install link on /get. `sends` holds when each install-link email went out (the
+ * latest few, for the per-email rate limit). The reminder goes once, the next day, unless they unsubscribed or have
+ * since made an account (`reminderSkipped`). `token` is the unsubscribe link's secret.
+ */
+export type InstallLinkSignup = {
+  id: string;
+  email: string;
+  emailNormalized: string;
+  source?: string;
+  token: string;
+  createdAt: string;
+  sends: string[];
+  reminderSentAt?: string;
+  reminderSkipped?: "signed_up" | "unsubscribed" | "too_old";
+  unsubscribedAt?: string;
 };
 
 /** `source` is where they joined from, like "guide/how-to-follow-up-on-a-job-application". */

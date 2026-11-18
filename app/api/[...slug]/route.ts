@@ -12,6 +12,7 @@ import { nowIso } from "@/lib/db/file-store";
 import { usingDefaultSecret } from "@/lib/security";
 import { integrations } from "@/lib/integrations/flags";
 import { SITE_URL } from "@/lib/config";
+import { requestInstallLink, sendDueReminders, unsubscribeInstallLink } from "@/lib/install-link";
 import { dismissRecommendedJob, generateWorkspaceCoverLetter, rewriteWorkspaceLetterPart, listRecommendedJobs, jobPreferences, saveJobPreferences, saveRecommendedJob, refreshProfileHighlights, resetStructuredProfile, saveStructuredProfile, workspaceState } from "@/lib/services/workspace";
 
 import { activeResume, profileState, removeResume, resumeList, saveStudentProfile, selectResume, uploadProfileResume } from "@/lib/profile/service";
@@ -34,7 +35,9 @@ const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests"
 async function handle(request: Request, slug: string[]) {
   const [root, action] = slug;
   // The extension sends a bearer token, which a browser never attaches on its own, so it skips the origin check.
-  if (request.method !== "GET" && !(root === "extension" && hasExtensionToken(request))) assertSameOrigin(request);
+  // The emails' one-click unsubscribe is posted by the mail provider, and its secret token is the check.
+  const oneClickUnsubscribe = root === "install-link" && action === "unsubscribe";
+  if (request.method !== "GET" && !(root === "extension" && hasExtensionToken(request)) && !oneClickUnsubscribe) assertSameOrigin(request);
 
   if (root === "extension") {
     try {
@@ -75,6 +78,25 @@ async function handle(request: Request, slug: string[]) {
       enabled: integrations,
       defaultSecret: usingDefaultSecret(),
     });
+  }
+
+  // /get's "Email me the install link", for someone on a phone. No account needed.
+  if (root === "install-link" && action === "request" && request.method === "POST") {
+    const body = (await request.json().catch(() => ({}))) as { email?: unknown; source?: unknown };
+    const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+    return json(await requestInstallLink({ email: body.email, source: body.source, ip, origin: publicOrigin(request) }));
+  }
+  // The unsubscribe link in those emails (GET from the link, POST from the mail app's one-click unsubscribe).
+  if (root === "install-link" && action === "unsubscribe") {
+    const done = await unsubscribeInstallLink(new URL(request.url).searchParams.get("token") || "");
+    if (request.method === "POST") return json({ ok: done });
+    return Response.redirect(new URL(`/get?unsubscribed=${done ? "1" : "0"}`, publicOrigin(request)), 303);
+  }
+  // Vercel's daily schedule (vercel.json): the next-day reminders. Only with the CRON_SECRET; not set up, nothing runs.
+  if (root === "cron" && action === "install-reminders" && request.method === "GET") {
+    const secret = process.env.CRON_SECRET?.trim();
+    if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) return json({ error: "Not allowed." }, 401);
+    return json(await sendDueReminders(SITE_URL));
   }
 
   if (root === "auth" && action === "signup" && request.method === "POST") {
