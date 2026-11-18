@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 import { Logo } from "@/components/brand/logo";
+import { DemoAnimation } from "@/components/marketing/demo-animation";
 import { FounderLink } from "@/components/marketing/founder-note";
 import { InstallLinkForm } from "@/components/marketing/install-link-form";
 import { Schools } from "@/components/marketing/schools";
@@ -66,6 +67,7 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
                     <span className="font-semibold">It runs in Chrome on your laptop.</span> <span className="text-[#B4B4BC]">We&apos;ll email you the link so it&apos;s waiting there.</span>
                   </p>
                   <InstallLinkForm source="home" />
+                  <DemoAnimation className="mr-2 mt-4 block" />
                 </div>
               ) : (
                 <div className="mt-1 flex flex-wrap items-center gap-3">
