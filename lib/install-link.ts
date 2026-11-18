@@ -14,19 +14,18 @@ import { randomToken } from "@/lib/security";
  */
 
 /**
- * The demo of the extension at work, shown on /get and in both emails. PLACEHOLDER until it's recorded: with
- * `ready: false` the page shows a stand-in card and the emails leave the GIF out. To finish it, put these files in
- * public/get/ and set `ready: true`:
- *   demo.mp4  (H.264, 5–10 s loop, 720 px wide, under ~600 KB; shown on the page)
- *   demo.webm (same clip as VP9, optional, usually smaller)
- *   demo.jpg  (the first frame, used as the poster so nothing jumps while it loads)
- *   demo.gif  (the same clip at 480 px wide, under ~1.5 MB; email can't play video)
+ * The demo of the extension at work, shown on /get and in both emails, drawn by scripts/demo-animation.ts (run it
+ * again after changing it): the spider drops in, shrinks onto a job application, then fills it, writes the cover
+ * letter and finds people to follow up with. In public/get/:
+ *   demo.webp (720 px animated, lossless, ~330 KB; the page)
+ *   demo.gif  (480 px, ~560 KB; email apps don't play WebP)
+ *   demo.jpg  (one still, for people who turn off motion)
+ * With `ready: false` the page shows a stand-in card and the emails leave the GIF out.
  */
 export const DEMO_MEDIA = {
-  ready: false,
-  mp4: "/get/demo.mp4",
-  webm: "/get/demo.webm",
-  poster: "/get/demo.jpg",
+  ready: true,
+  webp: "/get/demo.webp",
+  still: "/get/demo.jpg",
   gif: "/get/demo.gif",
   width: 720,
   height: 450,
