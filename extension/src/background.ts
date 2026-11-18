@@ -201,9 +201,9 @@ async function currentMe(token: string): Promise<Me | null> {
 }
 
 /** The student's resume (or transcript) file from Unnepo. Says why when it can't (none yet, or the file is gone). */
-async function resumeFile(kind: "resume" | "transcript" = "resume"): Promise<{ file: FileData | null; error: string | null }> {
+async function resumeFile(kind: "resume" | "transcript" = "resume", resumeId = ""): Promise<{ file: FileData | null; error: string | null }> {
   const { token, apiBase } = await settings();
-  const response = await fetch(`${apiBase}/api/extension/${kind}`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+  const response = await fetch(`${apiBase}/api/extension/${kind}${resumeId ? `?id=${encodeURIComponent(resumeId)}` : ""}`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
   if (!response) return { file: null, error: `Couldn't reach Unnepo to get your ${kind}.` };
   if (!response.ok) {
     const message = ((await response.json().catch(() => ({}))) as { error?: string }).error;
@@ -2059,7 +2059,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       // "Attach with Unnepo" beside a resume upload box on the page: the resume file, for that box.
       case "resume-file": {
         if (!sender.tab) return reply({ ok: false });
-        const resume = await readyResume();
+        const resume = message.resumeId ? await resumeFile("resume", String(message.resumeId)) : await readyResume();
         if (resume.file) void log("Attached your resume from the button on the page.");
         return reply({ ok: Boolean(resume.file), file: resume.file, error: resume.error ?? (resume.file ? null : "Upload your resume in Unnepo first") });
       }
@@ -2086,10 +2086,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const transcript = await resumeFile("transcript");
         return reply({ ok: Boolean(transcript.file), file: transcript.file, error: transcript.error });
       }
-      // "Attach" beside the resume: the resume file into the application's resume box.
+      // The student's resumes, for the pickers on a page's Attach button and the panel's resume row.
+      case "resume-list": {
+        const { token, apiBase } = await settings();
+        if (!token) return reply({ ok: false, resumes: [] });
+        const response = await fetch(`${apiBase}/api/extension/resumes`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+        const body = response?.ok ? ((await response.json().catch(() => ({}))) as { resumes?: unknown[] }) : {};
+        return reply({ ok: Boolean(response?.ok), resumes: body.resumes ?? [] });
+      }
+      // "Attach" beside the resume: the resume file into the application's resume box (the one picked, if any).
       case "attach-resume": {
         if (sender.tab) return reply({ ok: false });
-        const resume = await readyResume();
+        const resume = message.resumeId ? await resumeFile("resume", String(message.resumeId)) : await readyResume();
         if (!resume.file) return reply({ ok: false, error: resume.error ?? "Upload your resume first." });
         const attached = await attachEverywhere(Number(message.tabId), { type: "attach-resume", file: resume.file });
         if (!attached.length) return reply({ ok: false, error: "No empty resume upload box on this page. Open the application, then press Attach." });

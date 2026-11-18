@@ -33,19 +33,34 @@ describe("Scan my email", () => {
     expect(by.reply?.contactId).toBe("c1");
     expect(by.reply?.applicationId).toBe("a");
     expect(by.interview?.applicationId).toBe("b");
-    // Ramp is already Rejected: nothing to do.
+    // Ramp is already Rejected, and a plain "thanks for applying" asks nothing: neither is a to-do.
     expect(by.rejected).toBeUndefined();
-    expect(by.new?.company).toBe("Notion");
-    expect(items).toHaveLength(3);
+    expect(items).toHaveLength(2);
   });
 
-  it("reads a no, an offer and a confirmation", () => {
+  it("finds any next step or follow-up, at companies in Unnepo or not", () => {
+    const [check] = sortInbox([mail("Stripe", "jobs@stripe.com", "Checking in", "Are you still interested in the role?")], jobs);
+    expect(check?.kind).toBe("followup");
+    expect(check?.applicationId).toBe("b");
+    const [form] = sortInbox([mail("Figma Recruiting", "no-reply@lever.co", "Action required: complete your application", "Please complete the questionnaire for the Design Intern role.")], jobs);
+    expect(form?.kind).toBe("followup");
+    expect(form?.company).toBe("Figma");
+    expect(form?.applicationId).toBe("");
+    const [screen] = sortInbox([mail("Linear", "no-reply@ashbyhq.com", "Next steps for the Engineer role", "We'd like to invite you to a phone screen.")], jobs);
+    expect(screen?.kind).toBe("interview");
+    expect(screen?.company).toBe("Linear");
+    // Not about a job: left out.
+    expect(sortInbox([mail("Mom", "mom@gmail.com", "Following up", "Let me know about dinner")], jobs)).toHaveLength(0);
+    // A confirmation that says what happens next is still only a confirmation.
+    expect(sortInbox([mail("Notion", "no-reply@ashbyhq.com", "Thanks for applying", "We received your application. Next steps: our team will review it.")], jobs)).toHaveLength(0);
+  });
+
+  it("reads a no and an offer, and skips a confirmation", () => {
     const [no] = sortInbox([mail("Stripe", "jobs@stripe.com", "Update on your application", "We regret to inform you that we will not be moving forward.")], jobs);
     expect(no?.kind).toBe("rejected");
     const [offer] = sortInbox([mail("Stripe", "jobs@stripe.com", "Your offer letter", "We're pleased to offer you the role.")], jobs);
     expect(offer?.kind).toBe("offer");
-    const [got] = sortInbox([mail("Stripe Recruiting", "no-reply@greenhouse.io", "Thank you for applying!", "We've received your application.")], jobs);
-    expect(got?.kind).toBe("confirmed");
+    expect(sortInbox([mail("Stripe Recruiting", "no-reply@greenhouse.io", "Thank you for applying!", "We've received your application.")], jobs)).toHaveLength(0);
   });
 
   it("drops an older confirmation once the company has said more", () => {
@@ -66,7 +81,7 @@ describe("Scan my email", () => {
       mail("Linear", "no-reply@ashbyhq.com", "Thanks for applying to Linear", "", at(3)),
       mail("Linear Recruiting", "no-reply@ashbyhq.com", "Thank you for applying to Linear", "", at(4)),
     ], jobs);
-    expect(items.map((item) => [item.kind, item.count])).toEqual([["reply", 2], ["interview", 2], ["new", 2]]);
+    expect(items.map((item) => [item.kind, item.count])).toEqual([["reply", 2], ["interview", 2]]);
     expect(items[0]?.subject).toBe("Re: Re: E Commerce Associate");
     expect(items[0]?.key).toBe("p:c1");
   });
@@ -81,6 +96,8 @@ describe("Scan my email", () => {
     expect(words).toContain("newer_than:60d");
     // The inbox, and never "in:chats": that sends Gmail to its Conversations tab, which shows no emails.
     expect(words.startsWith("in:inbox ")).toBe(true);
+    expect(words).toContain('"follow up"');
+    expect(words).toContain("-category:promotions");
     expect(words).not.toMatch(/in:chats/);
     expect(replies).toBe("in:inbox newer_than:120d from:(a@x.com)");
     expect(gmailSearches([])).toHaveLength(1);

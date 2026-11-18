@@ -3,7 +3,7 @@ import { applicationProfiles } from "@/lib/apply/store";
 import { planAnswers } from "@/lib/apply/questions";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { groundExtracted, mergeResume } from "@/lib/profile/extract";
-import { profileReady, profileState, saveStudentProfile, uploadProfileResume } from "@/lib/profile/service";
+import { activeResume, profileReady, profileState, removeResume, resumeList, saveStudentProfile, selectResume, uploadProfileResume } from "@/lib/profile/service";
 import { completeness, emptyStudentProfile, missingGaps } from "@/lib/profile/student";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
 import { workspaceState } from "@/lib/services/workspace";
@@ -134,6 +134,40 @@ describe("profile service", () => {
     await uploadProfileResume(userId, { name: "Pat Doe Resume v2.pdf", type: "application/pdf", bytes: new Uint8Array(pdf2) });
     expect((await profileState(userId)).profile.contact.phone).toBe("207-555-1234");
     expect((await workspaceState(userId)).ready).toBe(true);
+  });
+
+  it("keeps several resumes, and switching changes only the work experience", async () => {
+    const userId = await student();
+    process.env.ANTHROPIC_API_KEY = "anthropic";
+    model.replies.push(JSON.stringify(EXTRACTED));
+    const first = await uploadProfileResume(userId, { name: "Finance.pdf", type: "application/pdf", bytes: new Uint8Array(await coverLetterPdf(RESUME, { name: "Pat Doe", contact: [] })) });
+    const RESUME_2 = RESUME.replace("Data Analyst Intern, Maine Credit Union, May 2024 - August 2024", "Research Assistant, Colby Lab, June 2025 - Present");
+    const lab = { ...EXTRACTED, contact: { ...EXTRACTED.contact, phone: "" }, education: [], experience: [{ company: "Colby Lab", title: "Research Assistant", startDate: "June 2025", endDate: "Present", bullets: [] }] };
+    model.replies.push(JSON.stringify(lab));
+    await uploadProfileResume(userId, { name: "Research.pdf", type: "application/pdf", bytes: new Uint8Array(await coverLetterPdf(RESUME_2, { name: "Pat Doe", contact: [] })) });
+
+    const listed = await resumeList(userId);
+    expect(listed.map((item) => [item.fileName, item.active])).toEqual([["Research.pdf", true], ["Finance.pdf", false]]);
+    const research = await profileState(userId);
+    expect(research.profile.experience[0]?.company).toBe("Colby Lab");
+
+    // Back to the first resume: its experience is kept from the upload, so no new read.
+    const calls = model.calls;
+    const back = await selectResume(userId, first.resume!.id);
+    expect(model.calls).toBe(calls);
+    expect(back.switched).toBe(true);
+    expect(back.resume?.fileName).toBe("Finance.pdf");
+    expect(back.profile.experience.map((item) => item.company)).toEqual(["Maine Credit Union"]);
+    // Everything else stays as it was.
+    expect(back.profile.education).toEqual(research.profile.education);
+    expect(back.profile.contact).toEqual(research.profile.contact);
+    expect((await activeResume(userId))?.fileName).toBe("Finance.pdf");
+    expect((await applicationProfiles.get(userId))?.resumeProfile?.experience[0]?.company).toBe("Maine Credit Union");
+
+    // Removing the one in use switches to the other.
+    const after = await removeResume(userId, first.resume!.id);
+    expect(after.resume?.fileName).toBe("Research.pdf");
+    await expect(removeResume(userId, after.resume!.id)).rejects.toThrow(/only one/);
   });
 
   it("rejects a bad job-site account email and never stores a password", async () => {

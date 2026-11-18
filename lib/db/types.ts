@@ -110,6 +110,8 @@ export type Resume = {
   storagePath: string;
   text: string;
   createdAt: string;
+  /** The work experience read off this resume, kept so switching to it again needs no new read. */
+  experience?: Array<{ company: string; title: string; location?: string; startDate: string; endDate?: string; current: boolean; bullets: string[] }>;
 };
 
 export type ResumeFact = {

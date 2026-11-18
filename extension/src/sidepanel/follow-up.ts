@@ -1,8 +1,8 @@
 /**
- * The Follow up tab: Scan my email, then what it found in two lists: Emails to you (replies, interviews, offers,
- * no's) and Add jobs (applications Unnepo missed). Each is one to-do per person, job or company, with the button
- * that does it, Done and Ignore; each list can be ignored all at once. Under them, five suggested follow-ups, and
- * the quiet updates (applications confirmed) last. The scan runs in the background worker.
+ * The Follow up tab, kept simple: one bar to scan Gmail, then two short lists. "Inbox" is the emails that ask for
+ * a next step (replies, interviews, offers, no's, and any other follow-up), one per person, job or company, each
+ * with the one button that does it, Open email, and × to clear it. "Follow-ups" is up to five people to nudge or
+ * email first. How the scan works sits behind "How it works". The scan runs in the background worker.
  */
 
 import type { InboxItem, InboxScan } from "@/lib/apply/inbox-scan";
@@ -11,8 +11,8 @@ import { escape, isHiddenJob, needsFirstEmail, store, todayList } from "../share
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
 
 /**
- * `ignored`: what was ticked off or ignored, with when. An inbox to-do comes back only when a newer email arrives
- * from that person, job or company; a suggestion stays gone.
+ * `ignored`: what was cleared, with when. An inbox to-do comes back only when a newer email arrives from that
+ * person, job or company; a suggestion stays gone.
  */
 const inbox = { scan: null as InboxScan | null, ignored: {} as Record<string, number>, busy: false, error: "", acting: new Set<string>(), loaded: false };
 let redraw = () => undefined as void;
@@ -30,24 +30,33 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.inboxScan || changes.inboxIgnored) redraw();
 });
 
+type Words = { title: (item: InboxItem) => string; action: string; tone: "ok" | "accent" | "muted" };
+const WORDS: Partial<Record<string, Words>> = {
+  reply: { title: (item) => `${item.contactName || item.fromName} replied`, action: "Mark replied", tone: "ok" },
+  offer: { title: (item) => `Offer from ${item.company}`, action: "Mark offer", tone: "ok" },
+  interview: { title: (item) => `Interview step at ${item.company}`, action: "Mark interviewing", tone: "accent" },
+  followup: { title: (item) => `Next step at ${item.company}`, action: "", tone: "accent" },
+  rejected: { title: (item) => `${item.company} passed`, action: "Mark rejected", tone: "muted" },
+};
+const ORDER: Record<string, number> = { reply: 0, offer: 1, interview: 2, followup: 3, rejected: 4 };
+
 const showing = (item: InboxItem) => !(inbox.ignored[item.key] >= item.at);
-const EMAIL_KINDS = new Set<InboxItem["kind"]>(["reply", "offer", "interview", "rejected"]);
-const ORDER: Record<InboxItem["kind"], number> = { reply: 0, offer: 1, interview: 2, rejected: 3, new: 4, confirmed: 5 };
-const emails = () => (inbox.scan?.items ?? []).filter((item) => EMAIL_KINDS.has(item.kind) && showing(item)).sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || b.at - a.at);
-const missed = () => (inbox.scan?.items ?? []).filter((item) => item.kind === "new" && showing(item)).sort((a, b) => b.at - a.at);
-const updates = () => (inbox.scan?.items ?? []).filter((item) => item.kind === "confirmed");
+// Scans saved before this version can hold "thanks for applying" kinds that aren't shown anymore.
+const emails = () => (inbox.scan?.items ?? []).filter((item) => WORDS[item.kind] && showing(item)).sort((a, b) => ORDER[a.kind] - ORDER[b.kind] || b.at - a.at);
 
 type Suggestion = { key: string; title: string; detail: string; button: string; later: string };
 /**
- * Five follow-ups to do: the follow-ups that are due first (from the reminders), then jobs applied to where
- * nobody's been emailed yet, the longest waiting first.
+ * Five follow-ups to do: the ones that are due first (from the reminders), then jobs applied to where nobody's
+ * been emailed yet, the longest waiting first.
  */
 function suggestions(): Suggestion[] {
   if (!store.tracker) return [];
   const due = todayList().items.map((item): Suggestion => ({
     key: item.key, title: item.title, detail: item.detail,
-    button: `<button type="button" class="solid" data-remind="${escape(item.key)}">${escape(item.action)}</button>`,
-    later: item.kind === "sent" ? `<button type="button" class="quiet-link" data-remind-mark="${escape(item.key)}">Not yet</button>` : `<button type="button" class="quiet-link" data-remind-snooze="${escape(item.key)}" title="Hide for 3 days">Later</button>`,
+    button: `<button type="button" class="fu-go" data-remind="${escape(item.key)}">${escape(item.action)}</button>`,
+    later: item.kind === "sent"
+      ? `<button type="button" class="fu-link" data-remind-mark="${escape(item.key)}">Not yet</button>`
+      : `<button type="button" class="fu-link" data-remind-snooze="${escape(item.key)}" title="Hide for 3 days">Later</button>`,
   }));
   const days = (at: string) => Math.max(0, Math.floor((Date.now() - Date.parse(at)) / 86_400_000));
   const first = store.tracker.jobs
@@ -58,96 +67,104 @@ function suggestions(): Suggestion[] {
       return {
         key: `first:${job.id}`,
         title: `Email someone at ${job.companyMissing ? "this company" : job.company}`,
-        detail: `${job.titleMissing ? "Job title missing" : job.title} · ${waited ? `applied ${waited} ${waited === 1 ? "day" : "days"} ago` : "applied today"}`,
-        button: `<button type="button" class="solid" data-bubble-open="${job.id}">${job.contacts.length ? "See who to email" : "Find people"}</button>`,
-        later: `<button type="button" class="quiet-link" data-inbox-ignore="first:${job.id}">Ignore</button>`,
+        detail: `${job.titleMissing ? "Job title missing" : job.title} · ${waited ? `applied ${waited}d ago` : "applied today"}`,
+        button: `<button type="button" class="fu-go" data-bubble-open="${job.id}">${job.contacts.length ? "See who" : "Find people"}</button>`,
+        later: "",
       };
     });
   return [...due, ...first].slice(0, 5);
 }
 
-/** How many things the Follow up tab has to do: emails to answer, jobs to add, and the follow-ups due. */
-export const followCount = () => emails().length + missed().length + todayList().items.length;
+/** How many things the Follow up tab has to do: emails that need a next step, and the follow-ups due. */
+export const followCount = () => emails().length + todayList().items.length;
 
 const day = (at: number) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 const ago = (at: number) => {
   const minutes = Math.round((Date.now() - at) / 60_000);
   if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
+  if (minutes < 60) return `${minutes}m ago`;
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
-  const days = Math.round(hours / 24);
-  return `${days} ${days === 1 ? "day" : "days"} ago`;
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 };
 
-const WORDS: Record<InboxItem["kind"], { title: (item: InboxItem) => string; action: string; tone: string }> = {
-  reply: { title: (item) => `${item.contactName || item.fromName} replied`, action: "Mark replied", tone: "ok" },
-  offer: { title: (item) => `Offer from ${item.company}`, action: "Set Offer", tone: "ok" },
-  interview: { title: (item) => `Next step at ${item.company}`, action: "Set Interviewing", tone: "accent" },
-  rejected: { title: (item) => `${item.company} said no`, action: "Set Rejected", tone: "muted" },
-  new: { title: (item) => `Applied to ${item.company}?`, action: "Add job", tone: "warn" },
-  confirmed: { title: (item) => `${item.company} got your application`, action: "", tone: "muted" },
-};
+const clear = (key: string, label: string) => `<button type="button" class="fu-x" data-inbox-ignore="${escape(key)}" aria-label="Clear: ${escape(label)}" title="Clear">×</button>`;
 
-function row(item: InboxItem) {
-  const words = WORDS[item.kind];
+function emailRow(item: InboxItem) {
+  const words = WORDS[item.kind]!;
+  const title = words.title(item);
   const busy = inbox.acting.has(item.key);
-  const more = item.count > 1 ? `${item.count} emails` : "";
-  const sub = [item.kind === "new" ? "" : item.jobTitle, item.subject, more || day(item.at)].filter(Boolean).join(" · ");
+  // A status to set only when the job is in Unnepo; otherwise opening the email is the thing to do.
+  const action = words.action && item.applicationId ? words.action : "";
+  const sub = [item.subject || item.snippet, item.count > 1 ? `${item.count} emails` : day(item.at)].filter(Boolean).join(" · ");
   return `
-    <li class="todo ${words.tone}">
-      <button type="button" class="todo-check" data-inbox-ignore="${escape(item.key)}" aria-label="Done: ${escape(words.title(item))}" title="Done"></button>
-      <div class="todo-text">
-        <span class="todo-title">${escape(words.title(item))}</span>
-        <span class="sub">${escape(sub)}</span>
-        <div class="todo-actions">
-          ${words.action ? `<button type="button" class="solid" data-inbox-act="${escape(item.key)}" ${busy ? "disabled" : ""}>${busy ? "Saving…" : words.action}</button>` : ""}
-          <a class="quiet-link" href="${escape(item.url)}" target="_blank" rel="noreferrer">Open email ↗</a>
-          <button type="button" class="quiet-link" data-inbox-ignore="${escape(item.key)}">Ignore</button>
+    <li class="fu-item ${words.tone}">
+      <span class="fu-dot" aria-hidden="true"></span>
+      <div class="fu-body">
+        <span class="fu-title">${escape(title)}</span>
+        <span class="fu-sub">${escape(sub)}</span>
+        <div class="fu-actions">
+          ${action ? `<button type="button" class="fu-go" data-inbox-act="${escape(item.key)}" ${busy ? "disabled" : ""}>${busy ? "Saving…" : action}</button>` : ""}
+          <a class="${action ? "fu-link" : "fu-go"}" href="${escape(item.url)}" target="_blank" rel="noreferrer">Open email</a>
+          ${!item.applicationId && item.kind !== "rejected" ? `<button type="button" class="fu-link" data-inbox-add="${escape(item.key)}">Add job</button>` : ""}
         </div>
       </div>
+      ${clear(item.key, title)}
     </li>`;
 }
 
-/** One list: its name, how many, Ignore all, then the to-dos (or a line when there are none). */
-function list(name: string, items: InboxItem[], group: string, empty: string) {
+function suggestionRow(idea: Suggestion) {
   return `
-    <section class="page" aria-label="${escape(name)}">
-      <div class="row-between"><span class="eyebrow">${escape(name)}${items.length ? ` · ${items.length}` : ""}</span>${items.length > 1 ? `<button type="button" class="quiet-link tight" data-inbox-ignore-all="${group}">Ignore all</button>` : ""}</div>
-      ${items.length ? `<ul class="todo-list">${items.map(row).join("")}</ul>` : `<p class="note">${escape(empty)}</p>`}
-    </section>`;
+    <li class="fu-item">
+      <span class="fu-dot" aria-hidden="true"></span>
+      <div class="fu-body">
+        <span class="fu-title">${escape(idea.title)}</span>
+        ${idea.detail ? `<span class="fu-sub">${escape(idea.detail)}</span>` : ""}
+        <div class="fu-actions">${idea.button}${idea.later}</div>
+      </div>
+      ${idea.key.startsWith("first:") ? clear(idea.key, idea.title) : ""}
+    </li>`;
 }
+
+const HOW = `
+  <details class="fu-how">
+    <summary>How it works</summary>
+    <p>Unnepo opens Gmail in a background tab for a few seconds, reads the subject and preview of recent emails about jobs, then closes it. Only emails asking for a next step show up here: replies, interviews, offers, no's, and anything asking you to follow up. "Thanks for applying" emails are skipped.</p>
+    <p>Your emails are read on this computer and never leave it. Use the Gmail account you're signed in to in Chrome.</p>
+    <p>Follow up is still being finished, so it can miss an email now and then.</p>
+  </details>`;
 
 export function followView() {
   const scan = inbox.scan;
-  const news = updates();
+  const items = scan ? emails() : [];
   const ideas = suggestions();
-  const status = inbox.busy ? "Reading your Gmail…" : scan ? `Scanned ${ago(scan.at)} · ${scan.looked} ${scan.looked === 1 ? "email" : "emails"}` : "Not scanned yet";
-  return `
-    <section class="page follow-scan" aria-label="Scan my email">
-      <div class="row-between"><span class="eyebrow">Your inbox <span class="demo-badge">Demo</span></span><span class="sub mono">${escape(status)}</span></div>
-      <p class="small demo-note">Follow up is a demo: it works, but it's still being finished.</p>
-      <p class="small">Unnepo looks through your Gmail for replies, interviews, offers, no's and applications it missed. Your emails are read on this computer and never leave it.</p>
-      <button type="button" class="btn primary big" id="scan-mail" ${inbox.busy ? "disabled" : ""}>${inbox.busy ? "Scanning…" : scan ? "Scan again" : "Scan my email"}</button>
-      ${inbox.busy ? `<div class="bar scan-bar" role="progressbar" aria-label="Scanning your email"><div></div></div><span class="sub">A Gmail tab opens in the background for a few seconds, then closes.</span>` : ""}
-      ${inbox.error ? `<p class="small" style="color: var(--warn)" role="alert">${escape(inbox.error)}</p>` : ""}
-    </section>
-    ${scan ? `${list("Emails to you", emails(), "emails", "Nothing new: no replies, interviews or no's to deal with.")}
-    ${list("Add jobs", missed(), "missed", "Every application in your inbox is in Unnepo.")}` : ""}
-    <section class="page" aria-label="Suggested follow-ups">
-      <div class="row-between"><span class="eyebrow">Suggested follow-ups</span>${ideas.length ? `<span class="mono">${ideas.length}</span>` : ""}</div>
-      ${ideas.length ? `<ul class="todo-list">${ideas.map((idea) => `
-        <li class="todo"><span class="todo-num" aria-hidden="true">${ideas.indexOf(idea) + 1}</span>
-          <div class="todo-text"><span class="todo-title">${escape(idea.title)}</span>${idea.detail ? `<span class="sub">${escape(idea.detail)}</span>` : ""}
-            <div class="todo-actions">${idea.button}${idea.later}</div></div></li>`).join("")}</ul>`
-        : `<p class="note ok">Nothing to follow up on. Apply to a job and email someone there, and Unnepo suggests when to follow up.</p>`}
-    </section>
-    ${news.length ? `<details class="page follow-updates"><summary><span class="eyebrow">Updates</span><span class="mono">${news.length}</span></summary>
-      <ul class="todo-list quiet">${news.map((item) => `<li class="todo muted"><span class="todo-dot" aria-hidden="true">✓</span><div class="todo-text"><span class="todo-title">${escape(WORDS.confirmed.title(item))}</span><span class="sub">${escape([item.jobTitle, day(item.at)].filter(Boolean).join(" · "))}</span></div></li>`).join("")}</ul>
-    </details>` : ""}`;
+  const button = `<button type="button" class="${scan ? "fu-scan" : "btn primary big fu-first"}" id="scan-mail" ${inbox.busy ? "disabled" : ""}>${inbox.busy ? "Scanning…" : scan ? "Scan again" : "Scan my email"}</button>`;
+  const error = inbox.error ? `<p class="fu-error" role="alert">${escape(inbox.error)}</p>` : "";
+  const progress = inbox.busy ? `<div class="bar scan-bar" role="progressbar" aria-label="Scanning your email"><div></div></div>` : "";
+
+  const top = scan
+    ? `<div class="fu-bar"><span class="fu-status">${inbox.busy ? "Reading your Gmail…" : `Checked ${ago(scan.at)}`}</span>${button}</div>${progress}${error}`
+    : `<section class="fu-start" aria-label="Scan my email">
+        <p class="fu-lead">Find replies and next steps in your Gmail.</p>
+        ${button}${progress}${error}${HOW}
+      </section>`;
+
+  const inboxList = scan ? `
+    <section class="fu-section" aria-label="Inbox">
+      <div class="fu-head"><span>Inbox${items.length ? ` <b>${items.length}</b>` : ""}</span>${items.length > 1 ? `<button type="button" class="fu-link" data-inbox-ignore-all>Clear all</button>` : ""}</div>
+      ${items.length ? `<ul class="fu-list">${items.map(emailRow).join("")}</ul>` : `<p class="fu-empty">Nothing waiting on you.</p>`}
+    </section>` : "";
+
+  const followList = `
+    <section class="fu-section" aria-label="Follow-ups">
+      <div class="fu-head"><span>Follow-ups${ideas.length ? ` <b>${ideas.length}</b>` : ""}</span></div>
+      ${ideas.length ? `<ul class="fu-list">${ideas.map(suggestionRow).join("")}</ul>` : `<p class="fu-empty">You're caught up.</p>`}
+    </section>`;
+
+  return `<div class="fu">${top}${inboxList}${followList}${scan ? HOW : ""}</div>`;
 }
 
-/** Ticks off or ignores to-dos. An inbox one remembers its newest email, so a newer one brings it back. */
+/** Clears to-dos. An inbox one remembers its newest email, so a newer one brings it back. */
 async function ignore(keys: string[]) {
   const items = inbox.scan?.items ?? [];
   for (const key of keys) inbox.ignored[key] = items.find((item) => item.key === key)?.at ?? Date.now();
@@ -159,8 +176,8 @@ async function ignore(keys: string[]) {
 }
 
 /**
- * Wires the tab. `addJob` opens the add-a-job form filled in with the company, for an application Unnepo missed;
- * `refresh` reads the tracker again after a change.
+ * Wires the tab. `addJob` opens the add-a-job form filled in with the company, for an email about a job that isn't
+ * in Unnepo; `refresh` reads the tracker again after a change.
  */
 export function wireFollow(root: HTMLElement, hooks: { redraw: () => void; addJob: (item: InboxItem) => void; refresh: () => Promise<void> | void }) {
   redraw = hooks.redraw;
@@ -177,17 +194,17 @@ export function wireFollow(root: HTMLElement, hooks: { redraw: () => void; addJo
     redraw();
   });
   root.querySelectorAll<HTMLButtonElement>("[data-inbox-ignore]").forEach((button) => button.addEventListener("click", () => void ignore([button.dataset.inboxIgnore!])));
-  root.querySelectorAll<HTMLButtonElement>("[data-inbox-ignore-all]").forEach((button) => button.addEventListener("click", () => {
-    const items = button.dataset.inboxIgnoreAll === "emails" ? emails() : missed();
-    if (confirm(`Ignore all ${items.length}? They come back only if a newer email arrives.`)) void ignore(items.map((item) => item.key));
+  root.querySelector<HTMLButtonElement>("[data-inbox-ignore-all]")?.addEventListener("click", () => {
+    const items = emails();
+    if (confirm(`Clear all ${items.length}? They come back only if a newer email arrives.`)) void ignore(items.map((item) => item.key));
+  });
+  root.querySelectorAll<HTMLButtonElement>("[data-inbox-add]").forEach((button) => button.addEventListener("click", () => {
+    const item = inbox.scan?.items.find((entry) => entry.key === button.dataset.inboxAdd);
+    if (item) hooks.addJob(item);
   }));
   root.querySelectorAll<HTMLButtonElement>("[data-inbox-act]").forEach((button) => button.addEventListener("click", async () => {
     const item = inbox.scan?.items.find((entry) => entry.key === button.dataset.inboxAct);
     if (!item) return;
-    if (item.kind === "new") {
-      await ignore([item.key]);
-      return hooks.addJob(item);
-    }
     inbox.acting.add(item.key);
     redraw();
     const outcome = { offer: "offer", interview: "interviewing", rejected: "rejected" }[item.kind as "offer" | "interview" | "rejected"];
