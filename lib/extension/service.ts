@@ -355,13 +355,18 @@ function trackerJob(app: JobApplication, people: ApplicationContact[]) {
  * follow-up), mark them emailed or replied, or say an address bounced. Credits are spent as on the website.
  */
 export async function extensionPeople(userId: string, raw: unknown) {
-  const body = (raw ?? {}) as { action?: unknown; applicationId?: unknown; contactId?: unknown; website?: unknown; status?: unknown; followUp?: unknown; followedUp?: unknown; subject?: unknown; body?: unknown; names?: unknown };
+  const body = (raw ?? {}) as { action?: unknown; applicationId?: unknown; contactId?: unknown; website?: unknown; status?: unknown; followUp?: unknown; followedUp?: unknown; subject?: unknown; body?: unknown; names?: unknown; emails?: unknown; deep?: unknown };
   const app = await requireApp(userId, body.applicationId);
   const forApp = async () => (await applicationContacts.list(userId, [app.id])).find((row) => row.id === String(body.contactId ?? ""));
   switch (body.action) {
     case "find": return retryContacts(userId, { applicationId: app.id, website: body.website });
     // "Find with LinkedIn": just the company's website and email format, free; the panel builds the guesses.
-    case "format": return companyEmailFormat(userId, app, { website: typeof body.website === "string" ? body.website : "", names: Array.isArray(body.names) ? body.names.filter((name): name is string => typeof name === "string") : [] });
+    case "format": return companyEmailFormat(userId, app, {
+      website: typeof body.website === "string" ? body.website : "",
+      names: Array.isArray(body.names) ? body.names.filter((name): name is string => typeof name === "string") : [],
+      emails: Array.isArray(body.emails) ? body.emails.filter((email): email is string => typeof email === "string") : [],
+      deep: body.deep === true,
+    });
     case "reveal": return revealContact(userId, { applicationId: app.id, contactId: body.contactId });
     case "write": return writeContactEmail(userId, { applicationId: app.id, contactId: body.contactId, followUp: body.followUp === true, ...(typeof body.body === "string" ? { subject: body.subject, body: body.body } : {}) });
     case "status": {

@@ -2,7 +2,7 @@ import { id, nowIso, repo } from "@/lib/db/file-store";
 import { safeGet } from "@/lib/apply/safe-fetch";
 import { contactFetch } from "@/lib/providers/contacts/http";
 import { assertSpendAllowed, isPersonalWorkEmail } from "@/lib/providers/contacts/router";
-import { COMMON_FORMATS, buildEmail, nameParts, patternOf } from "@/lib/apply/email-format";
+import { COMMON_FORMATS, buildEmail, emailsInText, nameParts, patternOf } from "@/lib/apply/email-format";
 
 /**
  * Work emails Apollo doesn't have: Unnepo learns the company's email format (from an email it already
@@ -28,12 +28,7 @@ export function patternFromLocals(locals: string[]) {
 
 /** Personal addresses at this company's domain in a page's HTML, including "jane [at] acme.com". */
 export function emailsOnPage(html: string, domain: string) {
-  const text = html.replace(/&#64;|&commat;|%40|\s*\[at\]\s*|\s*\(at\)\s*/gi, "@").replace(/&#46;|\s*\[dot\]\s*/gi, ".");
-  const wanted = domain.toLowerCase();
-  const found = (text.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) ?? [])
-    .map((email) => email.toLowerCase().replace(/^mailto:/, ""))
-    .filter((email) => email.split("@")[1] === wanted && isPersonalWorkEmail(email));
-  return [...new Set(found)];
+  return emailsInText(html, domain).filter(isPersonalWorkEmail);
 }
 
 /** Whether robots.txt lets any crawler read this path (the "User-agent: *" rules, longest match wins). */
@@ -271,4 +266,61 @@ export async function guessEmail(userId: string, name: string, domain: string, f
     if (status === "unknown" && !unchecked && (format.pattern || fromSite.has(email))) unchecked = { email, verified: false, source: "likely" };
   }
   return unchecked;
+}
+
+/**
+ * A format from real addresses found on the web for "@acme.com": an address that fits a name the student read off
+ * LinkedIn decides it (the most votes win); with no names to match, two or more addresses shaped alike
+ * ("jane.doe", "sam.lee") do. Null when the addresses don't say.
+ */
+export function formatFromEmails(domain: string, emails: string[], names: string[]) {
+  const at = emails.map((email) => email.toLowerCase().trim()).filter((email) => email.endsWith(`@${domain.toLowerCase()}`) && isPersonalWorkEmail(email));
+  const votes = new Map<string, number>();
+  for (const email of new Set(at)) {
+    // Each address counts once, for the first name it fits.
+    const pattern = names.map((name) => patternOf(email, name)).find(Boolean);
+    if (pattern) votes.set(pattern, (votes.get(pattern) ?? 0) + 1);
+  }
+  const best = [...votes.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best?.[0] ?? patternFromLocals(at.map((email) => email.split("@")[0]));
+}
+
+/** How long a company whose format couldn't be confirmed is left alone before it's checked again. */
+const UNCONFIRMED_DAYS = 30;
+const MAX_CONFIRM_CHECKS = 4;
+
+/**
+ * The format, confirmed with the cheap verifier when nothing else found it: the likeliest addresses for one or two
+ * of the people read off LinkedIn are checked until one is valid (at most four checks, about 2¢). Paid once per
+ * company: the format is saved for every student, and so is a company that couldn't be confirmed, for a month.
+ */
+export async function confirmFormat(userId: string, domain: string, names: string[]): Promise<{ pattern: string | null; acceptAll: boolean } | null> {
+  if (!checkerReady()) return null;
+  const saved = await repo.getEmailFormat(domain);
+  if (saved?.pattern || saved?.acceptAll) return { pattern: saved.pattern, acceptAll: saved.acceptAll };
+  if (saved?.source === "unconfirmed" && Date.now() - Date.parse(saved.at) < UNCONFIRMED_DAYS * 86_400_000) return null;
+  // Plain two-word names make the clearest checks: "Jane Doe", not "J. Doe" or "Jane".
+  const people = [...new Set(names)].filter((name) => { const { first, last } = nameParts(name); return first.length >= 2 && last.length >= 2; }).slice(0, 2);
+  if (!people.length) return null;
+  let checks = 0;
+  for (const name of people) {
+    for (const pattern of COMMON_FORMATS.slice(0, 3)) {
+      const email = buildEmail(pattern, name, domain);
+      if (!email || checks >= MAX_CONFIRM_CHECKS) continue;
+      checks += 1;
+      const status = await checkEmail(userId, email).catch(() => null);
+      // The checker failed or today's budget is spent: try again another time.
+      if (status === null) return null;
+      if (status === "valid") {
+        await repo.setEmailFormat(domain, { pattern, acceptAll: false, source: "verified" }).catch(() => undefined);
+        return { pattern, acceptAll: false };
+      }
+      if (status === "accept_all") {
+        await repo.setEmailFormat(domain, { pattern: null, acceptAll: true, source: "verified" }).catch(() => undefined);
+        return { pattern: null, acceptAll: true };
+      }
+    }
+  }
+  await repo.setEmailFormat(domain, { pattern: null, acceptAll: false, source: "unconfirmed" }).catch(() => undefined);
+  return null;
 }

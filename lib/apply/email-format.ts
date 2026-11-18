@@ -31,3 +31,27 @@ export function patternOf(email: string, name: string) {
   if (!local || !domain) return null;
   return COMMON_FORMATS.find((pattern) => buildEmail(pattern, name, domain) === `${local}@${domain}`) ?? null;
 }
+
+/**
+ * Addresses at this company's domain in any text or HTML (a page, search results), including "jane [at] acme.com"
+ * and "jane.doe<b>@acme.com</b>" as search engines bold it. Lowercase, each once.
+ */
+export function emailsInText(text: string, domain: string) {
+  const plain = text
+    // A mailto link's address is kept before the tags go.
+    .replace(/<a\b[^>]*href=["']?mailto:([^"'?>\s]+)[^>]*>/gi, " $1 ")
+    .replace(/<\/?(b|strong|em|i|span|mark|wbr)\b[^>]*>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&#64;|&commat;|%40|\s*\[at\]\s*|\s*\(at\)\s*/gi, "@")
+    .replace(/&#46;|\s*\[dot\]\s*/gi, ".");
+  const wanted = domain.toLowerCase();
+  const found = (plain.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) ?? [])
+    .map((email) => email.toLowerCase().replace(/^mailto:/, "").replace(/^[._%+-]+/, ""))
+    .filter((email) => email.split("@")[1] === wanted);
+  return [...new Set(found)];
+}
+
+/** The likeliest addresses for someone when the company's format isn't known, most likely first. */
+export function likelyEmails(name: string, domain: string, count = 3) {
+  return COMMON_FORMATS.slice(0, count).map((pattern) => buildEmail(pattern, name, domain)).filter((email): email is string => Boolean(email));
+}

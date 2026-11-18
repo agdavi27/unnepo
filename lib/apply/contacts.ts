@@ -4,7 +4,7 @@ import type { Contact } from "@/lib/db/types";
 import { contactFetch } from "@/lib/providers/contacts/http";
 import { ServiceError } from "@/lib/errors";
 import { safeGet } from "@/lib/apply/safe-fetch";
-import { HUNTER_CENTS, buildEmail, checkerReady, guessEmail, hunterCheck, hunterCount, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, siteEmails, type EmailFormat, type KnownEmail } from "@/lib/apply/email-guess";
+import { HUNTER_CENTS, buildEmail, checkerReady, confirmFormat, formatFromEmails, guessEmail, hunterCheck, hunterCount, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, siteEmails, type EmailFormat, type KnownEmail } from "@/lib/apply/email-guess";
 import { sameCompany } from "@/lib/apply/match";
 import { jobIdOf, outreachEmail } from "@/lib/apply/outreach-email";
 import { lastNamesFromWeb, peopleFromWeb } from "@/lib/apply/people-web";
@@ -182,18 +182,28 @@ export function companyNames(app: Pick<JobApplication, "company" | "jobUrl">) {
 }
 
 /**
- * "Find with LinkedIn": the company's website and email format, from the free sources only (a format learned
- * before, the company's own pages), never a paid lookup. The names the student read off LinkedIn help match an
- * address on the website to its owner. No format known: the pattern is null and the panel guesses first.last.
+ * "Find with LinkedIn": the company's website and email format. Free sources first (a format learned before, the
+ * company's own pages); then, with `deep`, real addresses the panel found on the web for "@domain", matched to the
+ * names the student read off LinkedIn; then one cheap verifier check per company. What's learned is saved for every
+ * student. Nothing found: the pattern is null and the panel shows the likeliest addresses as unknown.
  */
-export async function companyEmailFormat(userId: string, app: JobApplication, options: { website?: string; names?: string[] } = {}) {
+export async function companyEmailFormat(userId: string, app: JobApplication, options: { website?: string; names?: string[]; emails?: string[]; deep?: boolean } = {}) {
   const typed = options.website?.trim() ?? "";
   const given = typed ? siteDomain(/^https?:\/\//i.test(typed) ? typed : `https://${typed}`) : null;
   if (typed && !given) throw new ServiceError("That doesn't look like the company's own website. Try something like acme.com.", "website", 400);
   const domain = given ?? (await companyDomains(userId, app))[0] ?? null;
   if (!domain) return { domain: null, pattern: null, acceptAll: false, source: "none" };
-  const format = await learnFormat(userId, domain, [], (options.names ?? []).slice(0, 40), { useHunter: false });
-  return { domain, pattern: format.pattern, acceptAll: format.acceptAll, source: format.source };
+  const names = (options.names ?? []).map((name) => name.slice(0, 80)).slice(0, 60);
+  const format = await learnFormat(userId, domain, [], names, { useHunter: false });
+  if (format.pattern || format.acceptAll || !options.deep) return { domain, pattern: format.pattern, acceptAll: format.acceptAll, source: format.source };
+  const searched = formatFromEmails(domain, (options.emails ?? []).filter((email) => email.length <= 120).slice(0, 100), names);
+  if (searched) {
+    await repo.setEmailFormat(domain, { pattern: searched, acceptAll: false, source: "search" }).catch(() => undefined);
+    return { domain, pattern: searched, acceptAll: false, source: "search" };
+  }
+  const confirmed = await confirmFormat(userId, domain, names).catch(() => null);
+  if (confirmed) return { domain, pattern: confirmed.pattern, acceptAll: confirmed.acceptAll, source: "verified" };
+  return { domain, pattern: null, acceptAll: false, source: "none" };
 }
 
 /**
