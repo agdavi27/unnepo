@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { repo } from "@/lib/db/file-store";
 import { setJobPageFetcherForTests } from "@/lib/apply/safe-fetch";
 import { setContactFetcher } from "@/lib/providers/contacts/http";
-import { buildEmail, checkEmail, emailsOnPage, guessEmail, learnFormat, nameParts, patternFromLocals, patternOf, robotsAllows } from "@/lib/apply/email-guess";
+import { buildEmail, checkEmail, confirmFormat, emailsOnPage, formatFromEmails, guessEmail, learnFormat, nameParts, patternFromLocals, patternOf, robotsAllows } from "@/lib/apply/email-guess";
 import { useTempDb } from "./helpers";
+import { emailsInText, likelyEmails } from "@/lib/apply/email-format";
 
 beforeEach(() => {
   useTempDb();
@@ -149,5 +150,57 @@ describe("checking an address with the cheaper checker", () => {
     } finally {
       delete process.env.MILLIONVERIFIER_API_KEY;
     }
+  });
+});
+
+describe("finding the format from real addresses on the web", () => {
+  it("reads addresses out of search results, bolded or written out", () => {
+    const html = `<p>Contact jane.doe<strong>@acme.com</strong> or sam [at] acme.com, not x@other.com</p>`;
+    expect(emailsInText(html, "acme.com").sort()).toEqual(["jane.doe@acme.com", "sam@acme.com"]);
+  });
+
+  it("matches found addresses to LinkedIn names, and needs two alike addresses without a name", () => {
+    expect(formatFromEmails("acme.com", ["jdoe@acme.com", "info@acme.com", "x@other.com"], ["Jane Doe", "Sam Lee"])).toBe("{f}{last}");
+    expect(formatFromEmails("acme.com", ["pat.kim@acme.com", "ana.ruiz@acme.com"], [])).toBe("{first}.{last}");
+    expect(formatFromEmails("acme.com", ["pat.kim@acme.com"], [])).toBeNull();
+    expect(formatFromEmails("acme.com", ["press@acme.com"], ["Jane Doe"])).toBeNull();
+  });
+
+  it("lists the likeliest addresses when the format isn't known", () => {
+    expect(likelyEmails("Jane Doe", "acme.com")).toEqual(["jane.doe@acme.com", "jdoe@acme.com", "jane@acme.com"]);
+  });
+});
+
+describe("confirming the format with one cheap check per company", () => {
+  function verifier(answers: Record<string, string>) {
+    process.env.MILLIONVERIFIER_API_KEY = "mv";
+    const checked: string[] = [];
+    setContactFetcher(async (input) => {
+      const email = new URL(String(input)).searchParams.get("email") ?? "";
+      checked.push(email);
+      return Response.json({ result: answers[email] ?? "invalid" });
+    });
+    return checked;
+  }
+  afterEach(() => { delete process.env.MILLIONVERIFIER_API_KEY; });
+
+  it("checks the likeliest addresses until one is valid and saves the format for everyone", async () => {
+    const checked = verifier({ "jdoe@acme.com": "ok" });
+    expect(await confirmFormat("u1", "acme.com", ["Jane Doe"])).toEqual({ pattern: "{f}{last}", acceptAll: false });
+    expect(checked).toEqual(["jane.doe@acme.com", "jdoe@acme.com"]);
+    expect((await repo.getEmailFormat("acme.com"))?.pattern).toBe("{f}{last}");
+  });
+
+  it("stops at a catch-all company", async () => {
+    verifier({ "jane.doe@acme.com": "catch_all" });
+    expect(await confirmFormat("u1", "acme.com", ["Jane Doe"])).toEqual({ pattern: null, acceptAll: true });
+  });
+
+  it("spends at most four checks, then leaves the company alone", async () => {
+    const checked = verifier({});
+    expect(await confirmFormat("u1", "acme.com", ["Jane Doe", "Sam Lee", "Ana Ruiz"])).toBeNull();
+    expect(checked).toHaveLength(4);
+    expect(await confirmFormat("u2", "acme.com", ["Jane Doe"])).toBeNull();
+    expect(checked).toHaveLength(4);
   });
 });

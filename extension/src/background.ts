@@ -9,6 +9,7 @@ import { notJobTitle } from "@/lib/apply/job-title";
 import { notCompanyName } from "@/lib/apply/company-name";
 import { APPLIED_LINE, appliedDay } from "./shared/applied-line";
 import { composeLink, type Mailer } from "@/lib/apply/compose-link";
+import { emailsInText } from "@/lib/apply/email-format";
 import { putResumeInDraft } from "./shared/mail-attach";
 import { readGmailResults } from "./shared/gmail-read";
 import { gmailSearches, sortInbox, type InboxScan, type MailRow } from "@/lib/apply/inbox-scan";
@@ -1796,6 +1797,38 @@ async function readLinkedIn(tabId: number): Promise<{ ok: boolean; tabId?: numbe
   return { ok: true, tabId, people: read.people };
 }
 
+/**
+ * Real addresses at a company, for learning its email format: the web's search results for "@acme.com" (press
+ * releases, conference programs and filings name people with their emails). Bing and DuckDuckGo are read without a
+ * tab; when they find nothing, Google is read in a background tab and closed. Only addresses at the domain come back.
+ */
+async function searchCompanyEmails(domain: string) {
+  const found = new Set<string>();
+  const queries = [`"@${domain}"`, `"@${domain}" email contact`, `"@${domain}" press release media contact`];
+  const engines = [(q: string) => `https://www.bing.com/search?${new URLSearchParams({ q, count: "50" })}`, (q: string) => `https://html.duckduckgo.com/html/?${new URLSearchParams({ q })}`];
+  for (const query of queries) {
+    for (const engine of engines) {
+      try {
+        const response = await fetch(engine(query), { credentials: "omit", signal: AbortSignal.timeout(10_000) });
+        if (response.ok) for (const email of emailsInText(await response.text(), domain)) found.add(email);
+      } catch {
+        // A blocked or slow search is skipped.
+      }
+    }
+    if (found.size >= 6) break;
+  }
+  if (found.size) return [...found].slice(0, 100);
+  const tab = await chrome.tabs.create({ url: `https://www.google.com/search?${new URLSearchParams({ q: `"@${domain}"`, num: "50" })}`, active: false }).catch(() => null);
+  if (!tab?.id) return [];
+  try {
+    await tabLoaded(tab.id, 15_000);
+    const [result] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => document.body?.innerHTML ?? "" }).catch(() => [] as chrome.scripting.InjectionResult<string>[]);
+    return emailsInText(String(result?.result ?? ""), domain).slice(0, 100);
+  } finally {
+    void chrome.tabs.remove(tab.id).catch(() => undefined);
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   const tabId = sender.tab?.id;
   void (async () => {
@@ -2038,6 +2071,13 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "linkedin-read": {
         if (sender.tab) return reply({ ok: false });
         return reply(await readLinkedIn(Number(message.tabId)));
+      }
+      // "Find with LinkedIn": real addresses at the company from web search, so its email format is known, not guessed.
+      case "format-search": {
+        if (sender.tab) return reply({ ok: false, emails: [] });
+        const domain = String(message.domain ?? "").trim().toLowerCase();
+        if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(domain)) return reply({ ok: false, emails: [] });
+        return reply({ ok: true, emails: await searchCompanyEmails(domain).catch(() => [] as string[]) });
       }
       case "job-details": {
         if (sender.tab) return reply({ ok: false });
