@@ -124,3 +124,103 @@ ${perksHtml}
   if (!response.ok) console.error("Resend rejected the friend invite", response.status, await response.text().catch(() => ""));
   return response.ok;
 }
+
+/**
+ * Sends one email through Resend. Without RESEND_API_KEY it does nothing and reports false, except outside
+ * production, where it logs the subject and link instead and reports true, so /get can be tried locally.
+ */
+async function sendEmail(input: { to: string; subject: string; text: string; html: string; headers?: Record<string, string> }) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) {
+    if (process.env.NODE_ENV === "production") return false;
+    console.info(`[email not sent: no RESEND_API_KEY] to ${input.to}: ${input.subject}`);
+    return true;
+  }
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from: process.env.RESEND_FROM || `Unnepo <${CONTACT_EMAIL}>`,
+      to: [input.to],
+      subject: input.subject,
+      reply_to: CONTACT_EMAIL,
+      text: input.text,
+      html: input.html,
+      ...(input.headers ? { headers: input.headers } : {}),
+    }),
+  });
+  if (!response.ok) console.error("Resend rejected the email", input.subject, response.status, await response.text().catch(() => ""));
+  return response.ok;
+}
+
+export type InstallEmailInput = {
+  to: string;
+  /** The Chrome Web Store listing. */
+  installUrl: string;
+  /** One-click unsubscribe, also sent as the List-Unsubscribe header. */
+  unsubscribeUrl: string;
+  /** The demo GIF, when one has been recorded (see DEMO_MEDIA in lib/install-link.ts). */
+  gifUrl: string | null;
+};
+
+/** The two emails /get sends: right away, and one reminder the next day. Plain table layout, inline styles. */
+function installEmail(kind: "now" | "reminder", input: InstallEmailInput) {
+  const font = "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif";
+  const now = kind === "now";
+  const subject = now ? "Your Unnepo install link (open on your computer)" : "Still want to apply in 1 minute instead of 25?";
+  const heading = now ? "Here's your install link" : "Your install link, one more time";
+  const lead = now
+    ? "Open this email on your laptop and add Unnepo to Chrome. It's free. Then open any job application and press Fill."
+    : "Yesterday you asked for Unnepo. Next time you're on your laptop, add it to Chrome and your next application takes about a minute.";
+  const points = [
+    "Fills applications from your resume on Workday, Greenhouse, Lever and more",
+    "Writes a cover letter for each job",
+    "Finds people at the company to follow up with",
+  ];
+  const footer = now
+    ? "We'll send one reminder tomorrow, then nothing else."
+    : "This is the last email about it. We won't send another.";
+  const gif = input.gifUrl
+    ? `<tr><td align="center" style="padding:0 24px 22px"><a href="${input.installUrl}"><img src="${input.gifUrl}" width="432" alt="Unnepo filling a job application" style="display:block;border:0;width:100%;max-width:432px;height:auto;border-radius:12px"></a></td></tr>`
+    : "";
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark"><meta name="supported-color-schemes" content="dark"><title>${subject}</title></head>
+<body style="margin:0;padding:0;background:#000000">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0">${lead}</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#000000" style="background:#000000"><tr><td align="center" style="padding:24px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" bgcolor="#0C0C0E" style="max-width:480px;background:#0C0C0E;border-radius:18px;border:1px solid #1E1E24">
+<tr><td style="${font};padding:30px 28px 6px">
+<p style="margin:0;font-size:12px;letter-spacing:2px;text-transform:uppercase;color:#3D8BFF;font-weight:800">Unnepo for Chrome</p>
+<p style="margin:10px 0 0;font-size:24px;line-height:30px;font-weight:800;color:#F7F7F8">${heading}</p>
+<p style="margin:12px 0 20px;font-size:15px;line-height:22px;color:#B4B4BC">${lead}</p>
+</td></tr>
+${gif}
+<tr><td style="padding:0 28px 22px"><table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#3D8BFF" style="border-radius:10px;background:#3D8BFF"><a href="${input.installUrl}" style="${font};display:inline-block;padding:14px 24px;font-size:16px;font-weight:700;color:#000000;text-decoration:none;border-radius:10px">Add to Chrome, it's free</a></td></tr></table></td></tr>
+<tr><td style="${font};padding:0 28px 22px">
+${points.map((point) => `<p style="margin:0 0 6px;font-size:14px;line-height:20px;color:#D4D4DA">&#10003;&nbsp; ${point}</p>`).join("")}
+</td></tr>
+<tr><td style="${font};padding:18px 28px 26px;border-top:1px solid #1E1E24;font-size:12px;line-height:18px;color:#6E6E78">${footer} You got this because this address was entered on unnepo.com.<br><a href="${input.unsubscribeUrl}" style="color:#9A9AA3">Unsubscribe</a> &middot; Questions? <a href="mailto:${CONTACT_EMAIL}" style="color:#9A9AA3">${CONTACT_EMAIL}</a></td></tr>
+</table>
+</td></tr></table>
+</body></html>`;
+  const text = `${heading}\n\n${lead}\n\nAdd to Chrome (free): ${input.installUrl}\n\n${points.map((point) => `- ${point}`).join("\n")}\n\n${footer}\nUnsubscribe: ${input.unsubscribeUrl}\nQuestions? ${CONTACT_EMAIL}`;
+  return {
+    to: input.to,
+    subject,
+    text,
+    html,
+    headers: { "List-Unsubscribe": `<${input.unsubscribeUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
+  };
+}
+
+/** The install link, sent the moment someone asks for it on /get. */
+export function sendInstallLinkEmail(input: InstallEmailInput) {
+  return sendEmail(installEmail("now", input));
+}
+
+/** The one reminder, the next day. */
+export function sendInstallReminderEmail(input: InstallEmailInput) {
+  return sendEmail(installEmail("reminder", input));
+}
+
+/** For tests: what each install email says. */
+export const installEmailForTests = installEmail;
