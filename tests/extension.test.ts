@@ -9,7 +9,7 @@ import { issueExtensionToken, requireExtensionUser, revokeExtensionToken } from 
 import { saveStudentProfile } from "@/lib/profile/service";
 import { CREDIT_COST_FALLBACK } from "../extension/src/shared/types";
 import { login, signUp, userFromSessionToken, verifyEmail } from "@/lib/services/auth";
-import { GET, OPTIONS, POST } from "@/app/api/[...slug]/route";
+import { DELETE, GET, OPTIONS, POST } from "@/app/api/[...slug]/route";
 import { useTempDb } from "./helpers";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
 import { generatePassword, unmetRules } from "@/extension/src/shared/password";
@@ -469,6 +469,33 @@ describe("resume from the extension", () => {
     // Without the extension's token, nothing.
     const anonymous = await POST(new Request("https://unneponew.vercel.app/api/extension/resume", { method: "POST", body: new FormData() }), { params: Promise.resolve({ slug: ["extension", "resume"] }) });
     expect(anonymous.status).toBe(401);
+  });
+});
+
+describe("the student's own cover letter", () => {
+  it("is optional, saved from the extension, shown in me, served back, and removable", async () => {
+    const userId = await readyStudent();
+    const { token } = await issueExtensionToken(userId);
+    expect((await (await call("GET", "me", token)).json()).coverLetter).toBeNull();
+    const missing = await call("GET", "my-letter", token);
+    expect(missing.status).toBe(404);
+
+    const send = (name: string, type: string, bytes: Uint8Array) => {
+      const form = new FormData();
+      form.append("file", new File([Buffer.from(bytes)], name, { type }));
+      return POST(new Request("https://unneponew.vercel.app/api/extension/my-letter", { method: "POST", headers: { Authorization: `Bearer ${token}`, Origin: "chrome-extension://abcdefghijklmnop" }, body: form }), { params: Promise.resolve({ slug: ["extension", "my-letter"] }) });
+    };
+    expect((await send("letter.png", "image/png", new Uint8Array([1, 2, 3]))).status).toBe(400);
+    const bytes = await coverLetterPdf("Dear hiring team, I'd love to join.", { name: "Pat Doe", contact: [] });
+    expect((await send("Pat Doe Cover Letter.pdf", "application/pdf", bytes)).status).toBe(200);
+
+    expect((await (await call("GET", "me", token)).json()).coverLetter).toMatchObject({ fileName: "Pat Doe Cover Letter.pdf" });
+    const file = await call("GET", "my-letter", token);
+    expect(file.headers.get("content-disposition")).toContain("Pat Doe Cover Letter.pdf");
+    expect(new Uint8Array(await file.arrayBuffer()).byteLength).toBe(bytes.byteLength);
+    const removed = await DELETE(new Request("https://unneponew.vercel.app/api/extension/my-letter", { method: "DELETE", headers: { Authorization: `Bearer ${token}`, Origin: "chrome-extension://abcdefghijklmnop" } }), { params: Promise.resolve({ slug: ["extension", "my-letter"] }) });
+    expect(removed.status).toBe(200);
+    expect((await (await call("GET", "me", token)).json()).coverLetter).toBeNull();
   });
 });
 

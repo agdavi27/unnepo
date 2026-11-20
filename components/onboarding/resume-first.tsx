@@ -406,6 +406,58 @@ function ResumePicker({ state, busy, onPick, onRemove }: { state: State; busy: s
   );
 }
 
+/**
+ * The student's own cover letter, optional. When one is saved, "Write with unnepo" on a job form first offers to
+ * attach it as-is; otherwise (or if they'd rather) Unnepo writes one for that job.
+ */
+function DefaultCoverLetter() {
+  const [letter, setLetter] = useState<{ fileName: string; uploadedAt: string } | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState("");
+  useEffect(() => {
+    api<{ coverLetter: { fileName: string; uploadedAt: string } | null }>("/my-letter").then((body) => setLetter(body.coverLetter)).catch(() => setLetter(null));
+  }, []);
+
+  async function send(init: RequestInit) {
+    setBusy(true);
+    setProblem("");
+    try {
+      setLetter((await api<{ coverLetter: { fileName: string; uploadedAt: string } | null }>("/my-letter", init)).coverLetter);
+    } catch (reason) {
+      setProblem(reason instanceof Error ? reason.message : "Couldn't save it.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  function upload(file: File | undefined) {
+    if (!file) return;
+    const body = new FormData();
+    body.set("file", file);
+    void send({ method: "POST", body });
+  }
+
+  if (letter === undefined) return null;
+  return (
+    <section className="space-y-3 border-t border-[#17171B] pt-6">
+      <h3 className={eyebrow}>Your cover letter <span className="normal-case tracking-normal text-[#6B6B74]">(optional)</span></h3>
+      <p className="text-sm text-[#9A9AA3]">Have a cover letter you send everywhere? Add it and Unnepo offers to attach it when a form asks for one. Or skip this: Unnepo can write one for each job.</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <label className={`${secondary} cursor-pointer ${busy ? "pointer-events-none opacity-60" : ""}`}>
+          {busy ? "Saving…" : letter ? "Replace" : "Add my cover letter"}
+          <input type="file" className="sr-only" accept=".pdf,.docx,.doc,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; upload(file); }} />
+        </label>
+        {letter && (
+          <>
+            <span className="min-w-0 truncate text-sm">{letter.fileName}</span>
+            <button type="button" disabled={busy} onClick={() => void send({ method: "DELETE" })} className="text-xs text-[#8B8B94] hover:text-red-300">Remove</button>
+          </>
+        )}
+      </div>
+      {problem && <p role="alert" className="text-sm text-red-300">{problem}</p>}
+    </section>
+  );
+}
+
 export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onDone: () => void }) {
   const [state, setState] = useState<State | null>(null);
   const [draft, setDraft] = useState<StudentProfile | null>(null);
@@ -565,6 +617,7 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
       {(step === "confirm" || mode === "edit") && (
         <div className="space-y-8">
           <Sections profile={draft} set={setDraft} />
+          <DefaultCoverLetter />
           {mode === "onboarding" && (
             <div className="flex flex-wrap gap-3 border-t border-[#17171B] pt-6">
               <button type="button" className={primary} disabled={Boolean(busy) || datesLeft.length > 0} onClick={async () => { const next = await save({}, true); if (next) { setNote(""); setStep(next.missing.length ? "gaps" : "extension"); } }}>

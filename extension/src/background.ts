@@ -202,15 +202,15 @@ async function currentMe(token: string): Promise<Me | null> {
 }
 
 /** The student's resume (or transcript) file from Unnepo. Says why when it can't (none yet, or the file is gone). */
-async function resumeFile(kind: "resume" | "transcript" = "resume", resumeId = ""): Promise<{ file: FileData | null; error: string | null }> {
+async function resumeFile(kind: "resume" | "transcript" | "my-letter" = "resume", resumeId = ""): Promise<{ file: FileData | null; error: string | null }> {
   const { token, apiBase } = await settings();
   const response = await fetch(`${apiBase}/api/extension/${kind}${resumeId ? `?id=${encodeURIComponent(resumeId)}` : ""}`, { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
-  if (!response) return { file: null, error: `Couldn't reach Unnepo to get your ${kind}.` };
+  if (!response) return { file: null, error: `Couldn't reach Unnepo to get your ${kind === "my-letter" ? "cover letter" : kind}.` };
   if (!response.ok) {
     const message = ((await response.json().catch(() => ({}))) as { error?: string }).error;
-    return { file: null, error: message || `Unnepo couldn't send your ${kind} (${response.status}).` };
+    return { file: null, error: message || `Unnepo couldn't send your ${kind === "my-letter" ? "cover letter" : kind} (${response.status}).` };
   }
-  const name = response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] ?? (kind === "resume" ? "Resume.pdf" : "Transcript.pdf");
+  const name = response.headers.get("content-disposition")?.match(/filename="([^"]+)"/)?.[1] ?? (kind === "resume" ? "Resume.pdf" : kind === "transcript" ? "Transcript.pdf" : "Cover letter.pdf");
   const bytes = new Uint8Array(await response.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
@@ -323,7 +323,7 @@ async function answerComplex(id: number, options: { job?: Partial<JobDetails>; p
 }
 
 /** Uploads a new resume (or transcript) to Unnepo from the panel. A resume is read into the profile, like the website does. */
-async function uploadResume(name: string, mime: string, base64: string, kind: "resume" | "transcript" = "resume") {
+async function uploadResume(name: string, mime: string, base64: string, kind: "resume" | "transcript" | "my-letter" = "resume") {
   const { token, apiBase } = await settings();
   const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
   const form = new FormData();
@@ -1909,7 +1909,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const me = token ? await currentMe(token) : null;
         if (!me) return reply({ ok: false });
         const free = Boolean(me.usage?.free && !me.unlimitedCredits);
-        return reply({ ok: true, free, left: free ? me.usage?.letters.left ?? null : null, highlights: me.highlights ?? [] });
+        return reply({ ok: true, free, left: free ? me.usage?.letters.left ?? null : null, highlights: me.highlights ?? [], mine: me.coverLetter?.fileName ?? null });
       }
       // The link chips on application forms: the student's LinkedIn, GitHub and portfolio from their profile.
       // Kept ten minutes, so a form's pages don't each ask again.
@@ -2110,21 +2110,30 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (transcript.file) void log("Attached your transcript from the button on the page.");
         return reply({ ok: Boolean(transcript.file), file: transcript.file, error: transcript.file ? null : "Add your transcript in Unnepo first (Me tab)" });
       }
-      // The panel's transcript: Upload or Change, and its name opens it.
-      case "upload-transcript":
+      // The panel's transcript and own cover letter: Upload or Change, and the name opens it.
+      case "upload-saved-file": {
         if (sender.tab) return reply({ ok: false });
+        const kind = message.kind === "cover-letter" ? "my-letter" : "transcript";
         try {
-          await uploadResume(String(message.name), String(message.mime), String(message.base64), "transcript");
-          await meChanged("transcript");
+          await uploadResume(String(message.name), String(message.mime), String(message.base64), kind);
+          await meChanged(kind);
           void chrome.runtime.sendMessage({ type: "state-changed" }).catch(() => undefined);
           return reply({ ok: true });
         } catch (error) {
           return reply({ ok: false, error: error instanceof Error ? error.message : "Upload failed." });
         }
-      case "get-transcript": {
+      }
+      case "get-saved-file": {
         if (sender.tab) return reply({ ok: false });
-        const transcript = await resumeFile("transcript");
-        return reply({ ok: Boolean(transcript.file), file: transcript.file, error: transcript.error });
+        const got = await resumeFile(message.kind === "cover-letter" ? "my-letter" : "transcript");
+        return reply({ ok: Boolean(got.file), file: got.file, error: got.error });
+      }
+      // "Attach your cover letter" in the Write with unnepo popup: the student's own letter, as they saved it.
+      case "my-letter-file": {
+        if (!sender.tab) return reply({ ok: false });
+        const mine = await resumeFile("my-letter");
+        if (mine.file) void log("Attached your own cover letter from the button on the page.");
+        return reply({ ok: Boolean(mine.file), file: mine.file, error: mine.error });
       }
       // The student's resumes, for the pickers on a page's Attach button and the panel's resume row.
       case "resume-list": {

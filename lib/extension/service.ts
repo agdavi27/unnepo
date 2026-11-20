@@ -113,6 +113,8 @@ export async function extensionMe(userId: string) {
     resumes: state.resumes,
     // The transcript the extension attaches where a form asks for one.
     transcript: stored?.transcript?.storagePath ? { fileName: stored.transcript.fileName, uploadedAt: stored.transcript.uploadedAt } : null,
+    // The student's own cover letter, offered first by "Write with unnepo" before writing a new one.
+    coverLetter: stored?.coverLetter?.storagePath ? { fileName: stored.coverLetter.fileName, uploadedAt: stored.coverLetter.uploadedAt } : null,
     missing: [...state.missing].sort((a, b) => Number(a.optional) - Number(b.optional)).map((gap) => gap.title).slice(0, 3),
     // The spider the student wears from the Stats page, for the panel and the crawling spiders.
     spider: { skin: wornSkin(stored?.spiderSkin, applied.length), school: state.profile.education?.[0]?.school ?? "" },
@@ -177,6 +179,44 @@ export async function extensionTranscript(userId: string) {
   const bytes = await readStoredResume(transcript.storagePath);
   if (!bytes?.byteLength) throw new ServiceError("Unnepo lost your transcript's file. Upload it again.", "no_transcript_file", 404);
   return { bytes, fileName: transcript.fileName, mime: transcript.mime };
+}
+
+/** Saves the student's own cover letter (a PDF or Word file), replacing the one before. Optional: Unnepo can write one instead. */
+export async function saveDefaultCoverLetter(userId: string, file: { name: string; type: string; bytes: Uint8Array }) {
+  const lower = file.name.toLowerCase();
+  if (!/\.(pdf|docx?)$/.test(lower)) throw new ServiceError("Upload your cover letter as a PDF or DOCX.", "file_type");
+  if (file.bytes.byteLength > TRANSCRIPT_MAX_BYTES) throw new ServiceError("Cover letters need to be 10 MB or smaller.", "file_size");
+  const stored = await applicationProfiles.get(userId);
+  if (!stored) throw new ServiceError("Finish setting up your profile first.", "profile", 400);
+  const mime = file.type || (lower.endsWith(".pdf") ? "application/pdf" : lower.endsWith(".doc") ? "application/msword" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+  const storagePath = await saveResumeBytes(dataDir(), `${userId}/cover-letter-${id()}-${safeName}`, file.bytes, mime);
+  if (!storagePath) throw new ServiceError("Couldn't save your cover letter right now. Try again in a moment.", "storage", 503);
+  const coverLetter = { fileName: file.name, mime, byteSize: file.bytes.byteLength, storagePath, uploadedAt: nowIso() };
+  await applicationProfiles.change(userId, () => ({ coverLetter }), async () => stored);
+  return { ok: true, coverLetter: { fileName: coverLetter.fileName, uploadedAt: coverLetter.uploadedAt } };
+}
+
+/** Forgets the student's own cover letter, so "Write with unnepo" goes straight to writing one. */
+export async function removeDefaultCoverLetter(userId: string) {
+  const stored = await applicationProfiles.get(userId);
+  if (stored?.coverLetter) await applicationProfiles.change(userId, () => ({ coverLetter: null }), async () => stored);
+  return { ok: true, coverLetter: null };
+}
+
+/** Whether the student saved their own cover letter, and its name. */
+export async function defaultCoverLetterInfo(userId: string) {
+  const letter = (await applicationProfiles.get(userId))?.coverLetter;
+  return { coverLetter: letter?.storagePath ? { fileName: letter.fileName, uploadedAt: letter.uploadedAt } : null };
+}
+
+/** The student's own cover letter file, for the extension to attach. */
+export async function defaultCoverLetterFile(userId: string) {
+  const letter = (await applicationProfiles.get(userId))?.coverLetter;
+  if (!letter?.storagePath) throw new ServiceError("Add your cover letter in Unnepo first.", "no_cover_letter", 404);
+  const bytes = await readStoredResume(letter.storagePath);
+  if (!bytes?.byteLength) throw new ServiceError("Unnepo lost your cover letter's file. Upload it again.", "no_cover_letter_file", 404);
+  return { bytes, fileName: letter.fileName, mime: letter.mime };
 }
 
 /** A job the extension is on. Unnepo reads it when it can; otherwise it keeps what the page showed. */
