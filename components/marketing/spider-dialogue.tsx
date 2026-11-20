@@ -206,8 +206,10 @@ function useScrollView(home: React.RefObject<HTMLDivElement | null>) {
       const columnRight = el.closest("[data-landing-column]")?.getBoundingClientRect().right ?? screen;
       const scroll = Math.max(0, window.scrollY);
       const pageEnd = document.documentElement.scrollHeight - window.innerHeight;
+      // A phone (below Tailwind's sm) has no web line: he stays put beside the headline and scrolls away with it.
+      const phone = screen < 640;
       setView({
-        progress: clamp(scroll / SCROLL_RANGE, 0, 1),
+        progress: phone ? 0 : clamp(scroll / SCROLL_RANGE, 0, 1),
         descent: pageEnd > SCROLL_RANGE ? clamp((scroll - SCROLL_RANGE) / (pageEnd - SCROLL_RANGE), 0, 1) : 0,
         scroll,
         screenHeight: window.innerHeight,
@@ -319,8 +321,8 @@ export function SpiderDialogue() {
         @media (prefers-reduced-motion: reduce) { .unnepo-bob, .unnepo-blink, .unnepo-shake { animation: none; } }
       `}</style>
       {view && <div aria-hidden className="pointer-events-none fixed inset-y-0 z-[1] w-0.5 bg-[#3A3A42]" style={{ left: view.lineX, opacity: smooth((progress - 0.6) / 0.4) }} />}
-      {/* His spot in the hero. It keeps its size when he leaves, so the page doesn't jump. */}
-      <div ref={home} className="relative mt-11 aspect-[40/30] w-[min(340px,72vw)]">
+      {/* His spot in the hero. It keeps its size when he leaves, so the page doesn't jump. On a phone he hangs small beside the headline. */}
+      <div ref={home} className="relative aspect-[40/30] w-16 sm:mt-11 sm:w-[min(340px,72vw)]">
         <div className={moved ? "fixed z-[5]" : "absolute inset-0"} style={moved ? { left, top, width } : undefined}>
           <div className="unnepo-bob relative w-full">
             <div className="absolute left-1/2 -translate-x-1/2 bg-[#3A3A44]" style={{ width: threadWidth, height: threadHeight, bottom: moved ? `calc(100% - ${width * 0.1}px)` : "calc(100% - 18px)" }} />
@@ -330,8 +332,9 @@ export function SpiderDialogue() {
           </div>
         </div>
       </div>
-      {/* Buttons take their font from the page (globals.css), so the box's font is set on this wrapper. */}
-      <div className={`flex w-full max-w-[600px] flex-col font-[family-name:var(--font-pixel)] text-[clamp(12px,1.2vw,15px)] leading-[2] ${boxOpacity === 0 ? "invisible" : ""}`} style={{ opacity: boxOpacity, pointerEvents: boxOpacity < 0.3 ? "none" : undefined }}>
+      {/* Buttons take their font from the page (globals.css), so the box's font is set on this wrapper. On a phone the box is
+          left out: below the form it would fade away before anyone scrolled to it. */}
+      <div className={`flex w-full max-sm:hidden max-w-[600px] flex-col font-[family-name:var(--font-pixel)] text-[clamp(12px,1.2vw,15px)] leading-[2] ${boxOpacity === 0 ? "invisible" : ""}`} style={{ opacity: boxOpacity, pointerEvents: boxOpacity < 0.3 ? "none" : undefined }}>
         <div className={`relative z-[1] -mb-2 ml-6 self-start border-4 border-bg ${mad ? "bg-[#FF4D4D]" : "bg-[#3D8BFF]"} px-3.5 pb-2 pt-2.5 text-[13px] leading-normal text-white shadow-[0_0_0_4px_#F7F7F8]`}>UNNEPO</div>
         <button
           type="button"

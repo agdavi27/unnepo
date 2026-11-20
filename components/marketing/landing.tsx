@@ -12,17 +12,20 @@ import type { InstallView } from "@/lib/install-view";
 /**
  * --pad is the page's left edge, --gutter keeps the right side clear for the spider's web line, and --inset is how
  * far that line sits from the screen's edge. SpiderDialogue works out the same sizes to place the line.
+ * A phone has no web line (the spider stays beside the headline), so there the gutter is just the page edge.
  */
 const PAGE_SIZES = {
   "--pad": "clamp(16px, 5vw, 72px)",
-  "--gutter": "clamp(52px, 13vw, 176px)",
   "--inset": "clamp(24px, 6vw, 84px)",
 } as CSSProperties;
+const GUTTER = "[--gutter:var(--pad)] sm:[--gutter:clamp(52px,13vw,176px)]";
 
 /** A knot on the web line, level with a section's heading. */
 function Knot({ className = "bg-[#3D8BFF]", top }: { className?: string; top: number }) {
-  return <span aria-hidden className={`absolute right-[calc(var(--inset)-var(--gutter)-6px)] h-3.5 w-3.5 ${className}`} style={{ top }} />;
+  return <span aria-hidden className={`absolute right-[calc(var(--inset)-var(--gutter)-6px)] h-3.5 w-3.5 max-sm:hidden ${className}`} style={{ top }} />;
 }
+
+const NAV_LINK = "py-3 text-[#9A9AA3] hover:text-white";
 
 const PIXEL = "font-[family-name:var(--font-pixel)]";
 const CARD = "flex flex-col gap-[18px] border-4 border-[#F7F7F8] bg-[#0C0C0E] p-[26px] shadow-[8px_8px_0_#17171B]";
@@ -44,22 +47,36 @@ const STEPS = [
 /** `view` "email" (a phone, or a browser that can't add Chrome extensions) swaps the hero's buttons for the install-link email form. */
 export function Landing({ view = "chrome" }: { view?: InstallView }) {
   return (
-    <div style={PAGE_SIZES} className="relative overflow-hidden bg-bg pl-[var(--pad)] pr-[var(--gutter)] text-ink">
+    <div style={PAGE_SIZES} className={`relative overflow-hidden bg-bg pl-[var(--pad)] pr-[var(--gutter)] text-ink ${GUTTER}`}>
       <div data-landing-column className="mx-auto flex w-full max-w-[1192px] flex-col">
-        <header className="mr-[calc(var(--pad)-var(--gutter))] flex flex-wrap items-center justify-between gap-x-6 gap-y-3 py-6">
+        <header className="mr-[calc(var(--pad)-var(--gutter))] flex items-center justify-between gap-x-6 max-sm:border-b max-sm:border-[#1F1F24] max-sm:py-3 sm:flex-wrap sm:gap-y-3 sm:py-6">
           <Logo href="/" className="text-xl font-bold tracking-[-0.6px]" />
-          <nav aria-label="Main" className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-            <a href="#how" className="py-3 text-[#9A9AA3] hover:text-white">How it works</a>
-            <a href="#pricing" className="py-3 text-[#9A9AA3] hover:text-white">Plans</a>
+          <nav aria-label="Main" className="flex flex-wrap gap-x-6 gap-y-1 text-sm max-sm:hidden">
+            <a href="#how" className={NAV_LINK}>How it works</a>
+            <a href="#pricing" className={NAV_LINK}>Plans</a>
             <FounderLink />
-            <Link href="/login" className="py-3 text-[#9A9AA3] hover:text-white">Log in</Link>
+            <Link href="/login" className={NAV_LINK}>Log in</Link>
           </nav>
+          {/* A phone keeps Log in in view and folds the rest into a menu, so the header stays one line. */}
+          <div className="flex items-center gap-2 text-sm sm:hidden">
+            <Link href="/login" className={`${NAV_LINK} px-2`}>Log in</Link>
+            <details className="group relative">
+              <summary aria-label="Menu" className="flex h-11 w-11 cursor-pointer list-none items-center justify-center text-[#F7F7F8] [&::-webkit-details-marker]:hidden">
+                <svg aria-hidden viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h14M3 10h14M3 14h14" className="group-open:hidden" /><path d="M5 5l10 10M15 5L5 15" className="hidden group-open:inline" /></svg>
+              </summary>
+              <nav aria-label="Main" className="absolute right-0 top-full z-20 flex w-52 flex-col border-2 border-[#26262C] bg-[#0C0C0E] px-4 py-1">
+                <a href="#how" className={NAV_LINK}>How it works</a>
+                <a href="#pricing" className={NAV_LINK}>Plans</a>
+                <div className="flex [&>button]:text-left"><FounderLink /></div>
+              </nav>
+            </details>
+          </div>
         </header>
 
         <main className="contents">
-          <section className="mr-[calc(var(--pad)-var(--gutter))] flex flex-wrap items-center gap-x-12 gap-y-10 pb-24 pt-6">
+          <section className="relative mr-[calc(var(--pad)-var(--gutter))] flex flex-wrap items-center gap-x-12 gap-y-6 pb-16 pt-6 sm:gap-y-10 sm:pb-24">
             <div className="flex min-w-0 flex-[1_1_460px] flex-col items-start gap-5">
-              <h1 className="m-0 text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Apply faster.<br />Follow up smarter.<br />Get hired.</h1>
+              <h1 className="m-0 max-sm:pr-[68px] text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Apply faster.<br />Follow up smarter.<br />Get hired.</h1>
               <p className="m-0 max-w-[500px] text-[clamp(16px,2vw,19px)] leading-normal text-[#B4B4BC]">Apply on any job board or company site. Every application lands in one place, with the people to follow up with.</p>
               {view === "email" ? (
                 <div className="mt-1 flex w-full max-w-[460px] flex-col gap-3">
@@ -86,7 +103,8 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
               )}
               <p className="m-0 text-[13px] text-[#9A9AA3]">Free for students, no card. The tracker is free and unlimited. Pro is $29.99 a month or $199 a year, and some schools cover it.</p>
             </div>
-            <div className="flex min-w-0 flex-[1_1_480px] flex-col items-center gap-[22px]">
+            {/* On a phone the spider perches beside the headline instead of taking a column of its own. */}
+            <div className="flex min-w-0 flex-col items-center gap-[22px] max-sm:absolute max-sm:right-0 max-sm:top-6 sm:flex-[1_1_480px]">
               <SpiderDialogue />
             </div>
           </section>
