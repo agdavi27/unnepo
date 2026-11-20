@@ -633,7 +633,7 @@ export function structuredJobs(): Array<{ title: string; company: string; descri
 }
 
 // What job sites call themselves, which isn't the company's name.
-const JOB_SITE_NAME = /^(workday|greenhouse|lever|ashby|icims|smartrecruiters|jobvite|taleo|workable|careers?|jobs?|job application|handshake|ziprecruiter|indeed|glassdoor|wellfound|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|linkedin)$/i;
+const JOB_SITE_NAME = /^(workday|deltek( talent management)?|greenhouse|lever|ashby|icims|smartrecruiters|jobvite|taleo|workable|careers?|jobs?|job application|handshake|ziprecruiter|indeed|glassdoor|wellfound|dice|simplify|built ?in|monster|simplyhired|careerbuilder|wayup|idealist|usajobs|linkedin)$/i;
 const BOARD_SUFFIX = /\s*[|·–—-]\s*(handshake|ziprecruiter|indeed(\.com)?|glassdoor|wellfound|dice|simplify|built ?in[a-z ]*|monster(\.com)?|simplyhired|careerbuilder|wayup|idealist|usajobs|linkedin)\s*$/i;
 
 /**
@@ -695,7 +695,45 @@ function hostCompany(host: string) {
   // A job system's address names the system or a server ("snp98.rec.pro.ukg.net"), never the company.
   if (QUICK_BOARDS.test(host) || /(^|\.)linkedin\.com$/.test(host) || UKG_HOST.test(host)) return "";
   const first = host.replace(/^(www|jobs|careers|boards|apply|job-boards|hire|recruiting)\./, "").split(".")[0];
-  return NOT_COMPANY.test(first) ? "" : first;
+  if (NOT_COMPANY.test(first)) return "";
+  return nameMatching(first, (document.body?.innerText ?? "").slice(0, 20000)) || first;
+}
+
+/**
+ * The company's name as the page writes it, when it's the same letters as a word from the address: "McCormick
+ * Taylor" in the text for mccormicktaylor.hua.hrsmart.com. "" when the page never writes it.
+ */
+export function nameMatching(word: string, text: string) {
+  const squash = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const want = squash(word);
+  if (want.length < 3) return "";
+  for (const run of text.matchAll(/[A-Z][A-Za-z0-9&'.-]*(?:[ \t]+(?:&[ \t]+)?[A-Z][A-Za-z0-9&'.-]*){0,5}/g)) {
+    const words = run[0].split(/[ \t]+/);
+    for (let start = 0; start < words.length; start++) {
+      for (let end = start + 1; end <= Math.min(words.length, start + 5); end++) {
+        const phrase = words.slice(start, end).join(" ").replace(/[.,'-]+$/, "");
+        if (squash(phrase) === want) return phrase;
+      }
+    }
+  }
+  return "";
+}
+
+const DELTEK_HOST = /(^|\.)hrsmart\.com$/i;
+/**
+ * Deltek Talent Management (once HRsmart, at <company>.hua.hrsmart.com). Its tabs all start "Deltek Talent
+ * Management", and a posting (/hr/ats/Posting/view/<id>) is headed "Senior Engineer - (279)". The company is only
+ * in the address and the description's text. Null off a posting: its account and apply pages don't name the job.
+ */
+export function deltekJob(where: { hostname: string; pathname: string } = window.location): { title: string; company: string; description: string } | null {
+  if (!DELTEK_HOST.test(where.hostname) || !/\/posting\/view\/\d+/i.test(where.pathname)) return null;
+  const numbered = / - \(\d+\)$/;
+  const heading = Array.from(document.querySelectorAll("h1, h2")).map((el) => clean(el.textContent)).find((text) => numbered.test(text));
+  const title = (heading ?? document.title.replace(/^deltek talent management\s*-\s*/i, "")).replace(/\s*-\s*\(\d+\)\s*$/, "").trim();
+  if (!title || notJobTitle(title)) return null;
+  const text = (document.querySelector<HTMLElement>("main, [role=main], #main") ?? document.body).innerText ?? "";
+  const from = text.search(/job description/i);
+  return { title: title.slice(0, 200), company: hostCompany(where.hostname).slice(0, 200), description: (from >= 0 ? text.slice(from) : text).trim().slice(0, 20000) };
 }
 
 /** What a job is called when the page doesn't say: the same words the server saves, so it shows as missing. */
@@ -719,7 +757,7 @@ export function scanPage(): Scan {
   // The job a job board shows (Handshake's details pane, or a posting's schema.org data).
   // On a job board, the job that's open, not the results listed beside it.
   const opened = QUICK_BOARDS.test(host) ? findOpenedJob() : null;
-  const posting = handshakeJob() ?? linkedinJob() ?? opened ?? structuredJob();
+  const posting = handshakeJob() ?? linkedinJob() ?? opened ?? deltekJob() ?? structuredJob();
   const poster = hiringTeam();
   // On a job board without posting data, the tab's title names the job and company better than the page does.
   const fromTitle = posting || !QUICK_BOARDS.test(host) ? null : titleParts(document.title) ?? titleParts(meta("og:title"));
@@ -729,7 +767,8 @@ export function scanPage(): Scan {
   // Nothing at all: the server's own "Job title missing", so the job is still caught and can be named later.
   const tabName = clean(document.title.split(/\s+[|–—-]\s+/)[0]);
   // LinkedIn's pane still on the job before: the job isn't named yet (the next look names it).
-  const waiting = Boolean(posting && "waiting" in posting && posting.waiting);
+  // Or a Deltek page that isn't the posting (its account and apply steps): those never name the job.
+  const waiting = Boolean(posting && "waiting" in posting && posting.waiting) || (!posting && DELTEK_HOST.test(host));
   const title = waiting ? NO_TITLE : (named(posting?.title) || greenhouseTitle?.[1] || named(fromTitle?.title) || named(heading) || firstHeading || named(meta("og:title")) || named(tabName) || NO_TITLE).slice(0, 200);
   const siteName = meta("og:site_name");
   const company = waiting ? "" : (posting?.company || greenhouseTitle?.[2] || fromTitle?.company || (ats === "workday" ? workdayCompany() : "") || ukgCompany(host) || applyDialogCompany()

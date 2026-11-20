@@ -2816,6 +2816,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           return reply(failed(error, "Couldn't write the email."));
         }
       }
+      // "Write with unnepo" whose popup the site's own window hid (LinkedIn's Easy Apply): write it in the side panel.
+      case "letter-in-panel":
+        if (!fromOwnContent(sender) || tabId === undefined) return reply({ ok: false });
+        await chrome.storage.local.set({ panelOpen: { view: "cover", jobId: "", at: Date.now() } });
+        try {
+          await chrome.sidePanel.open({ tabId });
+          return reply({ ok: true });
+        } catch {
+          return reply({ ok: false, error: "Click the Unnepo icon in your toolbar to open it." });
+        }
       // Find on LinkedIn: the side panel opens on that job's LinkedIn page.
       case "card-linkedin":
         if (!fromOwnContent(sender) || tabId === undefined) return reply({ ok: false });
