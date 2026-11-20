@@ -2,7 +2,7 @@
   "framework": "nextjs",
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "regions": [
-    "iad1"
+    "pdx1"
   ],
   "crons": [
     {
