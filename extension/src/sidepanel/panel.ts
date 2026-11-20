@@ -2167,13 +2167,22 @@ function addDetected(item: Detected) {
   go("tools");
 }
 
-/** "Find on LinkedIn" on the card on a job page: the panel opens on that job's LinkedIn page. */
+/**
+ * "Find on LinkedIn" on the card on a job page: the panel opens on that job's LinkedIn page. "Write with unnepo"
+ * whose popup the site hid: the panel opens on Tools with the cover letter popup.
+ */
 function openAsked() {
   void chrome.storage.local.get("panelOpen").then((stored) => {
-    const asked = stored.panelOpen as { view: "linkedin"; jobId: string; at: number } | undefined;
+    const asked = stored.panelOpen as { view: "linkedin" | "cover"; jobId: string; at: number } | undefined;
     if (!asked) return;
     void chrome.storage.local.remove("panelOpen");
-    if (asked.jobId && Date.now() - asked.at < 60_000) {
+    if (Date.now() - asked.at >= 60_000) return;
+    if (asked.view === "cover") {
+      popup = { kind: "cover", step: 0 };
+      go("tools");
+      return;
+    }
+    if (asked.jobId) {
       jobFrom = "home";
       openContacts(asked.jobId, asked.view);
     }

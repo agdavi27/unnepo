@@ -9,6 +9,9 @@ describe("isJobPage", () => {
     // UKG Pro Recruiting's new address (UltiPro's old one is ultipro.com).
     expect(isJobPage({ url: "https://snp98.rec.pro.ukg.net/JAK1500JAKO/JobBoard/74f2e917-c09c-454b-b413-e11f7a62bf4b/OpportunityApply?opportunityId=5777cb78-b281-4c79-a8e7-6a396f0b992c" })).toBe(true);
     // LinkedIn: only a job it has open, never the feed or a search with no job picked.
+    // Deltek Talent Management (HRsmart): its posting, and the account step Apply opens, are a job system's pages.
+    expect(isJobPage({ url: "https://mccormicktaylor.hua.hrsmart.com/hr/ats/Posting/view/279" })).toBe(true);
+    expect(isJobPage({ url: "https://mccormicktaylor.hua.hrsmart.com/hr/ats/JobSeeker/createAccount" })).toBe(true);
     expect(isJobPage({ url: "https://www.linkedin.com/jobs/view/4012345678/" })).toBe(true);
     expect(isJobPage({ url: "https://www.linkedin.com/jobs/search/?currentJobId=4012345678&keywords=intern" })).toBe(true);
     expect(isJobPage({ url: "https://www.linkedin.com/jobs/search/?keywords=intern", description: "x".repeat(400) })).toBe(false);

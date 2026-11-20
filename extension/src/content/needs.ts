@@ -1,6 +1,7 @@
 import { isDropdownInput, typeInto } from "./dom";
 import { findMarked, isEmpty, scanFields } from "./scan";
 import { findAction } from "./actions";
+import { mountAbove } from "./top-layer";
 
 /**
  * The review checklist on the page, so the student never scrolls the form looking for what went wrong. Two
@@ -141,7 +142,7 @@ function drawBar() {
         host = null;
       }
     });
-    document.documentElement.appendChild(host);
+    mountAbove(host);
   }
   const bar = host.shadowRoot!.querySelector<HTMLDivElement>(".bar")!;
   if (done) {
@@ -251,7 +252,7 @@ function drawChips() {
         button[data-error] { border-color: #F87171; }
         button:focus-visible { outline: 3px solid #3D8BFF; outline-offset: 2px; }
       </style>`;
-    document.documentElement.appendChild(chips);
+    mountAbove(chips);
     addEventListener("scroll", schedulePlace, { capture: true, passive: true });
     addEventListener("resize", schedulePlace, { passive: true });
   }

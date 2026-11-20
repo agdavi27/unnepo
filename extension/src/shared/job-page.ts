@@ -5,7 +5,7 @@
  */
 
 // Application systems and job boards, by their address.
-const JOB_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|workday\.com|icims\.com|smartrecruiters\.com|jobvite\.com|taleo\.net|bamboohr\.com|workable\.com|recruitee\.com|jazzhr\.com|applytojob\.com|breezy\.hr|successfactors\.(com|eu)|oraclecloud\.com|paylocity\.com|ultipro\.com|ukg\.net|adp\.com|rippling\.com|dover\.com|teamtailor\.com|personio\.(de|com)|pinpointhq\.com|joinhandshake\.com|ziprecruiter\.com|indeed\.com|simplyhired\.com|wellfound\.com|glassdoor\.com|dice\.com|builtin\.com|monster\.com|careerbuilder\.com|wayup\.com|simplify\.jobs|idealist\.org|usajobs\.gov)$/i;
+const JOB_HOSTS = /(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|myworkdayjobs\.com|workday\.com|icims\.com|smartrecruiters\.com|jobvite\.com|taleo\.net|bamboohr\.com|workable\.com|recruitee\.com|jazzhr\.com|applytojob\.com|breezy\.hr|successfactors\.(com|eu)|oraclecloud\.com|paylocity\.com|hrsmart\.com|ultipro\.com|ukg\.net|adp\.com|rippling\.com|dover\.com|teamtailor\.com|personio\.(de|com)|pinpointhq\.com|joinhandshake\.com|ziprecruiter\.com|indeed\.com|simplyhired\.com|wellfound\.com|glassdoor\.com|dice\.com|builtin\.com|monster\.com|careerbuilder\.com|wayup\.com|simplify\.jobs|idealist\.org|usajobs\.gov)$/i;
 // Paths and subdomains that say job: /careers/123, /jobs/view, /apply, careers.acme.com, jobs.acme.com.
 const JOB_PATH = /\/(jobs?|careers?|positions?|openings?|vacanc(y|ies)|requisitions?|opportunit(y|ies)|apply|postings?|job-?details?|roles?)(\/|$|[?#-])/i;
 const JOB_SUBDOMAIN = /^(jobs|careers|apply|boards|job-boards|hire|recruiting|talent)\./i;

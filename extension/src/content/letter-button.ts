@@ -1,4 +1,5 @@
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
+import { coveredUp, mountAbove } from "./top-layer";
 
 /**
  * "Write with unnepo" beside the cover letter question on an application form ("Attach your cover letter",
@@ -423,8 +424,14 @@ function openPopup(box: HTMLElement) {
   // Site shortcuts don't fire while typing in the popup.
   for (const type of ["keydown", "keyup", "keypress"]) root.addEventListener(type, (event) => event.stopPropagation());
 
-  document.documentElement.append(host);
+  mountAbove(host);
   draw();
+  // Still hidden behind the site's own window: write the letter in the side panel instead. This runs inside the
+  // click, so Chrome lets the panel open.
+  if (coveredUp(host)) {
+    close();
+    void ask({ type: "letter-in-panel" }).catch(() => undefined);
+  }
 }
 
 async function refreshAccount() {

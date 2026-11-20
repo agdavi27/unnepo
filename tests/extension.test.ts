@@ -16,7 +16,7 @@ import { generatePassword, unmetRules } from "@/extension/src/shared/password";
 import { boardFromLink, nationalNumber } from "@/extension/src/content/generic";
 import { selfIdentifiedOption } from "@/lib/apply/questions";
 import { withToday } from "@/extension/src/shared/today";
-import { boardEmployerName, boardJobName, jobLink, titleParts, ukgCompanyFrom } from "@/extension/src/content/scan";
+import { boardEmployerName, boardJobName, jobLink, nameMatching, titleParts, ukgCompanyFrom } from "@/extension/src/content/scan";
 import { ADDRESS_LINE } from "@/extension/src/content/dom";
 import { arrange, postingLink, siteFor, sitesIn, sortByColumn } from "@/lib/apply/applied-list";
 import { cleanCompanyName, companyFromApplyHeading, notJobTitle } from "@/lib/apply/job-title";
@@ -862,6 +862,13 @@ describe("one link per job", () => {
     expect(boardEmployerName("Initech\n4.1 out of 5 stars")).toBe("Initech");
     expect(boardEmployerName("Globex 4.2 ★")).toBe("Globex");
     expect(boardEmployerName("3M")).toBe("3M");
+  });
+
+  it("writes a company from the address the way the page does", () => {
+    const text = "Company Overview\n\nMcCormick Taylor, Inc. is a full-service professional services consulting firm.";
+    expect(nameMatching("mccormicktaylor", text)).toBe("McCormick Taylor");
+    expect(nameMatching("mealpal", "Join the team at MealPal today.")).toBe("MealPal");
+    expect(nameMatching("acme", "Nothing about it here.")).toBe("");
   });
 
   it("turns Indeed's search with a job open into that job's own page, and leaves other links alone", () => {
