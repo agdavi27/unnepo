@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync, existsSync, rmSync 
 import path from "node:path";
 import { serverConfig } from "@/lib/config";
 import { ServiceError } from "@/lib/errors";
-import { loadRemote, remoteKind, saveRemote, VersionConflict } from "./remote";
+import { loadRemote, loadRemoteVersion, remoteKind, saveRemote, VersionConflict } from "./remote";
 import { emptyDatabase, type CreditAccount, type Database, type LedgerEntry, type Reservation, type SavedContact } from "./types";
 
 type GlobalStore = {
@@ -136,16 +136,29 @@ function withFileLock<T>(fn: (db: Database) => T): T {
   }
 }
 
+/**
+ * The whole app lives in one row, so a full load is the costly egress. Within REMOTE_CACHE_MS the
+ * cached copy is used as is; after that a version-only query decides whether to download it again.
+ */
+async function freshRemote(current: GlobalStore): Promise<{ db: Database; version: number | null }> {
+  if (current.memory && current.remoteVersion !== null) {
+    if (Date.now() - current.remoteAt <= REMOTE_CACHE_MS) return { db: current.memory, version: current.remoteVersion };
+    if ((await loadRemoteVersion()) === current.remoteVersion) {
+      current.remoteAt = Date.now();
+      return { db: current.memory, version: current.remoteVersion };
+    }
+  }
+  const loaded = await loadRemote();
+  current.memory = loaded.db;
+  current.remoteVersion = loaded.version;
+  current.remoteAt = Date.now();
+  return loaded;
+}
+
 async function withRemoteLock<T>(fn: (db: Database) => T): Promise<T> {
   const current = state();
   for (let attempt = 0; attempt < 8; attempt++) {
-    const stale = !current.memory || Date.now() - current.remoteAt > REMOTE_CACHE_MS;
-    const loaded = stale ? await loadRemote() : { db: current.memory as Database, version: current.remoteVersion };
-    if (stale) {
-      current.memory = loaded.db;
-      current.remoteVersion = loaded.version;
-      current.remoteAt = Date.now();
-    }
+    const loaded = await freshRemote(current);
     const db = loaded.db;
     const before = JSON.stringify(db);
     try {
@@ -158,12 +171,11 @@ async function withRemoteLock<T>(fn: (db: Database) => T): Promise<T> {
       }
       return structuredClone(result) as T;
     } catch (error) {
-      if (error instanceof VersionConflict) {
-        current.memory = null;
-        current.remoteVersion = null;
-        current.remoteAt = 0;
-        continue;
-      }
+      // fn may have changed the cached copy before failing, so drop it either way.
+      current.memory = null;
+      current.remoteVersion = null;
+      current.remoteAt = 0;
+      if (error instanceof VersionConflict) continue;
       throw error;
     }
   }

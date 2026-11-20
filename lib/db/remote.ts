@@ -113,12 +113,46 @@ export async function loadRemote(): Promise<{ db: Database; version: number | nu
   return { db: asDatabase(data.data), version: Number(data.version) };
 }
 
+/** The stored version alone: a few bytes, so callers can skip downloading an unchanged blob. */
+export async function loadRemoteVersion(): Promise<number | null> {
+  if (remoteKind() === "postgres") {
+    await ensurePostgres();
+    const rows = await sqlClient()<{ version: number | string }[]>`
+      select version from app_state where id = 'main'
+    `;
+    return rows.length ? Number(rows[0].version) : null;
+  }
+  const { data, error } = await supabaseClient().from("app_state").select("version").eq("id", "main").maybeSingle();
+  if (error) throw missingTable(error);
+  return data ? Number(data.version) : null;
+}
+
+type StoredSecrets = Database["serverSecrets"];
+
+/** Reads only the stored keys, not the whole blob. */
+async function loadStoredSecrets(): Promise<StoredSecrets> {
+  if (remoteKind() === "postgres") {
+    await ensurePostgres();
+    const rows = await sqlClient()<{ secrets: StoredSecrets | string | null }[]>`
+      select data->'serverSecrets' as secrets from app_state where id = 'main'
+    `;
+    const value = rows[0]?.secrets;
+    return typeof value === "string" ? (JSON.parse(value) as StoredSecrets) : value || undefined;
+  }
+  const { data, error } = await supabaseClient()
+    .from("app_state")
+    .select("secrets:data->serverSecrets")
+    .eq("id", "main")
+    .maybeSingle();
+  if (error) throw missingTable(error);
+  return ((data as { secrets?: StoredSecrets } | null)?.secrets) || undefined;
+}
+
 async function keepStoredSecrets(db: Database) {
   const needsApollo = !db.serverSecrets?.apolloApiKey;
   const needsAnthropic = !db.serverSecrets?.anthropicApiKey;
   if (!needsApollo && !needsAnthropic) return;
-  const loaded = await loadRemote();
-  const stored = loaded.db.serverSecrets;
+  const stored = await loadStoredSecrets();
   if (!stored?.apolloApiKey && !stored?.anthropicApiKey) return;
   db.serverSecrets = {
     ...stored,
