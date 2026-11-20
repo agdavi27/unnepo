@@ -64,7 +64,7 @@ export function InstallLinkForm({ source }: { source?: string }) {
         maxLength={254}
         value={email}
         onChange={(event) => { setEmail(event.target.value); setProblem(""); }}
-        placeholder="you@school.edu"
+        placeholder="jordan.lee@gmail.com"
         aria-invalid={Boolean(problem)}
         aria-describedby={problem ? "install-email-problem" : undefined}
         className="min-h-[54px] w-full rounded-[10px] border border-[#3A3A42] bg-[#070708] px-4 text-base text-[#F7F7F8] outline-none placeholder:text-[#6B6B74] focus:border-[#3D8BFF]"
@@ -72,9 +72,14 @@ export function InstallLinkForm({ source }: { source?: string }) {
       <button
         type="submit"
         disabled={busy}
-        className="inline-flex min-h-[54px] w-full items-center justify-center rounded-[10px] bg-[#3D8BFF] px-6 text-base font-semibold text-bg transition-colors hover:bg-[#5A9DFF] disabled:opacity-60"
+        className="inline-flex min-h-[54px] w-full flex-col items-center justify-center rounded-[10px] bg-[#3D8BFF] px-6 py-2 text-base font-semibold leading-tight text-bg transition-colors hover:bg-[#5A9DFF] disabled:opacity-60"
       >
-        {busy ? "Sending…" : "Email me the install link"}
+        {busy ? "Sending…" : (
+          <>
+            <span>Email me the install link</span>
+            <span className="text-[13px] font-medium opacity-75">(free, no card)</span>
+          </>
+        )}
       </button>
       {problem && <p id="install-email-problem" role="alert" className="m-0 text-sm text-[#FCA5A5]">{problem}</p>}
       <p className="m-0 text-[13px] leading-normal text-[#9A9AA3]">One email now and one reminder tomorrow. Unsubscribe any time.</p>
