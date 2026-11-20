@@ -3,7 +3,7 @@ import { buttonUnder, findAction, findApply, pageNotes, pressAction, SUBMIT, wor
 import { leave, press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
 import { fillGeneric, fillStopped, stopFilling, uploadCoverLetterNow, uploadResumeNow } from "./generic";
 import { fillGreenhouse, greenhouseValue } from "./greenhouse";
-import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, openedJob, scanFields, scanPage } from "./scan";
+import { deepAll, emptyRequired, findMarked, isEmpty, labelOf, rootOf, openedJob, scanFields, scanPage, scanPageWithJob } from "./scan";
 import { watchEdits } from "./edits";
 import { appliedStatus } from "./board-status";
 import { keptByStudent } from "./kept";
@@ -21,7 +21,7 @@ import type { FileData } from "../shared/types";
 
 declare global {
   interface Window {
-    __unnepo?: { scan: typeof scanPage; fill: typeof fill; alive: () => boolean };
+    __unnepo?: { scan: typeof scanPageWithJob; fill: typeof fill; alive: () => boolean };
   }
 }
 
@@ -191,13 +191,14 @@ function watchSubmit() {
 // One live copy per page. A copy left from before the extension was reloaded is cut off, so a new copy
 // takes over instead of leaving the page unreachable until it's refreshed.
 if (!window.__unnepo || !window.__unnepo.alive()) {
-  window.__unnepo = { scan: scanPage, fill, alive };
+  window.__unnepo = { scan: scanPageWithJob, fill, alive };
   watchSubmit();
   watchEdits();
   chrome.runtime.onMessage.addListener((message, _sender, reply) => {
     if (message?.type === "scan") {
-      reply(scanPage());
-      return false;
+      // A Deltek account page reads the posting it's for first, so it can answer a moment later.
+      void scanPageWithJob().then(reply, () => reply(scanPage()));
+      return true;
     }
     // "I applied": the job that's open on the page, for the student to check before it's saved.
     if (message?.type === "opened-job") {
