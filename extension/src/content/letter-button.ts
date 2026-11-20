@@ -11,6 +11,8 @@ import { coveredUp, mountAbove } from "./top-layer";
  */
 
 const LETTER = /cover ?letter|letter of (interest|motivation|intent)|motivation(al)? letter/i;
+// The same words in an upload box's name or id, where they're joined: LinkedIn's "jobs-document-upload-file-input-upload-cover-letter".
+const LETTER_FILE = /cover[\s_-]?letter|letter[\s_-]of[\s_-](interest|motivation|intent)|motivation(al)?[\s_-]letter/i;
 const MARK = "data-unnepo-letter";
 const CONTROL = "input:not([type=hidden]), textarea, select, button, [role=button]";
 
@@ -76,13 +78,15 @@ function dropZoneIn(box: HTMLElement) {
  * their own steps.
  */
 function targetsFor(box: HTMLElement) {
-  const near = box.querySelector<HTMLInputElement>("input[type=file]");
+  // By the question: the one upload box that names a letter, or the only one there that isn't for a resume or the like.
+  const nearby = Array.from(box.querySelectorAll<HTMLInputElement>("input[type=file]")).filter((input) => !input.disabled);
+  const near = nearby.find((input) => LETTER_FILE.test(fileWords(input))) ?? (nearby.length === 1 && !OTHER_FILE.test(fileWords(nearby[0])) ? nearby[0] : null);
   const area = box.querySelector<HTMLTextAreaElement>("textarea");
   const text = area && !area.disabled && !area.readOnly ? area : null;
   if (near) return { file: near, text: null, drop: null };
   if (text) return { file: null, text, drop: null };
   const uploads = Array.from(document.querySelectorAll<HTMLInputElement>("input[type=file]")).filter((input) => !input.disabled && !input.files?.length);
-  const named = uploads.find((input) => LETTER.test(fileWords(input)));
+  const named = uploads.find((input) => LETTER_FILE.test(fileWords(input)));
   const others = uploads.filter((input) => !OTHER_FILE.test(fileWords(input)));
   const file = named ?? (others.length === 1 ? others[0] : null);
   return { file, text: null, drop: file ? null : dropZoneIn(box) };

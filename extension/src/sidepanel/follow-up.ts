@@ -5,8 +5,9 @@
  * email first. How the scan works sits behind "How it works". The scan runs in the background worker.
  */
 
-import type { InboxItem, InboxScan } from "@/lib/apply/inbox-scan";
-import { escape, isHiddenJob, needsFirstEmail, store, todayList } from "../shared/tracker-view";
+import { companyWords, type InboxItem, type InboxScan } from "@/lib/apply/inbox-scan";
+import { escape, isHiddenJob, jobById, needsFirstEmail, store, todayList } from "../shared/tracker-view";
+import type { TrackerJob } from "../shared/types";
 
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
 
@@ -31,6 +32,39 @@ chrome.storage.onChanged.addListener((changes, area) => {
 });
 
 type Words = { title: (item: InboxItem) => string; action: string; tone: "ok" | "accent" | "muted" };
+type Outcome = NonNullable<NonNullable<TrackerJob["fillReport"]>["outcome"]>;
+/** The status an email moves its job to, with how the button names it. A reply is about the person, not the job. */
+const STATUS: Partial<Record<string, { outcome: Outcome; label: string }>> = {
+  offer: { outcome: "offer", label: "Offer" },
+  interview: { outcome: "interviewing", label: "Interviewing" },
+  followup: { outcome: "follow_up", label: "Follow up" },
+  rejected: { outcome: "rejected", label: "Rejected" },
+};
+
+// How far along a job is. A status button only moves a job forward (or to Rejected), never back from an offer.
+const RANK: Record<Outcome, number> = { follow_up: 1, assessment: 2, interviewing: 3, offer: 4, rejected: 5 };
+const moves = (job: TrackerJob, to: Outcome) => {
+  const now = job.fillReport?.outcome ?? null;
+  if (now === "rejected") return false;
+  return to === "rejected" || !now || RANK[to] > RANK[now];
+};
+
+/**
+ * The tracked job an email is about: the one the scan matched, or else one at the same company, since the job may
+ * have been added after the scan or named a little differently ("McCormick Taylor, Inc."). Null when none is.
+ */
+function jobOf(item: InboxItem): TrackerJob | null {
+  if (item.applicationId) return jobById(item.applicationId);
+  const want = companyWords(item.company).replace(/ /g, "");
+  if (want.length < 3 || !store.tracker) return null;
+  const same = store.tracker.jobs.filter((job) => {
+    const have = companyWords(job.company).replace(/ /g, "");
+    return have.length >= 3 && (have === want || (Math.min(have.length, want.length) >= 4 && (have.startsWith(want) || want.startsWith(have))));
+  });
+  // Several at one company: the one whose title the email names, else the newest.
+  const title = (job: TrackerJob) => `${item.subject} ${item.snippet}`.toLowerCase().includes(job.title.toLowerCase());
+  return same.find(title) ?? same.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0] ?? null;
+}
 const WORDS: Partial<Record<string, Words>> = {
   reply: { title: (item) => `${item.contactName || item.fromName} replied`, action: "Mark replied", tone: "ok" },
   offer: { title: (item) => `Offer from ${item.company}`, action: "Mark offer", tone: "ok" },
@@ -94,8 +128,10 @@ function emailRow(item: InboxItem) {
   const words = WORDS[item.kind]!;
   const title = words.title(item);
   const busy = inbox.acting.has(item.key);
-  // A status to set only when the job is in Unnepo; otherwise opening the email is the thing to do.
-  const action = words.action && item.applicationId ? words.action : "";
+  // A job already in Unnepo: set its status (a reply marks the person). Otherwise opening the email is the thing to do.
+  const job = jobOf(item);
+  const status = STATUS[item.kind];
+  const action = item.kind === "reply" ? (item.applicationId ? words.action : "") : job && status && moves(job, status.outcome) ? `Update status to ${status.label}` : "";
   const sub = [item.subject || item.snippet, item.count > 1 ? `${item.count} emails` : day(item.at)].filter(Boolean).join(" · ");
   return `
     <li class="fu-item ${words.tone}">
@@ -106,7 +142,7 @@ function emailRow(item: InboxItem) {
         <div class="fu-actions">
           ${action ? `<button type="button" class="fu-go" data-inbox-act="${escape(item.key)}" ${busy ? "disabled" : ""}>${busy ? "Saving…" : action}</button>` : ""}
           <a class="${action ? "fu-link" : "fu-go"}" href="${escape(item.url)}" target="_blank" rel="noreferrer">Open email</a>
-          ${!item.applicationId && item.kind !== "rejected" ? `<button type="button" class="fu-link" data-inbox-add="${escape(item.key)}">Add job</button>` : ""}
+          ${!job && item.kind !== "rejected" ? `<button type="button" class="fu-link" data-inbox-add="${escape(item.key)}">Add job</button>` : ""}
         </div>
       </div>
       ${clear(item.key, title)}
@@ -208,10 +244,9 @@ export function wireFollow(root: HTMLElement, hooks: { redraw: () => void; addJo
     if (!item) return;
     inbox.acting.add(item.key);
     redraw();
-    const outcome = { offer: "offer", interview: "interviewing", rejected: "rejected" }[item.kind as "offer" | "interview" | "rejected"];
     const result = item.kind === "reply"
       ? await ask<{ ok: boolean; error?: string }>({ type: "people", body: { action: "status", applicationId: item.applicationId, contactId: item.contactId, status: "replied" } }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }))
-      : await ask<{ ok: boolean; error?: string }>({ type: "job-status", applicationId: item.applicationId, outcome }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+      : await ask<{ ok: boolean; error?: string }>({ type: "job-status", applicationId: jobOf(item)?.id ?? item.applicationId, outcome: STATUS[item.kind]?.outcome ?? null }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
     inbox.acting.delete(item.key);
     if (result.ok) await ignore([item.key]);
     else { inbox.error = result.error ?? "Couldn't save it."; redraw(); }
