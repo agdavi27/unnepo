@@ -2674,7 +2674,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         void openEmailWithResume(link.url);
         return reply({ ok: true, cut: link.cut });
       }
-      // Follow up → Scan my email.
+      // Scan email → Scan my email.
       case "inbox-scan": {
         if (!fromExtension(sender)) return reply({ ok: false });
         try {

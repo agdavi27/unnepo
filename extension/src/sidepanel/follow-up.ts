@@ -1,5 +1,5 @@
 /**
- * The Follow up tab, kept simple: one bar to scan Gmail, then two short lists. "Inbox" is the emails that ask for
+ * The Scan email tab (named Follow up in code), kept simple: one bar to scan Gmail, then two short lists. "Inbox" is the emails that ask for
  * a next step (replies, interviews, offers, no's, and any other follow-up), one per person, job or company, each
  * with the one button that does it, Open email, and × to clear it. "Follow-ups" is up to five people to nudge or
  * email first. How the scan works sits behind "How it works". The scan runs in the background worker.
@@ -131,7 +131,7 @@ const HOW = `
     <summary>How it works</summary>
     <p>Unnepo opens Gmail in a background tab for a few seconds, reads the subject and preview of recent emails about jobs, then closes it. Only emails asking for a next step show up here: replies, interviews, offers, no's, and anything asking you to follow up. "Thanks for applying" emails are skipped.</p>
     <p>Your emails are read on this computer and never leave it. Use the Gmail account you're signed in to in Chrome.</p>
-    <p>Follow up is still being finished, so it can miss an email now and then.</p>
+    <p>Scan email is still being finished, so it can miss an email now and then.</p>
   </details>`;
 
 export function followView() {
@@ -161,7 +161,8 @@ export function followView() {
       ${ideas.length ? `<ul class="fu-list">${ideas.map(suggestionRow).join("")}</ul>` : `<p class="fu-empty">You're caught up.</p>`}
     </section>`;
 
-  return `<div class="fu">${top}${inboxList}${followList}${scan ? HOW : ""}</div>`;
+  const demo = `<p class="demo-note"><span class="demo-badge">Demo</span>It works, but it's still being finished.</p>`;
+  return `<div class="fu">${demo}${top}${inboxList}${followList}${scan ? HOW : ""}</div>`;
 }
 
 /** Clears to-dos. An inbox one remembers its newest email, so a newer one brings it back. */
