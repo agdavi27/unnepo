@@ -32,7 +32,7 @@ const followBadge = document.getElementById("follow-count")!;
 const planBadge = document.getElementById("plan-badge")!;
 
 /** The page showing: home follows what's on the tab; the rest were asked for, and have a Back button. */
-/** The five tabs along the bottom (jobs = Home, tools = Tools, home = Jobs, follow = Follow up, settings = Me; shown under those names), and the pages opened from them. */
+/** The five tabs along the bottom (jobs = Home, tools = Tools, home = Jobs, follow = Scan email, settings = Me; shown under those names), and the pages opened from them. */
 type View = "home" | "jobs" | "tools" | "follow" | "feedback" | "settings" | "job" | "linkedin" | "verified";
 const TABS: View[] = ["home", "jobs", "tools", "follow", "settings"];
 // The panel opens on Home (the graph and friends).

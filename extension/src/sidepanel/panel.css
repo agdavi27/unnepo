@@ -459,7 +459,10 @@ button.note.warn { all: unset; color: var(--warn); font-size: 13px; cursor: poin
 .tab:hover { color: var(--fg); }
 .tab.on { color: var(--fg); }
 .tab.on::before { content: ""; position: absolute; top: -7px; left: 32%; right: 32%; height: 2px; border-radius: 2px; background: var(--accent); }
-/* Follow up is a demo for now: a small tag on its tab and its page. */
+/* Scan email is a demo for now: a small tag on its tab and its page. */
+.tab-demo { position: absolute; top: 0; right: calc(50% + 8px); height: 14px; padding: 0 4px; border-radius: 4px; background: var(--warn, #F59E0B); color: #111114; font: 700 8.5px/14px var(--mono); letter-spacing: .04em; text-transform: uppercase; }
+.demo-badge { display: inline-block; height: 16px; padding: 0 6px; border-radius: 5px; background: var(--warn, #F59E0B); color: #111114; font: 700 9.5px/16px var(--mono); letter-spacing: .05em; text-transform: uppercase; vertical-align: 1px; }
+.demo-note { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: var(--muted); }
 .tab-count { position: absolute; top: 2px; left: calc(50% + 7px); min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--accent); color: #fff; font: 600 10px/16px var(--mono); text-align: center; }
 
 /* Week: seven squares that fill in with each application, the streak, then the day picked. */
