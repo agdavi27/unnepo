@@ -314,4 +314,6 @@ export type ApplicationProfile = {
   jobAccounts?: Array<{ host: string; email: string; createdAt: string }>;
   /** The student's transcript, kept like the resume so the extension can attach it where a form asks. */
   transcript?: { fileName: string; mime: string; byteSize: number; storagePath: string; uploadedAt: string } | null;
+  /** The student's own cover letter (optional), attached as-is where a form asks for one, instead of writing a new one. */
+  coverLetter?: { fileName: string; mime: string; byteSize: number; storagePath: string; uploadedAt: string } | null;
 };

@@ -22,7 +22,7 @@ import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { friendAction, listFriends } from "@/lib/social/friends";
 import { writeApplyEmail } from "@/lib/apply/apply-email";
-import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionQuickFill, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSaveTranscript, extensionSubmission, extensionTranscript, extensionUndoSubmission, extensionWrite } from "@/lib/extension/service";
+import { extensionAttempts, extensionCoverLetter, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionQuickFill, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSaveTranscript, extensionSubmission, extensionTranscript, extensionUndoSubmission, extensionWrite, defaultCoverLetterFile, defaultCoverLetterInfo, removeDefaultCoverLetter, saveDefaultCoverLetter } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
 import { contactBounced, revealContact, applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, setJobHidden, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
@@ -31,6 +31,15 @@ import { contactBounced, revealContact, applyState, createApplication, deleteApp
 export const maxDuration = 60;
 
 const ONBOARDING_INCOMPLETE = new Set(["profile", "goals", "resume", "interests", "roles", "location", "employment", "timing", "contacts", "networking", "extra", "story"]);
+
+/** The one file a form posted as "file", checked to be there and not empty. */
+async function formFile(request: Request, what: string) {
+  const file = (await request.formData()).get("file");
+  if (!(file instanceof File)) throw new ServiceError(`Choose your ${what} file.`, "file");
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (!bytes.byteLength) throw new ServiceError(`That file was empty. Choose the ${what} again.`, "file");
+  return { name: file.name, type: file.type, bytes };
+}
 
 async function handle(request: Request, slug: string[]) {
   const [root, action] = slug;
@@ -334,6 +343,15 @@ async function handle(request: Request, slug: string[]) {
       if (!bytes.byteLength) throw new ServiceError("That file was empty. Choose the resume again.", "file");
       return json(await uploadProfileResume(user.id, { name: file.name, type: file.type, bytes }));
     }
+    // The student's own cover letter, optional. GET shows whether one is saved; POST replaces it; DELETE forgets it.
+    if (action === "my-letter" && request.method === "GET") {
+      return json(await defaultCoverLetterInfo(user.id));
+    }
+    if (action === "my-letter" && request.method === "POST") {
+      if (!rateLimit(`extension-resume:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of uploads in an hour. Try again later.", "rate_limited", 429);
+      return json(await saveDefaultCoverLetter(user.id, await formFile(request, "cover letter")));
+    }
+    if (action === "my-letter" && request.method === "DELETE") return json(await removeDefaultCoverLetter(user.id));
     // Several resumes: pick the one to apply with (only the work experience changes), or remove one.
     if (action === "resume" && request.method === "PUT") {
       const body = (await request.json().catch(() => ({}))) as { id?: unknown };
@@ -490,6 +508,16 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   }
   if (action === "transcript" && method === "GET") {
     const file = await extensionTranscript(user.id);
+    return new Response(Buffer.from(file.bytes), { headers: { "Content-Type": file.mime, "Content-Disposition": `attachment; filename="${file.fileName.replace(/"/g, "")}"`, "Cache-Control": "private, no-store" } });
+  }
+  // The student's own cover letter (optional): uploaded from the Me tab or the website, attached by "Write with unnepo".
+  if (action === "my-letter" && method === "POST") {
+    if (!rateLimit(`extension-resume:${user.id}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of uploads in an hour. Try again later.", "rate_limited", 429);
+    return json(await saveDefaultCoverLetter(user.id, await formFile(request, "cover letter")));
+  }
+  if (action === "my-letter" && method === "DELETE") return json(await removeDefaultCoverLetter(user.id));
+  if (action === "my-letter" && method === "GET") {
+    const file = await defaultCoverLetterFile(user.id);
     return new Response(Buffer.from(file.bytes), { headers: { "Content-Type": file.mime, "Content-Disposition": `attachment; filename="${file.fileName.replace(/"/g, "")}"`, "Cache-Control": "private, no-store" } });
   }
   if (action === "jobs" && method === "POST") {

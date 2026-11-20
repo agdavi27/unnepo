@@ -394,7 +394,7 @@ function toolsPage(state: PanelState) {
       </div>
       ${manualJob.note && !popup ? `<p class="small" role="status">${escape(manualJob.note)}</p>` : ""}
       ${toolsNote() && !popup ? `<p class="small" role="status">${escape(toolsNote())}</p>` : ""}
-      <div class="tool-lines">${resumeLine(state)}${transcriptLine(state)}${letterLine()}<div id="password-slot"></div></div>
+      <div class="tool-lines">${resumeLine(state)}${transcriptLine(state)}${myLetterLine(state)}${letterLine()}<div id="password-slot"></div></div>
     </div>`;
 }
 
@@ -1294,46 +1294,57 @@ function resumeLine(state: PanelState) {
     ${note ? `<p class="small tool-note" role="status">${escape(note)}</p>` : ""}`;
 }
 
-/** The transcript, saved like the resume: its name opens it, Upload or Change picks one. Attached from the page's button. */
-const transcriptState = { busy: false, note: "" };
-function transcriptLine(state: PanelState) {
-  const transcript = state.me!.transcript;
-  const name = transcript ? escape(transcript.fileName) : "None yet";
-  const note = transcriptState.note || (transcript ? "" : "Save it once. Forms that ask for one get an Attach button.");
+/**
+ * Files saved like the resume: the transcript, and the student's own cover letter (optional; "Write with unnepo"
+ * offers to attach it before writing one). Each name opens the file, Upload or Change picks one.
+ */
+type SavedKind = "transcript" | "cover-letter";
+const SAVED: Record<SavedKind, { label: string; noun: string; accept: RegExp; types: string; empty: string; saved: string }> = {
+  transcript: { label: "Transcript", noun: "transcript", accept: /\.(pdf|docx|png|jpe?g)$/i, types: "a PDF, DOCX, PNG or JPG", empty: "Save it once. Forms that ask for one get an Attach button.", saved: "Transcript saved. Attach it from the button beside any transcript box." },
+  "cover-letter": { label: "My letter", noun: "cover letter", accept: /\.(pdf|docx?)$/i, types: "a PDF or DOCX", empty: "Optional. Write with unnepo offers to attach it as-is.", saved: "Cover letter saved. Write with unnepo offers it first." },
+};
+const savedState: Record<SavedKind, { busy: boolean; note: string }> = { transcript: { busy: false, note: "" }, "cover-letter": { busy: false, note: "" } };
+function savedLine(state: PanelState, kind: SavedKind) {
+  const info = SAVED[kind];
+  const file = kind === "transcript" ? state.me!.transcript : state.me!.coverLetter;
+  const busy = savedState[kind].busy;
+  const name = file ? escape(file.fileName) : "None yet";
+  const note = savedState[kind].note || (file ? "" : info.empty);
   return `
     <div class="tool-line">
-      <span class="tool-what">Transcript</span>
-      ${transcript ? `<button type="button" class="resume-link" id="open-transcript" title="Open ${name}" ${transcriptState.busy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
-      <button type="button" class="tool-change" id="replace-transcript" ${transcriptState.busy ? "disabled" : ""}>${transcriptState.busy ? "Uploading…" : transcript ? "Change" : "Upload"}</button>
+      <span class="tool-what">${info.label}</span>
+      ${file ? `<button type="button" class="resume-link" data-open-saved="${kind}" title="Open ${name}" ${busy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
+      <button type="button" class="tool-change" data-replace-saved="${kind}" ${busy ? "disabled" : ""}>${busy ? "Uploading…" : file ? "Change" : "Upload"}</button>
     </div>
     ${note ? `<p class="small tool-note" role="status">${escape(note)}</p>` : ""}`;
 }
+const transcriptLine = (state: PanelState) => savedLine(state, "transcript");
+const myLetterLine = (state: PanelState) => savedLine(state, "cover-letter");
 
-async function seeTranscript() {
+async function seeSaved(kind: SavedKind) {
   type Got = { ok: boolean; file?: { base64: string; mime: string } | null; error?: string | null };
-  const result = await ask<Got>({ type: "get-transcript" }).catch((): Got => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  const result = await ask<Got>({ type: "get-saved-file", kind }).catch((): Got => ({ ok: false, error: "Couldn't reach Unnepo." }));
   if (result.ok && result.file) {
     const bytes = Uint8Array.from(atob(result.file.base64), (char) => char.charCodeAt(0));
     void chrome.tabs.create({ url: URL.createObjectURL(new Blob([bytes], { type: result.file.mime })) });
-    transcriptState.note = "";
+    savedState[kind].note = "";
   } else {
-    transcriptState.note = result.error ?? "Couldn't open your transcript.";
+    savedState[kind].note = result.error ?? `Couldn't open your ${SAVED[kind].noun}.`;
   }
   void render();
 }
 
-async function replaceTranscript(file: File) {
-  if (!/\.(pdf|docx|png|jpe?g)$/i.test(file.name)) { transcriptState.note = "Choose a PDF, DOCX, PNG or JPG."; return void render(); }
-  if (file.size > 10 * 1024 * 1024) { transcriptState.note = "Transcripts need to be 10 MB or smaller."; return void render(); }
-  transcriptState.busy = true;
-  transcriptState.note = "";
+async function replaceSaved(kind: SavedKind, file: File) {
+  const info = SAVED[kind];
+  if (!info.accept.test(file.name)) { savedState[kind].note = `Choose ${info.types}.`; return void render(); }
+  if (file.size > 10 * 1024 * 1024) { savedState[kind].note = "Files need to be 10 MB or smaller."; return void render(); }
+  savedState[kind] = { busy: true, note: "" };
   void render();
   const bytes = new Uint8Array(await file.arrayBuffer());
   let binary = "";
   for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  const result = await ask<{ ok: boolean; error?: string }>({ type: "upload-transcript", name: file.name, mime: file.type || "application/pdf", base64: btoa(binary) }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
-  transcriptState.busy = false;
-  transcriptState.note = result.ok ? "Transcript saved. Attach it from the button beside any transcript box." : result.error ?? "Upload failed.";
+  const result = await ask<{ ok: boolean; error?: string }>({ type: "upload-saved-file", kind, name: file.name, mime: file.type || "application/pdf", base64: btoa(binary) }).catch(() => ({ ok: false, error: "Couldn't reach Unnepo." }));
+  savedState[kind] = { busy: false, note: result.ok ? info.saved : result.error ?? "Upload failed." };
   void render();
 }
 
@@ -1778,10 +1789,16 @@ resumeInput.addEventListener("change", () => {
   if (file) void replaceResume(file);
 });
 const transcriptInput = document.getElementById("transcript-input") as HTMLInputElement;
+const myLetterInput = document.getElementById("my-letter-input") as HTMLInputElement;
+myLetterInput.addEventListener("change", () => {
+  const file = myLetterInput.files?.[0];
+  myLetterInput.value = "";
+  if (file) void replaceSaved("cover-letter", file);
+});
 transcriptInput.addEventListener("change", () => {
   const file = transcriptInput.files?.[0];
   transcriptInput.value = "";
-  if (file) void replaceTranscript(file);
+  if (file) void replaceSaved("transcript", file);
 });
 
 
@@ -2132,8 +2149,8 @@ function draw(state: PanelState): boolean {
   wireJobBox(state);
   document.getElementById("open-resume")?.addEventListener("click", () => void seeResume());
   document.getElementById("replace-resume")?.addEventListener("click", () => resumeInput.click());
-  document.getElementById("open-transcript")?.addEventListener("click", () => void seeTranscript());
-  document.getElementById("replace-transcript")?.addEventListener("click", () => transcriptInput.click());
+  document.querySelectorAll<HTMLElement>("[data-open-saved]").forEach((button) => button.addEventListener("click", () => void seeSaved(button.dataset.openSaved as SavedKind)));
+  document.querySelectorAll<HTMLElement>("[data-replace-saved]").forEach((button) => button.addEventListener("click", () => (button.dataset.replaceSaved === "transcript" ? transcriptInput : myLetterInput).click()));
   document.getElementById("attach-resume")?.addEventListener("click", () => void attachResume());
   document.getElementById("resume-pick")?.addEventListener("change", (event) => { resumeAttach.pick = (event.target as HTMLSelectElement).value; });
   document.querySelectorAll<HTMLButtonElement>("[data-attach-letter]").forEach((button) => button.addEventListener("click", () => void attachLetter()));

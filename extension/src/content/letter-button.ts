@@ -3,9 +3,10 @@ import { coveredUp, mountAbove } from "./top-layer";
 
 /**
  * "Write with unnepo" beside the cover letter question on an application form ("Attach your cover letter",
- * "Cover letter", a letter of interest...). On Free it says how many letters are left today. Pressing it opens a
- * popup on the page with the same questions as the panel's cover letter (how it's built, length, tone, what to
- * mention), writes the letter for the job on this tab, and shows it to edit. Then it goes where the form wants it:
+ * "Cover letter", a letter of interest...). Pressing it opens a popup on the page that first asks: attach the
+ * student's own cover letter (saved in their profile, optional), or have Unnepo write one, which is where the
+ * letters left today on Free show. Writing asks the same questions as the panel's cover letter (how it's built,
+ * length, tone, what to mention), writes the letter for the job on this tab, and shows it to edit. Then it goes where the form wants it:
  * into the upload box (as a PDF), into the text box, or downloaded to upload by hand. Nothing is read or sent until
  * the button is pressed. Shows only when the student is signed in to Unnepo.
  */
@@ -16,8 +17,9 @@ const LETTER_FILE = /cover[\s_-]?letter|letter[\s_-]of[\s_-](interest|motivation
 const MARK = "data-unnepo-letter";
 const CONTROL = "input:not([type=hidden]), textarea, select, button, [role=button]";
 
-type PageState = { ok: boolean; free?: boolean; left?: number | null; highlights?: string[] };
-type Letter = { text: string; fileName: string; pdfBase64: string; upgrade?: string };
+type PageState = { ok: boolean; free?: boolean; left?: number | null; highlights?: string[]; /** The student's own cover letter's name, if they saved one. */ mine?: string | null };
+/** A letter Unnepo wrote (a PDF), or the student's own (`mime` says, often a Word file; no `text`). */
+type Letter = { text: string; fileName: string; pdfBase64: string; mime?: string; upgrade?: string };
 type Wrote = { ok: boolean; doc?: Letter; error?: string };
 
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
@@ -71,6 +73,26 @@ function dropZoneIn(box: HTMLElement) {
   return box.querySelector<HTMLElement>("[class*='dropzone' i], [class*='drop-zone' i], [class*='drop_zone' i], [data-testid*='drop' i], [class*='upload' i], [data-testid*='upload' i]");
 }
 
+/** Every upload box on the page, inside open shadow roots too (some sites draw their forms in one). */
+function allFileInputs(root: Document | ShadowRoot = document, out: HTMLInputElement[] = []) {
+  out.push(...Array.from(root.querySelectorAll<HTMLInputElement>("input[type=file]")));
+  for (const el of Array.from(root.querySelectorAll<HTMLElement>("*"))) if (el.shadowRoot) allFileInputs(el.shadowRoot, out);
+  return out;
+}
+
+const UPLOAD_WORDS = /upload|attach|choose file|browse|select file|add file/i;
+
+/**
+ * The site's own "Upload" button by the question, for forms with no upload box until it's pressed (LinkedIn's
+ * Easy Apply): pressing it with the file armed puts the file straight in. Never the resume's or another file's.
+ */
+function uploadButtonIn(box: HTMLElement) {
+  const candidates = Array.from(box.querySelectorAll<HTMLElement>("button, label, [role=button]")).filter((el) => !ours(el) && !(el as HTMLButtonElement).disabled && shown(el));
+  const words = (el: HTMLElement) => `${textOf(el)} ${el.getAttribute("aria-label") ?? ""} ${el.id} ${el.getAttribute("for") ?? ""}`;
+  const fits = candidates.filter((el) => UPLOAD_WORDS.test(words(el)) && !OTHER_FILE.test(words(el)));
+  return fits.find((el) => LETTER_FILE.test(words(el))) ?? fits[0] ?? null;
+}
+
 /**
  * Where the letter goes: the upload box or text box right by the question first; else a cover letter upload box
  * anywhere on the page; else, when the page has just one upload box that isn't for the resume, transcript or the
@@ -83,13 +105,16 @@ function targetsFor(box: HTMLElement) {
   const near = nearby.find((input) => LETTER_FILE.test(fileWords(input))) ?? (nearby.length === 1 && !OTHER_FILE.test(fileWords(nearby[0])) ? nearby[0] : null);
   const area = box.querySelector<HTMLTextAreaElement>("textarea");
   const text = area && !area.disabled && !area.readOnly ? area : null;
-  if (near) return { file: near, text: null, drop: null };
-  if (text) return { file: null, text, drop: null };
-  const uploads = Array.from(document.querySelectorAll<HTMLInputElement>("input[type=file]")).filter((input) => !input.disabled && !input.files?.length);
+  if (near) return { file: near, text: null, drop: null, button: null };
+  if (text) return { file: null, text, drop: null, button: null };
+  const uploads = allFileInputs().filter((input) => !input.disabled && !input.files?.length);
   const named = uploads.find((input) => LETTER_FILE.test(fileWords(input)));
   const others = uploads.filter((input) => !OTHER_FILE.test(fileWords(input)));
   const file = named ?? (others.length === 1 ? others[0] : null);
-  return { file, text: null, drop: file ? null : dropZoneIn(box) };
+  if (file) return { file, text: null, drop: null, button: null };
+  // No box yet: the site's own Upload button, which makes one when pressed. Else a drop area.
+  const button = uploadButtonIn(box);
+  return { file: null, text: null, button, drop: button ? null : dropZoneIn(box) };
 }
 
 /** Drops the letter on a drop area the way a dragged file arrives. */
@@ -101,7 +126,7 @@ function dropOn(zone: HTMLElement, letter: Letter) {
 
 const fileFrom = (letter: Letter) => {
   const bytes = Uint8Array.from(atob(letter.pdfBase64), (char) => char.charCodeAt(0));
-  return new File([bytes], letter.fileName || "Cover letter.pdf", { type: "application/pdf" });
+  return new File([bytes], letter.fileName || "Cover letter.pdf", { type: letter.mime || "application/pdf" });
 };
 
 function attach(input: HTMLInputElement, letter: Letter) {
@@ -110,6 +135,23 @@ function attach(input: HTMLInputElement, letter: Letter) {
   input.files = transfer.files;
   input.dispatchEvent(new Event("input", { bubbles: true, composed: true }));
   input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
+}
+
+/**
+ * Presses the site's own Upload button with the letter armed (see file-catcher.ts): the picker it opens gets the
+ * letter instead. True when the site took it within a couple of seconds.
+ */
+async function pressUpload(button: HTMLElement, letter: Letter) {
+  const taken = new Promise<boolean>((done) => {
+    const timer = setTimeout(() => { window.removeEventListener("unnepo:file-taken", got); done(false); }, 2500);
+    const got = () => { clearTimeout(timer); done(true); };
+    window.addEventListener("unnepo:file-taken", got, { once: true });
+  });
+  window.dispatchEvent(new CustomEvent("unnepo:arm-file", { detail: JSON.stringify({ name: letter.fileName || "Cover letter.pdf", mime: letter.mime || "application/pdf", base64: letter.pdfBase64 }) }));
+  button.click();
+  const ok = await taken;
+  if (!ok) window.dispatchEvent(new CustomEvent("unnepo:disarm-file"));
+  return ok;
 }
 
 /** Types the letter into a text box the way the site's own code expects (React and the like watch the setter). */
@@ -136,15 +178,12 @@ const BUTTON_STYLE = `
   button:hover { background: #14141A; }
   button:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
   .spark { color: #7FB2FF; }
-  .left { font-weight: 500; color: #B4B4BC; }
-  .left.out { color: #F5A524; }
 `;
 
-/** The label on every button: "Write with unnepo · 3 left" on Free. */
+/** The label on every button. The letters left today show in the popup, on "Write one with Unnepo". */
 let account: PageState = { ok: false };
 const buttons = new Set<ShadowRoot>();
-const leftText = () => (account.free && typeof account.left === "number" ? `<span class="left${account.left <= 0 ? " out" : ""}">· ${account.left} left</span>` : "");
-const buttonHtml = () => `<style>${BUTTON_STYLE}</style><button type="button" title="Write a cover letter for this job with Unnepo"><span class="spark" aria-hidden="true">✦</span><span>Write with unnepo</span>${leftText()}</button>`;
+const buttonHtml = () => `<style>${BUTTON_STYLE}</style><button type="button" title="Attach your cover letter, or write one for this job with Unnepo"><span class="spark" aria-hidden="true">✦</span><span>Write with unnepo</span></button>`;
 function relabel() {
   for (const root of buttons) root.innerHTML = buttonHtml();
 }
@@ -198,6 +237,7 @@ const POPUP_STYLE = (reduce: boolean) => `
   .opt { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; border: 1px solid #E4E4EA; font-weight: 600; }
   .opt small { font-weight: 400; font-size: 12px; color: #5C5C66; }
   .opt:hover { border-color: #3D8BFF; background: #F5F9FF; }
+  .opt[disabled] { cursor: default; opacity: .55; } .opt[disabled]:hover { border-color: #E4E4EA; background: none; }
   .opt.on { border-color: #3D8BFF; box-shadow: inset 0 0 0 1px #3D8BFF; background: #F5F9FF; }
   .chips { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip { all: unset; cursor: pointer; padding: 5px 10px; border-radius: 999px; border: 1px solid #D7D7DE; font-size: 12px; }
@@ -240,7 +280,7 @@ function openPopup(box: HTMLElement) {
 
   const ui = {
     step: 0 as number, choices: { format: "match", length: "standard", tone: "professional", picked: [] as string[], mention: "" },
-    phase: "ask" as "ask" | "writing" | "done", letter: null as Letter | null, edited: false, busy: "", note: "", placed: "",
+    phase: "choose" as "choose" | "ask" | "writing" | "done", letter: null as Letter | null, edited: false, busy: "", note: "", placed: "",
   };
   const previousFocus = document.activeElement as HTMLElement | null;
   const close = () => {
@@ -252,12 +292,70 @@ function openPopup(box: HTMLElement) {
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && ui.phase !== "writing") { event.stopPropagation(); close(); } };
   document.addEventListener("keydown", onKey, true);
 
-  const countLine = () => (account.free && typeof account.left === "number" ? `<span class="count">${account.left} left today</span>` : "");
+  const countLine = () => (ui.phase !== "choose" && account.free && typeof account.left === "number" ? `<span class="count">${account.left} left today</span>` : "");
+
+  /** First: attach the student's own letter, or have Unnepo write one. The letters left today show on writing. */
+  function chooseBody() {
+    const out = account.free && typeof account.left === "number" && account.left <= 0;
+    const writeHint = out ? "No letters left today on Free. Pro has no limit." : account.free && typeof account.left === "number" ? `Fits it to this job. ${account.left} left today` : "Fits it to this job";
+    const busy = Boolean(ui.busy);
+    return `<h2>Your cover letter</h2>
+      <div class="sub">Attach the one you saved, or have Unnepo write one for this job.</div>
+      ${account.mine ? `<button type="button" class="opt" data-act="mine" ${busy ? "disabled" : ""}>${ui.busy === "mine" ? "Attaching…" : "Attach your cover letter"}<small>${escape(account.mine)}</small></button>` : ""}
+      <button type="button" class="opt" data-act="start-write" ${out || busy ? "disabled" : ""}>✦ Write one with Unnepo<small>${writeHint}</small></button>
+      ${account.mine ? "" : `<p class="sub">Have a letter you always send? Add it to your Unnepo profile (optional) and it shows up here.</p>`}
+      ${ui.note ? `<p class="note" role="status">${escape(ui.note)}</p>` : ""}
+      ${ui.placed ? `<p class="good" role="status">✓ ${escape(ui.placed)}</p><div class="row" style="justify-content: flex-end"><button type="button" class="btn ghost" data-act="close">Done</button></div>` : ""}`;
+  }
+
+  /**
+   * Puts a letter file where the form wants it: its upload box, its own Upload button (armed, so the picker gets
+   * the file), or its drop area. None of those, or the site won't take it: downloaded, to upload by hand.
+   */
+  async function placeFile(letter: Letter) {
+    const where = targetsFor(box);
+    try {
+      if (where.file) { attach(where.file, letter); return "Attached to the application"; }
+      if (where.button && (await pressUpload(where.button, letter))) return "Attached to the application";
+      if (where.drop) {
+        const before = textOf(box);
+        dropOn(where.drop, letter);
+        await new Promise((done) => setTimeout(done, 700));
+        // The form shows the file's name once it took it.
+        const stem = (letter.fileName || "Cover letter.pdf").replace(/\.[a-z]+$/i, "");
+        if (textOf(box) !== before && textOf(box).includes(stem)) return "Attached to the application";
+      }
+      download(letter);
+      return where.button || where.drop ? "This form didn't take it, so it downloaded. Upload it with the form's button" : "Downloaded. Upload it with the form's button";
+    } catch {
+      download(letter);
+      return "This site blocks it, so it downloaded. Upload it with the form's button";
+    }
+  }
+
+  /** "Attach your cover letter": the student's own, as they saved it. */
+  async function attachMine() {
+    const where = targetsFor(box);
+    if (where.text && !where.file) {
+      ui.note = "This question wants the letter typed in, not a file. Paste yours into it, or write one with Unnepo.";
+      return draw();
+    }
+    ui.busy = "mine";
+    ui.note = "";
+    ui.placed = "";
+    draw();
+    type Got = { ok: boolean; file?: { name: string; mime: string; base64: string } | null; error?: string | null };
+    const got = await ask<Got>({ type: "my-letter-file" }).catch((): Got => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
+    if (got.ok && got.file) ui.placed = await placeFile({ text: "", fileName: got.file.name, pdfBase64: got.file.base64, mime: got.file.mime });
+    else ui.note = got.error ?? "Couldn't get your cover letter from Unnepo.";
+    ui.busy = "";
+    draw();
+  }
 
   function askBody() {
     const name = STEPS[ui.step];
     const progress = `<div class="progress" aria-hidden="true">${STEPS.map((_, index) => `<i class="${index <= ui.step ? "on" : ""}"></i>`).join("")}</div>`;
-    const back = ui.step > 0 ? `<button type="button" class="quiet" data-act="back">Back</button>` : "<span></span>";
+    const back = `<button type="button" class="quiet" data-act="back">Back</button>`;
     if (name !== "mention") {
       const { q, options } = CHOICES[name];
       return `${progress}<h2>${q}</h2><div class="sub">Question ${ui.step + 1} of ${STEPS.length}</div>
@@ -277,8 +375,8 @@ function openPopup(box: HTMLElement) {
   function doneBody() {
     const letter = ui.letter!;
     const where = targetsFor(box);
-    const primary = where.file || where.drop ? ["attach", "Attach to application"] : where.text ? ["paste", "Put it in the box"] : ["download", "Download PDF"];
-    const hint = where.file || where.drop ? "Attaches it as a PDF to the cover letter upload." : where.text ? "Puts the text in the cover letter box." : "This form uploads through its own button: download it, then pick it there.";
+    const primary = where.file || where.drop || where.button ? ["attach", "Attach to application"] : where.text ? ["paste", "Put it in the box"] : ["download", "Download PDF"];
+    const hint = where.file || where.drop || where.button ? "Attaches it as a PDF to the cover letter upload." : where.text ? "Puts the text in the cover letter box." : "This form uploads through its own button: download it, then pick it there.";
     const busy = Boolean(ui.busy);
     return `<h2>Your cover letter</h2>
       <div class="sub">Click into it to change anything. ${hint}</div>
@@ -302,7 +400,7 @@ function openPopup(box: HTMLElement) {
     const focusedId = (root.activeElement as HTMLElement | null)?.id;
     const body = ui.phase === "writing"
       ? `<div class="writing" role="status">${spiderSvg()}<div class="bar"><i></i></div><span class="sub">Writing your cover letter…</span></div>`
-      : ui.phase === "done" ? doneBody() : askBody();
+      : ui.phase === "done" ? doneBody() : ui.phase === "choose" ? chooseBody() : askBody();
     root.innerHTML = `<style>${POPUP_STYLE(reduce)}</style>
       <div class="scrim${enter}" data-act="scrim">
         <div class="card${enter}" role="dialog" aria-modal="true" aria-label="Write a cover letter with Unnepo">
@@ -351,7 +449,14 @@ function openPopup(box: HTMLElement) {
 
   async function act(name: string) {
     if (name === "close") return close();
-    if (name === "back") { ui.step = Math.max(0, ui.step - 1); ui.note = ""; return draw(); }
+    if (name === "back") {
+      if (ui.step === 0) ui.phase = "choose";
+      else ui.step -= 1;
+      ui.note = "";
+      return draw();
+    }
+    if (name === "mine") return attachMine();
+    if (name === "start-write") { Object.assign(ui, { phase: "ask", step: 0, note: "", placed: "" }); return draw(); }
     if (name === "write") return write();
     if (name === "again") { Object.assign(ui, { phase: "ask", step: 0, letter: null, edited: false, note: "", placed: "" }); return draw(); }
     if (name === "copy") {
@@ -375,23 +480,8 @@ function openPopup(box: HTMLElement) {
       const letter = await current();
       ui.busy = "";
       if (letter) {
-        const where = targetsFor(box);
-        try {
-          if (name === "attach" && where.file) { attach(where.file, letter); ui.placed = "Attached to the application"; }
-          else if (name === "attach" && where.drop) {
-            const before = textOf(box);
-            dropOn(where.drop, letter);
-            await new Promise((done) => setTimeout(done, 700));
-            // The form shows the file's name once it took it; otherwise it downloads, to upload by hand.
-            const took = textOf(box) !== before && textOf(box).includes((letter.fileName || "Cover letter.pdf").replace(/\.pdf$/i, ""));
-            if (took) ui.placed = "Attached to the application";
-            else { download(letter); ui.placed = "This form didn't take it, so it downloaded. Upload it with the form's button"; }
-          }
-          else { download(letter); ui.placed = "Downloaded. Upload it with the form's button"; }
-        } catch {
-          download(letter);
-          ui.placed = "This site blocks it, so it downloaded. Upload it with the form's button";
-        }
+        if (name === "attach") ui.placed = await placeFile(letter);
+        else { download(letter); ui.placed = "Downloaded. Upload it with the form's button"; }
       }
       return draw();
     }
@@ -430,6 +520,8 @@ function openPopup(box: HTMLElement) {
 
   mountAbove(host);
   draw();
+  // A letter saved since the page loaded shows up on the first step.
+  void refreshAccount().then(() => { if (ui.phase === "choose" && !ui.busy) draw(); });
   // Still hidden behind the site's own window: write the letter in the side panel instead. This runs inside the
   // click, so Chrome lets the panel open.
   if (coveredUp(host)) {
