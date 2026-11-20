@@ -76,7 +76,7 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
         <main className="contents">
           <section className="relative mr-[calc(var(--pad)-var(--gutter))] flex flex-wrap items-center gap-x-12 gap-y-6 pb-16 pt-6 sm:gap-y-10 sm:pb-24">
             <div className="flex min-w-0 flex-[1_1_460px] flex-col items-start gap-5">
-              <h1 className="m-0 max-sm:pr-[68px] text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Apply faster.<br />Follow up smarter.<br />Get hired.</h1>
+              <h1 className="m-0 max-sm:pr-[88px] text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Apply faster.<br />Follow up smarter.<br />Get hired.</h1>
               <p className="m-0 max-w-[500px] text-[clamp(16px,2vw,19px)] leading-normal text-[#B4B4BC]">Apply on any job board or company site. Every application lands in one place, with the people to follow up with.</p>
               {view === "email" ? (
                 <div className="mt-1 flex w-full max-w-[460px] flex-col gap-3">
@@ -104,7 +104,7 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
               <p className="m-0 text-[13px] text-[#9A9AA3]">Free for students, no card. The tracker is free and unlimited. Pro is $29.99 a month or $199 a year, and some schools cover it.</p>
             </div>
             {/* On a phone the spider perches beside the headline instead of taking a column of its own. */}
-            <div className="flex min-w-0 flex-col items-center gap-[22px] max-sm:absolute max-sm:right-0 max-sm:top-6 sm:flex-[1_1_480px]">
+            <div className="flex min-w-0 flex-col items-center gap-[22px] max-sm:absolute max-sm:right-0 max-sm:top-4 sm:flex-[1_1_480px]">
               <SpiderDialogue />
             </div>
           </section>

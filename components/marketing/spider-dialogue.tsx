@@ -322,7 +322,7 @@ export function SpiderDialogue() {
       `}</style>
       {view && <div aria-hidden className="pointer-events-none fixed inset-y-0 z-[1] w-0.5 bg-[#3A3A42]" style={{ left: view.lineX, opacity: smooth((progress - 0.6) / 0.4) }} />}
       {/* His spot in the hero. It keeps its size when he leaves, so the page doesn't jump. On a phone he hangs small beside the headline. */}
-      <div ref={home} className="relative aspect-[40/30] w-16 sm:mt-11 sm:w-[min(340px,72vw)]">
+      <div ref={home} className="relative aspect-[40/30] w-[84px] sm:mt-11 sm:w-[min(340px,72vw)]">
         <div className={moved ? "fixed z-[5]" : "absolute inset-0"} style={moved ? { left, top, width } : undefined}>
           <div className="unnepo-bob relative w-full">
             <div className="absolute left-1/2 -translate-x-1/2 bg-[#3A3A44]" style={{ width: threadWidth, height: threadHeight, bottom: moved ? `calc(100% - ${width * 0.1}px)` : "calc(100% - 18px)" }} />
