@@ -691,12 +691,12 @@ function ukgCompany(host: string) {
  * The last guess at the company, from the site's address: "mealpal" from mealpal.applytojob.com. Never on a job
  * board (app.joinhandshake.com is not a company called "app"), and never a generic first part.
  */
-function hostCompany(host: string) {
+function hostCompany(host: string, text = (document.body?.innerText ?? "")) {
   // A job system's address names the system or a server ("snp98.rec.pro.ukg.net"), never the company.
   if (QUICK_BOARDS.test(host) || /(^|\.)linkedin\.com$/.test(host) || UKG_HOST.test(host)) return "";
   const first = host.replace(/^(www|jobs|careers|boards|apply|job-boards|hire|recruiting)\./, "").split(".")[0];
   if (NOT_COMPANY.test(first)) return "";
-  return nameMatching(first, (document.body?.innerText ?? "").slice(0, 20000)) || first;
+  return nameMatching(first, text.slice(0, 20000)) || first;
 }
 
 /**
@@ -723,17 +723,60 @@ const DELTEK_HOST = /(^|\.)hrsmart\.com$/i;
 /**
  * Deltek Talent Management (once HRsmart, at <company>.hua.hrsmart.com). Its tabs all start "Deltek Talent
  * Management", and a posting (/hr/ats/Posting/view/<id>) is headed "Senior Engineer - (279)". The company is only
- * in the address and the description's text. Null off a posting: its account and apply pages don't name the job.
+ * in the address and the description's text. Null off a posting: its account and apply pages don't name the job
+ * (see deltekApplyingTo for those).
  */
-export function deltekJob(where: { hostname: string; pathname: string } = window.location): { title: string; company: string; description: string } | null {
+export function deltekJob(where: { hostname: string; pathname: string } = window.location, doc: Document = document): { title: string; company: string; description: string } | null {
   if (!DELTEK_HOST.test(where.hostname) || !/\/posting\/view\/\d+/i.test(where.pathname)) return null;
   const numbered = / - \(\d+\)$/;
-  const heading = Array.from(document.querySelectorAll("h1, h2")).map((el) => clean(el.textContent)).find((text) => numbered.test(text));
-  const title = (heading ?? document.title.replace(/^deltek talent management\s*-\s*/i, "")).replace(/\s*-\s*\(\d+\)\s*$/, "").trim();
+  const heading = Array.from(doc.querySelectorAll("h1, h2")).map((el) => clean(el.textContent)).find((text) => numbered.test(text));
+  const title = (heading ?? doc.title.replace(/^deltek talent management\s*-\s*/i, "")).replace(/\s*-\s*\(\d+\)\s*$/, "").trim();
   if (!title || notJobTitle(title)) return null;
-  const text = (document.querySelector<HTMLElement>("main, [role=main], #main") ?? document.body).innerText ?? "";
+  const main = doc.querySelector<HTMLElement>("main, [role=main], #main") ?? doc.body;
+  // A page read with fetch isn't laid out, so it has no innerText: its text without scripts and styles instead.
+  const text = doc === document ? main.innerText ?? "" : Array.from(main.querySelectorAll("script, style, noscript")).reduce((all, el) => all.replace(el.textContent ?? "", " "), main.textContent ?? "").replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n\n");
   const from = text.search(/job description/i);
-  return { title: title.slice(0, 200), company: hostCompany(where.hostname).slice(0, 200), description: (from >= 0 ? text.slice(from) : text).trim().slice(0, 20000) };
+  return { title: title.slice(0, 200), company: hostCompany(where.hostname, text).slice(0, 200), description: (from >= 0 ? text.slice(from) : text).trim().slice(0, 20000) };
+}
+
+/**
+ * Deltek's account and apply pages don't show the job, but their form carries its number (applyingTo=279). The
+ * posting it names is read from the same site, once per tab (kept in the page's session storage), so a student who
+ * landed straight on "Create an Account" still gets the job. Null when there's no number or it can't be read.
+ */
+export async function deltekApplyingTo(): Promise<{ title: string; company: string; description: string; url: string } | null> {
+  if (!DELTEK_HOST.test(window.location.hostname) || /\/posting\/view\/\d+/i.test(window.location.pathname)) return null;
+  const id = document.querySelector<HTMLInputElement>("input[name=applyingTo]")?.value.trim() ?? "";
+  if (!/^\d+$/.test(id)) return null;
+  const url = `${window.location.origin}/hr/ats/Posting/view/${id}`;
+  const key = `unnepo-deltek-${id}`;
+  try {
+    const kept = sessionStorage.getItem(key);
+    if (kept) return { ...JSON.parse(kept), url };
+  } catch {
+    // Storage blocked: read it each time.
+  }
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 4000);
+    const response = await fetch(url, { credentials: "include", signal: controller.signal }).finally(() => clearTimeout(timer));
+    if (!response.ok) return null;
+    const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+    const job = deltekJob({ hostname: window.location.hostname, pathname: new URL(url).pathname }, doc);
+    if (!job) return null;
+    try { sessionStorage.setItem(key, JSON.stringify(job)); } catch { /* fine without it */ }
+    return { ...job, url };
+  } catch {
+    return null;
+  }
+}
+
+/** The page's scan, with the job a Deltek account or apply page is for when it only gives the job's number. */
+export async function scanPageWithJob(): Promise<Scan> {
+  const page = scanPage();
+  if (page.title !== NO_TITLE) return page;
+  const job = await deltekApplyingTo();
+  return job ? { ...page, title: job.title, company: job.company, description: job.description, jobUrl: job.url } : page;
 }
 
 /** What a job is called when the page doesn't say: the same words the server saves, so it shows as missing. */
