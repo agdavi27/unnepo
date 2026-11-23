@@ -3,6 +3,7 @@ title: "Applying Into the Void: Why You Never Hear Back (and What to Change)"
 description: The real reasons students get no response to job and internship applications, and seven specific changes that get more applications read and answered.
 keyword: no response to job applications
 category: Applying
+author: Benjamin Ortiz
 publishAt: 2026-11-13
 ---
 

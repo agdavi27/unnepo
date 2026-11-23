@@ -3,6 +3,7 @@ title: Do Cover Letters Still Matter in 2026? An Honest Answer for Students
 description: When a cover letter actually helps your internship or job application, when you can skip it, and how to write a good one fast when it counts.
 keyword: do cover letters matter
 category: Cover letters
+author: Ethan Brooks
 publishAt: 2026-11-18
 ---
 

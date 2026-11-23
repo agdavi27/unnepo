@@ -6,7 +6,7 @@ import path from "node:path";
  * ship in the repo at once; each one only appears (on /guides, its own page, the sitemap and the RSS feed) once its
  * `publishAt` date has arrived, so the blog posts one a day by itself with no cron job and no redeploy.
  *
- * Front matter: title, description, keyword (the search phrase it targets), category, publishAt (YYYY-MM-DD), and
+ * Front matter: title, description, keyword (the search phrase it targets), category, author, publishAt (YYYY-MM-DD), and
  * optionally updated (YYYY-MM-DD). The body is a small Markdown subset (see parseBlocks) plus a `[[cta]]` line where
  * the mid-article Unnepo box goes.
  */
@@ -14,7 +14,12 @@ import path from "node:path";
 import { SITE_URL } from "@/lib/config";
 
 export { SITE_URL };
-export const GUIDES_AUTHOR = { name: "Drew Davis", role: "Student at Colby College and founder of Unnepo" };
+export const GUIDES_AUTHOR_ROLE = "Contributor, Unnepo Guides";
+
+/** "Maya Patel" → "MP", for the byline avatar. */
+export function authorInitials(name: string) {
+  return name.split(/\s+/).filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+}
 
 const GUIDES_DIR = path.join(process.cwd(), "content", "guides");
 
@@ -40,6 +45,7 @@ export type Guide = {
   description: string;
   keyword: string;
   category: string;
+  author: string;
   publishAt: string;
   updated?: string;
   blocks: Block[];
@@ -127,7 +133,7 @@ export function extractFaq(blocks: Block[]): Faq[] {
 
 export function parseGuide(slug: string, source: string): Guide {
   const { data, body } = parseFrontMatter(source);
-  for (const key of ["title", "description", "keyword", "category", "publishAt"]) {
+  for (const key of ["title", "description", "keyword", "category", "author", "publishAt"]) {
     if (!data[key]) throw new Error(`content/guides/${slug}.md is missing "${key}" in its front matter.`);
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data.publishAt)) throw new Error(`content/guides/${slug}.md: publishAt must be YYYY-MM-DD.`);
@@ -139,6 +145,7 @@ export function parseGuide(slug: string, source: string): Guide {
     description: data.description,
     keyword: data.keyword,
     category: data.category,
+    author: data.author,
     publishAt: data.publishAt,
     updated: data.updated || undefined,
     blocks,

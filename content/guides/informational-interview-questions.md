@@ -3,6 +3,7 @@ title: "Informational Interviews: 15 Questions to Ask (and How to Run One)"
 description: What an informational interview is, how to prepare, the best questions to ask, and how to end the conversation in a way that leads to opportunities.
 keyword: informational interview questions
 category: Networking
+author: Leah Sullivan
 publishAt: 2026-11-24
 ---
 

@@ -3,6 +3,7 @@ title: How to Turn Your Internship Into a Return Offer
 description: What managers look for when deciding on return offers, and a week-by-week plan for interns to make a strong impression, build relationships and ask about full-time roles.
 keyword: how to get a return offer
 category: Internships
+author: Nathan Rivera
 publishAt: 2026-12-04
 ---
 

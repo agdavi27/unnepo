@@ -3,6 +3,7 @@ title: "How Applicant Tracking Systems Read Your Resume (ATS Guide for Students)
 description: What an applicant tracking system actually does with your resume, the myths to ignore, and a checklist for a resume that parses cleanly and ranks well.
 keyword: applicant tracking system resume
 category: Resumes
+author: Hannah Whitaker
 publishAt: 2026-11-15
 ---
 

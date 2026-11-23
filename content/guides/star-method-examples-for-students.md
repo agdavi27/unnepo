@@ -3,6 +3,7 @@ title: STAR Method Examples for College Students (Behavioral Interview Guide)
 description: How to use the STAR method to answer "Tell me about a time when..." interview questions, with five complete example answers drawn from classes, clubs and campus jobs.
 keyword: STAR method examples for students
 category: Interviews
+author: Owen Price
 publishAt: 2026-11-20
 ---
 

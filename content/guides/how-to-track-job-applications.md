@@ -3,6 +3,7 @@ title: How to Track Your Job Applications (Spreadsheet Template vs. Tools)
 description: The columns every job application tracker needs, a simple spreadsheet setup, how to use it to follow up on time, and when it's worth switching to a dedicated tool.
 keyword: how to track job applications
 category: Applying
+author: Chloe Bennett
 publishAt: 2026-11-22
 ---
 

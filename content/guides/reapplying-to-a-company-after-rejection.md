@@ -3,6 +3,7 @@ title: Can You Reapply to a Company That Rejected You?
 description: When it's fine to reapply after a rejection, how long to wait, how to show you've grown, and how to use the first rejection to your advantage.
 keyword: reapplying to a company after rejection
 category: Following up
+author: Lucas Hart
 publishAt: 2026-12-01
 ---
 

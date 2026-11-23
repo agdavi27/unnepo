@@ -3,6 +3,7 @@ title: How to Find the Recruiter for Any Job Posting
 description: Six practical ways to find who is hiring for a role, plus how to guess a work email address correctly and what to do once you find the right person.
 keyword: how to find the recruiter for a job
 category: Networking
+author: Daniel Kim
 publishAt: 2026-11-13
 ---
 

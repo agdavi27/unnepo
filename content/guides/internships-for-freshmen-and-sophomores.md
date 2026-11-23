@@ -3,6 +3,7 @@ title: "Internships for First-Years and Sophomores: How to Get Experience Early"
 description: Where first-year and sophomore college students can find internships and other real experience, and how to build a resume that sets you up for junior-year recruiting.
 keyword: internships for freshmen and sophomores
 category: Internships
+author: Tyler Dunn
 publishAt: 2026-12-05
 ---
 

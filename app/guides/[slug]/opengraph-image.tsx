@@ -19,7 +19,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
         </div>
         <div style={{ display: "flex", fontSize: title.length > 60 ? 64 : 76, lineHeight: 1.08, color: "#1B1B1F", letterSpacing: -1.5 }}>{title}</div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontFamily: "sans-serif", fontSize: 28, color: "#6B665E" }}>
-          <div style={{ display: "flex" }}>By Drew Davis · Colby College</div>
+          <div style={{ display: "flex" }}>{guide ? `By ${guide.author}` : "Unnepo Guides"}</div>
           <div style={{ display: "flex", fontSize: 40, fontWeight: 800, color: "#1B1B1F", letterSpacing: -1 }}>
             unnepo<span style={{ color: "#3D8BFF" }}>.</span>
           </div>

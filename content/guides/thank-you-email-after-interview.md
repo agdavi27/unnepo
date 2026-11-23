@@ -3,6 +3,7 @@ title: Thank-You Email After an Interview (Templates for Students)
 description: When to send a thank-you email after an internship or job interview, what to say, and four templates for phone screens, panel interviews, final rounds and follow-ups.
 keyword: thank you email after interview
 category: Following up
+author: Henry Walsh
 publishAt: 2026-11-26
 ---
 

@@ -3,6 +3,7 @@ title: How to Follow Up on a Job Application (With Email Templates)
 description: When to follow up after applying, who to email, and exactly what to say. Includes three copy-and-paste templates for students applying to internships and entry-level jobs.
 keyword: how to follow up on a job application
 category: Following up
+author: Grace Holloway
 publishAt: 2026-11-13
 ---
 

@@ -3,6 +3,7 @@ title: How to Ask for a Referral (and Who to Ask)
 description: Why referrals are so powerful, who to ask, when to ask, and exactly what to say. Includes templates for asking alumni, friends and people you've just met.
 keyword: how to ask for a referral
 category: Networking
+author: Caleb Turner
 publishAt: 2026-12-07
 ---
 

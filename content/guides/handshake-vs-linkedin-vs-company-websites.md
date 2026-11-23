@@ -3,6 +3,7 @@ title: "Handshake vs. LinkedIn vs. Company Websites: Where Should Students Apply
 description: The pros and cons of applying for internships through Handshake, LinkedIn, Indeed and company career sites, and how to use each one to get more responses.
 keyword: Handshake vs LinkedIn for internships
 category: Applying
+author: Jordan Lee
 publishAt: 2026-11-29
 ---
 

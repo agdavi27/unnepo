@@ -3,6 +3,7 @@ title: How to Write a Resume With No Experience (College Student Guide)
 description: A step-by-step guide to writing a strong college resume when you've never had an internship. What to include, how to phrase it, and a sample layout you can copy.
 keyword: resume with no experience college student
 category: Resumes
+author: Nora Delaney
 publishAt: 2026-11-13
 ---
 

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { SERIF } from "@/components/guides/styles";
-import { formatGuideDate, GUIDES_AUTHOR, isPublished, publishedGuides, SITE_URL } from "@/lib/guides";
+import { formatGuideDate, isPublished, publishedGuides, SITE_URL } from "@/lib/guides";
 
 // Re-checked every hour, so each day's article appears on its own.
 export const revalidate = 3600;
@@ -31,7 +31,7 @@ export default function GuidesIndex() {
       headline: guide.title,
       url: `${SITE_URL}/guides/${guide.slug}`,
       datePublished: guide.publishAt,
-      author: { "@type": "Person", name: GUIDES_AUTHOR.name },
+      author: { "@type": "Person", name: guide.author },
     })),
   };
 
@@ -41,7 +41,7 @@ export default function GuidesIndex() {
       <p className="m-0 mt-6 text-[12px] font-semibold uppercase tracking-[0.2em] text-[#3D6FD1]">Guides</p>
       <h1 className={`mb-0 mt-3 ${SERIF} text-[clamp(34px,5.4vw,52px)] font-normal leading-[1.05] tracking-[-1px]`}>{TITLE}</h1>
       <p className={`mb-0 mt-4 max-w-[620px] ${SERIF} text-[19px] italic leading-[1.5] text-[#4A463F]`}>
-        Straight answers on resumes, cold emails, following up and getting hired, written by a student who is in the same job search you are.
+        Straight answers on resumes, cold emails, following up and getting hired, written for students in the middle of the job search.
       </p>
 
       <ol className="m-0 mt-10 flex list-none flex-col p-0">
