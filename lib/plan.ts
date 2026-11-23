@@ -7,7 +7,7 @@
  * No server imports, so the web app and the extension's types can use it too.
  */
 
-export type StoredPlan = "free" | "grind" | "pack" | "pro" | "premium";
+export type StoredPlan = "free" | "grind" | "pack" | "pro" | "premium" | "outreach";
 
 /** Where "Get Pro" goes in the web app: the Upgrade to Pro page, beside Settings (Settings and plans once on Pro). */
 export const UPGRADE_URL = "/home?tab=pro";

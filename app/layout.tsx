@@ -12,8 +12,8 @@ const pixel = Press_Start_2P({ variable: "--font-pixel", weight: "400", subsets:
 export const metadata: Metadata = {
   // Makes canonical, Open Graph and share-image URLs absolute.
   metadataBase: new URL(SITE_URL),
-  title: "Unnepo — Apply faster. Follow up smarter. Get hired.",
-  description: "A Chrome extension that fills job and internship applications for you, then finds the recruiters behind the role. Free to start.",
+  title: "Unnepo — Apply in minutes. Then actually hear back.",
+  description: "A free Chrome extension that fills internship and job applications, then finds the right people at each company and writes each one a short, tailored email.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

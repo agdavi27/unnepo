@@ -6,7 +6,7 @@ import { FounderLink } from "@/components/marketing/founder-note";
 import { InstallLinkForm } from "@/components/marketing/install-link-form";
 import { Schools } from "@/components/marketing/schools";
 import { SpiderDialogue } from "@/components/marketing/spider-dialogue";
-import { CHROME_STORE_URL, CONTACT_EMAIL, ENTERPRISE_PLAN, PUBLIC_PLANS } from "@/lib/config";
+import { CHROME_STORE_URL, CONTACT_EMAIL, ENTERPRISE_PLAN, PUBLIC_PLANS, REFUND_DAYS } from "@/lib/config";
 import type { InstallView } from "@/lib/install-view";
 
 /**
@@ -40,8 +40,16 @@ const TRACKER = [
 
 const STEPS = [
   ["Add the extension", "Sign up free with any email and add your resume."],
-  ["Apply anywhere", "Use your letter and answers on a job board, or press Fill on the company's site."],
-  ["Track and follow up", "The job goes in your tracker, with people to email and a draft for each."],
+  ["Apply in minutes", "Press Fill on the company's site, or use your letter and answers on a job board. You press Submit."],
+  ["Email the people who decide", "Unnepo finds the 2 or 3 right people and writes each one a short email about this job. You send it."],
+];
+
+/** Volume tools against Unnepo, row by row. */
+const VERSUS: Array<[string, string]> = [
+  ["Pay more to send more applications", "Free, unlimited autofill. The application is the easy part"],
+  ["A bot submits for you, to jobs you never read", "You read the job and press Submit, every time"],
+  ["Your application joins hundreds in the pile", "A short email puts your name in front of a person"],
+  ["Hard-to-cancel billing, refund fights", `Cancel in two clicks. Full refund within ${REFUND_DAYS} days, no questions`],
 ];
 
 /** `view` "email" (a phone, or a browser that can't add Chrome extensions) swaps the hero's buttons for the install-link email form. */
@@ -76,8 +84,8 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
         <main className="contents">
           <section className="relative mr-[calc(var(--pad)-var(--gutter))] flex flex-wrap items-center gap-x-12 gap-y-6 pb-16 pt-6 sm:gap-y-10 sm:pb-24">
             <div className="flex min-w-0 flex-[1_1_460px] flex-col items-start gap-5">
-              <h1 className="m-0 max-sm:pr-[88px] text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Apply faster.<br />Follow up smarter.<br />Get hired.</h1>
-              <p className="m-0 max-w-[500px] text-[clamp(16px,2vw,19px)] leading-normal text-[#B4B4BC]">Apply on any job board or company site. Every application lands in one place, with the people to follow up with.</p>
+              <h1 className="m-0 max-sm:pr-[88px] text-[clamp(42px,5.8vw,80px)] font-bold leading-[0.96] tracking-[-0.045em]">Apply in minutes.<br />Then actually<br />hear back.</h1>
+              <p className="m-0 max-w-[520px] text-[clamp(16px,2vw,19px)] leading-normal text-[#B4B4BC]">Unnepo fills the application for you, then finds the 2 or 3 people who decide and writes each one a short email about that exact job. Fewer applications into the void. More replies.</p>
               {view === "email" ? (
                 <div className="mt-1 flex w-full max-w-[460px] flex-col gap-3">
                   <p className="m-0 text-[15px] leading-relaxed text-[#F7F7F8]">
@@ -101,7 +109,7 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
                   </Link>
                 </div>
               )}
-              <p className="m-0 text-[13px] text-[#9A9AA3]">Free for students, no card. The tracker is free and unlimited. Pro is $29.99 a month or $199 a year, and some schools cover it.</p>
+              <p className="m-0 text-[13px] text-[#9A9AA3]">Free for students, no card: unlimited autofill and tracking. Pro is $99 a semester, and some schools cover it.</p>
             </div>
             {/* On a phone the spider perches beside the headline instead of taking a column of its own. */}
             <div className="flex min-w-0 flex-col items-center gap-[22px] max-sm:absolute max-sm:right-0 max-sm:top-4 sm:flex-[1_1_480px]">
@@ -110,6 +118,32 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
           </section>
 
           <Schools />
+
+          <section className="relative flex flex-col gap-6 pb-20 pt-2">
+            <Knot top={24} className="bg-[#F7F7F8]" />
+            <div className="flex flex-col gap-3">
+              <h2 className="m-0 text-balance text-[clamp(30px,4.2vw,52px)] font-bold leading-[1.03] tracking-[-1.6px]">Other AI tools sell you volume.<br />Volume lands in the bin.</h2>
+              <p className="m-0 max-w-[640px] text-base leading-relaxed text-[#B4B4BC]">Auto-apply tools charge you more to fire your application at more jobs. Recruiters now get twice as many applications per opening as in 2022, and they filter the mass-sent ones first. Even the auto-apply tools promise about 1 or 2 interviews per 100 applications. Unnepo does the opposite: one good application, then a real email to the right person.</p>
+            </div>
+            <div className="overflow-x-auto border-4 border-[#26262C] bg-[#0C0C0E]">
+              <table className="w-full min-w-[560px] border-collapse text-left text-sm">
+                <thead>
+                  <tr className="border-b-2 border-[#1F1F24]">
+                    <th scope="col" className={`w-1/2 p-4 ${PIXEL} text-[10px] font-normal leading-relaxed text-[#9A9AA3]`}>AUTO-APPLY TOOLS</th>
+                    <th scope="col" className={`w-1/2 p-4 ${PIXEL} text-[10px] font-normal leading-relaxed text-[#3D8BFF]`}>UNNEPO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {VERSUS.map(([them, us]) => (
+                    <tr key={them} className="border-b-2 border-[#1F1F24] last:border-b-0">
+                      <td className="p-4 align-top text-[#9A9AA3] line-through decoration-[#3A3A42]">{them}</td>
+                      <td className="p-4 align-top text-[#F7F7F8]">{us}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
 
           <section className="relative flex flex-col gap-6 pb-20 pt-2">
             <Knot top={24} />
@@ -164,8 +198,8 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
           <section className="relative flex flex-wrap gap-x-12 gap-y-6 pb-16">
             <Knot top={12} />
             <div className="flex min-w-0 flex-[1_1_340px] flex-col gap-3">
-              <h2 className="m-0 text-[clamp(26px,3vw,36px)] font-bold leading-[1.06] tracking-[-1px]">Find who to follow up with.</h2>
-              <p className="m-0 text-base leading-relaxed text-[#B4B4BC]">Hiring managers, recruiters and people who match you at the company, with emails and a draft to send.</p>
+              <h2 className="m-0 text-[clamp(26px,3vw,36px)] font-bold leading-[1.06] tracking-[-1px]">Email the people who decide.</h2>
+              <p className="m-0 text-base leading-relaxed text-[#B4B4BC]">Unnepo picks the right 2 or 3 people for each job: an alum from your school first, then the recruiter and the team. Each gets a short email, under 100 words, about that job and why you fit it. Short emails get replies; long ones get skipped.</p>
             </div>
             <ul className="m-0 flex min-w-0 flex-[1_1_340px] list-none flex-col border-2 border-[#26262C] bg-[#0C0C0E] p-0">
               <li className="border-b-2 border-[#1F1F24] px-3.5 py-3 text-sm"><strong className="font-semibold">Priya Nair</strong> <span className="text-[#9A9AA3]">· Hiring manager</span></li>
@@ -194,27 +228,33 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
             <div className="grid grid-cols-[repeat(auto-fit,minmax(min(280px,100%),1fr))] gap-6">
               {PUBLIC_PLANS.map((plan) => {
                 const free = plan.id === "free";
-                const features = free ? ["Unlimited job tracking", ...plan.features.filter((feature) => !feature.startsWith("Tracker"))] : plan.features;
                 return (
-                  <div key={plan.id} className={`flex flex-col gap-3.5 border-4 bg-[#0C0C0E] p-6 ${free ? "border-[#F7F7F8] shadow-[8px_8px_0_#3D8BFF]" : "border-[#26262C]"}`}>
-                    <p className={`m-0 ${PIXEL} text-xs leading-relaxed`}>{free ? "Free for students" : plan.name}</p>
+                  <div key={plan.id} className={`flex flex-col gap-3.5 border-4 bg-[#0C0C0E] p-6 ${plan.popular ? "border-[#F7F7F8] shadow-[8px_8px_0_#3D8BFF]" : "border-[#26262C]"}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className={`m-0 ${PIXEL} text-xs leading-relaxed`}>{free ? "Free for students" : plan.name}</p>
+                      {plan.popular && <span className={`${PIXEL} bg-[#3D8BFF] px-2 py-1 text-[9px] leading-none text-bg`}>RECOMMENDED</span>}
+                    </div>
                     <p className="m-0 text-[44px] font-bold leading-none tracking-[-1.5px]">
                       {plan.priceLabel}
-                      {plan.monthly && <span className="text-sm font-normal tracking-normal text-[#9A9AA3]"> / month {plan.yearLabel}</span>}
+                      {plan.per && <span className="text-sm font-normal tracking-normal text-[#9A9AA3]"> / {plan.per}</span>}
                     </p>
+                    {plan.altLabel && <p className="-mt-1.5 m-0 text-[13px] text-[#9A9AA3]">{plan.altLabel}</p>}
+                    <p className="m-0 text-sm text-[#F7F7F8]">{plan.blurb}</p>
                     <ul className="m-0 flex flex-1 list-disc flex-col gap-2 pl-[18px] text-sm leading-[1.4] text-[#B4B4BC]">
-                      {features.map((feature) => <li key={feature}>{feature}</li>)}
+                      {plan.features.map((feature) => <li key={feature}>{feature}</li>)}
                     </ul>
                     <Link
                       href="/signup"
-                      className={`flex min-h-[46px] items-center justify-center rounded-[10px] text-sm font-semibold transition-colors ${free ? "bg-[#3D8BFF] text-bg hover:bg-[#5A9DFF]" : "border border-[#3A3A42] text-[#F7F7F8] hover:bg-white/5"}`}
+                      className={`flex min-h-[46px] items-center justify-center rounded-[10px] text-sm font-semibold transition-colors ${plan.popular ? "bg-[#3D8BFF] text-bg hover:bg-[#5A9DFF]" : "border border-[#3A3A42] text-[#F7F7F8] hover:bg-white/5"}`}
                     >
                       {plan.cta}
                     </Link>
+                    {plan.giftable && <Link href="/gift" className="-mt-1 text-center text-[13px] text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline">Parent? Give it as a gift</Link>}
                   </div>
                 );
               })}
             </div>
+            <p className="m-0 text-sm text-[#9A9AA3]">Every plan: cancel in two clicks from Settings, and a full refund within {REFUND_DAYS} days of any payment, no questions asked. Outreach Season costs about a tenth of a career coach.</p>
             <p className="m-0 text-sm text-[#9A9AA3]">
               Buying for your school?{" "}
               <a href={`mailto:${ENTERPRISE_PLAN.contactEmail}?subject=${encodeURIComponent("Unnepo for our school")}`} className="text-[#F7F7F8] underline-offset-4 hover:underline">Contact us</a>

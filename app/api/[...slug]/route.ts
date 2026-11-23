@@ -4,7 +4,7 @@ import { assertSameOrigin, clearSessionCookie, errorResponse, json, publicOrigin
 import { isAdminEmail, login, logout, publicUser, requestPasswordReset, resendVerification, resetPassword, signUp, verifyEmail } from "@/lib/services/auth";
 import { persistenceMode, readAnthropicKey, readApolloKey, repo } from "@/lib/db/file-store";
 import { readStoredResume, storeResume } from "@/lib/services/resume";
-import { applyVerifiedStripeEvent, checkoutKind, createBillingPortal, createStripeCheckout } from "@/lib/services/billing";
+import { applyVerifiedStripeEvent, checkoutKind, createBillingPortal, createGiftCheckout, createStripeCheckout, giftForCheckout, redeemGift } from "@/lib/services/billing";
 import { autofillProblems, peopleTest, profitability } from "@/lib/services/admin";
 import { beginOAuth, finishOAuth, oauthReady } from "@/lib/services/oauth";
 import { ServiceError } from "@/lib/errors";
@@ -220,7 +220,23 @@ async function handle(request: Request, slug: string[]) {
     return json(result);
   }
 
+  // Outreach Season as a gift: no account needed to buy one, or to see the code on the thank-you page.
+  if (root === "gift" && action === "checkout" && request.method === "POST") {
+    if (!rateLimit(`gift:${request.headers.get("x-forwarded-for") || "local"}`, 20, 60 * 60 * 1000)) throw new ServiceError("That's a lot of tries in an hour. Try again later.", "rate_limited", 429);
+    return json(await createGiftCheckout(await request.json().catch(() => ({})), publicOrigin(request)));
+  }
+  if (root === "gift" && action === "thanks" && request.method === "GET") {
+    const session = new URL(request.url).searchParams.get("session") ?? "";
+    if (!/^cs_[A-Za-z0-9_]{10,200}$/.test(session)) throw new ServiceError("That checkout wasn't found.", "not_found", 404);
+    return json({ gift: await giftForCheckout(session) });
+  }
+
   const user = await requireUser();
+
+  if (root === "gift" && action === "redeem" && request.method === "POST") {
+    if (!rateLimit(`redeem:${user.id}`, 10, 60 * 60 * 1000)) throw new ServiceError("That's a lot of tries in an hour. Try again later.", "rate_limited", 429);
+    return json(await redeemGift(user.id, (await request.json().catch(() => ({}))).code));
+  }
 
   // Admins: work as Free or Pro ({ plan: null } goes back to the real plan).
   if (root === "me" && action === "plan-preview" && request.method === "POST") return json(await setPlanPreview(user.id, await request.json()));

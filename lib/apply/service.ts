@@ -15,6 +15,7 @@ import { companyFromUrl, extractJob, findPostedRecruiter, isJobSiteName, jobKeyF
 import { AI_ANSWER_PROMPT, acceptAiAnswer, classifyQuestion, contactFromResume, eligibilityAnswer, headlineAnswer, missingAnswers, normalizeLabel, planAnswers, toolExperienceAnswer, type AnswerContext } from "@/lib/apply/questions";
 import { applicationContacts, applicationProfiles, applications } from "@/lib/apply/store";
 import { assertUseAllowed, countUse, isFree, peopleAccess, peopleNote, planState, planUsage, spendPeople } from "@/lib/apply/limits";
+import { MAX_FOLLOW_UPS } from "@/lib/apply/outreach-email";
 import { mergeRepeats } from "@/lib/apply/merge-repeats";
 import { addActivity, dropMaybe, liveMaybe, sessionNow } from "@/lib/apply/activity";
 import { activeResume, profileReady, profileState } from "@/lib/profile/service";
@@ -952,11 +953,16 @@ export async function writeContactEmail(userId: string, raw: unknown) {
     if (checked && (checked.email !== contact.email || checked.emailSource !== contact.emailSource)) writeTo = (await applicationContacts.update(userId, contact.id, checked)) ?? contact;
   }
   if (body.followUp === true && (await isFree(userId))) throw new ServiceError("Follow-up emails written for you are part of Pro.", "plan", 402);
+  // Which follow-up this is: one after each the student marked sent. Two at most; the second is Outreach Season's.
+  const followUpsSent = (app.fillReport?.outreachLog ?? []).filter((entry) => entry.contactId === contact.id && entry.kind === "follow_up").length;
+  const followUpNumber = Math.min(followUpsSent + 1, MAX_FOLLOW_UPS) as 1 | 2;
+  if (body.followUp === true && followUpsSent >= MAX_FOLLOW_UPS) throw new ServiceError(`You've sent ${MAX_FOLLOW_UPS} follow-ups to ${contact.name.split(" ")[0]}. A fourth email tends to hurt more than help, so try someone else at ${app.company}.`, "follow_up_limit", 409);
+  if (body.followUp === true && followUpNumber === 2 && (await planState(userId)).plan !== "outreach") throw new ServiceError("The second follow-up is part of Outreach Season. You can still write it yourself.", "plan", 402);
   // Free writes a few emails a day; follow-ups are Pro's.
   if (body.followUp !== true) await assertUseAllowed(userId, "emails");
   const info = await student(userId);
   // "Write follow-up": a short nudge on the email already sent, which stays in the thread.
-  const followUp = body.followUp === true && contact.emailBody ? { subject: contact.emailSubject ?? "", body: contact.emailBody, sentAt: app.fillReport?.emailedAt?.[contact.id] ?? null } : undefined;
+  const followUp = body.followUp === true && contact.emailBody ? { subject: contact.emailSubject ?? "", body: contact.emailBody, sentAt: app.fillReport?.emailedAt?.[contact.id] ?? null, number: followUpNumber } : undefined;
   const [email] = await writeOutreachEmails(userId, app, [writeTo], { name: info.user.name, resumeText: info.resumeText, profile: info.profileText, school: info.context.school, year: info.context.classYear, major: info.context.majors.join(" and ") }, { followUp }).catch((error: unknown) => {
     throw new ServiceError(`The email couldn't be written. ${error instanceof Error ? error.message : ""}`.trim(), "write_failed", 502);
   });

@@ -10,7 +10,7 @@ To upload an update: `npm run push` (raises the version), then `npm run extensio
 
 **Summary** (132 characters max, from the manifest's description):
 
-> Track every job you apply to, autofill applications, write cover letters, and find who to email at each company.
+> Apply in minutes with free autofill, then actually hear back: short, tailored emails to the right people at each company.
 
 **Category:** Productivity → Workflow & Planning (or Productivity → Tools)
 
@@ -19,26 +19,32 @@ To upload an update: `npm run push` (raises the version), then `npm run extensio
 **Description:** (Don't list job sites or other companies' names. On Nov 14, 2026 a submission was rejected for "Keyword Spam" over "Workday, Greenhouse, Lever, Ashby, LinkedIn, Handshake, Indeed".)
 
 ```
-Unnepo is a job search sidekick for college students. It lives in Chrome's side panel, right beside the job boards and company career sites where you already apply.
+Apply in minutes. Then actually hear back.
+
+Unnepo is for college students applying to internships and first jobs. It lives in Chrome's side panel, beside the job boards and company career sites where you already apply.
+
+Most applications go unanswered. Tools that fire your application at hundreds of jobs make that worse: recruiters filter mass-sent applications first. Unnepo does the opposite. It makes each application quick, then helps you reach the people who decide.
+
+FILL APPLICATIONS, FREE AND UNLIMITED
+Fill in your details and the application questions from your profile in one click. No daily limit. Unnepo never submits for you: you review every page and press Submit yourself.
+
+EMAIL THE RIGHT PEOPLE
+For each job, Unnepo finds the 2 or 3 right people at the company, someone from your school first, then the recruiter and the team, with checked work emails. It writes each one a short email, under 100 words, about that job and why you fit. You read it and send it yourself.
+
+FOLLOW UP AT THE RIGHT TIME
+When someone hasn't replied, Unnepo reminds you and writes a short follow-up.
 
 TRACK EVERY APPLICATION, AUTOMATICALLY
-When a page says your application went through, Unnepo saves the job to your tracker: the title, the company, the link and the date. No spreadsheet to keep up.
-
-FILL APPLICATIONS FASTER
-Fill in your name, email, school, links and other basics from your profile in one click. Unnepo never submits for you: you review every page and press Submit yourself.
+When a page says your application went through, Unnepo saves the job to your tracker. No spreadsheet to keep up.
 
 WRITE THE HARD PARTS
-Get a cover letter written for the job in front of you, and answers to questions like "Why do you want to work here?" drawn from your own resume and experience.
+A cover letter for the job in front of you, and answers to questions like "Why do you want to work here?", drawn from your own resume.
 
-KNOW WHO TO EMAIL
-See who works at each company you applied to, and with Pro, their names and verified work emails. Unnepo reminds you when it's time to follow up and writes the follow-up for you.
-
-SEE YOUR WEEK
-A calendar of everything you did: jobs found, applications sent, emails and interviews, so you can keep a steady pace.
-
-FREE AND PRO
-Free: a 7-day Pro trial with no card, unlimited basic autofill, 3 cover letters and 5 question answers a month, and your tracker.
-Pro ($25 a month or $75 a semester): unlimited cover letters, answers and smart autofill, plus names and emails at 20 companies a month.
+FREE, PRO AND OUTREACH SEASON
+Free, no card: unlimited autofill and tracking, plus 3 cover letters, 3 answers and 3 emails a day, and 2 people to email a day.
+Pro ($99 a semester, or $29.99 a month): unlimited letters and answers, the right 3 people at up to 100 companies a month with checked emails, a short email to each, and follow-ups.
+Outreach Season ($199 once for 4 months, never renews): everything in Pro, more companies, alumni first, and a first email plus two timed follow-ups for each person. Parents can give it as a gift.
+Cancel in two clicks. Full refund within 14 days of any payment, no questions.
 
 PRIVACY
 Unnepo reads only the job pages you're on, to save jobs and fill forms you open. It never reads your email, never sells your data, and never submits an application without you. Privacy policy: https://www.unnepo.com/privacy
@@ -101,7 +107,7 @@ Unnepo reads only the job pages you're on, to save jobs and fill forms you open.
 
 - **Visibility:** Unlisted to start (only people with the link can install), then Public.
 - **Regions:** All regions (or the United States only, to start).
-- **Payments:** Free (Pro is sold on the website, not through the store).
+- **Payments:** Free (Pro and Outreach Season are sold on the website, not through the store).
 
 ## After approval
 

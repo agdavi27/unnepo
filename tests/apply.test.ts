@@ -787,14 +787,24 @@ describe("people after applying", () => {
     expect(businessDaysBetween(new Date("2026-11-06T10:00:00Z"), new Date("2026-11-09T09:00:00Z"))).toBe(1);
     expect(followUpsDue(await withPeople(), new Date(Date.parse(emailedAt) + 3 * 86_400_000))).toHaveLength(0);
     expect(followUpsDue(await withPeople(), new Date(Date.parse(emailedAt) + 8 * 86_400_000))).toMatchObject([{ name: "Casey Park", company: "Acme Corp" }]);
-    model.replies.push(JSON.stringify({ emails: [{ index: 1, subject: "Re: Hello", body: "Hi Casey, a quick note on my application." }] }));
+    model.replies.push(JSON.stringify({ emails: [{ index: 1, followUp: "I also built a dashboard 40 students use each week" }] }));
     const followUp = await writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, followUp: true });
     expect(followUp.contact).toMatchObject({ emailSubject: "Re: Hello" });
-    expect(model.calls.at(-1)).toContain("This is a follow-up");
+    expect(followUp.contact?.emailBody).toContain("I also built a dashboard 40 students use each week.");
+    expect(model.calls.at(-1)).toContain("This is for a follow-up");
     expect(model.calls.at(-1)).toContain("Hi Casey, I applied to the Product Analyst Intern role.");
-    // "I sent it" starts the five days again; marking them replied ends the reminders.
+    // "I sent it" starts the wait again; marking them replied ends the reminders.
     await updateOutreach(userId, { contactId: casey.id, status: "emailed", followedUp: true });
     expect(Date.parse((await applications.get(userId, application.id))!.fillReport!.emailedAt![casey.id])).toBeGreaterThanOrEqual(Date.parse(emailedAt));
+    // The second, last follow-up is Outreach Season's, and needs no AI. A third is never written.
+    await expect(writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, followUp: true })).rejects.toMatchObject({ code: "plan", status: 402 });
+    await repo.setAccountForTests(userId, { plan: "outreach", planEndsAt: new Date(Date.now() + 86_400_000).toISOString() });
+    const calls = model.calls.length;
+    const last = await writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, followUp: true });
+    expect(last.contact?.emailBody).toContain("someone else on the team");
+    expect(model.calls.length).toBe(calls);
+    await updateOutreach(userId, { contactId: casey.id, status: "emailed", followedUp: true });
+    await expect(writeContactEmail(userId, { applicationId: application.id, contactId: casey.id, followUp: true })).rejects.toMatchObject({ code: "follow_up_limit" });
     await updateOutreach(userId, { contactId: casey.id, status: "replied" });
     expect((await applications.get(userId, application.id))!.fillReport!.emailedAt![casey.id]).toBeUndefined();
   });

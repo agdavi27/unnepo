@@ -133,7 +133,9 @@ export type CreditAccount = {
   purchasedBalance: number;
   allowanceBalance: number;
   includedAllowance: number;
-  plan: "free" | "grind" | "pack" | "pro" | "premium";
+  plan: "free" | "grind" | "pack" | "pro" | "premium" | "outreach";
+  /** When a plan paid once (Outreach Season) runs out. The account works as Free after it. */
+  planEndsAt?: string | null;
   updatedAt: string;
 };
 
@@ -338,7 +340,8 @@ export type Payment = {
   stripePaymentIntent: string | null;
   amountCents: number;
   currency: string;
-  kind: "subscription" | "pack";
+  /** "pass": Outreach Season, paid once for a season. */
+  kind: "subscription" | "pack" | "pass";
   status: "paid" | "refunded" | "demo";
   creditsGranted: number;
   demo: boolean;
@@ -357,6 +360,24 @@ export type Subscription = {
   /** What was bought: "pro", "premium_semester" and so on. Older rows don't have it. */
   kind?: string;
   stripeCustomerId?: string;
+};
+
+export type Gift = {
+  code: string;
+  /** What it gives: an Outreach Season pass. */
+  plan: "outreach";
+  days: number;
+  buyerEmail: string;
+  /** Who it's for, as the buyer typed it, and their note. Shown on the redeem screen. */
+  recipientName: string;
+  message: string;
+  stripeCheckoutId: string;
+  amountCents: number;
+  createdAt: string;
+  redeemedBy: string | null;
+  redeemedAt: string | null;
+  /** Refunded before it was used: it can't be redeemed. */
+  refunded?: boolean;
 };
 
 export type Referral = {
@@ -614,6 +635,8 @@ export type Database = {
   friendships?: Friendship[];
   /** People who asked to hear when Unnepo launches, from the landing page popup. */
   waitlist?: WaitlistEntry[];
+  /** Outreach Season bought as a gift (by a parent, say): a code the student redeems on their own account. */
+  gifts?: Gift[];
   /** People on a phone (or a browser that isn't Chrome) who asked /get to email them the extension's install link. */
   installLinks?: InstallLinkSignup[];
 };

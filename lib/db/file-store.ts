@@ -3,7 +3,7 @@ import path from "node:path";
 import { serverConfig } from "@/lib/config";
 import { ServiceError } from "@/lib/errors";
 import { loadRemote, loadRemoteVersion, remoteKind, saveRemote, VersionConflict } from "./remote";
-import { emptyDatabase, type CreditAccount, type Database, type LedgerEntry, type Reservation, type SavedContact } from "./types";
+import { emptyDatabase, type CreditAccount, type Database, type Gift, type LedgerEntry, type Reservation, type SavedContact } from "./types";
 
 type GlobalStore = {
   memory: Database | null;
@@ -1057,6 +1057,42 @@ export const repo = {
   },
   async listWaitlist() {
     return withLock((db) => db.waitlist ?? []);
+  },
+  /** A gift bought at checkout. The same checkout twice (a webhook retry) keeps the first code. */
+  async createGift(gift: Gift) {
+    return withLock((db) => {
+      db.gifts ??= [];
+      const existing = db.gifts.find((item) => item.stripeCheckoutId === gift.stripeCheckoutId);
+      if (existing) return { gift: existing, created: false };
+      db.gifts.push(gift);
+      return { gift, created: true };
+    });
+  },
+  async getGift(code: string) {
+    return withLock((db) => db.gifts?.find((item) => item.code === code.trim().toUpperCase()) ?? null);
+  },
+  async giftByCheckout(checkoutId: string) {
+    return withLock((db) => db.gifts?.find((item) => item.stripeCheckoutId === checkoutId) ?? null);
+  },
+  /** Marks a gift used and puts its pass on the account, in one step so a code can't be spent twice. */
+  async redeemGift(code: string, userId: string, endsAt: (current: string | null | undefined) => string) {
+    return withLock((db) => {
+      const gift = db.gifts?.find((item) => item.code === code.trim().toUpperCase());
+      if (!gift || gift.refunded) return { status: "missing" as const };
+      if (gift.redeemedBy) return { status: gift.redeemedBy === userId ? ("mine" as const) : ("used" as const), gift };
+      gift.redeemedBy = userId;
+      gift.redeemedAt = nowIso();
+      const account = ensureAccount(db, userId);
+      Object.assign(account, { plan: gift.plan, planEndsAt: endsAt(account.plan === "outreach" ? account.planEndsAt : null), updatedAt: nowIso() });
+      return { status: "redeemed" as const, gift, endsAt: account.planEndsAt };
+    });
+  },
+  async markGiftRefunded(checkoutId: string) {
+    return withLock((db) => {
+      const gift = db.gifts?.find((item) => item.stripeCheckoutId === checkoutId);
+      if (gift) gift.refunded = true;
+      return gift ?? null;
+    });
   },
   async recordWebhook(provider: string, eventId: string) {
     return withLock((db) => {
