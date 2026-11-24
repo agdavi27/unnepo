@@ -1,4 +1,4 @@
-import { CONTACT_EMAIL, serverConfig, SITE_URL } from "@/lib/config";
+import { CONTACT_EMAIL, REFUND_DAYS, serverConfig, SITE_URL } from "@/lib/config";
 
 export async function sendPasswordResetEmail(to: string, resetUrl: string) {
   const key = process.env.RESEND_API_KEY;
@@ -29,6 +29,40 @@ export async function sendPasswordResetEmail(to: string, resetUrl: string) {
     const detail = await response.text().catch(() => "");
     console.error("Resend rejected the reset email", response.status, detail);
   }
+  return response.ok;
+}
+
+/**
+ * To whoever bought Outreach Season as a gift: the code, and the link the student opens to use it. False when email
+ * isn't set up or it failed (the code is still on the thank-you page).
+ */
+export async function sendGiftEmail(input: { to: string; code: string; recipientName: string; redeemUrl: string; days: number }) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) return false;
+  const from = process.env.RESEND_FROM || `Unnepo <${CONTACT_EMAIL}>`;
+  const who = input.recipientName.replace(/[<>&"]/g, "").slice(0, 80) || "your student";
+  const months = Math.round(input.days / 30);
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from,
+      to: [input.to],
+      subject: `Your Unnepo gift for ${who}`,
+      reply_to: CONTACT_EMAIL,
+      text: `Thank you for giving ${who} Outreach Season: ${months} months of Unnepo's outreach tools, paid once, never renewed.\n\nGift code: ${input.code}\n\nSend them this link to use it (they'll sign up free first if they haven't):\n${input.redeemUrl}\n\nThe ${months} months start when they use the code, not today. Changed your mind? Email ${CONTACT_EMAIL} within ${REFUND_DAYS} days for a full refund.`,
+      html: `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:480px;color:#111;line-height:1.5">
+<p style="font-size:18px;font-weight:700;margin:0 0 16px">Your gift for ${who}</p>
+<p style="margin:0 0 16px">Thank you for giving ${who} Outreach Season: ${months} months of Unnepo's outreach tools, paid once, never renewed.</p>
+<p style="margin:0 0 8px;font-size:13px;color:#555">Gift code</p>
+<p style="margin:0 0 20px;font-size:22px;font-weight:700;letter-spacing:2px;font-family:ui-monospace,Menlo,monospace">${input.code}</p>
+<p style="margin:0 0 24px"><a href="${input.redeemUrl}" style="display:inline-block;background:#111;color:#fff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:10px">Link to send them</a></p>
+<p style="margin:0 0 8px;font-size:13px;color:#555">The ${months} months start when they use the code, not today.</p>
+<p style="margin:0;font-size:13px;color:#555">Changed your mind? Email <a href="mailto:${CONTACT_EMAIL}" style="color:#555">${CONTACT_EMAIL}</a> within ${REFUND_DAYS} days for a full refund.</p>
+</div>`,
+    }),
+  });
+  if (!response.ok) console.error("Resend rejected the gift email", response.status, await response.text().catch(() => ""));
   return response.ok;
 }
 

@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/[...slug]/route";
 import { repo } from "@/lib/db/file-store";
-import { applyVerifiedStripeEvent, checkoutKind, createBillingPortal, createStripeCheckout } from "@/lib/services/billing";
+import { applyVerifiedStripeEvent, checkoutKind, createBillingPortal, createGiftCheckout, createStripeCheckout, giftForCheckout, passEndsAt, redeemGift } from "@/lib/services/billing";
+import { planState } from "@/lib/apply/limits";
 import { login, signUp, verifyEmail } from "@/lib/services/auth";
-import { semesterEndsAt } from "@/lib/config";
 import { useTempDb } from "./helpers";
 
 const api = vi.hoisted(() => ({
@@ -83,14 +83,16 @@ afterEach(() => {
 
 describe("checkout", () => {
   it("only sells what's on the plan cards", () => {
+    // The semester is the default; monthly only when asked for.
+    expect(checkoutKind("pro", "semester")).toBe("pro_semester");
+    expect(checkoutKind("pro", undefined)).toBe("pro_semester");
     expect(checkoutKind("pro", "monthly")).toBe("pro");
-    expect(checkoutKind("pro", undefined)).toBe("pro");
-    expect(checkoutKind("pro", "year")).toBe("pro_year");
-    // Older pages still send "semester": that's the yearly plan now.
-    expect(checkoutKind("pro", "semester")).toBe("pro_year");
+    // Older pages send "year": the yearly plan isn't sold, so it's the semester.
+    expect(checkoutKind("pro", "year")).toBe("pro_semester");
+    expect(checkoutKind("outreach", undefined)).toBe("outreach");
     expect(checkoutKind("pack", undefined)).toBe("pack");
     // Premium isn't sold any more; students already on it keep it.
-    for (const plan of ["premium", "grind", "free", "", undefined, { plan: "pro" }]) expect(() => checkoutKind(plan, "monthly")).toThrow("Choose Pro.");
+    for (const plan of ["premium", "grind", "free", "", undefined, { plan: "pro" }]) expect(() => checkoutKind(plan, "monthly")).toThrow("Choose a plan.");
   });
 
   it("charges Pro at the monthly price and returns to the app it came from", async () => {
@@ -105,29 +107,16 @@ describe("checkout", () => {
     expect(session.subscription_data.metadata).toMatchObject({ userId: user.id, kind: "pro", plan: "pro", credits: "20" });
   });
 
-  it("charges $199 for a year, renewing every twelve months, with no end date set", async () => {
+  it("charges $99 a semester, renewing every four months until cancelled, with no end date set", async () => {
     const user = await student();
-    await createStripeCheckout(user, "pro_year", ORIGIN);
+    await createStripeCheckout(user, "pro_semester", ORIGIN);
     const [pro] = api.checkout.mock.calls.map((call) => call[0]);
-    expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 19900, recurring: { interval: "month", interval_count: 12 } });
-    expect(pro.metadata).toMatchObject({ kind: "pro_year", plan: "pro", credits: "240" });
-    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro_year", subscription: "sub_year", credits: "240" }));
+    expect(pro.mode).toBe("subscription");
+    expect(pro.line_items[0].price_data).toMatchObject({ unit_amount: 9900, recurring: { interval: "month", interval_count: 4 } });
+    expect(pro.metadata).toMatchObject({ kind: "pro_semester", plan: "pro", credits: "80" });
+    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro_semester", subscription: "sub_sem", credits: "80" }));
     expect(api.update).not.toHaveBeenCalled();
-  });
-
-  it("still ends a semester bought before (no longer sold) on May 31, and leaves monthly Pro alone", async () => {
-    const user = await student();
-    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro_semester", subscription: "sub_sem", credits: "70" }));
-    expect(api.update).toHaveBeenCalledWith("sub_sem", { cancel_at: Math.floor(semesterEndsAt().getTime() / 1000), proration_behavior: "none" });
-    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro_semester", subscription: "sub_sem", reason: "subscription_cycle" }));
-    await applyVerifiedStripeEvent(paidInvoice(user.id, { kind: "pro", subscription: "sub_month" }));
-    expect(api.update).toHaveBeenCalledTimes(1);
-  });
-
-  it("puts the semester's end at the next May 31, Eastern", () => {
-    expect(semesterEndsAt(Date.parse("2026-11-14T12:00:00Z")).toISOString()).toBe("2027-06-01T03:59:59.000Z");
-    expect(semesterEndsAt(Date.parse("2027-02-01T12:00:00Z")).toISOString()).toBe("2027-06-01T03:59:59.000Z");
-    expect(semesterEndsAt(Date.parse("2027-06-02T12:00:00Z")).toISOString()).toBe("2028-06-01T03:59:59.000Z");
+    expect((await repo.getAccount(user.id))?.plan).toBe("pro");
   });
 
   it("won't charge a price that differs from the page", async () => {
@@ -148,7 +137,7 @@ describe("checkout", () => {
     const user = await student();
     await applyVerifiedStripeEvent(paidInvoice(user.id));
     await expect(createStripeCheckout(user, "pro", ORIGIN)).rejects.toThrow("already on this plan");
-    await createStripeCheckout(user, "pro_year", ORIGIN);
+    await createStripeCheckout(user, "pro_semester", ORIGIN);
     const session = api.checkout.mock.calls[0][0];
     expect(session.customer).toBe("cus_1");
     expect(session.customer_email).toBeUndefined();
@@ -335,5 +324,85 @@ describe("managing a subscription", () => {
     api.portal.mockRejectedValue(new Error("No configuration provided"));
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     await expect(createBillingPortal(user.id, ORIGIN)).rejects.toThrow("Couldn't open subscription settings");
+  });
+});
+
+const paidCheckout = (metadata: Record<string, string>, extra: Record<string, unknown> = {}) => ({
+  id: `evt_${++eventCount}`,
+  type: "checkout.session.completed",
+  data: { object: { id: `cs_test_${eventCount}abcdefghij`, mode: "payment", payment_status: "paid", amount_total: 19900, currency: "usd", payment_intent: `pi_${eventCount}`, metadata, ...extra } },
+});
+
+describe("Outreach Season", () => {
+  it("is paid once for 120 days, never renews, and stops a Pro subscription renewing", async () => {
+    const user = await student();
+    await createStripeCheckout(user, "outreach", ORIGIN);
+    const session = api.checkout.mock.calls[0][0];
+    expect(session.mode).toBe("payment");
+    expect(session.line_items[0].price_data).toMatchObject({ unit_amount: 19900 });
+    expect(session.line_items[0].price_data.recurring).toBeUndefined();
+    await applyVerifiedStripeEvent(paidInvoice(user.id));
+    api.search.mockResolvedValue({ data: [] });
+    const before = Date.now();
+    const event = paidCheckout({ userId: user.id, kind: "outreach", plan: "outreach" });
+    await applyVerifiedStripeEvent(event);
+    const account = await repo.getAccount(user.id);
+    expect(account?.plan).toBe("outreach");
+    const days = (Date.parse(account!.planEndsAt!) - before) / 86_400_000;
+    expect(days).toBeGreaterThan(119.9);
+    expect(days).toBeLessThan(120.1);
+    expect(api.update).toHaveBeenCalledWith("sub_1", { cancel_at_period_end: true });
+    // The Pro subscription ending later leaves the pass alone.
+    await applyVerifiedStripeEvent(ended(user.id));
+    expect((await repo.getAccount(user.id))?.plan).toBe("outreach");
+    expect((await planState(user.id)).plan).toBe("outreach");
+  });
+
+  it("works as Free once the season is over", async () => {
+    const user = await student();
+    await repo.setAccountForTests(user.id, { plan: "outreach", planEndsAt: new Date(Date.now() - 1000).toISOString() });
+    expect((await planState(user.id)).free).toBe(true);
+  });
+
+  it("adds a second season on to one still running", () => {
+    const now = Date.parse("2026-12-01T00:00:00Z");
+    expect(passEndsAt(null, now)).toBe("2027-03-31T00:00:00.000Z");
+    expect(passEndsAt("2027-01-01T00:00:00.000Z", now)).toBe("2027-05-01T00:00:00.000Z");
+  });
+
+  it("sells a gift without an account, and the code puts the season on the student's account once", async () => {
+    await createGiftCheckout({ recipientName: "Maya", message: "Go get them" }, ORIGIN);
+    const session = api.checkout.mock.calls[0][0];
+    expect(session.mode).toBe("payment");
+    expect(session.metadata).toMatchObject({ kind: "outreach_gift", recipientName: "Maya", message: "Go get them" });
+    expect(session.success_url).toBe(`${ORIGIN}/gift/thanks?session={CHECKOUT_SESSION_ID}`);
+    const event = paidCheckout({ kind: "outreach_gift", plan: "outreach", recipientName: "Maya", message: "Go get them" }, { customer_details: { email: "parent@example.com" } });
+    await applyVerifiedStripeEvent(event);
+    // A retried webhook keeps the same code.
+    await applyVerifiedStripeEvent({ ...event, id: `${event.id}_retry` });
+    const gift = await giftForCheckout(event.data.object.id);
+    expect(gift?.code).toMatch(/^UNN-[A-Z0-9]{4}-[A-Z0-9]{4}$/);
+    expect((await repo.giftByCheckout(event.data.object.id))?.buyerEmail).toBe("parent@example.com");
+    const maya = await student("maya@colby.edu");
+    const redeemed = await redeemGift(maya.id, gift!.code.toLowerCase());
+    expect(redeemed).toMatchObject({ plan: "outreach", message: "Go get them" });
+    expect((await planState(maya.id)).plan).toBe("outreach");
+    const other = await student("sam@colby.edu");
+    await expect(redeemGift(other.id, gift!.code)).rejects.toThrow("already used");
+    await expect(redeemGift(other.id, "UNN-AAAA-BBBB")).rejects.toThrow("wasn't found");
+    await expect(redeemGift(other.id, "hello")).rejects.toThrow("doesn't look like");
+  });
+
+  it("a refund ends the pass, or makes an unused gift code worthless", async () => {
+    const user = await student();
+    const own = paidCheckout({ userId: user.id, kind: "outreach", plan: "outreach" });
+    await applyVerifiedStripeEvent(own);
+    await applyVerifiedStripeEvent({ id: `evt_${++eventCount}`, type: "charge.refunded", data: { object: { id: "ch_1", refunded: true, payment_intent: own.data.object.payment_intent } } });
+    expect((await repo.getAccount(user.id))?.plan).toBe("free");
+    const gift = paidCheckout({ kind: "outreach_gift", plan: "outreach" }, { customer_details: { email: "parent@example.com" } });
+    await applyVerifiedStripeEvent(gift);
+    await applyVerifiedStripeEvent({ id: `evt_${++eventCount}`, type: "charge.refunded", data: { object: { id: "ch_2", refunded: true, payment_intent: gift.data.object.payment_intent } } });
+    const code = (await repo.giftByCheckout(gift.data.object.id))!.code;
+    await expect(redeemGift(user.id, code)).rejects.toThrow("wasn't found");
   });
 });

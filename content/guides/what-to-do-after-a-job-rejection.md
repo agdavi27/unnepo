@@ -3,6 +3,7 @@ title: What to Do After a Job or Internship Rejection Email
 description: How to respond to a rejection email, what to learn from it, and how to keep your search moving without losing motivation. Includes a reply template.
 keyword: what to do after a job rejection
 category: Following up
+author: Aaron Mitchell
 publishAt: 2026-12-03
 ---
 

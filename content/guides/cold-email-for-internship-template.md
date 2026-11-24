@@ -3,6 +3,7 @@ title: "Cold Emailing for Internships: A Template That Gets Replies"
 description: How to cold email companies for an internship, even when nothing is posted. A proven structure, three real templates, subject lines, and the mistakes that get emails ignored.
 keyword: cold email for internship
 category: Networking
+author: Maya Patel
 publishAt: 2026-11-13
 ---
 

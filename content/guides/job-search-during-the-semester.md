@@ -3,6 +3,7 @@ title: "How to Job Search During a Busy Semester: A Weekly Plan"
 description: A realistic weekly plan for applying to internships and jobs while taking a full course load, plus tips to batch your work, avoid burnout and keep momentum.
 keyword: job search during the semester
 category: Applying
+author: Jonah Fischer
 publishAt: 2026-12-02
 ---
 

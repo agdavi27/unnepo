@@ -3,6 +3,7 @@ title: "Job and Internship Scams Targeting Students: How to Spot Them"
 description: The most common fake job and internship scams aimed at college students, the red flags to watch for, and what to do if you think you've been targeted.
 keyword: job scams targeting college students
 category: Applying
+author: Ava Lindqvist
 publishAt: 2026-12-08
 ---
 

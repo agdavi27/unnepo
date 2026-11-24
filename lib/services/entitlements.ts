@@ -4,7 +4,7 @@ import type { CreditAccount } from "@/lib/db/types";
 import { ServiceError } from "@/lib/errors";
 import { planState } from "@/lib/apply/limits";
 
-const PAID = new Set(["pro", "premium", "grind", "pack"]);
+const PAID = new Set(["pro", "premium", "grind", "pack", "outreach"]);
 
 export function aiMonthlyLimit(plan: CreditAccount["plan"] | string | undefined) {
   const config = serverConfig();

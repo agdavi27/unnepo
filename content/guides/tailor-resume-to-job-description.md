@@ -3,6 +3,7 @@ title: How to Tailor Your Resume to a Job Description in 10 Minutes
 description: A fast, repeatable process for customizing your resume for each internship or job application without rewriting it from scratch.
 keyword: tailor resume to job description
 category: Resumes
+author: Zoe Nakamura
 publishAt: 2026-11-16
 ---
 

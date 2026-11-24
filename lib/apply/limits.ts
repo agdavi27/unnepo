@@ -34,7 +34,8 @@ export async function hasUnlimitedCredits(userId: string) {
  */
 export async function planState(userId: string) {
   const [account, user, profile] = await Promise.all([repo.getAccount(userId), repo.getUserById(userId), applicationProfiles.get(userId)]);
-  const stored = account?.plan ?? "free";
+  // An Outreach Season pass is paid once and runs out on its own: after planEndsAt the account works as Free.
+  const stored = passEnded(account) ? "free" : account?.plan ?? "free";
   // An admin looking at the product as Free or Pro: every limit and screen works as that plan. Billing still reads `stored`.
   const preview = profile?.planPreview && user && (await isAdminEmail(user)) ? profile.planPreview : null;
   if (preview) return { stored, plan: preview as StoredPlan, free: preview === "free", trial: null, trialEnded: null, account, preview };
@@ -43,6 +44,11 @@ export async function planState(userId: string) {
   const ended = trialEndedAt(stored, user?.createdAt);
   const trialEnded = ended && Date.now() - Date.parse(ended) < 30 * 86_400_000 ? ended : null;
   return { stored, plan, free: plan === "free", trial: trialFor(stored, user?.createdAt), trialEnded, account, preview: null as "free" | "pro" | null };
+}
+
+/** True once a pass (Outreach Season) is past its end date. */
+export function passEnded(account: { plan?: string; planEndsAt?: string | null } | null | undefined, now = Date.now()) {
+  return account?.plan === "outreach" && Boolean(account.planEndsAt) && Date.parse(account.planEndsAt!) <= now;
 }
 
 /** Admins only: work as Free or Pro to see what students on it see, or null to go back to the real plan. */
@@ -93,7 +99,7 @@ function usesNote(kind: CountedKind, left: number, free: boolean, cap: number) {
   const [one, many] = NAMES[kind];
   if (kind === "people" && free) return left > 0 ? "" : `You've used today's ${FREE_UNLOCKS_PER_DAY} unlocks. Free unlocks ${FREE_UNLOCKS_PER_DAY} people a day, each at a different company. More tomorrow, or Pro finds verified contacts.`;
   if (left > 0) return free && left === 1 && kind !== "people" ? `Only 1 ${one} left today` : "";
-  if (!free && kind === "people") return `You've used this month's ${cap} companies. Pro finds people at ${cap} companies a month; more on the 1st.`;
+  if (!free && kind === "people") return `You've used this month's ${cap} companies. Your plan finds people at ${cap} companies a month; more on the 1st.`;
   if (!free) return `That's a lot of ${many} this month (${cap}). More on the 1st, or write to us if you need more sooner.`;
   return `No ${many} left today. More tomorrow, or Pro has no limit.`;
 }
@@ -133,8 +139,9 @@ export async function planUsage(userId: string) {
     if (shownUnlimited) return { used: 0, left: 999, allowance: 999, credits, paid: true, note: "", badge: "Unlimited", limit: null as number | null, per: null as "today" | "this month" | null };
     if (paid) {
       // Counted apart from "people", so the Free unlocks used earlier in the month don't come out of Pro's.
-      const left = Math.max(0, config.proPeopleLimit - monthly("companies"));
-      return { used: monthly("companies"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, config.proPeopleLimit), badge: `${left} of ${config.proPeopleLimit} companies left this month`, limit: config.proPeopleLimit as number | null, per: "this month" as const };
+      const cap = state.plan === "outreach" ? config.outreachPeopleLimit : config.proPeopleLimit;
+      const left = Math.max(0, cap - monthly("companies"));
+      return { used: monthly("companies"), left, allowance: left, credits, paid: true, note: usesNote("people", left, false, cap), badge: `${left} of ${cap} companies left this month`, limit: cap as number | null, per: "this month" as const };
     }
     // Free unlocks FREE_UNLOCKS_PER_DAY people a day, credits or not. The trial spends its credits on whole lists.
     if (free) {

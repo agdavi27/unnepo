@@ -3,6 +3,7 @@ title: "Internship Recruiting Timelines by Industry: When to Apply"
 description: When finance, consulting, tech, government, nonprofits and other industries recruit summer interns, and a month-by-month plan so you don't miss your window.
 keyword: internship recruiting timeline
 category: Applying
+author: Rachel Kaplan
 publishAt: 2026-11-21
 ---
 

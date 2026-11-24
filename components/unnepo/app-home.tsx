@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
-import { CREDIT_COST, ENTERPRISE_PLAN, PRO_COMPANIES_PER_MONTH, PUBLIC_PLANS } from "@/lib/config";
+import { CREDIT_COST, ENTERPRISE_PLAN, PRO_COMPANIES_PER_MONTH, PUBLIC_PLANS, REFUND_DAYS } from "@/lib/config";
 import type { planUsage } from "@/lib/apply/limits";
 import { Logo } from "@/components/brand/logo";
 import { SpiderSettings } from "@/components/unnepo/spider-settings";
@@ -21,7 +21,7 @@ type StudentFact = { id: string; text: string; verified: boolean };
 type Workspace = {
   user: { name: string; email: string };
   admin?: boolean;
-  credits: { balance: number; plan: string; includedAllowance: number; unlimited?: boolean; coverLetters?: { used: number; left: number | null }; usage?: PlanUsage };
+  credits: { balance: number; plan: string; planEndsAt?: string | null; includedAllowance: number; unlimited?: boolean; coverLetters?: { used: number; left: number | null }; usage?: PlanUsage };
   profile: { ready: boolean; form: Profile; organizedProfile: unknown | null } | null;
   /** The resume-first profile is confirmed (or the student finished the old onboarding). */
   ready: boolean;
@@ -57,10 +57,10 @@ const VIEWS: { id: View; label: string }[] = [
 
 /** What Pro does that Free doesn't, on the Upgrade to Pro page. */
 const PRO_REASONS: Array<[string, string]> = [
-  [`Verified contacts at ${PRO_COMPANIES_PER_MONTH} companies a month`, "Up to 3 people at each company (recruiters, hiring managers and the team), each with a verified work email, and more on request. Free unlocks 2 people a day, one per company."],
-  ["Unlimited cover letters, written for each job", "Tailored to the posting and your resume. Free has 3 general ones a day."],
-  ["Unlimited answers to the hard questions", "\"Why do you want to work here?\" and every other written question, drafted from your profile. Free has 3 a day."],
-  ["Unlimited emails and follow-ups written for you", "A short note to each person, ready to send from Gmail or Outlook. Free writes 3 emails a day."],
+  [`The right people at ${PRO_COMPANIES_PER_MONTH} companies a month`, "Up to 3 people at each company, an alum from your school first, then the recruiter and the team, each with a verified work email. Free unlocks 2 people a day, one per company."],
+  ["A short email to each one, about this job", "Under 100 words, tailored to the person and the posting, ready to send from Gmail or Outlook. Short emails get several times the replies of long ones."],
+  ["A follow-up when it's time", "Unnepo tells you who hasn't replied and writes the nudge."],
+  ["Unlimited cover letters and answers, tailored to each job", "Written from the posting and your resume. Free has 3 of each a day."],
 ];
 const LEGACY_PLANS: Record<string, string> = { grind: "Grind (legacy)", pack: "Credit pack (legacy)", premium: "Premium (no longer offered)" };
 
@@ -70,6 +70,8 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [billingBusy, setBillingBusy] = useState(false);
+  // A gift code from /gift/redeem's link (/home?tab=settings&gift=UNN-…), kept here since the address is tidied at once.
+  const [giftFromLink, setGiftFromLink] = useState("");
   const [view, setView] = useState<View>(start);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -107,8 +109,9 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from the link, once
+    if (params.get("gift")) setGiftFromLink(params.get("gift")!.slice(0, 20));
     if (params.get("edit") === "profile") {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- opening from a link, once
       setEditing(true);
       window.history.replaceState(null, "", window.location.pathname);
     } else if (tab === "settings" || tab === "jobs" || tab === "goals" || tab === "resources" || tab === "pro") {
@@ -244,8 +247,11 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
   const onFree = Boolean(data?.credits.usage?.free);
   const planView = data?.credits.usage?.preview ?? null;
   // An admin viewing as Free or Pro sees that plan as theirs.
-  const currentPlan = planView ?? data?.credits.plan ?? "free";
+  // An Outreach Season pass past its end date is Free again.
+  const storedPlan = data?.credits.plan === "outreach" && data.credits.usage?.free ? "free" : data?.credits.plan;
+  const currentPlan = planView ?? storedPlan ?? "free";
   const subscribed = currentPlan === "pro" || currentPlan === "premium" || currentPlan === "grind";
+  const passEnds = currentPlan === "outreach" && data?.credits.planEndsAt ? new Date(data.credits.planEndsAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : null;
   const usage = data?.credits.usage;
   const creditsLeft = usage?.credits ?? (data?.credits.balance ?? 0) * CREDIT_COST.people;
   const creditsLabel = data?.credits.unlimited || usage?.unlimited ? "Unlimited" : usage?.free ? "Resets every day" : `${creditsLeft} ${creditsLeft === 1 ? "credit" : "credits"} left`;
@@ -328,8 +334,8 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
         {data && !showOnboarding && view === "goals" && <GoalsView />}
         {data && !showOnboarding && view === "resources" && <ResourcesView guides={guides} />}
         {data && !showOnboarding && view === "pro" && (
-          onFree ? <UpgradePage busy={billingBusy} admin={admin} onUpgrade={(billing) => (admin ? void switchPlanView("pro") : void goToBilling("checkout", { plan: "pro", billing }))} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />
-            : <p className="text-sm text-muted">You&apos;re on Pro. Your plan is under <button type="button" onClick={() => setView("settings")} className="underline underline-offset-4 hover:text-white">Settings and plans</button>.</p>
+          onFree ? <UpgradePage busy={billingBusy} admin={admin} onUpgrade={(billing) => (admin ? void switchPlanView("pro") : void goToBilling("checkout", billing === "outreach" ? { plan: "outreach" } : { plan: "pro", billing }))} onPlans={() => { setView("settings"); requestAnimationFrame(() => document.getElementById("plans")?.scrollIntoView({ block: "start" })); }} />
+            : <p className="text-sm text-muted">You&apos;re on {currentPlan === "outreach" ? "Outreach Season" : "Pro"}. Your plan is under <button type="button" onClick={() => setView("settings")} className="underline underline-offset-4 hover:text-white">Settings and plans</button>.</p>
         )}
         {data && !showOnboarding && view === "settings" && (
           <>
@@ -397,8 +403,8 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
                           <span className="rounded-full border border-line px-2.5 py-0.5 text-xs text-muted">Popular</span>
                         ) : null}
                       </div>
-                      <p className="mt-3 text-3xl font-bold tabular-nums">{plan.priceLabel}<span className="text-sm font-normal text-muted">{plan.monthly ? " / month" : ""}</span></p>
-                      {plan.yearLabel && <p className="mt-1 text-xs text-faint">{plan.yearLabel}</p>}
+                      <p className="mt-3 text-3xl font-bold tabular-nums">{plan.priceLabel}<span className="text-sm font-normal text-muted">{plan.per ? ` / ${plan.per}` : ""}</span></p>
+                      {plan.altLabel && <p className="mt-1 text-xs text-faint">{plan.altLabel}</p>}
                       <p className="mt-1 text-sm text-muted">{plan.blurb}</p>
                       <p className="mt-4 text-sm font-medium">{plan.applicationsLabel}</p>
                       <ul className="m-0 mt-2 flex list-none flex-col gap-1 p-0 text-sm text-muted">{plan.features.map((feature) => <li key={feature}>{feature}</li>)}</ul>
@@ -408,15 +414,20 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
                             <button type="button" disabled={billingBusy} onClick={() => void switchPlanView(plan.id === "free" || plan.id === "pro" ? plan.id : null)} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">Switch to {plan.name} (admin, free)</button>
                           )
                         ) : current ? (
-                          plan.monthly ? (
-                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="w-full rounded-xl border border-line px-4 py-2 text-sm font-semibold hover:bg-white/5 disabled:opacity-50">Manage subscription</button>
+                          plan.id === "pro" ? (
+                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="w-full rounded-xl border border-line px-4 py-2 text-sm font-semibold hover:bg-white/5 disabled:opacity-50">Cancel or manage subscription</button>
                           ) : (
-                            <p className="text-center text-sm text-muted">Your plan</p>
+                            <p className="text-center text-sm text-muted">{passEnds && plan.id === "outreach" ? `Yours until ${passEnds}. It won't renew.` : "Your plan"}</p>
                           )
-                        ) : plan.monthly ? (
+                        ) : plan.id === "pro" ? (
                           <>
-                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: plan.id, billing: "monthly" })} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{subscribed ? "Switch" : "Upgrade"} to {plan.name}</button>
-                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: plan.id, billing: "year" })} className="mt-2 w-full rounded-xl border border-line px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-50">Pay yearly</button>
+                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: "pro", billing: "semester" })} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{subscribed ? "Switch to" : "Get"} Pro, {plan.priceLabel} a semester</button>
+                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: "pro", billing: "monthly" })} className="mt-2 w-full rounded-xl border border-line px-4 py-2 text-sm hover:bg-white/5 disabled:opacity-50">Or pay monthly, $29.99</button>
+                          </>
+                        ) : plan.id === "outreach" ? (
+                          <>
+                            <button type="button" disabled={billingBusy} onClick={() => void goToBilling("checkout", { plan: "outreach" })} className="w-full rounded-xl bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">Get Outreach Season, {plan.priceLabel} once</button>
+                            <a href="/gift" className="mt-2 block w-full rounded-xl border border-line px-4 py-2 text-center text-sm hover:bg-white/5">Give it as a gift</a>
                           </>
                         ) : null}
                       </div>
@@ -435,6 +446,8 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
                   </div>
                 </div>
               </div>
+              <p className="text-sm text-muted">Cancel in two clicks with Cancel or manage subscription. Any payment can be refunded in full within {REFUND_DAYS} days, no questions: email <a href={`mailto:${ENTERPRISE_PLAN.contactEmail}?subject=${encodeURIComponent("Refund")}`} className="underline underline-offset-4 hover:text-white">{ENTERPRISE_PLAN.contactEmail}</a>.</p>
+              <RedeemGift key={giftFromLink} initial={giftFromLink} onDone={(message) => { setNotice(message); void load(); }} />
               {currentPlan !== "free" && (
                 <div className="flex flex-wrap gap-3">
                   {(currentPlan === "grind" || currentPlan === "premium") && <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Manage subscription</button>}
@@ -453,18 +466,18 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
  * doesn't do). Shown above every page but Settings, where the plans are.
  */
 /** Upgrade to Pro: the price, every reason, and the button to Stripe (an admin just switches their view). */
-function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin: boolean; onUpgrade: (billing: "monthly" | "year") => void; onPlans: () => void }) {
+function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin: boolean; onUpgrade: (billing: "semester" | "monthly" | "outreach") => void; onPlans: () => void }) {
   const pro = PUBLIC_PLANS.find((plan) => plan.id === "pro")!;
   return (
     <section className="mx-auto flex w-full max-w-2xl flex-col gap-6">
       <div>
         <p className="font-mono text-xs uppercase tracking-[0.16em] text-faint">Unnepo Pro</p>
         <h1 className="mt-2 text-3xl font-bold tracking-tight md:text-4xl">Get replies, not just applications</h1>
-        <p className="mt-3 text-muted">You&apos;re on Free. Pro is everything Free does, plus finding the right person at each company and writing to them for you.</p>
+        <p className="mt-3 text-muted">You&apos;re on Free, with unlimited autofill and tracking. Pro adds what gets you an answer: the right people at each company, and a short email to each one about the job.</p>
       </div>
       <div className="rounded-2xl border border-[#3D8BFF] bg-panel p-6">
-        <p className="text-4xl font-bold tabular-nums">{pro.priceLabel}<span className="text-base font-normal text-muted"> / month</span></p>
-        {pro.yearLabel && <p className="mt-1 text-sm text-faint">{pro.yearLabel}</p>}
+        <p className="text-4xl font-bold tabular-nums">{pro.priceLabel}<span className="text-base font-normal text-muted"> / {pro.per}</span></p>
+        {pro.altLabel && <p className="mt-1 text-sm text-faint">{pro.altLabel}. A semester is 4 months.</p>}
         <ul className="m-0 mt-6 flex list-none flex-col gap-4 p-0">
           {PRO_REASONS.map(([title, why]) => (
             <li key={title} className="grid grid-cols-[20px_1fr] gap-3">
@@ -474,12 +487,44 @@ function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin
           ))}
         </ul>
         <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-          <button type="button" disabled={busy} onClick={() => onUpgrade("monthly")} className="flex-1 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{admin ? "Switch to Pro (admin, free)" : `Upgrade to Pro, ${pro.priceLabel} a month`}</button>
-          {!admin && <button type="button" disabled={busy} onClick={() => onUpgrade("year")} className="flex-1 rounded-xl border border-line px-4 py-2.5 text-sm hover:bg-white/5 disabled:opacity-50">Pay yearly</button>}
+          <button type="button" disabled={busy} onClick={() => onUpgrade("semester")} className="flex-1 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">{admin ? "Switch to Pro (admin, free)" : `Get Pro, ${pro.priceLabel} a semester`}</button>
+          {!admin && <button type="button" disabled={busy} onClick={() => onUpgrade("monthly")} className="flex-1 rounded-xl border border-line px-4 py-2.5 text-sm hover:bg-white/5 disabled:opacity-50">Or $29.99 a month</button>}
         </div>
-        <p className="mt-3 text-xs text-faint">Cancel any time. <button type="button" onClick={onPlans} className="underline underline-offset-4 hover:text-white">Compare every plan</button></p>
+        <p className="mt-3 text-xs text-faint">Cancel in two clicks. Full refund within {REFUND_DAYS} days, no questions. Recruiting in finance or consulting? <button type="button" onClick={onPlans} className="underline underline-offset-4 hover:text-white">See Outreach Season</button></p>
       </div>
     </section>
+  );
+}
+
+/** A gift code (Outreach Season from a parent, say): typed in, or filled from /gift/redeem's link. */
+function RedeemGift({ initial, onDone }: { initial: string; onDone: (message: string) => void }) {
+  const [code, setCode] = useState(initial.toUpperCase());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function redeem() {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/gift/redeem", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code }) });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) setError(payload.error || "Couldn't use that code.");
+      else {
+        setCode("");
+        const ends = payload.endsAt ? new Date(payload.endsAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" }) : "";
+        onDone(`Gift used: you're on Outreach Season${ends ? ` until ${ends}` : ""}.${payload.message ? ` Their note: "${payload.message}"` : ""}`);
+      }
+    } catch {
+      setError("Couldn't use that code.");
+    }
+    setBusy(false);
+  }
+  return (
+    <form onSubmit={(event) => { event.preventDefault(); void redeem(); }} className="flex flex-wrap items-center gap-2 rounded-2xl border border-line bg-panel p-4 text-sm">
+      <label htmlFor="gift-code" className="mr-auto font-medium">Have a gift code?</label>
+      <input id="gift-code" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="UNN-XXXX-XXXX" autoComplete="off" className="w-44 rounded-xl border border-line bg-transparent px-3 py-1.5 font-mono uppercase" />
+      <button type="submit" disabled={busy || !code.trim()} className="rounded-xl bg-white px-3 py-1.5 font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">Use code</button>
+      {error && <p role="alert" className="basis-full text-[#F87171]">{error}</p>}
+    </form>
   );
 }
 

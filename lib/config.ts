@@ -27,6 +27,11 @@ export function serverConfig() {
     packCredits: intEnv("PACK_CREDITS", 15),
     proPriceCents: intEnv("PRO_PRICE_CENTS", 2999),
     proMonthlyCredits: intEnv("PRO_MONTHLY_CREDITS", 20),
+    /** Pro by the semester, the default plan: four months for $99, renewing every four months. */
+    proSemesterPriceCents: intEnv("PRO_SEMESTER_PRICE_CENTS", PLAN_CENTS.pro_semester),
+    /** Outreach Season: one payment for OUTREACH_SEASON_DAYS, never renewed, giftable. */
+    outreachPriceCents: intEnv("OUTREACH_PRICE_CENTS", PLAN_CENTS.outreach),
+    outreachPeopleLimit: intEnv("OUTREACH_PEOPLE_LIMIT", OUTREACH_COMPANIES_PER_MONTH),
     /** Pro paid for a year up front: twelve months of Pro, for less than twelve monthly payments. */
     proYearCredits: intEnv("PRO_YEAR_CREDITS", 240),
     proYearPriceCents: intEnv("PRO_YEAR_PRICE_CENTS", 19900),
@@ -71,61 +76,74 @@ export const CREDIT_COST = { letters: 2, answers: 1, autofills: 1, emails: 1, pe
 /** What Free gets each day, in credits. */
 export const FREE_CREDITS = FREE_LIMITS.letters * CREDIT_COST.letters + FREE_LIMITS.answers * CREDIT_COST.answers + FREE_LIMITS.emails * CREDIT_COST.emails;
 
-/** A semester plan (no longer sold; students already on one keep it): four months paid up front. */
-export const SEMESTER_MONTHS = 4;
-/** The yearly plan: twelve months paid up front, renewing each year until cancelled. */
-export const YEAR_MONTHS = 12;
+/** Companies Outreach Season finds people at each month, alumni from the student's school first. Shown on the plan. */
+export const OUTREACH_COMPANIES_PER_MONTH = 250;
+/** How long an Outreach Season pass lasts: one recruiting season, paid once, never renewed. */
+export const OUTREACH_SEASON_DAYS = 120;
+/** A full refund, no questions, for this many days after any payment. Said on the plans and in the Terms. */
+export const REFUND_DAYS = 14;
 
-/**
- * When a Pro semester (no longer sold) ends: May 31 (end of day, Eastern), the next one to come. PRO_SEMESTER_ENDS_AT (an ISO date)
- * overrides it while it's still in the future. A semester bought in the summer runs to the following May.
- */
-export function semesterEndsAt(now = Date.now()) {
-  const set = typeof process !== "undefined" ? Date.parse(process.env.PRO_SEMESTER_ENDS_AT ?? "") : NaN;
-  if (!Number.isNaN(set) && set > now) return new Date(set);
-  const year = new Date(now).getUTCFullYear();
-  // 23:59:59 on May 31 in New York (EDT) is 03:59:59 UTC on June 1.
-  const thisMay = Date.UTC(year, 5, 1, 3, 59, 59);
-  return new Date(thisMay > now ? thisMay : Date.UTC(year + 1, 5, 1, 3, 59, 59));
-}
+/** Pro by the semester (the default): four months paid up front, renewing every four months until cancelled. */
+export const SEMESTER_MONTHS = 4;
+/** The yearly plan (no longer sold; students already on one keep it): twelve months paid up front. */
+export const YEAR_MONTHS = 12;
 
 /** "40 jobs' people lists" */
 export function creditMath(credits: number) {
   return credits === 1 ? "People at 1 company" : `People at ${credits} companies`;
 }
 
+/**
+ * The plans on the site and in the app. `priceLabel` is what each one costs for its `per` (a semester is four months),
+ * and `altLabel` the other way to pay. Checkout refuses to charge anything but these prices.
+ */
 export const PUBLIC_PLANS = [
   {
     id: "free" as const,
     name: "Free",
     priceLabel: "$0",
-    yearLabel: null,
+    per: null as string | null,
+    altLabel: null as string | null,
     cadence: "Free for students, no card",
-    blurb: "Everything you need to start",
+    blurb: "Unlimited autofill and tracking, free for good",
     cta: "Start free",
     popular: false,
-    monthly: false,
-    credits: FREE_UNLOCKS_PER_DAY,
-    yearCredits: null,
+    giftable: false,
     applicationsLabel: "Free every day",
-    features: ["Unlimited autofill that answers the questions too", `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_UNLOCKS_PER_DAY} people to email a day, each at a different company`, "Compete with friends", "Tracker and job matches"],
+    features: ["Unlimited autofill that answers the questions too", "Unlimited job tracking", `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_UNLOCKS_PER_DAY} people to email a day, each at a different company`, "Compete with friends"],
   },
   {
     id: "pro" as const,
     name: "Pro",
-    priceLabel: "$29.99",
-    yearLabel: "or $199 a year (save 45%)",
-    cadence: "Billed monthly or yearly",
-    blurb: "Unlimited writing and autofill, verified contacts every month",
+    priceLabel: "$99",
+    per: "semester" as string | null,
+    altLabel: "or $29.99 a month" as string | null,
+    cadence: "Billed every 4 months, or monthly",
+    blurb: "Every application tailored, and the right people to email about it",
     cta: "Choose Pro",
     popular: true,
-    monthly: true,
-    credits: 20,
-    yearCredits: 240,
+    giftable: false,
     applicationsLabel: "Unlimited writing and autofill",
-    features: ["Unlimited autofill that answers the questions too", "Unlimited cover letters, tailored to each job", "Unlimited answers, every question on a page at once", `Verified contacts at ${PRO_COMPANIES_PER_MONTH} companies a month: up to 3 people at each, with verified emails`, "Unlimited emails and follow-ups written for you", "Email updates the moment they arrive", "Compete with friends"],
+    features: ["Everything in Free", "Unlimited cover letters and answers, tailored to each job", `Verified contacts at ${PRO_COMPANIES_PER_MONTH} companies a month: the right 3 people at each`, "Short, tailored emails to each person, under 100 words", "A follow-up written for you when it's time", "Cancel in two clicks"],
+  },
+  {
+    id: "outreach" as const,
+    name: "Outreach Season",
+    priceLabel: "$199",
+    per: "season" as string | null,
+    altLabel: "4 months, paid once, never renews" as string | null,
+    cadence: "Paid once for a recruiting season",
+    blurb: "A season of networking, for a tenth of what a coach costs",
+    cta: "Get Outreach Season",
+    popular: false,
+    giftable: true,
+    applicationsLabel: "Everything in Pro, plus the outreach",
+    features: ["Everything in Pro, for 4 months", `Verified contacts at ${OUTREACH_COMPANIES_PER_MONTH} companies a month, alumni from your school first`, "A full sequence for each person: the first email and two follow-ups, timed for you", "Parents can give it as a gift", "Never renews, so nothing to cancel"],
   },
 ];
+
+/** The cents behind a plan's labels, so a checkout can never charge something the page didn't say. */
+export const PLAN_CENTS = { pro_semester: 9900, pro: 2999, outreach: 19900 } as const;
 
 /** Shown next to the public plans. Schools buy seats for their students; pricing is by conversation. */
 export const ENTERPRISE_PLAN = {

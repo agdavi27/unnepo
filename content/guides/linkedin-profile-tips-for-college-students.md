@@ -3,6 +3,7 @@ title: "A LinkedIn Profile Checklist for College Students"
 description: Everything a student's LinkedIn profile needs, from the photo and headline to the About section, experience and skills, plus how to use LinkedIn to actually find opportunities.
 keyword: LinkedIn profile tips for college students
 category: Networking
+author: Emily Castillo
 publishAt: 2026-11-25
 ---
 

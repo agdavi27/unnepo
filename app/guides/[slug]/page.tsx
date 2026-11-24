@@ -1,11 +1,10 @@
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { GuideBody, renderInline } from "@/components/guides/guide-body";
 import { GuideCta } from "@/components/guides/guide-cta";
 import { SERIF } from "@/components/guides/styles";
-import { formatGuideDate, getGuide, GUIDES_AUTHOR, guideUrl, isPublished, publishedGuides, relatedGuides, SITE_URL } from "@/lib/guides";
+import { formatGuideDate, getGuide, authorInitials, GUIDES_AUTHOR_ROLE, guideUrl, isPublished, publishedGuides, relatedGuides, SITE_URL } from "@/lib/guides";
 
 // Articles published at build are prerendered; later ones render on first visit once their date arrives
 // (dynamicParams stays on), and everything is re-checked hourly.
@@ -23,7 +22,7 @@ export async function generateMetadata({ params }: PageProps<"/guides/[slug]">):
     title: `${guide.title} · Unnepo`,
     description: guide.description,
     keywords: [guide.keyword, guide.category, "college students", "internships"],
-    authors: [{ name: GUIDES_AUTHOR.name, url: `${SITE_URL}/story` }],
+    authors: [{ name: guide.author }],
     alternates: { canonical: `/guides/${guide.slug}` },
     openGraph: {
       type: "article",
@@ -33,7 +32,7 @@ export async function generateMetadata({ params }: PageProps<"/guides/[slug]">):
       siteName: "Unnepo",
       publishedTime: guide.publishAt,
       modifiedTime: guide.updated ?? guide.publishAt,
-      authors: [GUIDES_AUTHOR.name],
+      authors: [guide.author],
       section: guide.category,
     },
     twitter: { card: "summary_large_image", title: guide.title, description: guide.description },
@@ -61,7 +60,7 @@ export default async function GuidePage({ params }: PageProps<"/guides/[slug]">)
       mainEntityOfPage: guideUrl(guide.slug),
       url: guideUrl(guide.slug),
       image: `${guideUrl(guide.slug)}/opengraph-image`,
-      author: { "@type": "Person", name: GUIDES_AUTHOR.name, jobTitle: GUIDES_AUTHOR.role, url: `${SITE_URL}/story` },
+      author: { "@type": "Person", name: guide.author, jobTitle: GUIDES_AUTHOR_ROLE },
       publisher: { "@type": "Organization", name: "Unnepo", url: SITE_URL, logo: { "@type": "ImageObject", url: `${SITE_URL}/apple-icon.png` } },
     },
     {
@@ -96,9 +95,9 @@ export default async function GuidePage({ params }: PageProps<"/guides/[slug]">)
         <p className={`mb-0 mt-4 ${SERIF} text-[clamp(18px,2.2vw,21px)] italic leading-[1.5] text-[#4A463F]`}>{guide.description}</p>
 
         <div className="mt-6 flex items-center gap-3 border-y border-[#E2DDD4] py-3">
-          <Image src="/founders/drew.jpg" alt="" width={40} height={40} className="h-10 w-10 rounded-full object-cover object-[50%_30%]" />
+          <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#E4ECFA] text-[14px] font-semibold text-[#2F5FC4]">{authorInitials(guide.author)}</span>
           <div className="text-[13px] leading-snug text-[#6B665E]">
-            <span className="font-semibold text-[#1B1B1F]">By {GUIDES_AUTHOR.name}</span>, {GUIDES_AUTHOR.role.charAt(0).toLowerCase() + GUIDES_AUTHOR.role.slice(1)}
+            <span className="font-semibold text-[#1B1B1F]">By {guide.author}</span>, {GUIDES_AUTHOR_ROLE}
             <br />
             <time dateTime={guide.publishAt}>{formatGuideDate(guide.publishAt)}</time>
             {guide.updated && <> · Updated <time dateTime={guide.updated}>{formatGuideDate(guide.updated)}</time></>}
@@ -122,11 +121,11 @@ export default async function GuidePage({ params }: PageProps<"/guides/[slug]">)
         <GuideCta slug={guide.slug} variant="end" />
 
         <aside className="mt-10 flex gap-4 border-t border-[#E2DDD4] pt-6">
-          <Image src="/founders/drew.jpg" alt="Drew Davis" width={64} height={64} className="h-16 w-16 shrink-0 rounded-full object-cover object-[50%_30%]" />
+          <span aria-hidden className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-[#E4ECFA] text-[20px] font-semibold text-[#2F5FC4]">{authorInitials(guide.author)}</span>
           <div className="text-[15px] leading-relaxed text-[#4A463F]">
             <p className="m-0 font-semibold text-[#1B1B1F]">About the author</p>
             <p className="m-0 mt-1">
-              Drew Davis is a student at Colby College going through the internship search himself. He built Unnepo to take the busywork out of applying, so these guides mention it where it helps. Everything here works with or without it. <Link href="/story" className="text-[#2F5FC4] underline underline-offset-[3px]">Read his story</Link>.
+              {guide.author} writes for Unnepo Guides, straight answers for college students in the middle of the job search. Unnepo takes the busywork out of applying, so these guides mention it where it helps. Everything here works with or without it.
             </p>
           </div>
         </aside>

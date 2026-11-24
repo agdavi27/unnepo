@@ -3,6 +3,7 @@ title: How to Email Alumni for Career Advice (Without Being Awkward)
 description: How to find alumni at companies you're interested in, what to write in your first message, and how to turn a quick chat into a lasting connection. Includes templates.
 keyword: how to email alumni for career advice
 category: Networking
+author: Olivia Grant
 publishAt: 2026-11-23
 ---
 

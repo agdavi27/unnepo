@@ -3,6 +3,7 @@ title: How to Get the Most Out of Your College Career Center
 description: What your career center can actually do for you, when to visit, what to bring, and how to turn a quick appointment into real progress on your internship search.
 keyword: how to use your college career center
 category: Applying
+author: Isaac Moreno
 publishAt: 2026-11-28
 ---
 

@@ -3,6 +3,7 @@ title: How to Write Strong Short Answers on Job Applications
 description: How to answer the written questions on internship and job applications, from "Why this company?" to "Describe a challenge," with a simple structure, examples and an answer bank to save time.
 keyword: how to answer short answer application questions
 category: Applying
+author: Priya Shah
 publishAt: 2026-12-06
 ---
 

@@ -3,6 +3,7 @@ title: How to Answer "Why Do You Want to Work Here?" (With Examples)
 description: A three-part formula for answering one of the most common interview and application questions, with sample answers for students and the mistakes that sound generic.
 keyword: why do you want to work here answer
 category: Interviews
+author: Lily Chen
 publishAt: 2026-11-19
 ---
 

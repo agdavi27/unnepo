@@ -3,6 +3,7 @@ title: How Many Internship Applications Should You Actually Send?
 description: A realistic way to decide how many internships to apply to, based on your field, your year and your response rate, plus how to keep quality high as volume grows.
 keyword: how many internship applications should I send
 category: Applying
+author: Marcus Bell
 publishAt: 2026-11-14
 ---
 

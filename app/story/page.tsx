@@ -101,8 +101,8 @@ export default function StoryPage() {
               <dt className="font-semibold">Founder</dt><dd className="m-0 text-[#4A463F]">Drew Davis, a student at Colby College</dd>
               <dt className="font-semibold">What it is</dt><dd className="m-0 text-[#4A463F]">A Chrome extension and website for job and internship applications</dd>
               <dt className="font-semibold">Fills out</dt><dd className="m-0 text-[#4A463F]">Applications on job boards and company career sites, stopping at Submit</dd>
-              <dt className="font-semibold">Finds</dt><dd className="m-0 text-[#4A463F]">A person to email at each company, with a draft written for you</dd>
-              <dt className="font-semibold">Cost</dt><dd className="m-0 text-[#4A463F]">Free for students. Pro is $29.99 a month or $199 a year.</dd>
+              <dt className="font-semibold">Finds</dt><dd className="m-0 text-[#4A463F]">The right people to email at each company, with a short, tailored email to each</dd>
+              <dt className="font-semibold">Cost</dt><dd className="m-0 text-[#4A463F]">Free for students, with unlimited autofill and tracking. Pro is $99 a semester or $29.99 a month.</dd>
             </dl>
           </aside>
 

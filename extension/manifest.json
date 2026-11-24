@@ -2,9 +2,9 @@
   "manifest_version": 3,
   "name": "Unnepo",
   "short_name": "Unnepo",
-  "version": "1.195",
-  "version_name": "1.195",
-  "description": "Track every job you apply to, autofill applications, write cover letters, and find who to email at each company.",
+  "version": "1.196",
+  "version_name": "1.196",
+  "description": "Apply in minutes with free autofill, then actually hear back: short, tailored emails to the right people at each company.",
   "minimum_chrome_version": "116",
   "action": {
     "default_title": "Open Unnepo",

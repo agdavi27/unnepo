@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ENTERPRISE_PLAN } from "@/lib/config";
+import { CONTACT_EMAIL, ENTERPRISE_PLAN, OUTREACH_SEASON_DAYS, REFUND_DAYS } from "@/lib/config";
 import { Logo } from "@/components/brand/logo";
 
 export const metadata: Metadata = {
@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: "The rules for using Unnepo: accounts, plans and payments, connected email, and what we're responsible for.",
 };
 
-const UPDATED = "November 10, 2026";
+const UPDATED = "November 23, 2026";
 
 const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
   {
@@ -97,9 +97,10 @@ const SECTIONS: Array<{ title: string; body: React.ReactNode }> = [
     body: (
       <ul>
         <li>Unnepo has a free plan and paid plans. The price and what&apos;s included are shown before you pay. Payments are processed by Stripe.</li>
-        <li>A monthly plan renews each month until you cancel. A yearly plan is paid up front for the year and renews each year until you cancel. If you cancel, you keep your paid features until the end of the period you already paid for.</li>
+        <li>Pro by the semester is paid up front for four months and renews every four months until you cancel. Pro by the month renews each month until you cancel. Cancel any time under Settings and plans; you keep your paid features until the end of the period you already paid for. Older yearly plans renew each year until cancelled.</li>
+        <li>Outreach Season is paid once and lasts {OUTREACH_SEASON_DAYS} days from the day it starts. It never renews. Bought as a gift, it starts when the student uses the code, and a code can be used once.</li>
         <li>Credits have no cash value, can&apos;t be transferred, and are used and refreshed as described in the app.</li>
-        <li>Except where the law requires otherwise, payments aren&apos;t refundable. If something went wrong with a charge, email us and we&apos;ll make it right.</li>
+        <li>Any payment can be refunded in full within {REFUND_DAYS} days, no questions asked: email {CONTACT_EMAIL} from the account that paid, or that bought the gift. A refund ends what it paid for (an unused gift code stops working). After {REFUND_DAYS} days, if something went wrong with a charge, email us and we&apos;ll make it right.</li>
         <li>We may change prices or plans. Changes to a paid plan you already have start at your next renewal, and we&apos;ll tell you before they do.</li>
       </ul>
     ),

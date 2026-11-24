@@ -3,6 +3,7 @@ title: How to Write an Internship Cover Letter With No Experience
 description: A simple four-paragraph structure for an internship cover letter when you've never had an internship, with a full example and the phrases to avoid.
 keyword: internship cover letter no experience
 category: Cover letters
+author: Samuel Okafor
 publishAt: 2026-11-17
 ---
 

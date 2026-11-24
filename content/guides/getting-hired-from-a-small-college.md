@@ -3,6 +3,7 @@ title: How to Get Hired From a Small College Without Big Campus Recruiting
 description: Big employers don't always recruit at small schools. Here's how students at liberal arts colleges and smaller universities can still land great internships and jobs.
 keyword: getting a job from a small college
 category: Applying
+author: Sofia Ramirez
 publishAt: 2026-11-27
 ---
 

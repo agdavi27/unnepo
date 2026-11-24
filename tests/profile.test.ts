@@ -122,9 +122,12 @@ describe("structured profile", () => {
     expect((await repo.getAccount(a))?.balance).toBe(3);
   });
 
-  it("offers Free and Pro, monthly or yearly, with Free counted by the day and Pro's companies by the month", () => {
-    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.yearLabel, plan.credits])).toEqual([["free", "$0", null, 2], ["pro", "$29.99", "or $199 a year (save 45%)", 20]]);
-    expect(PUBLIC_PLANS[1].features).toContain("Verified contacts at 100 companies a month: up to 3 people at each, with verified emails");
+  it("offers Free, Pro by the semester (or month) and Outreach Season, with Free counted by the day and Pro's companies by the month", () => {
+    expect(PUBLIC_PLANS.map((plan) => [plan.id, plan.priceLabel, plan.per, plan.altLabel])).toEqual([["free", "$0", null, null], ["pro", "$99", "semester", "or $29.99 a month"], ["outreach", "$199", "season", "4 months, paid once, never renews"]]);
+    expect(PUBLIC_PLANS.find((plan) => plan.popular)?.id).toBe("pro");
+    expect(PUBLIC_PLANS.filter((plan) => plan.giftable).map((plan) => plan.id)).toEqual(["outreach"]);
+    expect(PUBLIC_PLANS[0].features).toContain("Unlimited autofill that answers the questions too");
+    expect(PUBLIC_PLANS[1].features).toContain("Verified contacts at 100 companies a month: the right 3 people at each");
     expect(PUBLIC_PLANS.flatMap((plan) => plan.features).some((feature) => /unlimited (verified )?contacts|every company/i.test(feature))).toBe(false);
     expect(creditMath(1)).toBe("People at 1 company");
     expect(creditMath(40)).toBe("People at 40 companies");

@@ -3,6 +3,7 @@ title: How to Use AI to Apply for Jobs Without Sounding Like a Robot
 description: Where AI genuinely helps in a job search, where it backfires, and a practical workflow for using it on resumes, cover letters, short answers and emails while keeping your own voice.
 keyword: using AI to apply for jobs
 category: Applying
+author: Julia Ferreira
 publishAt: 2026-11-30
 ---
 
