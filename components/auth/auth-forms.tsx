@@ -62,7 +62,7 @@ export function SignupForm({ google = false }: { google?: boolean }) {
         setError(loggedInData.error || "Account created. Log in with the same password.");
         return;
       }
-      router.push("/onboarding");
+      router.push(params.get("next") || "/onboarding");
       return;
     }
     setBusy(false);

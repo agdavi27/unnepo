@@ -432,7 +432,7 @@ export async function workspaceState(userId: string) {
     user: { name: user?.name ?? "", email: user?.email ?? "" },
     // Admins switch plans here without paying, to see what students on each plan see.
     admin: user ? await isAdminEmail(user) : false,
-    credits: { balance: credits?.balance ?? 0, plan: credits?.plan ?? "free", includedAllowance: credits?.includedAllowance ?? 0, unlimited: await hasUnlimitedCredits(userId), coverLetters: await coverLettersLeft(userId), usage: await planUsage(userId) },
+    credits: { balance: credits?.balance ?? 0, plan: credits?.plan ?? "free", planEndsAt: credits?.planEndsAt ?? null, includedAllowance: credits?.includedAllowance ?? 0, unlimited: await hasUnlimitedCredits(userId), coverLetters: await coverLettersLeft(userId), usage: await planUsage(userId) },
     profile: document,
     ready: student.ready,
     completeness: student.profile.completeness,

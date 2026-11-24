@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
+import { forgetGift, pendingGift, rememberGift } from "@/lib/gift/pending";
 import { CREDIT_COST, ENTERPRISE_PLAN, PRO_COMPANIES_PER_MONTH, PUBLIC_PLANS, REFUND_DAYS } from "@/lib/config";
 import type { planUsage } from "@/lib/apply/limits";
 import { Logo } from "@/components/brand/logo";
@@ -72,6 +73,12 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
   const [billingBusy, setBillingBusy] = useState(false);
   // A gift code from /gift/redeem's link (/home?tab=settings&gift=UNN-…), kept here since the address is tidied at once.
   const [giftFromLink, setGiftFromLink] = useState("");
+  function giftUsed(message: string) {
+    forgetGift();
+    setGiftFromLink("");
+    setNotice(message);
+    void load();
+  }
   const [view, setView] = useState<View>(start);
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -109,8 +116,11 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tab = params.get("tab");
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from the link, once
-    if (params.get("gift")) setGiftFromLink(params.get("gift")!.slice(0, 20));
+    // A code from the link, or one remembered since /gift/redeem (kept through sign-up and onboarding).
+    const gift = params.get("gift")?.slice(0, 20) || pendingGift();
+    rememberGift(gift);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read from the link and this browser, once
+    if (gift) setGiftFromLink(gift);
     if (params.get("edit") === "profile") {
       setEditing(true);
       window.history.replaceState(null, "", window.location.pathname);
@@ -323,6 +333,12 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
             <button type="button" onClick={() => setNotice("")} aria-label="Dismiss" className="text-faint hover:text-white">✕</button>
           </div>
         )}
+        {data && !showOnboarding && giftFromLink && view !== "settings" && (
+          <div className="flex flex-col gap-2">
+            <p className="m-0 text-sm font-semibold">Someone gave you Outreach Season. Use the code to start it.</p>
+            <RedeemGift key={giftFromLink} initial={giftFromLink} onDone={giftUsed} onDismiss={() => { forgetGift(); setGiftFromLink(""); }} />
+          </div>
+        )}
         {data && showOnboarding && (
           <ResumeFirst
             key={editing ? "edit" : "onboarding"}
@@ -447,7 +463,7 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
                 </div>
               </div>
               <p className="text-sm text-muted">Cancel in two clicks with Cancel or manage subscription. Any payment can be refunded in full within {REFUND_DAYS} days, no questions: email <a href={`mailto:${ENTERPRISE_PLAN.contactEmail}?subject=${encodeURIComponent("Refund")}`} className="underline underline-offset-4 hover:text-white">{ENTERPRISE_PLAN.contactEmail}</a>.</p>
-              <RedeemGift key={giftFromLink} initial={giftFromLink} onDone={(message) => { setNotice(message); void load(); }} />
+              <RedeemGift key={giftFromLink} initial={giftFromLink} onDone={giftUsed} />
               {currentPlan !== "free" && (
                 <div className="flex flex-wrap gap-3">
                   {(currentPlan === "grind" || currentPlan === "premium") && <button type="button" disabled={billingBusy} onClick={() => void goToBilling("portal")} className="rounded-xl border border-line px-3 py-1.5 text-sm hover:bg-white/5 disabled:opacity-50">Manage subscription</button>}
@@ -497,7 +513,7 @@ function UpgradePage({ busy, admin, onUpgrade, onPlans }: { busy: boolean; admin
 }
 
 /** A gift code (Outreach Season from a parent, say): typed in, or filled from /gift/redeem's link. */
-function RedeemGift({ initial, onDone }: { initial: string; onDone: (message: string) => void }) {
+function RedeemGift({ initial, onDone, onDismiss }: { initial: string; onDone: (message: string) => void; onDismiss?: () => void }) {
   const [code, setCode] = useState(initial.toUpperCase());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -523,6 +539,7 @@ function RedeemGift({ initial, onDone }: { initial: string; onDone: (message: st
       <label htmlFor="gift-code" className="mr-auto font-medium">Have a gift code?</label>
       <input id="gift-code" value={code} onChange={(event) => setCode(event.target.value.toUpperCase())} placeholder="UNN-XXXX-XXXX" autoComplete="off" className="w-44 rounded-xl border border-line bg-transparent px-3 py-1.5 font-mono uppercase" />
       <button type="submit" disabled={busy || !code.trim()} className="rounded-xl bg-white px-3 py-1.5 font-semibold text-black hover:bg-zinc-200 disabled:opacity-50">Use code</button>
+      {onDismiss && <button type="button" onClick={onDismiss} className="rounded-xl px-2 py-1.5 text-muted hover:text-white">Dismiss</button>}
       {error && <p role="alert" className="basis-full text-[#F87171]">{error}</p>}
     </form>
   );
