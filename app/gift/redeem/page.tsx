@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { GiftShell } from "@/components/marketing/gift-shell";
+import { RememberGift } from "@/components/marketing/remember-gift";
 import { readSession } from "@/lib/http";
 
 export const metadata: Metadata = { title: "Your Unnepo gift", robots: { index: false, follow: false } };
@@ -15,6 +16,7 @@ export default async function GiftRedeemPage({ searchParams }: { searchParams: P
   const next = encodeURIComponent(home);
   return (
     <GiftShell>
+      <RememberGift code={code} />
       <h1 className="m-0 text-[clamp(32px,5vw,52px)] font-bold leading-[1] tracking-[-0.04em]">Someone gave you Outreach Season.</h1>
       <p className="m-0 text-base leading-relaxed text-[#B4B4BC]">A recruiting season of Unnepo: the right people at each company you apply to, and a short email to each one. Sign up free (or log in), and the code is filled in for you.</p>
       {code && <p className="m-0 border-4 border-[#26262C] bg-[#0C0C0E] p-4 text-center font-mono text-2xl font-bold tracking-[0.12em]">{code}</p>}
