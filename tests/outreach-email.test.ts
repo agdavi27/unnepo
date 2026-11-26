@@ -1,75 +1,56 @@
 import { describe, expect, it } from "vitest";
-import { BANNED, followUpEmail, jobIdOf, outreachEmail, shortRole, subjectFor, usable, wordCount, type Audience } from "@/lib/apply/outreach-email";
+import { BANNED, INSPIRED_BRIDGE, OPENER_TAIL, followUpEmail, jobIdOf, outreachEmail, shortRole, slot, subjectFor, usable, wordCount } from "@/lib/apply/outreach-email";
 import { composeLink, withoutJobId } from "@/lib/apply/compose-link";
 
 const base = {
-  firstName: "Jane", studentName: "Drew Davis", year: "Junior", school: "Colby College", major: "Economics",
-  role: "Sports Analyst", company: "WPP Media", jobId: "Job ID 11922471", audience: "recruiter" as Audience,
-  connection: "Your team runs the media buying for the NBA's streaming partners.", proof: "Last season I built the stats model Colby hockey used to set its lines.",
+  firstName: "Jane", studentName: "Drew Davis", role: "Sports Analyst", company: "WPP Media",
+  field: "live sports media analytics", initiative: "WPP Media's Open Intelligence platform",
+  skills: ["SQL", "statistical modeling", "client presentations"],
 };
-const words = (text: string) => wordCount(text.replace(/^Hi [^,]+,|Thank you,\n.*$/g, ""));
+const words = (text: string) => wordCount(text.replace(/^Hi [^,]+,|(Thank you|Best),\n.*$/g, ""));
 
 describe("outreachEmail", () => {
-  it("writes to a recruiter: who, the exact role and job ID, one proof point, one question", () => {
+  it("follows the student's format exactly, with the AI filling only the slots", () => {
     const email = outreachEmail(base);
-    expect(email.subject).toBe("Sports Analyst application");
+    expect(email.subject).toBe("Thank you! - Sports Analyst");
     expect(email.body).toBe([
       "Hi Jane,",
-      "I’m a junior at Colby College studying Economics, and I just applied for the Sports Analyst role (Job ID 11922471).",
-      "Last season I built the stats model Colby hockey used to set its lines.",
-      "Is there anything else that would help your review?",
-      "Thank you,\nDrew Davis",
+      `I hope you're having a great week! I recently applied to the Sports Analyst role on your team and just wanted to reach out to express my sincerest enthusiasm ${OPENER_TAIL}`,
+      `I'm incredibly interested in the work you all are doing in live sports media analytics -- I recently checked out WPP Media's Open Intelligence platform and ${INSPIRED_BRIDGE} in SQL, statistical modeling, and client presentations.`,
+      "Thank you in advance for your consideration!",
+      "Best,\nDrew Davis",
     ].join("\n\n"));
   });
 
-  it("leads with the reader for a hiring manager, the school for an alum, and never asks an alum for a job", () => {
-    const manager = outreachEmail({ ...base, audience: "manager" });
-    expect(manager.body.split("\n\n")[1]).toBe(base.connection);
-    expect(manager.body).toContain("10-minute chat");
-    expect(manager.subject).toBe("Sports Analyst at WPP Media");
-    const alum = outreachEmail({ ...base, audience: "alum", connection: "", proof: "" });
-    expect(alum.subject).toBe("Fellow Colby College student");
-    expect(alum.body).toContain("I saw that you went to Colby College too");
-    expect(alum.body).toContain("15-minute call about your path to WPP Media?");
-    expect(alum.body).not.toMatch(/referr|job opening|hire me/i);
+  it("never invents an initiative: with none, it names the posting the student read", () => {
+    const email = outreachEmail({ ...base, initiative: "" });
+    expect(email.body).toContain("I recently checked out what the Sports Analyst posting says about the team and was super inspired by it.");
   });
 
-  it("stays short, with exactly one question, for every kind of reader", () => {
-    for (const audience of ["recruiter", "manager", "alum", "peer"] as Audience[]) {
-      const email = outreachEmail({ ...base, audience });
-      expect(words(email.body)).toBeGreaterThanOrEqual(25);
-      expect(words(email.body)).toBeLessThanOrEqual(100);
-      expect(email.body.match(/\?/g)).toHaveLength(1);
-      expect(email.body).not.toMatch(BANNED);
-      expect(wordCount(email.subject)).toBeLessThanOrEqual(6);
-      expect(email.subject.length).toBeLessThanOrEqual(40);
-    }
+  it("drops a slot that's long, gushes, or is a placeholder, for a plain wording", () => {
+    expect(slot("[initiative]")).toBe("");
+    expect(slot("their innovative, cutting-edge work")).toBe("");
+    expect(slot("Wow!")).toBe("");
+    expect(slot(Array(20).fill("word").join(" "))).toBe("");
+    expect(slot("  sports analytics. ")).toBe("sports analytics");
+    const email = outreachEmail({ ...base, field: "the innovative world of sports", initiative: "N/A", skills: ["SQL", "", "SQL", "[skill]"] });
+    expect(email.body).toContain("I'm incredibly interested in the work you all are doing at WPP Media -- ");
+    expect(email.body).toContain("for my experience in SQL.");
+    const none = outreachEmail({ ...base, skills: [] });
+    expect(none.body).toContain("an incredible fit for my experience.");
+    expect(outreachEmail({ ...base, skills: ["SQL", "Excel"] }).body).toContain("in SQL and Excel.");
   });
 
-  it("drops an AI sentence that's long, asks a question, gushes, or reads like a template", () => {
-    expect(usable("I hope this email finds you well.")).toBe("");
-    expect(usable("I'm so passionate about media")).toBe("");
-    expect(usable("Would love to chat?")).toBe("");
-    expect(usable("Wow!")).toBe("");
-    expect(usable(Array(30).fill("word").join(" "))).toBe("");
-    expect(usable("I ran the numbers for our club's fund")).toBe("I ran the numbers for our club's fund.");
-    const email = outreachEmail({ ...base, audience: "peer", connection: "I'm thrilled about WPP Media's innovative work!" });
-    expect(email.body).toContain("I’d love to hear what your work at WPP Media is like.");
-    expect(email.body).not.toMatch(/thrilled|innovative/);
-  });
-
-  it("drops missing pieces cleanly", () => {
-    const email = outreachEmail({ ...base, year: "", major: "", jobId: "", proof: "", company: "Adidas" });
-    expect(email.body).toContain("I’m a student at Colby College, and I just applied for the Sports Analyst role.");
-    expect(email.body.split("\n\n")).toHaveLength(4);
-    const noSchool = outreachEmail({ ...base, audience: "alum", school: "", year: "", connection: "" });
-    expect(noSchool.subject).toBe("Sports Analyst at WPP Media");
-    expect(noSchool.body).toContain("I’m a student studying Economics");
+  it("is five blocks and stays short", () => {
+    const email = outreachEmail(base);
+    expect(email.body.split("\n\n")).toHaveLength(5);
+    expect(words(email.body)).toBeLessThanOrEqual(110);
   });
 
   it("keeps a long posting title out of the subject", () => {
     expect(shortRole("Investment Banking Summer Analyst – New York, 2027")).toBe("Investment Banking Summer Analyst");
-    expect(subjectFor({ audience: "recruiter", school: "", role: "Investment Banking Summer Analyst – New York", company: "Evercore" }).length).toBeLessThanOrEqual(40);
+    expect(subjectFor({ role: "Investment Banking Summer Analyst – New York" })).toBe("Thank you! - Investment Banking Summer Analyst");
+    expect(usable("I ran the numbers for our club's fund")).toBe("I ran the numbers for our club's fund.");
   });
 });
 

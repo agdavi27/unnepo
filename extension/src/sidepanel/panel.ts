@@ -1287,7 +1287,8 @@ function resumeLine(state: PanelState) {
       <span class="tool-what">Resume</span>
       ${resumes.length > 1 ? `<select class="field resume-pick" id="resume-pick" aria-label="Resume to attach">${resumes.map((item) => `<option value="${escape(item.id)}" ${item.id === resumeAttach.pick ? "selected" : ""}>${escape(item.fileName)}</option>`).join("")}</select>`
         : resume?.file ? `<button type="button" class="resume-link" id="open-resume" title="Open ${name}" ${resumeBusy ? "disabled" : ""}><span class="resume-link-name">${name}</span></button>` : `<span class="tool-value">${name}</span>`}
-      ${resume?.file ? `<button type="button" class="tool-change" id="attach-resume" title="Attach your resume to the application on this tab" ${resumeAttach.busy ? "disabled" : ""}>${resumeAttach.busy ? "Attaching…" : "Attach"}</button>` : ""}
+      ${resume?.file ? `<button type="button" class="tool-change" id="attach-resume" title="Attach your resume to the application on this tab" ${resumeAttach.busy ? "disabled" : ""}>${resumeAttach.busy === "attach" ? "Attaching…" : "Attach"}</button>` : ""}
+      ${resume?.file && jobFound(state) ? `<button type="button" class="tool-change" id="tailor-resume" title="Tailor my resume to this job, then attach it: reworded and reordered for it, nothing added" ${resumeAttach.busy ? "disabled" : ""}>${resumeAttach.busy === "tailor" ? "Tailoring…" : "✦ Tailor"}</button>` : ""}
       <button type="button" class="tool-change" id="replace-resume" ${resumeBusy ? "disabled" : ""}>${resume ? "Change" : "Upload"}</button>
     </div>
     ${resumeAttach.note ? `<p class="small tool-note" role="status">${escape(resumeAttach.note)}</p>` : ""}
@@ -1349,17 +1350,37 @@ async function replaceSaved(kind: SavedKind, file: File) {
 }
 
 /** "Attach resume to this application": the resume file into the page's resume upload box. */
-const resumeAttach = { busy: false, note: "", pick: "" };
+const resumeAttach = { busy: false as false | "attach" | "tailor", note: "", pick: "" };
 async function attachResume() {
   const tabId = lastState?.tab?.id;
   if (tabId === undefined || resumeAttach.busy) return;
-  resumeAttach.busy = true;
+  resumeAttach.busy = "attach";
   resumeAttach.note = "";
   void render();
   type Attached = { ok: boolean; attached?: string[]; error?: string };
   const result = await ask<Attached>({ type: "attach-resume", tabId, resumeId: (lastState?.me?.resumes?.length ?? 0) > 1 ? resumeAttach.pick : undefined }).catch((): Attached => ({ ok: false, error: "Couldn't reach the page. Reload it and try again." }));
   resumeAttach.busy = false;
   resumeAttach.note = result.ok && result.attached?.length ? `✓ Attached to “${short(result.attached[0], 40)}”. Check it on the page.` : result.error ?? "Couldn't attach it.";
+  void render();
+}
+
+/**
+ * "✦ Tailor" beside Attach: the same resume tailored to the job on this tab (reworded and reordered, nothing added),
+ * in the resume's own layout, into its resume upload box. Free has 3 a day, counted apart from cover letters; Pro has
+ * no limit. If it fails, Attach still puts in the saved resume.
+ */
+async function tailorResume() {
+  const tabId = lastState?.tab?.id;
+  if (tabId === undefined || resumeAttach.busy) return;
+  resumeAttach.busy = "tailor";
+  resumeAttach.note = "";
+  void render();
+  type Tailored = { ok: boolean; attached?: string[]; note?: string | null; error?: string };
+  const result = await ask<Tailored>({ type: "tailor-resume", tabId, resumeId: (lastState?.me?.resumes?.length ?? 0) > 1 ? resumeAttach.pick : undefined }).catch((): Tailored => ({ ok: false, error: "Couldn't reach the page. Reload it and try again." }));
+  resumeAttach.busy = false;
+  resumeAttach.note = result.ok && result.attached?.length
+    ? `✓ Tailored and attached to “${short(result.attached[0], 40)}”.${result.note ? ` ${result.note}` : ""} Check it on the page.`
+    : `${result.error ?? "Couldn't tailor your resume."} Press Attach to use your saved resume instead.`;
   void render();
 }
 
@@ -2152,6 +2173,7 @@ function draw(state: PanelState): boolean {
   document.querySelectorAll<HTMLElement>("[data-open-saved]").forEach((button) => button.addEventListener("click", () => void seeSaved(button.dataset.openSaved as SavedKind)));
   document.querySelectorAll<HTMLElement>("[data-replace-saved]").forEach((button) => button.addEventListener("click", () => (button.dataset.replaceSaved === "transcript" ? transcriptInput : myLetterInput).click()));
   document.getElementById("attach-resume")?.addEventListener("click", () => void attachResume());
+  document.getElementById("tailor-resume")?.addEventListener("click", () => void tailorResume());
   document.getElementById("resume-pick")?.addEventListener("change", (event) => { resumeAttach.pick = (event.target as HTMLSelectElement).value; });
   document.querySelectorAll<HTMLButtonElement>("[data-attach-letter]").forEach((button) => button.addEventListener("click", () => void attachLetter()));
   document.getElementById("start-resume")?.addEventListener("click", () => resumeInput.click());

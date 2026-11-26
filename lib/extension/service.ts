@@ -22,6 +22,7 @@ import { wornSkin } from "@/lib/spiders";
 import type { ApplicationContact, FillAttempt, FillProblem, JobApplication, PostedRecruiter } from "@/lib/apply/types";
 import { activeResume, profileReady, profileState, saveStudentProfile } from "@/lib/profile/service";
 import { readStoredResume, saveResumeBytes } from "@/lib/services/resume";
+import { readResumeLayout, tailoredFile, writeTailorPlan } from "@/lib/apply/tailor-resume";
 
 /**
  * What the Chrome extension calls. The extension fills forms in the student's own browser; the server
@@ -774,6 +775,53 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
   return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64"), addedToApplied: false, tailored: tailored || Boolean(reused && app?.fillReport?.coverLetter), upgrade: free && !generic ? "Pro tailors every letter to the job description." : null };
+}
+
+/** A form's upload box takes only PDFs: its `accept` names PDF and nothing Word. */
+export const acceptsOnlyPdf = (accept: unknown) => typeof accept === "string" && /pdf/i.test(accept) && !/doc|word|officedocument|\*/i.test(accept);
+
+/**
+ * "Tailor my resume to this job": the student's resume (the one picked, else the one they apply with) with its bullets,
+ * summary and skills reworded and reordered toward this job, in its own layout (see lib/apply/tailor-resume.ts). The
+ * same on every plan: tailored to the whole posting. Free has FREE_LIMITS.resumes a day, counted apart from cover
+ * letters; Pro has no limit. The changes are kept with the job, so asking again (or an outreach email for it, with
+ * `cachedOnly`) draws the same file at no cost. Fails with a plain message when it can't be done, so the extension
+ * offers the saved resume instead.
+ */
+export async function extensionTailoredResume(userId: string, raw: unknown) {
+  const body = (raw ?? {}) as { applicationId?: unknown; job?: unknown; resumeId?: unknown; fresh?: unknown; accept?: unknown; cachedOnly?: unknown };
+  const cachedOnly = body.cachedOnly === true;
+  const read = body.applicationId ? null : pageJob(body.job);
+  if (!body.applicationId && (cachedOnly || !read)) throw new ServiceError("Open the job posting in this tab first, so Unnepo knows what to tailor it to.", "job", 400);
+  const app = read ? null : await requireApp(userId, body.applicationId);
+  const kept = app?.fillReport?.tailoredResume;
+  // An outreach email: the tailored resume only if one was made for this job; nothing is written for it.
+  if (cachedOnly && !kept?.plan) return { none: true as const };
+  const resumeId = cachedOnly ? kept!.resumeId : typeof body.resumeId === "string" && body.resumeId ? body.resumeId.slice(0, 80) : null;
+  const [info, resume] = await Promise.all([student(userId), activeResume(userId, resumeId)]);
+  if (!resume) {
+    if (cachedOnly) return { none: true as const };
+    throw new ServiceError("Upload a resume in Unnepo first.", "no_resume", 404);
+  }
+  const original = resume.storagePath ? await readStoredResume(resume.storagePath).catch(() => null) : null;
+  const layout = await readResumeLayout({ bytes: original, fileName: resume.fileName, text: resume.text ?? "" });
+  if (layout.lines.map((line) => line.text).join("\n").trim().length < 200) throw new ServiceError("Unnepo couldn't read enough of your resume to tailor it. Attach it as it is.", "resume_text", 409);
+  const job = app ?? { title: read!.title, company: read!.company, description: read!.description, requirements: [] as string[] };
+  const reused = body.fresh !== true && kept?.plan && kept.resumeId === resume.id ? kept.plan : null;
+  if (!reused) await assertUseAllowed(userId, "resumes");
+  const plan = reused ?? (await writeTailorPlan(userId, job, layout.lines));
+  if (!plan) throw new ServiceError("Couldn't tailor your resume this time. Attach your saved resume instead.", "tailor", 502);
+  if (!reused) await countUse(userId, "resumes");
+  if (app && !reused) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), tailoredResume: { resumeId: resume.id, plan, at: nowIso() } } });
+  const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name || "Resume";
+  const contact = [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")].filter((part): part is string => Boolean(part?.trim()));
+  const file = await tailoredFile(layout, original, plan, { name, contact, title: `${name} Resume` }, { pdfOnly: acceptsOnlyPdf(body.accept) });
+  const fileName = `${name} Resume${job.company ? ` - ${job.company}` : ""}.${file.ext}`.replace(/[\\/:*?"<>|]+/g, "").replace(/\s+/g, " ");
+  const note = file.look === "unnepo" ? "Your resume's layout couldn't be read, so this one uses Unnepo's layout."
+    : layout.kind === "docx" && file.ext === "pdf" ? "This form takes PDFs, so it's a PDF drawn to match your Word resume."
+    : layout.kind === "pdf" ? "Drawn to match your PDF, in the closest standard fonts."
+    : null;
+  return { fileName, mime: file.mime, base64: Buffer.from(file.bytes).toString("base64"), look: file.look, note, changed: Object.keys(plan.edits).length, reordered: Object.keys(plan.order).length };
 }
 
 /** Saves the confirmation screenshot the extension took. Only JPEG or PNG, at most about 2 MB. */

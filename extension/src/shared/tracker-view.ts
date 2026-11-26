@@ -749,8 +749,8 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
       say("The email was too long for the link: it's copied. Paste it into the email that opened.");
     }
     if (link.url.startsWith("mailto:")) window.location.href = link.url;
-    // Gmail and Outlook open with the resume attached to the draft.
-    else void ask({ type: "open-email", url: link.url });
+    // Gmail and Outlook open with the resume attached to the draft: the one tailored to this job if there is one.
+    else void ask({ type: "open-email", url: link.url, applicationId: job.id });
     await opened(contact, followUp);
   };
   root.querySelectorAll<HTMLAnchorElement>("[data-email-link]").forEach((anchor) => anchor.addEventListener("click", (event) => {
@@ -764,7 +764,7 @@ export function wireJobPage(root: HTMLElement, job: TrackerJob) {
     if (!contact?.email) return;
     const link = composeLink(store.mailer, contact.email, "", "");
     if (link.url.startsWith("mailto:")) window.location.href = link.url;
-    else void ask({ type: "open-email", url: link.url });
+    else void ask({ type: "open-email", url: link.url, applicationId: job.id });
     await opened(contact, contact.outreachStatus !== "not_contacted");
   }));
   root.querySelectorAll<HTMLButtonElement>("[data-write-open]").forEach((button) => button.addEventListener("click", async () => {

@@ -90,6 +90,7 @@ const NAMES: Record<CountedKind, [string, string]> = {
   answers: ["question answer", "question answers"],
   autofills: ["autofill", "autofills"],
   emails: ["written email", "written emails"],
+  resumes: ["tailored resume", "tailored resumes"],
   people: ["company", "companies"],
   companies: ["company", "companies"],
 };
@@ -131,7 +132,7 @@ export async function planUsage(userId: string) {
     const left = Math.max(0, limit - used);
     return { used, limit, left, note: usesNote(kind, left, byDay, limit), badge: byDay ? `${left} left today` : "Unlimited" };
   };
-  const [letters, answers, emails] = [one("letters"), one("answers"), one("emails")];
+  const [letters, answers, emails, resumes] = [one("letters"), one("answers"), one("emails"), one("resumes")];
   // Every autofill answers the questions too; `basic` (only the student's details) is never on now.
   const autofills = { ...one("autofills"), basic: false };
   const credits = account?.balance ?? 0;
@@ -155,7 +156,7 @@ export async function planUsage(userId: string) {
     free, plan: state.plan, preview: state.preview, trial: state.trial, trialEnded: state.trialEnded,
     unlimited: shownUnlimited || paid,
     credits: shownUnlimited || paid ? null : writing + people.left * CREDIT_COST.people,
-    letters, answers, autofills, emails, people,
+    letters, answers, autofills, emails, resumes, people,
   };
 }
 

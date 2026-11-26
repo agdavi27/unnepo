@@ -75,6 +75,8 @@ export type FillReport = {
   host?: string;
   /** The cover letter autofill wrote for this job and put on the form, for the student to read or copy. */
   coverLetter?: string;
+  /** The changes "Tailor my resume to this job" made for this job (which lines, reworded how), kept so it can be drawn again at no cost: pressing it again, and outreach emails, attach it. */
+  tailoredResume?: { resumeId: string; plan: { edits: Record<string, string>; order: Record<string, number[]> }; at: string };
   /** Required fields Unnepo worked out after the normal fill, with the answer and why. */
   decided?: Array<{ label: string; answer: string; why: string }>;
   /** Fast pipeline: where the time went (schema, mapping, fill, submit), AI calls, and fallback fields. */
@@ -236,7 +238,7 @@ export type ApplicationContact = {
   updatedAt: string;
 };
 
-export type UsageCounts = { letters?: number; answers?: number; autofills?: number; emails?: number; people?: number; /** Companies searched on a paid plan, counted apart so Free's unlocks don't use up Pro's month. */ companies?: number };
+export type UsageCounts = { letters?: number; answers?: number; autofills?: number; emails?: number; /** Resumes tailored to a job. */ resumes?: number; people?: number; /** Companies searched on a paid plan, counted apart so Free's unlocks don't use up Pro's month. */ companies?: number };
 
 /** Reusable answers for application forms. Only what the student typed or what appears in their resume. */
 /** A deleted job that had been applied to: it still counts as applied. */

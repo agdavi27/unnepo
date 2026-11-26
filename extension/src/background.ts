@@ -732,6 +732,46 @@ async function writeLetter(tabId: number, message: LetterAsk): Promise<{ ok: boo
   }
 }
 
+/**
+ * "Tailor my resume to this job": the student's resume (the one picked, if any) rewritten toward the job on a tab, as
+ * a PDF for the same upload box. The job comes the way the cover letter's does: the tracker's job for the tab, else the
+ * job as the page shows it, else the job the page sent (an apply-by-email card). Never adds a job to the tracker.
+ */
+type Tailored = { ok: boolean; file?: FileData; note?: string | null; error?: string };
+type TailoredFile = { fileName: string; mime: string; base64: string; note?: string | null };
+async function tailorResume(tabId: number, options: { resumeId?: unknown; job?: unknown; accept?: unknown } = {}): Promise<Tailored> {
+  try {
+    const resumeId = typeof options.resumeId === "string" && options.resumeId ? options.resumeId : undefined;
+    const earlier = (await jobs())[tabId];
+    const scan = earlier?.applicationId ? await look(tabId) : null;
+    const applicationId = earlier?.applicationId && (!scan || earlier.running || sameApplication(earlier.url, scan.url)) ? earlier.applicationId : undefined;
+    let job: { title: string; company: string; description: string } | undefined;
+    if (!applicationId) {
+      const given = options.job as Partial<JobDetails> | undefined;
+      const read = given?.title ? given : await readJobDetails(tabId);
+      if (!read?.title) throw new Error("Open the job posting in this tab first, so Unnepo knows what to tailor it to.");
+      job = { title: read.title, company: read.company || read.site || "", description: read.description ?? "" };
+    }
+    // The upload box's `accept`: a box that takes only PDFs gets a PDF even from a Word resume.
+    const accept = typeof options.accept === "string" ? options.accept.slice(0, 300) : undefined;
+    const made = await api<TailoredFile>("POST", "tailored-resume", { applicationId, job, resumeId, accept });
+    return { ok: true, note: made.note ?? null, file: { name: made.fileName, mime: made.mime || "application/pdf", base64: made.base64 } };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Couldn't tailor your resume. Attach your saved one instead." };
+  }
+}
+
+/** The resume already tailored to a tracked job, drawn again (no AI, nothing counted). Null when none was made. */
+async function tailoredForJob(applicationId: unknown): Promise<FileData | null> {
+  if (typeof applicationId !== "string" || !applicationId) return null;
+  try {
+    const made = await api<Partial<TailoredFile> & { none?: boolean }>("POST", "tailored-resume", { applicationId, cachedOnly: true });
+    return made.none || !made.base64 || !made.fileName ? null : { name: made.fileName, mime: made.mime || "application/pdf", base64: made.base64 };
+  } catch {
+    return null;
+  }
+}
+
 /** The page bar's quick fills, per tab: a newer fill or Stop replaces the number, and the older one gives up. */
 const quickRuns = new Map<number, number>();
 let quickCounter = 0;
@@ -1734,9 +1774,10 @@ function scanInbox(): Promise<InboxScan> {
   return scanning;
 }
 
-/** Opens an email in Gmail or Outlook on the web with the student's resume attached to the draft. */
-async function openEmailWithResume(url: string) {
-  const resume = readyResume();
+/** Opens an email in Gmail or Outlook on the web with the student's resume (or the tailored one given) attached to the draft. */
+async function openEmailWithResume(url: string, given?: FileData | Promise<FileData | null>) {
+  // The tab opens at once; the resume (a tailored one being drawn, else the saved one) is ready by the time the draft is.
+  const resume = Promise.resolve(given).then((file) => (file ? { file, error: null } : readyResume()));
   const tab = await chrome.tabs.create({ url, active: true });
   if (tab.id === undefined) return;
   const { file } = await resume;
@@ -1902,6 +1943,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "generate-letter":
         if (sender.tab) return reply({ ok: false });
         return reply(await writeLetter(Number(message.tabId), message));
+      // "Tailor my resume to this job" (on a resume box's button and the apply-by-email card): Free's tailored resumes left today.
+      case "resume-page-state": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        const { token } = await settings();
+        const me = token ? await currentMe(token) : null;
+        if (!me) return reply({ ok: false });
+        const free = Boolean(me.usage?.free && !me.unlimitedCredits);
+        return reply({ ok: true, free, left: free ? me.usage?.resumes?.left ?? null : null, limit: free ? me.usage?.resumes?.limit ?? null : null });
+      }
       // "Write with unnepo" beside a cover letter question on the page: what its button and popup show.
       case "letter-page-state": {
         if (!fromOwnContent(sender)) return reply({ ok: false });
@@ -2103,6 +2153,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (resume.file) void log("Attached your resume from the button on the page.");
         return reply({ ok: Boolean(resume.file), file: resume.file, error: resume.error ?? (resume.file ? null : "Upload your resume in Unnepo first") });
       }
+      // "Tailor my resume to this job" in the menu on a resume upload box's button, or on an apply-by-email card: the
+      // tailored PDF for the job on that tab. On failure the page offers the saved resume instead.
+      case "resume-tailor": {
+        if (!fromOwnContent(sender) || sender.tab?.id === undefined) return reply({ ok: false });
+        const tailored = await tailorResume(sender.tab.id, { resumeId: message.resumeId, job: message.job, accept: message.accept });
+        if (tailored.ok) void log("Tailored your resume to the job on this page.");
+        return reply(tailored);
+      }
       // "Attach transcript with Unnepo" beside a transcript upload box on the page.
       case "transcript-file": {
         if (!sender.tab) return reply({ ok: false });
@@ -2152,6 +2210,16 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         if (!attached.length) return reply({ ok: false, error: "No empty resume upload box on this page. Open the application, then press Attach." });
         void log(`Attached your resume to "${attached[0].slice(0, 40)}".`);
         return reply({ ok: true, attached });
+      }
+      // The panel's "Tailor" beside the resume: a resume tailored to the job on this tab, into its resume upload box.
+      case "tailor-resume": {
+        if (sender.tab) return reply({ ok: false });
+        const tailored = await tailorResume(Number(message.tabId), { resumeId: message.resumeId });
+        if (!tailored.ok || !tailored.file) return reply(tailored);
+        const attached = await attachEverywhere(Number(message.tabId), { type: "attach-resume", file: tailored.file });
+        if (!attached.length) return reply({ ...tailored, ok: false, attached: [], error: "Tailored, but there's no empty resume upload box on this page. Open the application, then press Tailor again (it won't count twice)." });
+        void log(`Attached your tailored resume to "${attached[0].slice(0, 40)}".`);
+        return reply({ ...tailored, attached });
       }
       case "begin-applying": {
         if (sender.tab) return reply({ ok: false });
@@ -2680,7 +2748,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         const { mailer } = await chrome.storage.local.get("mailer");
         const link = composeLink((mailer as Mailer | undefined) ?? "gmail", to, String(message.subject ?? "").slice(0, 200), String(message.body ?? "").slice(0, 6000));
         if (link.url.startsWith("mailto:")) return reply({ ok: true, mailto: link.url, cut: link.cut });
-        void openEmailWithResume(link.url);
+        // The resume the card chose: the tailored one it was given, else the saved one.
+        const chosen = message.file as FileData | undefined;
+        void openEmailWithResume(link.url, chosen?.base64 && chosen.name ? { name: String(chosen.name).slice(0, 160), mime: String(chosen.mime || "application/pdf"), base64: String(chosen.base64) } : undefined);
         return reply({ ok: true, cut: link.cut });
       }
       // Scan email → Scan my email.
@@ -2696,7 +2766,8 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       // An email from the panel or dashboard: opened in Gmail or Outlook with the resume attached.
       case "open-email": {
         if (!fromExtension(sender) || !MAIL_HOST.test(String(message.url ?? ""))) return reply({ ok: false });
-        void openEmailWithResume(String(message.url));
+        // An outreach email for a job: the resume tailored to that job if one was made, else the saved one.
+        void openEmailWithResume(String(message.url), tailoredForJob(message.applicationId));
         return reply({ ok: true });
       }
       case "email-opened": {
