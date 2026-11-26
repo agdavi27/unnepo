@@ -118,13 +118,10 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
             <Knot top={24} className="bg-[#F7F7F8]" />
             <div className="flex flex-col gap-3">
               <h2 className="m-0 text-balance text-[clamp(30px,4.2vw,52px)] font-bold leading-[1.03] tracking-[-1.6px]">Other AI tools sell you volume.<br />Volume lands in the bin.</h2>
-              <p className="m-0 max-w-[680px] text-base leading-relaxed text-[#B4B4BC]">Auto-apply bots fire hundreds of applications at jobs you never read, and many stall at a sign-in page or bounce without a word. Chatbots write the same letter everyone else sends. Resume builders sell you a template. None of them gets you in front of a person. Recruiters now get twice as many applications per opening as in 2022, and they filter the mass-sent ones first. Even the auto-apply tools promise about 1 or 2 interviews per 100 applications.</p>
+              <p className="m-0 max-w-[620px] text-base leading-relaxed text-[#B4B4BC]">Auto-apply bots, chatbots and resume builders all bet on more applications. Even the auto-apply tools promise about 1 or 2 interviews per 100 applications.</p>
             </div>
             <Versus />
-            <div className="flex flex-col gap-2 border-l-4 border-[#3D8BFF] pl-4">
-              <p className="m-0 text-[17px] font-semibold leading-snug text-[#F7F7F8]">No tool can promise you a job, and we won&apos;t either.</p>
-              <p className="m-0 max-w-[680px] text-[15px] leading-relaxed text-[#9A9AA3]">Here&apos;s what we do promise: every application is one you chose, every line on your resume is still true, and someone on the hiring team reads your name in their inbox, not in a pile.</p>
-            </div>
+            <p className="m-0 text-[15px] text-[#9A9AA3]">No tool can promise you a job. We promise every word is true, and your email goes to a real person on the team.</p>
           </section>
 
           <section className="relative flex flex-col gap-6 pb-20 pt-2">
