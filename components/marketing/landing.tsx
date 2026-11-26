@@ -6,6 +6,7 @@ import { FounderLink } from "@/components/marketing/founder-note";
 import { InstallLinkForm } from "@/components/marketing/install-link-form";
 import { Schools } from "@/components/marketing/schools";
 import { SpiderDialogue } from "@/components/marketing/spider-dialogue";
+import { Versus } from "@/components/marketing/versus";
 import { CHROME_STORE_URL, CONTACT_EMAIL, ENTERPRISE_PLAN, PUBLIC_PLANS, REFUND_DAYS } from "@/lib/config";
 import type { InstallView } from "@/lib/install-view";
 
@@ -44,14 +45,6 @@ const STEPS = [
   ["Email the people who decide", "Unnepo finds the 2 or 3 right people and writes each one a short email about this job. You send it."],
 ];
 
-/** Volume tools against Unnepo, row by row. */
-const VERSUS: Array<[string, string]> = [
-  ["Pay more to send more applications", "Free, unlimited autofill. The application is the easy part"],
-  ["A bot submits for you, to jobs you never read", "You read the job and press Submit, every time"],
-  ["Your application joins hundreds in the pile", "A short email puts your name in front of a person"],
-  ["Hard-to-cancel billing, refund fights", `Cancel in two clicks. Full refund within ${REFUND_DAYS} days, no questions`],
-];
-
 /** `view` "email" (a phone, or a browser that can't add Chrome extensions) swaps the hero's buttons for the install-link email form. */
 export function Landing({ view = "chrome" }: { view?: InstallView }) {
   return (
@@ -60,6 +53,7 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
         <header className="mr-[calc(var(--pad)-var(--gutter))] flex items-center justify-between gap-x-6 max-sm:border-b max-sm:border-[#1F1F24] max-sm:py-3 sm:flex-wrap sm:gap-y-3 sm:py-6">
           <Logo href="/" className="text-xl font-bold tracking-[-0.6px]" />
           <nav aria-label="Main" className="flex flex-wrap gap-x-6 gap-y-1 text-sm max-sm:hidden">
+            <a href="#compare" className={NAV_LINK}>Why Unnepo</a>
             <a href="#how" className={NAV_LINK}>How it works</a>
             <a href="#pricing" className={NAV_LINK}>Plans</a>
             <FounderLink />
@@ -73,6 +67,7 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
                 <svg aria-hidden viewBox="0 0 20 20" className="h-5 w-5" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h14M3 10h14M3 14h14" className="group-open:hidden" /><path d="M5 5l10 10M15 5L5 15" className="hidden group-open:inline" /></svg>
               </summary>
               <nav aria-label="Main" className="absolute right-0 top-full z-20 flex w-52 flex-col border-2 border-[#26262C] bg-[#0C0C0E] px-4 py-1">
+                <a href="#compare" className={NAV_LINK}>Why Unnepo</a>
                 <a href="#how" className={NAV_LINK}>How it works</a>
                 <a href="#pricing" className={NAV_LINK}>Plans</a>
                 <div className="flex [&>button]:text-left"><FounderLink /></div>
@@ -119,29 +114,16 @@ export function Landing({ view = "chrome" }: { view?: InstallView }) {
 
           <Schools />
 
-          <section className="relative flex flex-col gap-6 pb-20 pt-2">
+          <section id="compare" className="relative flex scroll-mt-8 flex-col gap-6 pb-20 pt-2">
             <Knot top={24} className="bg-[#F7F7F8]" />
             <div className="flex flex-col gap-3">
               <h2 className="m-0 text-balance text-[clamp(30px,4.2vw,52px)] font-bold leading-[1.03] tracking-[-1.6px]">Other AI tools sell you volume.<br />Volume lands in the bin.</h2>
-              <p className="m-0 max-w-[640px] text-base leading-relaxed text-[#B4B4BC]">Auto-apply tools charge you more to fire your application at more jobs. Recruiters now get twice as many applications per opening as in 2022, and they filter the mass-sent ones first. Even the auto-apply tools promise about 1 or 2 interviews per 100 applications. Unnepo does the opposite: one good application, then a real email to the right person.</p>
+              <p className="m-0 max-w-[680px] text-base leading-relaxed text-[#B4B4BC]">Auto-apply bots fire hundreds of applications at jobs you never read, and many stall at a sign-in page or bounce without a word. Chatbots write the same letter everyone else sends. Resume builders sell you a template. None of them gets you in front of a person. Recruiters now get twice as many applications per opening as in 2022, and they filter the mass-sent ones first. Even the auto-apply tools promise about 1 or 2 interviews per 100 applications.</p>
             </div>
-            <div className="overflow-x-auto border-4 border-[#26262C] bg-[#0C0C0E]">
-              <table className="w-full min-w-[560px] border-collapse text-left text-sm">
-                <thead>
-                  <tr className="border-b-2 border-[#1F1F24]">
-                    <th scope="col" className={`w-1/2 p-4 ${PIXEL} text-[10px] font-normal leading-relaxed text-[#9A9AA3]`}>AUTO-APPLY TOOLS</th>
-                    <th scope="col" className={`w-1/2 p-4 ${PIXEL} text-[10px] font-normal leading-relaxed text-[#3D8BFF]`}>UNNEPO</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {VERSUS.map(([them, us]) => (
-                    <tr key={them} className="border-b-2 border-[#1F1F24] last:border-b-0">
-                      <td className="p-4 align-top text-[#9A9AA3] line-through decoration-[#3A3A42]">{them}</td>
-                      <td className="p-4 align-top text-[#F7F7F8]">{us}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <Versus />
+            <div className="flex flex-col gap-2 border-l-4 border-[#3D8BFF] pl-4">
+              <p className="m-0 text-[17px] font-semibold leading-snug text-[#F7F7F8]">No tool can promise you a job, and we won&apos;t either.</p>
+              <p className="m-0 max-w-[680px] text-[15px] leading-relaxed text-[#9A9AA3]">Here&apos;s what we do promise: every application is one you chose, every line on your resume is still true, and someone on the hiring team reads your name in their inbox, not in a pile.</p>
             </div>
           </section>
 
