@@ -148,7 +148,7 @@ export async function cvPdf(text: string, header: { name: string; contact: strin
     }
     // Bullets and the skills list are regular; school and role lines are bold.
     const bullet = /^[•\-*]\s*/.test(line);
-    const plain = bullet || /SKILL/.test(section);
+    const plain = bullet || /SKILL|SUMMARY/.test(section);
     const indent = bullet ? 12 : 0;
     const rows = wrap(bullet ? line.replace(/^[•\-*]\s*/, "") : line, plain ? regular : bold, size, indent);
     rows.forEach((row, index) => {

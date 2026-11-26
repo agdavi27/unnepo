@@ -1,11 +1,14 @@
 /**
  * A job that's applied to by email ("To apply, send your resume to hi@pennock.co"): a card in the corner of the page
  * says so, and offers to write the email. The email is written from the student's resume for this job, shown to edit,
- * then opened in Gmail or Outlook with the resume attached (or in the mail app). Nothing is read from the page or
- * sent anywhere until "Write the email" is pressed.
+ * then opened in Gmail or Outlook with the resume attached (or in the mail app). Which resume, like the cover letter's
+ * choice: "Attach my resume now" (the saved one, as it is) or "Tailor my resume to this job" (reworded and reordered
+ * for this job in its own layout, nothing added; Free has 3 a day). Nothing is read from the page or sent anywhere
+ * until "Write the email" is pressed.
  */
 
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
+import type { FileData } from "../shared/types";
 
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const SEND = /\b(send|sending|e-?mail|submit|forward|direct|apply|reply)\b/i;
@@ -35,6 +38,7 @@ export function findApplyEmail(text: string): ApplyEmail | null {
 
 type State = { ok?: boolean; mailer?: "gmail" | "outlook" | "mailto" };
 type Wrote = { ok?: boolean; to?: string; subject?: string; body?: string; error?: string };
+type Tailored = { ok?: boolean; file?: FileData; note?: string | null; error?: string };
 
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -52,7 +56,7 @@ function pageJob() {
 const STYLE = `
   :host { all: initial; position: fixed; right: 20px; bottom: 20px; z-index: 2147483646; font: 13.5px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #111114; }
   * { box-sizing: border-box; }
-  .card { width: min(380px, calc(100vw - 32px)); background: #fff; border: 1px solid #E4E4EA; border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.06); padding: 14px 16px 16px; }
+  .card { width: min(380px, calc(100vw - 32px)); background: #fff; border: 1px solid #E4E4EA; border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,.18), 0 2px 8px rgba(0,0,0,.06); padding: 14px 16px 16px; max-height: calc(100vh - 40px); overflow: auto; }
   .card.enter { animation: pop .28s cubic-bezier(.2,1.2,.4,1) both; }
   @keyframes pop { from { transform: translateY(16px); opacity: 0; } }
   .head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
@@ -79,6 +83,14 @@ const STYLE = `
   .bad { color: #B91C1C; font-size: 12.5px; margin-top: 8px; }
   .good { color: #15803D; font-weight: 600; margin: 4px 0 0; }
   .dots::after { content: "…"; }
+  .pickr { all: unset; cursor: pointer; display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: 9px; border: 1px solid #E4E4EA; font-weight: 600; font-size: 12.5px; margin-top: 6px; box-sizing: border-box; width: 100%; }
+  .pickr small { font-weight: 400; font-size: 11.5px; color: #6A6A74; }
+  .pickr:hover { border-color: #3D8BFF; background: #F5F9FF; }
+  .pickr.on { border-color: #3D8BFF; box-shadow: inset 0 0 0 1px #3D8BFF; background: #F5F9FF; }
+  .pickr[disabled] { cursor: default; opacity: .55; } .pickr[disabled]:hover { border-color: #E4E4EA; background: none; }
+  .pickr:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
+  .note { color: #B45309; font-size: 12px; margin-top: 6px; }
+  .quiet { all: unset; cursor: pointer; font-size: 12px; color: #45454E; text-decoration: underline; text-underline-offset: 3px; margin-top: 6px; display: inline-block; }
 `;
 
 function show(found: ApplyEmail, mailer: NonNullable<State["mailer"]>) {
@@ -88,9 +100,31 @@ function show(found: ApplyEmail, mailer: NonNullable<State["mailer"]>) {
   document.documentElement.append(host);
   let spider = spiderRects(0);
   const ui: { step: "ask" | "writing" | "ready" | "opened"; subject: string; body: string; error: string; shown: boolean } = { step: "ask", subject: "", body: "", error: "", shown: false };
+  /** Which resume goes with the email: the saved one, or one tailored to this job (and how that went). */
+  const resume: { use: "saved" | "tailored"; busy: boolean; file: FileData | null; look: string; note: string; free: boolean; left: number | null; limit: number | null } = { use: "saved", busy: false, file: null, look: "", note: "", free: false, left: null, limit: null };
+  void ask<{ ok?: boolean; free?: boolean; left?: number | null; limit?: number | null }>({ type: "resume-page-state" }).then((state) => {
+    resume.free = Boolean(state?.ok && state.free);
+    resume.left = state?.ok && typeof state.left === "number" ? state.left : null;
+    resume.limit = state?.ok && typeof state.limit === "number" ? state.limit : null;
+  }).catch(() => undefined);
   void storedSpiderColors().then((colors) => { spider = spiderRects(0, colors); draw(); });
   const svg = () => `<svg viewBox="0 0 ${W} ${H}" shape-rendering="crispEdges" aria-hidden="true"><g transform="rotate(180 ${W / 2} ${H / 2})">${spider}</g></svg>`;
   const where = MAILER_NAME[mailer];
+
+  /** Attach the saved resume, or tailor it to this job first: the same two choices as on a resume upload box. */
+  function resumeChoice() {
+    const out = resume.free && typeof resume.left === "number" && resume.left <= 0 && !resume.file;
+    const hint = resume.busy ? "Takes a few seconds"
+      : resume.file ? `${resume.file.name}${resume.look ? `. ${resume.look}` : ""}`
+      : out ? "None left today on Free. Pro has no limit."
+      : resume.free && typeof resume.left === "number" ? `${resume.left} of ${resume.limit ?? 3} left today`
+      : "Rewords it for this job, in your own layout. Adds nothing new";
+    return `<label>Resume</label>
+      <button type="button" class="pickr${resume.use === "saved" ? " on" : ""}" data-act="use-saved" aria-pressed="${resume.use === "saved"}" ${resume.busy ? "disabled" : ""}>Attach my resume now<small>Your saved resume, as it is</small></button>
+      <button type="button" class="pickr${resume.use === "tailored" ? " on" : ""}" data-act="tailor" aria-pressed="${resume.use === "tailored"}" ${out || resume.busy ? "disabled" : ""}>${resume.busy ? `<span class="dots">Tailoring your resume</span>` : resume.file ? "✓ Tailored to this job" : "✦ Tailor my resume to this job"}<small>${escape(hint)}</small></button>
+      ${resume.file && resume.use === "tailored" ? `<button type="button" class="quiet" data-act="preview">${mailer === "mailto" ? "Download the tailored resume" : "Preview it"}</button>` : ""}
+      ${resume.note ? `<div class="note" role="status">${escape(resume.note)}</div>` : ""}`;
+  }
 
   function body() {
     if (ui.step === "ask" || ui.step === "writing") {
@@ -107,15 +141,16 @@ function show(found: ApplyEmail, mailer: NonNullable<State["mailer"]>) {
       return `<h2>Your email to <span class="to">${escape(found.email)}</span></h2>
         <label for="subject">Subject</label><input id="subject" value="${escape(ui.subject)}">
         <label for="body">Email</label><textarea id="body">${escape(ui.body)}</textarea>
+        ${resumeChoice()}
         ${ui.error ? `<div class="bad" role="alert">${escape(ui.error)}</div>` : ""}
         <div class="row">
-          <button type="button" class="btn wide" data-act="open">Open in ${where}${mailer === "mailto" ? "" : " with resume"} ↗</button>
+          <button type="button" class="btn wide" data-act="open" ${resume.busy ? "disabled" : ""}>Open in ${where}${mailer === "mailto" ? "" : resume.use === "tailored" ? " with tailored resume" : " with resume"} ↗</button>
           <button type="button" class="btn ghost" data-act="copy">Copy</button>
         </div>
-        <div class="hint">${mailer === "mailto" ? "Your mail app can't be reached from here: attach your resume there before you send." : `Your resume is attached when it opens in ${where}. Read it over, then send.`}</div>`;
+        <div class="hint">${mailer === "mailto" ? `Your mail app can't be reached from here: attach your ${resume.use === "tailored" ? "tailored " : ""}resume there before you send.` : `Your ${resume.use === "tailored" ? "tailored " : ""}resume is attached when it opens in ${where}. Read it over, then send.`}</div>`;
     }
     return `<h2>Opened in ${where}</h2>
-      <p class="good">✓ ${mailer === "mailto" ? "Attach your resume, then send." : "Check your resume is attached, then send."}</p>
+      <p class="good">✓ ${mailer === "mailto" ? `Attach your ${resume.use === "tailored" ? "tailored " : ""}resume, then send.` : `Check your ${resume.use === "tailored" ? "tailored " : ""}resume is attached, then send.`}</p>
       <div class="row"><button type="button" class="btn ghost" data-act="close">Done</button></div>`;
   }
 
@@ -154,6 +189,47 @@ function show(found: ApplyEmail, mailer: NonNullable<State["mailer"]>) {
       ui.step = "ready";
       return draw();
     }
+    // The resume choice: the saved one, or tailor it (once; choosing it again reuses the one made).
+    if (name === "use-saved") {
+      keep();
+      resume.use = "saved";
+      resume.note = "";
+      return draw();
+    }
+    if (name === "tailor") {
+      keep();
+      if (resume.file) { resume.use = "tailored"; return draw(); }
+      resume.busy = true;
+      resume.note = "";
+      draw();
+      const got = await ask<Tailored>({ type: "resume-tailor", job: pageJob() }).catch((): Tailored => ({ ok: false, error: "Unnepo was updated. Refresh this page." }));
+      resume.busy = false;
+      if (got?.ok && got.file) {
+        resume.file = got.file;
+        resume.look = got.note ?? "";
+        resume.use = "tailored";
+        if (typeof resume.left === "number") resume.left = Math.max(0, resume.left - 1);
+      } else {
+        resume.use = "saved";
+        resume.note = `${got?.error || "Couldn't tailor your resume."} Your saved resume will be attached instead.`;
+      }
+      return draw();
+    }
+    if (name === "preview" && resume.file) {
+      keep();
+      const bytes = Uint8Array.from(atob(resume.file.base64), (char) => char.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: resume.file.mime }));
+      if (mailer === "mailto") {
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = resume.file.name;
+        document.body.append(link);
+        link.click();
+        link.remove();
+      } else window.open(url, "_blank", "noopener");
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      return;
+    }
     if (name === "copy") {
       keep();
       await navigator.clipboard.writeText(ui.body).catch(() => undefined);
@@ -165,7 +241,7 @@ function show(found: ApplyEmail, mailer: NonNullable<State["mailer"]>) {
       keep();
       // A long email may not fit in the link: it's on the clipboard to paste, just in case.
       if (ui.body.length > 1200) await navigator.clipboard.writeText(ui.body).catch(() => undefined);
-      const opened = await ask<{ ok?: boolean; mailto?: string; cut?: boolean; error?: string }>({ type: "email-apply-open", to: found.email, subject: ui.subject, body: ui.body }).catch(() => null);
+      const opened = await ask<{ ok?: boolean; mailto?: string; cut?: boolean; error?: string }>({ type: "email-apply-open", to: found.email, subject: ui.subject, body: ui.body, file: resume.use === "tailored" && resume.file ? resume.file : undefined }).catch(() => null);
       if (!opened?.ok) {
         ui.error = opened?.error ?? "Couldn't open the email. Copy it instead.";
         return draw();

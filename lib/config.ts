@@ -67,7 +67,8 @@ export function serverConfig() {
  * company, with a checked email, found when the student presses Unlock. Pro's writing and autofill have no limit (only
  * a hidden guard against scripts, PRO_AI_LIMIT); its people are PRO_COMPANIES_PER_MONTH companies a month, shown on the plan. `balance` on an account counts people searches left from the trial or a pack.
  */
-export const FREE_LIMITS = { letters: 3, answers: 3, autofills: 3, emails: 3 };
+/** `resumes`: resumes tailored to a job ("Tailor my resume to this job"), counted apart from cover letters. */
+export const FREE_LIMITS = { letters: 3, answers: 3, autofills: 3, emails: 3, resumes: 3 };
 /** People Free unlocks each day: one person at each of two companies, with a checked email. */
 export const FREE_UNLOCKS_PER_DAY = 2;
 /** Companies Pro finds people at each month: up to 3 people at each, with verified emails. Shown on the plan. */
@@ -110,7 +111,7 @@ export const PUBLIC_PLANS = [
     popular: false,
     giftable: false,
     applicationsLabel: "Free every day",
-    features: ["Unlimited autofill that answers the questions too", "Unlimited job tracking", `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_UNLOCKS_PER_DAY} people to email a day, each at a different company`, "Compete with friends"],
+    features: ["Unlimited autofill that answers the questions too", "Unlimited job tracking", `${FREE_LIMITS.letters} cover letters a day`, `${FREE_LIMITS.resumes} resumes tailored to the job a day`, `${FREE_LIMITS.answers} question answers a day`, `${FREE_LIMITS.emails} emails written for you a day`, `${FREE_UNLOCKS_PER_DAY} people to email a day, each at a different company`, "Compete with friends"],
   },
   {
     id: "pro" as const,

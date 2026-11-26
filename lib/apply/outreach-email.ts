@@ -1,22 +1,31 @@
 import { FOLLOW_UPS_AT_MOST } from "@/lib/apply/follow-ups";
 
 /**
- * The student's emails to people at a company where they applied, built to what gets replies (research notes:
- * research_notes/…/email_structure.md). Short (a first email of 45–100 words, follow-ups of 50 and 40 or fewer),
- * plain, one question as the only ask, and shaped by who it's to:
+ * The student's emails to people at a company where they applied. The first email to anyone (recruiter, hiring
+ * manager, alum or someone on the team) follows one fixed format, the student's own:
  *
- *   recruiter (or whoever posted the job): who the student is and the exact role and job ID, one proof point,
- *     "Is there anything else that would help your review?"
- *   hiring manager: their team's work, the application and a proof point, a 10-minute chat about the team
- *   alum: the shared school first, the application in a clause, 15 minutes about their path. Never asks for a job.
- *   someone on the team: their work, the application in a clause, 15 minutes about what the work is like
+ *   Subject: Thank you! - [Role]
  *
- * The AI writes at most two sentences of it (`connection`, `proof`), and each is checked: too long, a question, an
- * exclamation or a stock phrase, and it's dropped for a plain line that's always true. Everything else comes from
- * the student's profile and the job, so the shape, length and ask never drift.
+ *   Hi [Name],
+ *
+ *   I hope you're having a great week! I recently applied to the [Role] role on your team and just wanted to reach
+ *   out to express my sincerest enthusiasm (please excuse the cold email!)
+ *
+ *   I'm incredibly interested in the work you all are doing in [part of the field] -- I recently checked out
+ *   [initiative] and was super inspired by it. I believe this role is an incredible fit for my experience in [1],
+ *   [2], and [3].
+ *
+ *   Thank you in advance for your consideration!
+ *
+ *   Best,
+ *   [Student]
+ *
+ * The skeleton is built here; the AI fills only the slots (`field`, `initiative`, `skills`), and each slot is
+ * checked: too long, a question, an exclamation, a stock phrase or a placeholder, and it's dropped for a plain
+ * wording that's always true. So the shape never drifts.
  *
  * A sequence is the first email and at most two follow-ups (MAX_FOLLOW_UPS); a fourth email gets more
- * complaints than replies.
+ * complaints than replies. Follow-ups keep their own short shape (`followUpEmail`).
  */
 
 export type Audience = "recruiter" | "manager" | "alum" | "peer";
@@ -29,26 +38,28 @@ export function audienceOf(role: string): Audience {
   return "peer";
 }
 
+// The two places the format the student supplied was cut off. Each is a best completion; change it here.
+/** Ends the first paragraph, after "…to express my sincerest enthusiasm ". The source text stopped at "(please excuse". */
+export const OPENER_TAIL = "(please excuse the cold email!)";
+/** Joins the initiative to the skills in the second paragraph. The source text stopped at "was super inspi" and resumed at "this role is an incredible fit". */
+export const INSPIRED_BRIDGE = "was super inspired by it. I believe this role is an incredible fit for my experience";
+
 export type OutreachFields = {
+  /** The contact's first name. */
   firstName: string;
   studentName: string;
-  /** "Junior", "Graduate student". */
-  year: string;
-  school: string;
-  /** "Economics", "Economics and Computer Science". */
-  major: string;
   /** The posting's title, as written. */
   role: string;
   company: string;
-  jobId: string;
-  audience: Audience;
-  /** One sentence the AI wrote about the person's work or team, or the shared school. Checked by `usable`. */
-  connection: string;
-  /** One sentence with a concrete fact from the student's resume that fits the role. Checked by `usable`. */
-  proof: string;
+  /** The specific part of the field the team works in ("live sports media analytics"), from the posting. Checked by `slot`. */
+  field: string;
+  /** Something real the company or team does that the posting or company info names (a product, project, initiative, article, podcast). Checked by `slot`. Never invented: empty when there's none. */
+  initiative: string;
+  /** Up to three skills or experiences the posting names that the student's resume shows. Each checked by `slot`. */
+  skills: string[];
 };
 
-/** Words that mark an email as a template or as written by AI. A sentence with one of these is dropped. */
+/** Words that mark an AI-written sentence or phrase as a template or as written by AI. One with these is dropped. */
 export const BANNED = /\b(hope (this|you)|reaching out|reach out|came across|my name is|passionate|excited|thrilled|delve|leverage|innovative|cutting[- ]edge|pick your brain|aligns? perfectly|look forward|just (following|checking)|circling back|bump(ing)? this|synerg|dynamic|i am writing)\b/i;
 
 const tidy = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -61,54 +72,48 @@ export function usable(sentence: string, max = 25) {
   return /[.]$/.test(text) ? text : `${text}.`;
 }
 
+/** An AI phrase fit to drop into a slot mid-sentence: `max` words or fewer, no sentence punctuation, no stock phrase, no placeholder. */
+export function slot(phrase: string, max = 12) {
+  const text = tidy(String(phrase ?? "")).replace(/^[-–—,;:\s]+|[.,;:\s]+$/g, "");
+  if (!text || wordCount(text) > max || /[?!]|--|[—–]|[a-z]{3,}\.\s/.test(text) || BANNED.test(text) || /\[|\{|\bTODO\b|\bN\/A\b|^none$/i.test(text)) return "";
+  return text;
+}
+
+/** "a, b, and c"; "a and b"; "a". */
+function list(items: string[]) {
+  if (items.length <= 2) return items.join(" and ");
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+}
+
 /** "Investment Banking Summer Analyst – New York, 2027" → "Investment Banking Summer Analyst", for a subject line. */
 export function shortRole(role: string) {
   return tidy(role.split(/\s[-–|,(]\s?|,|\(/)[0]).replace(/\b(20\d\d)\b/g, "").replace(/\s+/g, " ").trim() || role;
 }
 
-/** A subject of 2 to 6 words and 40 characters or fewer, in sentence case, led by what the reader cares about. */
-export function subjectFor(f: Pick<OutreachFields, "audience" | "school" | "role" | "company">) {
-  const role = shortRole(f.role);
-  const options = f.audience === "alum" && f.school ? [`Fellow ${f.school} student`, `${f.school} student`]
-    : f.audience === "recruiter" ? [`${role} application`, `${f.company} application`]
-    : [`${role} at ${f.company}`, `${role} application`, `${f.company} application`];
-  return options.find((option) => option.length <= 40 && wordCount(option) <= 6) ?? options.at(-1)!.slice(0, 40).trim();
+/** "Thank you! - Sports Analyst". */
+export function subjectFor(f: Pick<OutreachFields, "role">) {
+  return `Thank you! - ${shortRole(tidy(f.role))}`.slice(0, 200);
 }
 
-/** "a junior at Colby College studying Economics" */
-function whoClause(f: OutreachFields) {
-  const at = f.year && f.school ? `a ${f.year.toLowerCase()} at ${f.school}` : f.school ? `a student at ${f.school}` : f.year ? `a ${f.year.toLowerCase()}` : "a student";
-  return f.major ? `${at} studying ${f.major}` : at;
-}
-
-const ASKS: Record<Audience, (f: OutreachFields) => string> = {
-  recruiter: () => "Is there anything else that would help your review?",
-  manager: () => "Would you be open to a 10-minute chat about the team’s work?",
-  alum: (f) => `Would you be open to a 15-minute call about your path to ${f.company}?`,
-  peer: () => "Would you be open to a 15-minute call about what the work is like?",
-};
-
-/** The first email. */
+/** The first email, to anyone at the company. */
 export function outreachEmail(fields: OutreachFields) {
-  const f = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, tidy(String(value ?? ""))])) as OutreachFields;
-  const connection = usable(f.connection);
-  const proof = usable(f.proof);
-  const job = f.jobId ? ` (${f.jobId})` : "";
-  const who = whoClause(f);
-  const opener = {
-    recruiter: `I’m ${who}, and I just applied for the ${f.role} role${job}.`,
-    manager: connection || `I just applied for the ${f.role} role on your team${job}.`,
-    alum: connection || (f.school ? `I saw that you went to ${f.school} too, and I’d love to hear how you got to ${f.company}.` : `I’d love to hear how you got to ${f.company}.`),
-    peer: connection || `I’d love to hear what your work at ${f.company} is like.`,
-  }[f.audience];
-  const middle = {
-    recruiter: proof,
-    manager: connection ? `I’m ${who}, and I just applied for the ${f.role} role${job}. ${proof}` : `I’m ${who}. ${proof}`,
-    alum: `I’m ${who}, and I recently applied for the ${f.role} role there.`,
-    peer: `I’m ${who}, and I recently applied for the ${f.role} role there.`,
-  }[f.audience];
-  const body = [`Hi ${f.firstName || "there"},`, opener, tidy(middle), ASKS[f.audience](f)].filter(Boolean).join("\n\n") + `\n\nThank you,\n${f.studentName}`;
-  return { subject: subjectFor(f), body };
+  const role = shortRole(tidy(fields.role ?? ""));
+  const company = tidy(fields.company ?? "");
+  const field = slot(fields.field);
+  const initiative = slot(fields.initiative, 14);
+  const skills = [...new Set((fields.skills ?? []).map((skill) => slot(skill, 6)).filter(Boolean))].slice(0, 3);
+  const interest = field ? `the work you all are doing in ${field}` : company ? `the work you all are doing at ${company}` : "the work you all are doing";
+  // No real initiative to name: the posting itself is something the student did read, so that's what they checked out.
+  const checkedOut = initiative || `what the ${role} posting says about the team`;
+  const fit = skills.length ? `${INSPIRED_BRIDGE} in ${list(skills)}.` : `${INSPIRED_BRIDGE}.`;
+  const body = [
+    `Hi ${tidy(fields.firstName ?? "") || "there"},`,
+    `I hope you're having a great week! I recently applied to the ${role} role on your team and just wanted to reach out to express my sincerest enthusiasm ${OPENER_TAIL}`,
+    `I'm incredibly interested in ${interest} -- I recently checked out ${checkedOut} and ${fit}`,
+    "Thank you in advance for your consideration!",
+    `Best,\n${tidy(fields.studentName ?? "")}`,
+  ].join("\n\n");
+  return { subject: subjectFor({ role }), body };
 }
 
 /** The most emails after the first: two follow-ups, then stop. */
