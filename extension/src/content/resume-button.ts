@@ -111,27 +111,28 @@ function addButton(target: Target, after: HTMLElement, kind: Kind) {
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = `
     <style>
-      :host { all: initial; position: relative; display: inline-flex; margin: 6px 0; font: 600 12px/1 system-ui, -apple-system, sans-serif; }
-      .main { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 7px; background: #070708; color: #F7F7F8; border: 1px solid #3D8BFF; box-shadow: 2px 2px 0 #3D8BFF; }
-      .main:hover { background: #14141A; }
+      :host { all: initial; position: relative; display: inline-flex; margin: 6px 0; font: 500 12.5px/1.1 -apple-system, system-ui, "Segoe UI", sans-serif; }
+      .main { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 8px; background: #262A33; color: #F3F4F6; border: 1px solid #262A33; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+      .main:hover { background: #31363F; border-color: #31363F; }
       button:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
       button[disabled] { cursor: default; opacity: .7; }
-      .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 2147483000; min-width: 220px; max-width: 320px; padding: 6px; border-radius: 9px; background: #0C0C0E; border: 1px solid #26262C; box-shadow: 0 8px 24px rgba(0,0,0,.4); display: grid; gap: 2px; }
+      .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 2147483000; min-width: 220px; max-width: 320px; padding: 5px; border-radius: 10px; background: #262A33; border: 1px solid #353A45; box-shadow: 0 10px 28px rgba(0,0,0,.22); display: grid; gap: 1px; }
       .menu[hidden] { display: none; }
-      .menu .head { color: #8B8B94; font-weight: 500; font-size: 11px; padding: 4px 8px 6px; }
-      .pick { all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 8px; border-radius: 6px; color: #F7F7F8; font-weight: 500; }
-      .pick:hover, .pick:focus-visible { background: #17171B; outline: none; }
+      .menu .head { color: #8D93A0; font-weight: 500; font-size: 11px; padding: 5px 9px 5px; letter-spacing: .02em; }
+      .pick { all: unset; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 6px; color: #F3F4F6; font-weight: 500; font-size: 13px; }
+      .pick:hover, .pick:focus-visible { background: #31363F; outline: none; }
       .pick .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .pick .tag { color: #8B8B94; font-size: 11px; }
+      .pick .tag { color: #A3A9B5; font-size: 11px; }
       .pick .words { flex: 1; min-width: 0; display: grid; gap: 2px; }
-      .pick small { color: #8B8B94; font-weight: 400; font-size: 11px; white-space: normal; }
+      .pick small { color: #A3A9B5; font-weight: 400; font-size: 11.5px; line-height: 1.35; white-space: normal; }
       .pick[disabled] { cursor: default; opacity: .55; } .pick[disabled]:hover { background: none; }
-      .menu .note { margin: 4px 8px 6px; color: #F5A524; font-weight: 500; font-size: 11.5px; line-height: 1.4; }
-      .menu .good { margin: 0 8px 4px; color: #4ADE80; font-weight: 600; font-size: 11.5px; line-height: 1.4; }
-      .dot { width: 7px; height: 7px; border-radius: 50%; background: #3D8BFF; }
-      .ok { border-color: #22C55E; box-shadow: 2px 2px 0 #22C55E; }
-      .ok .dot { background: #22C55E; }
-      .bad { border-color: #F5A524; box-shadow: 2px 2px 0 #F5A524; }
+      .menu .note { margin: 3px 9px 6px; color: #FBBF24; font-weight: 500; font-size: 11.5px; line-height: 1.4; }
+      .menu .good { margin: 0 9px 4px; color: #4ADE80; font-weight: 600; font-size: 11.5px; line-height: 1.4; }
+      .dot { width: 6px; height: 6px; border-radius: 50%; background: #8DB8FF; }
+      .ok { border-color: #22C55E; }
+      .ok .dot { background: #4ADE80; }
+      .bad { border-color: #F5A524; }
+      .bad .dot { background: #FBBF24; }
     </style>
     <button type="button" class="main" title="${kind === "resume" ? "Attach your Unnepo resume, or tailor it to this job first" : "Put your Unnepo transcript in this upload box"}" aria-haspopup="${kind === "resume" ? "menu" : "false"}"><span class="dot" aria-hidden="true"></span><span class="text">${kind === "resume" ? "Attach with Unnepo" : "Attach transcript with Unnepo"}</span></button>
     <div class="menu" role="menu" hidden></div>`;

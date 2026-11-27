@@ -152,6 +152,12 @@ function gutterOf(segments: Segment[], width: number) {
   return null;
 }
 
+/**
+ * A row drawn all in bold (a heading, an employer). A bullet that only starts with a bold word ("**Generated** $30,000+…")
+ * isn't, so its regular wrapped lines still join it.
+ */
+const allBold = (seg: Segment) => seg.items.filter((item) => item !== seg.glyph).every((item) => isBold(item.font));
+
 /** Joins a bullet (or a summary paragraph) with the lines it wrapped onto. */
 function blocksOf(segments: Segment[]) {
   const used = new Set<Segment>();
@@ -173,7 +179,7 @@ function blocksOf(segments: Segment[]) {
         if (drop > last.size * 1.7) break;
         const lineX = segs.length > 1 ? segs[1].x0 : seg.textX;
         const aligned = Math.abs(next.x0 - lineX) < 2 || (segs.length === 1 && next.x0 > seg.x0 - 1 && next.x0 < seg.textX + 2);
-        if (!aligned || next.glyph || next.dot || BULLET_START.test(next.text) || isSection(next.text) || Math.abs(next.size - seg.size) > 0.6 || isBold(next.items[0].font) !== isBold((seg.glyph ? seg.items[1] : seg.items[0]).font)) break;
+        if (!aligned || next.glyph || next.dot || BULLET_START.test(next.text) || isSection(next.text) || Math.abs(next.size - seg.size) > 0.6 || allBold(next) !== allBold(seg)) break;
         segs.push(next);
         used.add(next);
         last = next;
@@ -463,8 +469,13 @@ export async function renderPdf(original: Uint8Array, layout: PdfLayout, plan: T
           if (block.segs.length > room) overflow = true;
         } else {
           const label = block.line.kind === "skills" ? labelItems(first) : [];
-          // The words' own font: past the bullet, and past a skills label (often bold).
-          const body = (first.glyph ? first.items.slice(1) : first.items).find((item) => !label.includes(item)) ?? first.items.at(-1)!;
+          // The words' own font: the one most of the text is in, past the bullet and a skills label (often bold). A bullet
+          // that leads with a bold phrase ("**Generated** $30,000+…") is still drawn in its regular font, not all bold.
+          const own = block.segs.flatMap((seg) => seg.items).filter((item) => item !== first.glyph && !label.includes(item));
+          const weight = new Map<string, number>();
+          for (const item of own) { const key = `${stdFont(item.font)}|${item.size}`; weight.set(key, (weight.get(key) ?? 0) + item.str.length); }
+          const main = [...weight].sort((a, b) => b[1] - a[1])[0]?.[0];
+          const body = own.find((item) => `${stdFont(item.font)}|${item.size}` === main) ?? first.items.at(-1)!;
           const key = stdFont(body.font);
           const font = await load(key);
           const scale = pdf.scales.get(key) ?? 1;

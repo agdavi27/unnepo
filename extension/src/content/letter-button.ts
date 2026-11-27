@@ -173,11 +173,11 @@ function download(letter: Letter) {
 }
 
 const BUTTON_STYLE = `
-  :host { all: initial; display: inline-flex; vertical-align: middle; margin: 2px 0 2px 10px; font: 600 12px/1 system-ui, -apple-system, sans-serif; }
-  button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 7px; background: #070708; color: #F7F7F8; border: 1px solid #3D8BFF; box-shadow: 2px 2px 0 #3D8BFF; white-space: nowrap; }
-  button:hover { background: #14141A; }
+  :host { all: initial; display: inline-flex; vertical-align: middle; margin: 2px 0 2px 10px; font: 500 12.5px/1.1 -apple-system, system-ui, "Segoe UI", sans-serif; }
+  button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 8px; background: #262A33; color: #F3F4F6; border: 1px solid #262A33; box-shadow: 0 1px 2px rgba(0,0,0,.2); white-space: nowrap; }
+  button:hover { background: #31363F; border-color: #31363F; }
   button:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
-  .spark { color: #7FB2FF; }
+  .spark { color: #8DB8FF; }
 `;
 
 /** The label on every button. The letters left today show in the popup, on "Write one with Unnepo". */
