@@ -2046,10 +2046,20 @@ async function render() {
   await refresh();
 }
 
+/** Closes the panel on unnepo.com/home, after asking the page to say why (a small note at its top). */
+let closing = false;
+function closeOnHome(tabId: number) {
+  if (closing) return;
+  closing = true;
+  const told = chrome.tabs.sendMessage(tabId, { type: "panel-closed-here" }).catch(() => undefined);
+  // Close once the page has it, or after a moment if the page can't answer (opened before the extension was).
+  void Promise.race([told, new Promise((done) => setTimeout(done, 300))]).then(() => window.close());
+}
+
 /** Draws the panel. False when it left the page as it was, because the student is typing in it. */
 function draw(state: PanelState): boolean {
   if (onUnnepoHome(state)) {
-    window.close();
+    closeOnHome(state.tab!.id);
     return false;
   }
   usesNow = state.me?.usage ?? null;
