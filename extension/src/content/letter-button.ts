@@ -3,10 +3,11 @@ import { coveredUp, mountAbove } from "./top-layer";
 
 /**
  * "Write with unnepo" beside the cover letter question on an application form ("Attach your cover letter",
- * "Cover letter", a letter of interest...). Pressing it opens a popup on the page that first asks: attach the
- * student's own cover letter (saved in their profile, optional), or have Unnepo write one, which is where the
- * letters left today on Free show. Writing asks the same questions as the panel's cover letter (how it's built,
- * length, tone, what to mention), writes the letter for the job on this tab, and shows it to edit. Then it goes where the form wants it:
+ * "Cover letter", a letter of interest...). Pressing it opens a short menu, like the resume's "Attach with Unnepo":
+ * "Attach my default cover letter" (the student's own saved letter, else a short general one Unnepo writes once from
+ * their profile, opening "Dear Hiring Team"), or "Write a tailored cover letter", where the letters left today on Free
+ * show. That opens a popup with the same questions as the panel's cover letter (how it's built, length, tone, what to
+ * mention), writes the letter for the job on this tab, and shows it to edit. Either way it goes where the form wants it:
  * into the upload box (as a PDF), into the text box, or downloaded to upload by hand. Nothing is read or sent until
  * the button is pressed. Shows only when the student is signed in to Unnepo.
  */
@@ -45,7 +46,9 @@ function findSpots(): Spot[] {
     for (let depth = 0; box && depth < 6; depth++, box = box.parentElement) {
       if (Array.from(box.querySelectorAll(CONTROL)).some((el) => !ours(el))) break;
     }
-    if (!box || textOf(box).length > 1500 || box.closest(`[${MARK}]`) || box.querySelector(`[${MARK}]`)) continue;
+    // One button per question: a heading and its hint line ("Cover letter", "Be sure to include an updated cover
+    // letter") share a box, and only the first gets it.
+    if (!box || textOf(box).length > 1500 || box.closest(`[${MARK}]`) || box.querySelector(`[${MARK}]`) || spots.some((spot) => spot.box === box)) continue;
     spots.push({ label, box });
   }
   return spots;
@@ -173,36 +176,156 @@ function download(letter: Letter) {
 }
 
 const BUTTON_STYLE = `
-  :host { all: initial; display: inline-flex; vertical-align: middle; margin: 2px 0 2px 10px; font: 500 12.5px/1.1 -apple-system, system-ui, "Segoe UI", sans-serif; }
-  button { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 8px; background: #262A33; color: #F3F4F6; border: 1px solid #262A33; box-shadow: 0 1px 2px rgba(0,0,0,.2); white-space: nowrap; }
-  button:hover { background: #31363F; border-color: #31363F; }
+  :host { all: initial; position: relative; display: inline-flex; vertical-align: middle; margin: 2px 0 2px 10px; font: 500 12.5px/1.1 -apple-system, system-ui, "Segoe UI", sans-serif; }
+  .main { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 8px; background: #262A33; color: #F3F4F6; border: 1px solid #262A33; box-shadow: 0 1px 2px rgba(0,0,0,.2); white-space: nowrap; }
+  .main:hover { background: #31363F; border-color: #31363F; }
   button:focus-visible { outline: 2px solid #3D8BFF; outline-offset: 2px; }
+  button[disabled] { cursor: default; opacity: .7; }
   .spark { color: #8DB8FF; }
+  .ok { border-color: #22C55E; } .bad { border-color: #F5A524; }
+  .menu { position: absolute; top: calc(100% + 6px); left: 0; z-index: 2147483000; min-width: 220px; max-width: 320px; padding: 5px; border-radius: 10px; background: #262A33; border: 1px solid #353A45; box-shadow: 0 10px 28px rgba(0,0,0,.22); display: grid; gap: 1px; white-space: normal; text-align: left; }
+  .menu[hidden] { display: none; }
+  .menu .head { color: #8D93A0; font-weight: 500; font-size: 11px; padding: 5px 9px 5px; letter-spacing: .02em; }
+  .pick { all: unset; cursor: pointer; display: grid; gap: 2px; padding: 7px 9px; border-radius: 6px; color: #F3F4F6; font-weight: 500; font-size: 13px; }
+  .pick:hover, .pick:focus-visible { background: #31363F; outline: none; }
+  .pick small { color: #A3A9B5; font-weight: 400; font-size: 11.5px; line-height: 1.35; }
+  .pick[disabled] { cursor: default; opacity: .55; } .pick[disabled]:hover { background: none; }
+  .menu .note { margin: 3px 9px 6px; color: #FBBF24; font-weight: 500; font-size: 11.5px; line-height: 1.4; }
+  .menu .good { margin: 3px 9px 6px; color: #4ADE80; font-weight: 600; font-size: 11.5px; line-height: 1.4; }
 `;
 
-/** The label on every button. The letters left today show in the popup, on "Write one with Unnepo". */
+/** The student's account, for the menu: letters left today on Free, and the name of their own saved letter. */
 let account: PageState = { ok: false };
-const buttons = new Set<ShadowRoot>();
-const buttonHtml = () => `<style>${BUTTON_STYLE}</style><button type="button" title="Attach your cover letter, or write one for this job with Unnepo"><span class="spark" aria-hidden="true">✦</span><span>Write with unnepo</span></button>`;
-function relabel() {
-  for (const root of buttons) root.innerHTML = buttonHtml();
+const buttonHtml = () => `<style>${BUTTON_STYLE}</style><button type="button" class="main" title="Attach your default cover letter, or write one tailored to this job with Unnepo" aria-haspopup="menu"><span class="spark" aria-hidden="true">✦</span><span class="text">Write with unnepo</span></button><div class="menu" role="menu" hidden></div>`;
+
+/**
+ * Puts a letter where the form wants it: its upload box, its own Upload button (armed, so the picker gets the file),
+ * or its drop area. None of those, or the site won't take it: downloaded, to upload by hand.
+ */
+async function placeLetter(box: HTMLElement, letter: Letter) {
+  const where = targetsFor(box);
+  try {
+    if (where.file) { attach(where.file, letter); return "Attached to the application"; }
+    if (where.button && (await pressUpload(where.button, letter))) return "Attached to the application";
+    if (where.drop) {
+      const before = textOf(box);
+      dropOn(where.drop, letter);
+      await new Promise((done) => setTimeout(done, 700));
+      // The form shows the file's name once it took it.
+      const stem = (letter.fileName || "Cover letter.pdf").replace(/\.[a-z]+$/i, "");
+      if (textOf(box) !== before && textOf(box).includes(stem)) return "Attached to the application";
+    }
+    download(letter);
+    return where.button || where.drop ? "This form didn't take it, so it downloaded. Upload it with the form's button" : "Downloaded. Upload it with the form's button";
+  } catch {
+    download(letter);
+    return "This site blocks it, so it downloaded. Upload it with the form's button";
+  }
 }
 
+/**
+ * "Write with unnepo" opens a short menu, like "Attach with Unnepo" does for a resume: attach the student's default
+ * cover letter (the one they saved, else a short general one Unnepo writes once from their profile, "Dear Hiring
+ * Team"), or write one tailored to this job (the popup's questions, then the letter to read and edit).
+ */
 function addButton(spot: Spot) {
   spot.box.setAttribute(MARK, "");
   const host = document.createElement("span");
   host.setAttribute(MARK, "button");
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = buttonHtml();
-  buttons.add(root);
-  // Inside a <label>, a click would also open the site's upload box: stopped here.
-  root.addEventListener("click", (event) => {
-    if (!(event.target as Element).closest("button")) return;
+  const button = root.querySelector<HTMLButtonElement>(".main")!;
+  const menu = root.querySelector<HTMLElement>(".menu")!;
+  const label = root.querySelector<HTMLElement>(".text")!;
+  const state = { busy: false, note: "", good: "" };
+  const set = (words: string, tone: "" | "ok" | "bad") => { label.textContent = words; button.className = `main ${tone}`; };
+
+  const outside = (event: Event) => { if (!event.composedPath().includes(host) && !state.busy) closeMenu(); };
+  const closeMenu = () => { menu.hidden = true; document.removeEventListener("click", outside, true); };
+  const row = (title: string, hint: string, act: () => void, disabled = false) => {
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.className = "pick";
+    pick.setAttribute("role", "menuitem");
+    pick.disabled = disabled;
+    const name = document.createElement("span");
+    name.textContent = title;
+    const small = document.createElement("small");
+    small.textContent = hint;
+    pick.append(name, small);
+    pick.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); act(); });
+    menu.append(pick);
+  };
+  const line = (kind: "head" | "note" | "good", text: string) => {
+    const el = document.createElement(kind === "head" ? "div" : "p");
+    el.className = kind;
+    el.textContent = text;
+    if (kind !== "head") el.setAttribute("role", "status");
+    menu.append(el);
+  };
+
+  function drawMenu() {
+    menu.replaceChildren();
+    line("head", "Your cover letter");
+    const out = account.free && typeof account.left === "number" && account.left <= 0;
+    const tailorHint = out ? "None left today on Free. Pro has no limit." : account.free && typeof account.left === "number" ? `Fits it to this job. ${account.left} left today` : "Fits it to this job, with a few quick questions";
+    row(state.busy ? "Attaching…" : "Attach my default cover letter", account.mine ? `Your saved letter, ${account.mine}` : "A short, general letter from your profile. Dear Hiring Team", () => void attachDefault(), state.busy);
+    row("✦ Write a tailored cover letter", tailorHint, () => { closeMenu(); openPopup(spot.box); }, out || state.busy);
+    if (state.note) line("note", state.note);
+    if (state.good) line("good", `✓ ${state.good}`);
+  }
+
+  /** The student's own saved letter as it is; else Unnepo's short general one. A text box gets the words instead. */
+  async function attachDefault() {
+    state.busy = true;
+    state.note = "";
+    state.good = "";
+    button.disabled = true;
+    set("Attaching…", "");
+    drawMenu();
+    const where = targetsFor(spot.box);
+    const typed = Boolean(where.text && !where.file);
+    let placed = "";
+    let problem = "";
+    if (account.mine && !typed) {
+      type Got = { ok: boolean; file?: { name: string; mime: string; base64: string } | null; error?: string | null };
+      const got = await ask<Got>({ type: "my-letter-file" }).catch((): Got => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
+      if (got.ok && got.file) placed = await placeLetter(spot.box, { text: "", fileName: got.file.name, pdfBase64: got.file.base64, mime: got.file.mime });
+      else problem = got.error ?? "Couldn't get your cover letter from Unnepo.";
+    } else if (account.mine && typed) {
+      problem = "This question wants the letter typed in, not a file. Paste yours into it, or write a tailored one.";
+    } else {
+      const got = await ask<Wrote>({ type: "general-letter" }).catch((): Wrote => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
+      if (got.ok && got.doc) {
+        if (typed) { putText(where.text!, got.doc.text); placed = "In the cover letter box"; }
+        else placed = await placeLetter(spot.box, got.doc);
+      } else problem = got.error ?? "Couldn't get your default cover letter.";
+    }
+    state.busy = false;
+    button.disabled = false;
+    const attached = placed === "Attached to the application" || placed === "In the cover letter box";
+    state.good = placed && attached ? placed : "";
+    state.note = problem || (placed && !attached ? placed : "");
+    set(attached ? "✓ Cover letter attached" : problem ? "Write with unnepo" : "Write with unnepo", attached ? "ok" : problem ? "bad" : "");
+    if (attached) closeMenu();
+    else drawMenu();
+  }
+
+  button.addEventListener("click", async (event) => {
     event.preventDefault();
     event.stopPropagation();
-    openPopup(spot.box);
+    if (!menu.hidden) { if (!state.busy) closeMenu(); return; }
+    await refreshAccount();
+    drawMenu();
+    menu.hidden = false;
+    document.addEventListener("click", outside, true);
+    menu.querySelector<HTMLButtonElement>(".pick:not([disabled])")?.focus();
   });
+  menu.addEventListener("keydown", (event) => { if (event.key === "Escape" && !state.busy) { closeMenu(); button.focus(); } });
+  // Inside a <label>, a click would also open the site's upload box: stopped here.
   host.addEventListener("click", (event) => { event.preventDefault(); event.stopPropagation(); });
+  // Site shortcuts don't fire while using the menu.
+  for (const type of ["keydown", "keyup", "keypress"]) root.addEventListener(type, (event) => event.stopPropagation());
   spot.label.append(host);
 }
 
@@ -280,7 +403,7 @@ function openPopup(box: HTMLElement) {
 
   const ui = {
     step: 0 as number, choices: { format: "match", length: "standard", tone: "professional", picked: [] as string[], mention: "" },
-    phase: "choose" as "choose" | "ask" | "writing" | "done", letter: null as Letter | null, edited: false, busy: "", note: "", placed: "",
+    phase: "ask" as "ask" | "writing" | "done", letter: null as Letter | null, edited: false, busy: "", note: "", placed: "",
   };
   const previousFocus = document.activeElement as HTMLElement | null;
   const close = () => {
@@ -292,65 +415,7 @@ function openPopup(box: HTMLElement) {
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && ui.phase !== "writing") { event.stopPropagation(); close(); } };
   document.addEventListener("keydown", onKey, true);
 
-  const countLine = () => (ui.phase !== "choose" && account.free && typeof account.left === "number" ? `<span class="count">${account.left} left today</span>` : "");
-
-  /** First: attach the student's own letter, or have Unnepo write one. The letters left today show on writing. */
-  function chooseBody() {
-    const out = account.free && typeof account.left === "number" && account.left <= 0;
-    const writeHint = out ? "No letters left today on Free. Pro has no limit." : account.free && typeof account.left === "number" ? `Fits it to this job. ${account.left} left today` : "Fits it to this job";
-    const busy = Boolean(ui.busy);
-    return `<h2>Your cover letter</h2>
-      <div class="sub">Attach the one you saved, or have Unnepo write one for this job.</div>
-      ${account.mine ? `<button type="button" class="opt" data-act="mine" ${busy ? "disabled" : ""}>${ui.busy === "mine" ? "Attaching…" : "Attach your cover letter"}<small>${escape(account.mine)}</small></button>` : ""}
-      <button type="button" class="opt" data-act="start-write" ${out || busy ? "disabled" : ""}>✦ Write one with Unnepo<small>${writeHint}</small></button>
-      ${account.mine ? "" : `<p class="sub">Have a letter you always send? Add it to your Unnepo profile (optional) and it shows up here.</p>`}
-      ${ui.note ? `<p class="note" role="status">${escape(ui.note)}</p>` : ""}
-      ${ui.placed ? `<p class="good" role="status">✓ ${escape(ui.placed)}</p><div class="row" style="justify-content: flex-end"><button type="button" class="btn ghost" data-act="close">Done</button></div>` : ""}`;
-  }
-
-  /**
-   * Puts a letter file where the form wants it: its upload box, its own Upload button (armed, so the picker gets
-   * the file), or its drop area. None of those, or the site won't take it: downloaded, to upload by hand.
-   */
-  async function placeFile(letter: Letter) {
-    const where = targetsFor(box);
-    try {
-      if (where.file) { attach(where.file, letter); return "Attached to the application"; }
-      if (where.button && (await pressUpload(where.button, letter))) return "Attached to the application";
-      if (where.drop) {
-        const before = textOf(box);
-        dropOn(where.drop, letter);
-        await new Promise((done) => setTimeout(done, 700));
-        // The form shows the file's name once it took it.
-        const stem = (letter.fileName || "Cover letter.pdf").replace(/\.[a-z]+$/i, "");
-        if (textOf(box) !== before && textOf(box).includes(stem)) return "Attached to the application";
-      }
-      download(letter);
-      return where.button || where.drop ? "This form didn't take it, so it downloaded. Upload it with the form's button" : "Downloaded. Upload it with the form's button";
-    } catch {
-      download(letter);
-      return "This site blocks it, so it downloaded. Upload it with the form's button";
-    }
-  }
-
-  /** "Attach your cover letter": the student's own, as they saved it. */
-  async function attachMine() {
-    const where = targetsFor(box);
-    if (where.text && !where.file) {
-      ui.note = "This question wants the letter typed in, not a file. Paste yours into it, or write one with Unnepo.";
-      return draw();
-    }
-    ui.busy = "mine";
-    ui.note = "";
-    ui.placed = "";
-    draw();
-    type Got = { ok: boolean; file?: { name: string; mime: string; base64: string } | null; error?: string | null };
-    const got = await ask<Got>({ type: "my-letter-file" }).catch((): Got => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
-    if (got.ok && got.file) ui.placed = await placeFile({ text: "", fileName: got.file.name, pdfBase64: got.file.base64, mime: got.file.mime });
-    else ui.note = got.error ?? "Couldn't get your cover letter from Unnepo.";
-    ui.busy = "";
-    draw();
-  }
+  const countLine = () => (account.free && typeof account.left === "number" ? `<span class="count">${account.left} left today</span>` : "");
 
   function askBody() {
     const name = STEPS[ui.step];
@@ -400,7 +465,7 @@ function openPopup(box: HTMLElement) {
     const focusedId = (root.activeElement as HTMLElement | null)?.id;
     const body = ui.phase === "writing"
       ? `<div class="writing" role="status">${spiderSvg()}<div class="bar"><i></i></div><span class="sub">Writing your cover letter…</span></div>`
-      : ui.phase === "done" ? doneBody() : ui.phase === "choose" ? chooseBody() : askBody();
+      : ui.phase === "done" ? doneBody() : askBody();
     root.innerHTML = `<style>${POPUP_STYLE(reduce)}</style>
       <div class="scrim${enter}" data-act="scrim">
         <div class="card${enter}" role="dialog" aria-modal="true" aria-label="Write a cover letter with Unnepo">
@@ -450,13 +515,12 @@ function openPopup(box: HTMLElement) {
   async function act(name: string) {
     if (name === "close") return close();
     if (name === "back") {
-      if (ui.step === 0) ui.phase = "choose";
-      else ui.step -= 1;
+      // The first question's Back goes back to the page, where the menu is.
+      if (ui.step === 0) return close();
+      ui.step -= 1;
       ui.note = "";
       return draw();
     }
-    if (name === "mine") return attachMine();
-    if (name === "start-write") { Object.assign(ui, { phase: "ask", step: 0, note: "", placed: "" }); return draw(); }
     if (name === "write") return write();
     if (name === "again") { Object.assign(ui, { phase: "ask", step: 0, letter: null, edited: false, note: "", placed: "" }); return draw(); }
     if (name === "copy") {
@@ -480,7 +544,7 @@ function openPopup(box: HTMLElement) {
       const letter = await current();
       ui.busy = "";
       if (letter) {
-        if (name === "attach") ui.placed = await placeFile(letter);
+        if (name === "attach") ui.placed = await placeLetter(box, letter);
         else { download(letter); ui.placed = "Downloaded. Upload it with the form's button"; }
       }
       return draw();
@@ -520,8 +584,6 @@ function openPopup(box: HTMLElement) {
 
   mountAbove(host);
   draw();
-  // A letter saved since the page loaded shows up on the first step.
-  void refreshAccount().then(() => { if (ui.phase === "choose" && !ui.busy) draw(); });
   // Still hidden behind the site's own window: write the letter in the side panel instead. This runs inside the
   // click, so Chrome lets the panel open.
   if (coveredUp(host)) {
@@ -536,7 +598,6 @@ async function refreshAccount() {
   } catch {
     account = { ok: false };
   }
-  relabel();
   return account;
 }
 

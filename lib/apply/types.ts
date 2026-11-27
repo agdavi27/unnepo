@@ -318,4 +318,6 @@ export type ApplicationProfile = {
   transcript?: { fileName: string; mime: string; byteSize: number; storagePath: string; uploadedAt: string } | null;
   /** The student's own cover letter (optional), attached as-is where a form asks for one, instead of writing a new one. */
   coverLetter?: { fileName: string; mime: string; byteSize: number; storagePath: string; uploadedAt: string } | null;
+  /** The default letter Unnepo wrote when the student saved none: short and general, kept until they change resumes. */
+  generalLetter?: { text: string; resumeId: string | null; at: string } | null;
 };

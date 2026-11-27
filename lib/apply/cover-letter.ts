@@ -43,7 +43,8 @@ export type CoverLetterStudent = { name: string; resumeText: string; profile: st
 
 /** What the student asked for in the extension's quick questions, or the changes they asked for after reading it. */
 export type CoverLetterStyle = {
-  length?: "short" | "standard" | "detailed";
+  /** "brief": the default letter, a few lines for any employer. */
+  length?: "brief" | "short" | "standard" | "detailed";
   tone?: "professional" | "warm" | "confident" | "enthusiastic";
   /** How the letter is built: one of the research-backed structures in LETTER_FORMATS. */
   format?: LetterFormat;
@@ -70,6 +71,7 @@ const FORMATS: Record<LetterFormat, string> = {
 };
 
 const LENGTHS: Record<NonNullable<CoverLetterStyle["length"]>, string> = {
+  brief: "About 70 to 100 words in all: two short paragraphs, then the close. Broad: who the student is (school, year and major when known) and their one or two strongest real experiences, said in a way that suits any employer in their field.",
   short: "Under 150 words: two short paragraphs plus the close.",
   standard: "About 150 to 200 words.",
   detailed: "About 250 to 300 words, still fitting on one page.",

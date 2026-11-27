@@ -2187,6 +2187,17 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         return reply({ ok: Boolean(got.file), file: got.file, error: got.error });
       }
       // "Attach your cover letter" in the Write with unnepo popup: the student's own letter, as they saved it.
+      // "Attach my default cover letter" for a student who saved none: Unnepo's short general letter, written once.
+      case "general-letter": {
+        if (!fromOwnContent(sender)) return reply({ ok: false });
+        try {
+          const doc = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "general-letter", {});
+          void log("Attached your default cover letter from the button on the page.");
+          return reply({ ok: true, doc });
+        } catch (error) {
+          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't get your default cover letter." });
+        }
+      }
       case "my-letter-file": {
         if (!sender.tab) return reply({ ok: false });
         const mine = await resumeFile("my-letter");
