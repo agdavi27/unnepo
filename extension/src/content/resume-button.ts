@@ -1,4 +1,5 @@
 import type { FileData } from "../shared/types";
+import { fixesFor, openPanel, type Fix } from "./fixes";
 
 /**
  * A small "Attach with Unnepo" button beside each resume upload box on a job page (a file box whose label or
@@ -161,7 +162,7 @@ function addButton(target: Target, after: HTMLElement, kind: Kind) {
   menu.addEventListener("keydown", (event) => { if (event.key === "Escape" && !tailor.busy) { closeMenu(); button.focus(); } });
 
   /** "Tailor my resume to this job": where it's got to, kept while the menu is closed and opened again. */
-  const tailor = { busy: false, file: null as FileData | null, look: "", note: "", account: { free: false, left: null as number | null, limit: null as number | null } };
+  const tailor = { busy: false, file: null as FileData | null, look: "", note: "", fixes: [] as Fix[], resumeId: undefined as string | undefined, account: { free: false, left: null as number | null, limit: null as number | null } };
 
   const row = (label: string, hint: string, onPick: () => void, options: { disabled?: boolean; tag?: string } = {}) => {
     const pick = document.createElement("button");
@@ -236,7 +237,16 @@ function addButton(target: Target, after: HTMLElement, kind: Kind) {
     row("Attach my resume now", "Your saved resume, as it is", () => { closeMenu(); void whichResume((id) => void attach(id)); });
     row(tailor.busy ? "Tailoring your resume…" : "✦ Tailor my resume to this job", tailor.busy ? "Takes a few seconds" : hint, () => void whichResume((id) => void tailorIt(id)), { disabled: out || tailor.busy });
     if (tailor.note) line("note", tailor.note, "status");
+    // What failed, made fixable right here: try again, refresh the page, or open the side panel where it's fixed.
+    if (!tailor.busy) for (const fix of tailor.fixes) row(fix.label, fix.hint, () => void runFix(fix));
     openMenu();
+  }
+
+  async function runFix(fix: Fix) {
+    if (fix.kind === "reload") return location.reload();
+    if (fix.kind === "retry") return tailorIt(tailor.resumeId);
+    closeMenu();
+    if (!(await openPanel())) set("Open Unnepo from the toolbar", "bad");
   }
 
   async function putIn(file: FileData) {
@@ -255,10 +265,12 @@ function addButton(target: Target, after: HTMLElement, kind: Kind) {
   async function tailorIt(resumeId?: string) {
     tailor.busy = true;
     tailor.note = "";
+    tailor.fixes = [];
+    tailor.resumeId = resumeId;
     button.disabled = true;
     set("Tailoring your resume…", "");
     chooseMenu();
-    type Got = { ok?: boolean; file?: FileData; note?: string | null; error?: string };
+    type Got = { ok?: boolean; file?: FileData; note?: string | null; error?: string; code?: string; status?: number };
     // The box's own file types go along: one that takes only PDFs gets a PDF, even from a Word resume.
     const got = await (chrome.runtime.sendMessage({ type: "resume-tailor", resumeId, accept }) as Promise<Got>).catch((): Got => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
     tailor.busy = false;
@@ -268,7 +280,8 @@ function addButton(target: Target, after: HTMLElement, kind: Kind) {
       tailor.look = got.note ?? "";
       set("Tailored. Attach it?", "");
     } else {
-      tailor.note = `${got?.error || "Couldn't tailor your resume."} Your saved resume is still here to attach.`;
+      tailor.note = got?.error || "Couldn't tailor your resume.";
+      tailor.fixes = fixesFor(got ?? {});
       set("Attach with Unnepo", "");
     }
     await refreshAccount();

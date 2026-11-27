@@ -138,6 +138,11 @@ class ApiError extends Error {
   }
 }
 
+/** A failed call for an on-page button: the message plus the server's code and status, so the button can offer a fix. */
+function failedCall(error: unknown, fallback: string) {
+  return { ok: false as const, error: error instanceof Error ? error.message : fallback, code: error instanceof ApiError ? error.code : "", status: error instanceof ApiError ? error.status : 0 };
+}
+
 async function api<T>(method: "GET" | "POST" | "DELETE", path: string, body?: unknown): Promise<T> {
   const { token, apiBase } = await settings();
   if (!token) throw new ApiError("Connect the extension to Unnepo first.", 401);
@@ -706,7 +711,7 @@ async function state(): Promise<PanelState> {
  * (how it's built, length, tone, what to mention), an edit request, or their edited text to save.
  */
 type LetterAsk = { description?: unknown; job?: unknown; options?: unknown };
-async function writeLetter(tabId: number, message: LetterAsk): Promise<{ ok: boolean; doc?: { text: string; fileName: string; pdfBase64: string }; error?: string }> {
+async function writeLetter(tabId: number, message: LetterAsk): Promise<{ ok: boolean; doc?: { text: string; fileName: string; pdfBase64: string }; error?: string; code?: string; status?: number }> {
   try {
     // No job on the page: the student pasted the job description in the panel.
     if (typeof message.description === "string") {
@@ -728,7 +733,7 @@ async function writeLetter(tabId: number, message: LetterAsk): Promise<{ ok: boo
     const letter = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "cover-letter", { applicationId, ...((message.options ?? {}) as object) });
     return { ok: true, doc: letter };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Couldn't write the cover letter." };
+    return failedCall(error, "Couldn't write the cover letter.");
   }
 }
 
@@ -737,7 +742,7 @@ async function writeLetter(tabId: number, message: LetterAsk): Promise<{ ok: boo
  * a PDF for the same upload box. The job comes the way the cover letter's does: the tracker's job for the tab, else the
  * job as the page shows it, else the job the page sent (an apply-by-email card). Never adds a job to the tracker.
  */
-type Tailored = { ok: boolean; file?: FileData; note?: string | null; error?: string };
+type Tailored = { ok: boolean; file?: FileData; note?: string | null; error?: string; code?: string; status?: number };
 type TailoredFile = { fileName: string; mime: string; base64: string; note?: string | null };
 async function tailorResume(tabId: number, options: { resumeId?: unknown; job?: unknown; accept?: unknown } = {}): Promise<Tailored> {
   try {
@@ -757,7 +762,7 @@ async function tailorResume(tabId: number, options: { resumeId?: unknown; job?: 
     const made = await api<TailoredFile>("POST", "tailored-resume", { applicationId, job, resumeId, accept });
     return { ok: true, note: made.note ?? null, file: { name: made.fileName, mime: made.mime || "application/pdf", base64: made.base64 } };
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : "Couldn't tailor your resume. Attach your saved one instead." };
+    return failedCall(error, "Couldn't tailor your resume.");
   }
 }
 
@@ -2195,7 +2200,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           void log("Attached your default cover letter from the button on the page.");
           return reply({ ok: true, doc });
         } catch (error) {
-          return reply({ ok: false, error: error instanceof Error ? error.message : "Couldn't get your default cover letter." });
+          return reply(failedCall(error, "Couldn't get your default cover letter."));
         }
       }
       case "my-letter-file": {
