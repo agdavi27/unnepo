@@ -1,4 +1,5 @@
 import { claudeAsk } from "@/lib/apply/fast/pipeline";
+import { id, nowIso, repo } from "@/lib/db/file-store";
 import { cvPdf } from "@/lib/apply/cv";
 import type { JobApplication } from "@/lib/apply/types";
 import { applyDocxPlan, docxPdf, readDocxLayout } from "@/lib/resume/docx-tailor";
@@ -109,7 +110,7 @@ export function linesForModel(lines: ResumeLine[]) {
 
 /** Asks for the changes and keeps the ones that hold up. Null when AI isn't set up or nothing useful came back. */
 export async function writeTailorPlan(userId: string, job: TailorJob, lines: ResumeLine[]) {
-  if (lines.filter((line) => EDITABLE.has(line.kind)).length < 2) return null;
+  if (lines.filter((line) => EDITABLE.has(line.kind)).length < 2) return tailorFailed(userId, `The resume read into ${lines.length} lines with fewer than 2 that can be edited.`);
   const posting = [
     `Role: ${job.title || "(not named)"}${job.company ? ` at ${job.company}` : ""}`,
     job.requirements.length ? `Requirements from the posting:\n${job.requirements.slice(0, 12).map((item) => `- ${item}`).join("\n")}` : "",
@@ -123,9 +124,17 @@ export async function writeTailorPlan(userId: string, job: TailorJob, lines: Res
   }
   const json = written.slice(written.indexOf("{"), written.lastIndexOf("}") + 1);
   let parsed: unknown;
-  try { parsed = JSON.parse(json); } catch { return null; }
+  try { parsed = JSON.parse(json); } catch { return tailorFailed(userId, `The model's answer wasn't JSON: ${written.slice(0, 200)}`); }
   const plan = checkPlan(lines, parsed, job);
-  return Object.keys(plan.edits).length || Object.keys(plan.order).length ? plan : null;
+  if (Object.keys(plan.edits).length || Object.keys(plan.order).length) return plan;
+  return tailorFailed(userId, `None of the model's changes passed the checks: ${json.slice(0, 300)}`);
+}
+
+/** No plan, with the reason kept for the admin page (a failed model call is already kept by claudeAsk). */
+async function tailorFailed(userId: string, reason: string) {
+  console.error(`[ai] tailored_resume unusable: ${reason}`);
+  await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "tailored_resume", success: false, latencyMs: 0, costCents: 0, estimated: true, error: reason.slice(0, 500), createdAt: nowIso() }).catch(() => undefined);
+  return null;
 }
 
 export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
