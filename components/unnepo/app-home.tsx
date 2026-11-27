@@ -301,7 +301,7 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
             {data && <span className="font-mono text-xs uppercase text-[#8B8B94]">{creditsLabel}</span>}
             {data ? (
               <div className="relative" ref={menu}>
-                <button type="button" aria-label="Account and settings" aria-expanded={menuOpen} onClick={() => setMenuOpen((on) => !on)} className="h-9 w-9 rounded-full border border-[#26262C] bg-[#111114] text-[13px] font-semibold text-[#F7F7F8] hover:border-[#3D8BFF]">{initials || "?"}</button>
+                <button type="button" aria-label="Account and settings" aria-expanded={menuOpen} onClick={() => setMenuOpen((on) => !on)} className="h-9 w-9 rounded-full border border-[#26262C] bg-[#111114] text-[13px] font-semibold text-[#F7F7F8] hover:border-[#3D8BFF]"><span data-pii>{initials || "?"}</span></button>
                 {menuOpen && (
                   <div className="absolute right-0 top-11 z-30 flex w-64 flex-col rounded-xl border border-[#26262C] bg-[#0C0C0E] p-2 text-sm shadow-2xl">
                     <p className="m-0 truncate px-2.5 pt-1 font-medium">{data.user.name || "Student"}</p>

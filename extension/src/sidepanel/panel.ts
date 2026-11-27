@@ -13,6 +13,7 @@ import { dueCount } from "../shared/reminders";
 import { accountTheme, chooseTheme, onThemeChange, startTheme, theme } from "../shared/theme";
 import { UPGRADE_URL } from "@/lib/plan";
 import { startWalkthrough, walkthroughOnce } from "./walkthrough";
+import { DEMO_KEY, demoTerms, startDemoMask, type DemoMode } from "../shared/demo-mask";
 
 startTheme();
 
@@ -1501,6 +1502,24 @@ function resetTime(now = new Date()) {
   return new Date(now.getTime() + (86_400 - intoDay - 60) * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
+/**
+ * Admins only: demo mode blurs personal info in this panel, in Unnepo's cards on job pages, in the job page's form
+ * and on unnepo.com/home, for recording or showing Unnepo. Other people's names (contacts, friends) are marked here.
+ */
+const demoMask = startDemoMask([".account-name", ".me-email", ".account-av", ".friend-name", ".friend-av", ".guess-name", ".guess-mail", ".person-name", ".avatar.initials", ".tool-value", ".resume-link-name", "#resume-pick"]);
+let demo: DemoMode = { on: false, terms: [] };
+const applyDemo = (value: unknown) => { demo = (value as DemoMode | undefined) ?? { on: false, terms: [] }; demoMask.update(demo); };
+void chrome.storage.local.get(DEMO_KEY).then((stored) => applyDemo(stored[DEMO_KEY]));
+chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && DEMO_KEY in changes) { applyDemo(changes[DEMO_KEY]!.newValue); void render(); } });
+const setDemo = (next: DemoMode) => chrome.storage.local.set({ [DEMO_KEY]: next });
+/** Keeps the switch honest: off for anyone who isn't an admin, and hiding the name of whoever is signed in. */
+function syncDemo(me: PanelState["me"]) {
+  if (!demo.on || !me) return;
+  if (!me.admin) { void setDemo({ on: false, terms: [] }); return; }
+  const terms = demoTerms(me.user.name, me.user.email);
+  if (terms.join("|") !== demo.terms.join("|")) void setDemo({ on: true, terms });
+}
+
 /** Admins only: see the product as a Free or a Pro student does. Billing never changes. */
 let planSwitching = false;
 function adminPlanSwitch(preview: "free" | "pro" | null) {
@@ -1509,9 +1528,15 @@ function adminPlanSwitch(preview: "free" | "pro" | null) {
     return `<button type="button" class="chip${on ? " on" : ""}" data-plan-preview="${value}" aria-pressed="${on}" ${planSwitching ? "disabled" : ""}>${label}</button>`;
   };
   return `<div class="row-between"><span class="small">Admin · view as</span><div class="chips" role="group" aria-label="View Unnepo as">${chip("real", "My plan")}${chip("free", "Free")}${chip("pro", "Pro")}</div></div>
-    <div class="row-between"><span class="small">Admin · today's Free counts</span><button type="button" class="chip" id="reset-today" ${planSwitching ? "disabled" : ""}>Reset today</button></div>`;
+    <div class="row-between"><span class="small">Admin · today's Free counts</span><button type="button" class="chip" id="reset-today" ${planSwitching ? "disabled" : ""}>Reset today</button></div>
+    <div class="row-between"><span class="small">Admin · demo mode</span><button type="button" class="chip${demo.on ? " on" : ""}" id="demo-mode" aria-pressed="${demo.on}" title="Blurs names, emails, phone numbers and other personal info here, on job pages and on unnepo.com">${demo.on ? "Blurring personal info" : "Blur personal info"}</button></div>`;
 }
 function wirePlanSwitch() {
+  document.getElementById("demo-mode")?.addEventListener("click", () => {
+    const me = lastState?.me;
+    if (!me?.admin) return;
+    void setDemo(demo.on ? { on: false, terms: [] } : { on: true, terms: demoTerms(me.user.name, me.user.email) });
+  });
   document.getElementById("reset-today")?.addEventListener("click", async () => {
     planSwitching = true;
     void render();
@@ -2020,6 +2045,7 @@ function draw(state: PanelState): boolean {
     letterFor = letterJob;
   }
   dressSpider(state.me?.spider);
+  syncDemo(state.me);
   accountTheme(state.me?.theme);
   const said = lines(state);
   speech(said.lines, said.alert);

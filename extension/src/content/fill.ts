@@ -1,3 +1,4 @@
+import { demoMaskForPage } from "../shared/demo-mask";
 import { CONFIRM_TEXT, type FillPlan, type FillReport, type PageField } from "../shared/types";
 import { buttonUnder, findAction, findApply, pageNotes, pressAction, SUBMIT, workdayStep } from "./actions";
 import { leave, press, sleep, typeInto, visibleOptions, waitFor } from "./dom";
@@ -12,6 +13,9 @@ import { fieldControl, markNeeds, reviewLeft, type CheckItem } from "./needs";
 import { celebrateSpiders, startSpiders, stopSpiders } from "./spiders";
 import { beginApplying, clearQuestionSpiders, jobDetails, putAnswer, showQuestion } from "./apply-help";
 import type { FileData } from "../shared/types";
+
+// Admin demo mode: blur personal info on this page and in Unnepo's cards on it.
+demoMaskForPage();
 
 /**
  * Injected into the job page when the student presses Fill. Scans the form, fills it from the plan the

@@ -392,7 +392,7 @@ function ResumePicker({ state, busy, onPick, onRemove }: { state: State; busy: s
             <li key={item.id} className={`flex items-center gap-3 px-3 py-2.5 ${on ? "bg-[#0C0C0E]" : ""}`}>
               <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
                 <input type="radio" name="active-resume" checked={on} onChange={() => onPick(item.id)} className="accent-[#3D8BFF]" />
-                <span className="min-w-0 truncate text-sm">{item.fileName}</span>
+                <span data-pii className="min-w-0 truncate text-sm">{item.fileName}</span>
                 <span className="shrink-0 text-xs text-[#8B8B94]">{busy === `pick:${item.id}` ? "Switching…" : day(item.uploadedAt)}</span>
               </label>
               <a href={`/api/resume-file?id=${encodeURIComponent(item.id)}`} target="_blank" rel="noreferrer" className="text-xs text-[#9A9AA3] hover:text-white">Open</a>
@@ -448,7 +448,7 @@ function DefaultCoverLetter() {
         </label>
         {letter && (
           <>
-            <span className="min-w-0 truncate text-sm">{letter.fileName}</span>
+            <span data-pii className="min-w-0 truncate text-sm">{letter.fileName}</span>
             <button type="button" disabled={busy} onClick={() => void send({ method: "DELETE" })} className="text-xs text-[#8B8B94] hover:text-red-300">Remove</button>
           </>
         )}

@@ -1,3 +1,8 @@
+import { demoMaskForPage } from "../shared/demo-mask";
+
+// Admin demo mode: blur personal info on unnepo.com/home too.
+demoMaskForPage();
+
 /**
  * Runs on Unnepo's own pages. On /extension/connect, when the student presses Connect, the page posts the new
  * token to itself; this hands it to the extension. On the Applied page, "Fill in from their links" asks the
