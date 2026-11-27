@@ -2,6 +2,7 @@ import { demoMaskForPage } from "../shared/demo-mask";
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
 import type { TrackerContact, TrackerJob } from "../shared/types";
 import { companyGuess } from "@/lib/apply/company-name";
+import { keepOnTop } from "./top-layer";
 
 // Admin demo mode: blur personal info on this page and in Unnepo's cards on it.
 demoMaskForPage();
@@ -250,7 +251,7 @@ function start() {
 
   function draw() {
     if (!card.data) return;
-    if (!host.isConnected) document.documentElement.appendChild(host);
+    if (!host.isConnected) keepOnTop(host);
     if (card.small) {
       root.innerHTML = `<style>${STYLE}</style><button type="button" class="pill" data-act="open" aria-label="Open the Unnepo card">${spiderSvg()}<span>Reach out</span><span class="dot" aria-hidden="true"></span></button>`;
       return;

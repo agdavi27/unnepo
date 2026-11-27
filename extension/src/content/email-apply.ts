@@ -9,6 +9,7 @@
 
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
 import type { FileData } from "../shared/types";
+import { keepOnTop } from "./top-layer";
 
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 const SEND = /\b(send|sending|e-?mail|submit|forward|direct|apply|reply)\b/i;
@@ -97,7 +98,7 @@ function show(found: ApplyEmail, mailer: NonNullable<State["mailer"]>) {
   const host = document.createElement("div");
   host.setAttribute("data-unnepo-email-apply", "");
   const root = host.attachShadow({ mode: "closed" });
-  document.documentElement.append(host);
+  keepOnTop(host);
   let spider = spiderRects(0);
   const ui: { step: "ask" | "writing" | "ready" | "opened"; subject: string; body: string; error: string; shown: boolean } = { step: "ask", subject: "", body: "", error: "", shown: false };
   /** Which resume goes with the email: the saved one, or one tailored to this job (and how that went). */

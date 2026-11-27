@@ -9,6 +9,7 @@ import { watchForms } from "./form-help";
 import { watchPasswordBoxes } from "./password-button";
 import { watchEmailApply } from "./email-apply";
 import { appliedList, appliedStatus, isAppliedListPage } from "./board-status";
+import { keepOnTop } from "./top-layer";
 
 // Admin demo mode: blur personal info on this page and in Unnepo's cards on it.
 demoMaskForPage();
@@ -101,7 +102,7 @@ function show() {
     try { sessionStorage.setItem(DISMISSED, "1"); } catch { /* storage off: it just hides for now */ }
     host.remove();
   });
-  document.documentElement.appendChild(host);
+  keepOnTop(host);
 }
 
 function dismissed() {
