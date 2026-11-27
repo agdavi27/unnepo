@@ -1,5 +1,6 @@
 "use client";
 
+import { pokeLine, pokeMs } from "@/lib/spider-pokes";
 import { useEffect, useReducer, useRef, useState } from "react";
 
 /**
@@ -18,9 +19,6 @@ const LINES = [
   "Your job? Pick the jobs. I'll do the crawling.",
 ];
 
-/** What he says when poked, getting crankier each time. */
-const OUCH = ["Ouch!", "Hey! Quit poking me.", "I have eight legs and I'm not afraid to use them.", "OK, that's it. I'm telling the recruiters."];
-const MAD_MS = 2200;
 
 const ACCENT = "#3D8BFF";
 const PALETTE: Record<string, string> = {
@@ -254,6 +252,8 @@ export function SpiderDialogue() {
   // Pokes so far; `mad` is non-zero (the poke number) while he's still cross.
   const [pokes, setPokes] = useState(0);
   const [mad, setMad] = useState(0);
+  // Mixes up the order of what he says when poked (lib/spider-pokes.ts), picked on the first poke.
+  const [seed, setSeed] = useState(0);
   const home = useRef<HTMLDivElement>(null);
   const view = useScrollView(home);
 
@@ -273,18 +273,19 @@ export function SpiderDialogue() {
 
   useEffect(() => {
     if (!mad) return;
-    const timer = setTimeout(() => setMad(0), MAD_MS);
+    const timer = setTimeout(() => setMad(0), pokeMs(pokeLine(mad, seed)));
     return () => clearTimeout(timer);
-  }, [mad]);
+  }, [mad, seed]);
 
   const poke = () => {
     const count = pokes + 1;
+    if (count === 1) setSeed(Math.random());
     setPokes(count);
     setMad(count);
   };
 
   const { line } = state;
-  const text = mad ? OUCH[Math.min(mad, OUCH.length) - 1] : LINES[line];
+  const text = mad ? pokeLine(mad, seed) : LINES[line];
   const typed = reduced || mad ? text.length : state.shown;
   const typing = typed < text.length;
   // With reduced motion every line is shown whole, so a click always moves on.
