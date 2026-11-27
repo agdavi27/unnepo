@@ -22,6 +22,7 @@ export function AdminView() {
   const unit = data.unit as Record<string, number>;
   const providers = data.providers as Array<Record<string, number | string | boolean>>;
   const alerts = data.alerts as Array<{ level: string; message: string }>;
+  const failures = (data.failures ?? []) as Array<{ provider: string; operation: string; error: string; at: string }>;
   return (
     <div className="px-4 py-6 lg:px-6">
       <h1 className="text-4xl font-semibold">Profitability</h1>
@@ -52,6 +53,19 @@ export function AdminView() {
       <ul className="mt-4 space-y-2 text-sm">
         {alerts.map((alert) => <li key={alert.message} className={alert.level === "warning" ? "text-cream" : "text-muted"}>{alert.message}</li>)}
       </ul>
+      <section className="mt-6">
+        <h2 className="font-semibold">Recent provider failures</h2>
+        {failures.length ? (
+          <ul className="mt-3 space-y-2 text-sm">
+            {failures.map((item, index) => (
+              <li key={`${item.at}-${index}`} className="rounded-xl border border-line bg-card p-3">
+                <span className="text-faint">{new Date(item.at).toLocaleString()} · {item.provider} · {item.operation}</span>
+                <p className="mt-1 break-words text-muted">{item.error || "No message"}</p>
+              </li>
+            ))}
+          </ul>
+        ) : <p className="mt-2 text-sm text-muted">None recorded.</p>}
+      </section>
     </div>
   );
 }

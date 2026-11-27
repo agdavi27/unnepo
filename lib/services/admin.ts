@@ -93,6 +93,8 @@ export async function profitability() {
     },
     providers,
     alerts,
+    // The newest provider failures with their messages, so a broken key, empty balance or retired model shows up here.
+    failures: recentFailures.slice().reverse().map((item) => ({ provider: item.provider, operation: item.operation, error: item.error ?? "", at: item.createdAt })),
     counts: { users: users.length, unlocks: successfulUnlocks, generations: db.generations.length },
   };
 }

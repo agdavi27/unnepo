@@ -97,7 +97,11 @@ export const letterModel = () => process.env.ANTHROPIC_LETTER_MODEL || process.e
 export async function writeCoverLetter(userId: string, app: Pick<JobApplication, "title" | "company" | "department" | "description" | "requirements">, student: CoverLetterStudent, style: CoverLetterStyle = {}) {
   if (!student.resumeText.trim() && !student.profile.trim()) return null;
   const apiKey = await readAnthropicKey();
-  if (!apiKey) return null;
+  if (!apiKey) {
+    console.error("[ai] cover_letter failed: no Anthropic key on the server");
+    await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: false, latencyMs: 0, costCents: 0, estimated: true, error: "No Anthropic API key is set on the server.", createdAt: nowIso() }).catch(() => undefined);
+    return null;
+  }
   const config = serverConfig();
   // A generic letter, for no job in particular.
   const generic = !app.title && !app.description.trim();
@@ -132,6 +136,7 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
     if (response.stop_reason === "refusal" || text.length < 200 || /\[[^\]]*\]/.test(text)) return null;
     return text.slice(0, 4000);
   } catch (error) {
+    console.error(`[ai] cover_letter failed (${letterModel()}): ${error instanceof Error ? error.message : error}`);
     await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true, error: error instanceof Error ? error.message : "anthropic_failed", createdAt: nowIso() });
     return null;
   }

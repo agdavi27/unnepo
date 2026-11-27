@@ -78,13 +78,26 @@ export function knownAnswers(context: KnownContext) {
 export function claudeAsk(userId: string, purpose: string) {
   return async (system: string, content: string) => {
     const apiKey = await readAnthropicKey();
-    if (!apiKey) throw new Error("AI writing is not configured.");
+    if (!apiKey) {
+      console.error(`[ai] ${purpose} failed: no Anthropic key on the server`);
+      await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: purpose, success: false, latencyMs: 0, costCents: 0, estimated: true, error: "No Anthropic API key is set on the server.", createdAt: nowIso() }).catch(() => undefined);
+      throw new Error("AI writing is not configured.");
+    }
     const config = serverConfig();
     const model = process.env.ANTHROPIC_MAPPING_MODEL || process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
     const started = Date.now();
     const Anthropic = (await import("@anthropic-ai/sdk")).default;
     const client = new Anthropic({ apiKey });
-    const response = await client.messages.create({ model, max_tokens: 4000, system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }], messages: [{ role: "user", content }] });
+    let response;
+    try {
+      response = await client.messages.create({ model, max_tokens: 4000, system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }], messages: [{ role: "user", content }] });
+    } catch (error) {
+      // Kept with its message, so the admin page shows why (bad key, no balance, retired model).
+      const message = error instanceof Error ? error.message : "anthropic_failed";
+      console.error(`[ai] ${purpose} failed (${model}): ${message}`);
+      await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: purpose, success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true, error: message.slice(0, 500), createdAt: nowIso() }).catch(() => undefined);
+      throw error;
+    }
     const inputTokens = response.usage?.input_tokens ?? 0;
     const outputTokens = response.usage?.output_tokens ?? 0;
     const costCents = (inputTokens * config.fastInputCentsPerMillion + outputTokens * config.fastOutputCentsPerMillion) / 1_000_000;
