@@ -142,7 +142,7 @@ function drawBar() {
         host = null;
       }
     });
-    keepOnTop(host);
+    keepOnTop(host, "13px/1.3 system-ui, -apple-system, sans-serif");
   }
   const bar = host.shadowRoot!.querySelector<HTMLDivElement>(".bar")!;
   if (done) {
@@ -252,7 +252,7 @@ function drawChips() {
         button[data-error] { border-color: #F87171; }
         button:focus-visible { outline: 3px solid #3D8BFF; outline-offset: 2px; }
       </style>`;
-    keepOnTop(chips);
+    keepOnTop(chips, "600 12px/1 system-ui, -apple-system, sans-serif");
     addEventListener("scroll", schedulePlace, { capture: true, passive: true });
     addEventListener("resize", schedulePlace, { passive: true });
   }

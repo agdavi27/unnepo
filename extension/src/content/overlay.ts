@@ -95,7 +95,10 @@ function start() {
     .av { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #fff; font: 600 10px system-ui, sans-serif; }
     .who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     .who b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .who span { font-size: 11.5px; color: #5C5C66; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .tag { flex: none; font: 600 10px/1 system-ui, sans-serif; color: #1D4ED8; background: #EAF2FF; border-radius: 999px; padding: 3px 7px; }
+    .saved { font-size: 12px; color: #15803D; font-weight: 600; }
+    .who > span:not(.name-row) { font-size: 11.5px; color: #5C5C66; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .btn { all: unset; cursor: pointer; height: 30px; padding: 0 11px; border-radius: 9px; font: 600 12px system-ui, sans-serif; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; background: #3D8BFF; color: #fff; }
     .btn:hover { background: #2F6FEB; }
     .btn.ghost { background: transparent; color: #111114; box-shadow: inset 0 0 0 1px #D7D7DE; font-weight: 500; }
@@ -163,12 +166,23 @@ function start() {
       </div>`;
   }
 
-  /** Free sees the one person it unlocked (the posting's first); Pro, the first two. */
+  /**
+   * Who shows: the person the job listing named (free, it came with the page), then Free's one unlocked person with
+   * an email, or Pro's first two.
+   */
   function people(data: CardState) {
     const list = data.job?.contacts ?? [];
-    if (!data.free) return list.slice(0, 2);
-    const pick = list.find((person) => person.role === "job_poster") ?? list.find((person) => person.email) ?? list[0];
-    return pick ? [pick] : [];
+    const poster = list.find((person) => person.role === "job_poster");
+    const others = list.filter((person) => person !== poster);
+    const rest = data.free ? others.filter((person) => person.email).slice(0, 1) : others.slice(0, 2);
+    return poster ? [poster, ...rest] : rest;
+  }
+
+  /** Their LinkedIn profile when Unnepo has it, else a LinkedIn search for them at the company. */
+  function linkedinFor(person: TrackerContact) {
+    if (person.linkedinUrl && /^https:\/\/([\w-]+\.)?linkedin\.com\//i.test(person.linkedinUrl)) return person.linkedinUrl;
+    const company = card.data?.job?.company || "";
+    return `https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords: `${person.name} ${company}`.trim(), origin: "GLOBAL_SEARCH_HEADER" })}`;
   }
 
   /**
@@ -180,13 +194,15 @@ function start() {
     const manual = card.busy.has(`manual:${person.id}`);
     const emailed = card.sent.has(person.id) || person.outreachStatus !== "not_contacted";
     const id = escape(person.id);
+    // No email yet: they're kept on the job for later, and LinkedIn is where to reach them now.
     const buttons = person.email
       ? `<div class="row"><button type="button" class="btn wide" data-act="email" data-id="${id}" ${auto ? "disabled" : ""}>${auto ? "Writing…" : "Auto write email"}</button><button type="button" class="btn ghost wide" data-act="manual" data-id="${id}" ${manual ? "disabled" : ""}>Manual write email</button></div>`
-      : `<span class="sub">No email for them.</span>`;
+      : `<span class="saved">✓ Saved for later. No email for them yet.</span><div class="row"><button type="button" class="btn ghost wide" data-act="profile" data-id="${id}">Find them on LinkedIn</button></div>`;
+    const tag = person.role === "job_poster" ? `<span class="tag">Found on job listing</span>` : "";
     const status = card.opened.has(person.id)
       ? `<div class="row"><span class="sub" style="flex:1">Sent it?</span><button type="button" class="btn ok" data-act="sent" data-id="${id}">Sent</button><button type="button" class="btn ghost" data-act="notyet" data-id="${id}">Not yet</button></div>`
       : emailed ? `<span class="done">Emailed ✓</span>` : "";
-    return `<div class="person-block"><div class="person"><span class="av" style="background:${color(person.name)}">${escape(initials(person.name))}</span><span class="who"><b>${escape(person.name)}</b><span>${escape(person.title || "")}</span></span></div>${buttons}${status}</div>`;
+    return `<div class="person-block"><div class="person"><span class="av" style="background:${color(person.name)}">${escape(initials(person.name))}</span><span class="who"><span class="name-row"><b>${escape(person.name)}</b>${tag}</span><span>${escape(person.title || "")}</span></span></div>${buttons}${status}</div>`;
   }
 
   /**
@@ -232,7 +248,14 @@ function start() {
       const shown = people(data);
       const finding = job.contactsStatus === "finding" || job.contactsStatus === "writing" || card.busy.has("find");
       if (shown.length) {
-        inner = `${shown.map(personRow).join("")}<span class="sub">Auto writes it from your resume and opens Gmail, ready to send. Manual opens an empty email to them.</span>`;
+        const left = data.peopleLeft ?? 0;
+        const out = data.free && !left;
+        const hint = shown.some((person) => person.email) ? `<span class="sub">Auto writes it from your resume and opens Gmail, ready to send. Manual opens an empty email to them.</span>` : "";
+        // More people with work emails, beyond who's shown (the listing's poster, say). Uses one company, like Yes did.
+        const more = finding
+          ? `<span class="sub">${escape(job.contactsMessage || `Finding more people at ${company}…`)}</span><div class="bar" role="progressbar" aria-label="Finding people"><i></i></div>`
+          : `<button type="button" class="btn ghost" data-act="find" ${out ? "disabled" : ""}>${out ? "Find more people · Pro" : "+ Find more people to reach out to"}</button>`;
+        inner = `${shown.map(personRow).join("")}${hint}${more}`;
       } else if (finding) {
         inner = `<span class="sub">${escape(job.contactsMessage || `Finding people at ${company}…`)}</span><div class="bar" role="progressbar" aria-label="Finding people"><i></i></div>`;
       } else {
@@ -380,6 +403,11 @@ function start() {
           if (!result.ok) card.note = result.error ?? "Couldn't start the search.";
           await load(true);
         });
+      case "profile": {
+        const person = card.data?.job?.contacts.find((item) => item.id === id);
+        if (person) window.open(linkedinFor(person), "_blank", "noopener");
+        return;
+      }
       case "linkedin":
         void ask<{ ok: boolean; error?: string }>({ type: "card-linkedin", applicationId: card.applicationId }).then((result) => {
           if (!result?.ok) { card.note = result?.error ?? "Click the Unnepo icon in your toolbar."; draw(); }

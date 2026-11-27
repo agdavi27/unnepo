@@ -90,7 +90,7 @@ export function watchTypedAnswers() {
     const button = root.querySelector("button")!;
     button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", () => void save(el, button));
-    keepOnTop(host);
+    keepOnTop(host, `600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif`);
     place();
     // Left alone, it goes after a while; the answer stays in the box either way.
     hideTimer = window.setTimeout(hide, 20_000);

@@ -92,9 +92,21 @@ function watch() {
   }, 1000);
 }
 
-/** Adds `host` to the page and keeps it in front of everything until its `remove()` is called. */
-export function keepOnTop(host: HTMLElement) {
+const SYSTEM = `system-ui, -apple-system, "Segoe UI", sans-serif`;
+
+/**
+ * Sets a piece's font on its host element itself. Some sites reset every div's font (LinkedIn: \`font: inherit\`),
+ * and a page's own rules beat a shadow root's \`:host\` style, so the piece came out in 10px Times. Its own inline
+ * style beats those rules. `font` is the CSS font shorthand the piece's \`:host\` asks for.
+ */
+export function pinFont(host: HTMLElement, font = `13px/1.4 ${SYSTEM}`) {
+  host.style.setProperty("font", font);
+}
+
+/** Adds `host` to the page and keeps it in front of everything until its `remove()` is called. `font`: see pinFont. */
+export function keepOnTop(host: HTMLElement, font?: string) {
   kept.add(host);
+  pinFont(host, font);
   // A popover gets the browser's default box (a border, padding, a white background) until its own style says
   // otherwise, and a piece with nothing to show has no style at all: an empty, invisible box instead.
   for (const [name, value] of [["border", "0"], ["padding", "0"], ["background", "transparent"]]) host.style.setProperty(name, value);
