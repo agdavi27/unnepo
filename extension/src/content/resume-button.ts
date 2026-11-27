@@ -75,8 +75,37 @@ function attachFile(input: HTMLInputElement, file: FileData) {
   input.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
 }
 
-function addButton(input: HTMLInputElement, after: HTMLElement, kind: Kind) {
-  input.setAttribute(MARK, "");
+/**
+ * Presses the site's own Upload button with the file armed (see file-catcher.ts): the picker it opens gets the file
+ * instead. True when the site took it within a couple of seconds.
+ */
+async function pressUpload(button: HTMLElement, file: FileData) {
+  const taken = new Promise<boolean>((done) => {
+    const timer = setTimeout(() => { window.removeEventListener("unnepo:file-taken", got); done(false); }, 2500);
+    const got = () => { clearTimeout(timer); done(true); };
+    window.addEventListener("unnepo:file-taken", got, { once: true });
+  });
+  window.dispatchEvent(new CustomEvent("unnepo:arm-file", { detail: JSON.stringify({ name: file.name, mime: file.mime, base64: file.base64 }) }));
+  button.click();
+  const ok = await taken;
+  if (!ok) window.dispatchEvent(new CustomEvent("unnepo:disarm-file"));
+  return ok;
+}
+
+/**
+ * Where the file goes: an upload box, or (LinkedIn's Easy Apply, which has no box until its "Upload resume" button
+ * makes one) the site's own button, pressed with the file armed.
+ */
+type Target = { input: HTMLInputElement } | { button: HTMLElement };
+
+function addButton(target: Target, after: HTMLElement, kind: Kind) {
+  const marked = "input" in target ? target.input : target.button;
+  marked.setAttribute(MARK, "");
+  const accept = "input" in target ? target.input.accept : "";
+  const place = async (file: FileData) => {
+    if ("input" in target) { attachFile(target.input, file); return true; }
+    return pressUpload(target.button, file);
+  };
   const host = document.createElement("span");
   host.setAttribute(MARK, "button");
   const root = host.attachShadow({ mode: "closed" });
@@ -123,12 +152,7 @@ function addButton(input: HTMLInputElement, after: HTMLElement, kind: Kind) {
     }
     button.disabled = false;
     if (!result?.ok || !result.file) return set(result?.error || `Upload your ${kind} in Unnepo first`, "bad");
-    try {
-      attachFile(input, result.file);
-      set(`✓ Attached ${short(result.file.name)}`, "ok");
-    } catch {
-      set("This site blocks it. Upload it yourself", "bad");
-    }
+    await putIn(result.file);
   }
 
   const closeMenu = () => { menu.hidden = true; document.removeEventListener("click", outside, true); };
@@ -200,7 +224,7 @@ function addButton(input: HTMLInputElement, after: HTMLElement, kind: Kind) {
     line("head", "Your resume");
     if (tailor.file) {
       line("good", `✓ Tailored to this job${tailor.look ? `. ${tailor.look}` : ""}`, "status");
-      row("Attach tailored resume", tailor.file.name, () => { closeMenu(); putIn(tailor.file!); });
+      row("Attach tailored resume", tailor.file.name, () => { closeMenu(); void putIn(tailor.file!); });
       row("Preview it", "Opens the PDF in a new tab", () => preview(tailor.file!));
       row("Attach my saved resume instead", "As it is, no changes", () => { closeMenu(); void whichResume((id) => void attach(id)); });
       return openMenu();
@@ -214,13 +238,9 @@ function addButton(input: HTMLInputElement, after: HTMLElement, kind: Kind) {
     openMenu();
   }
 
-  function putIn(file: FileData) {
-    try {
-      attachFile(input, file);
-      set(`✓ Attached ${short(file.name)}`, "ok");
-    } catch {
-      set("This site blocks it. Upload it yourself", "bad");
-    }
+  async function putIn(file: FileData) {
+    const ok = await place(file).catch(() => false);
+    set(ok ? `✓ Attached ${short(file.name)}` : "This site blocks it. Upload it yourself", ok ? "ok" : "bad");
   }
 
   function preview(file: FileData) {
@@ -239,7 +259,7 @@ function addButton(input: HTMLInputElement, after: HTMLElement, kind: Kind) {
     chooseMenu();
     type Got = { ok?: boolean; file?: FileData; note?: string | null; error?: string };
     // The box's own file types go along: one that takes only PDFs gets a PDF, even from a Word resume.
-    const got = await (chrome.runtime.sendMessage({ type: "resume-tailor", resumeId, accept: input.accept }) as Promise<Got>).catch((): Got => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
+    const got = await (chrome.runtime.sendMessage({ type: "resume-tailor", resumeId, accept }) as Promise<Got>).catch((): Got => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
     tailor.busy = false;
     button.disabled = false;
     if (got?.ok && got.file) {
@@ -271,12 +291,31 @@ function addButton(input: HTMLInputElement, after: HTMLElement, kind: Kind) {
   after.insertAdjacentElement("afterend", host);
 }
 
+// The site's own button for a resume upload: "Upload resume", "Attach CV", "Add résumé"...
+const UPLOAD_RESUME = /\b(upload|attach|add|choose|select|browse)\b.{0,20}(r[eé]sum[eé]|\bcv\b)/i;
+const visible = (el: Element) => { const rect = el.getBoundingClientRect(); return rect.width > 2 && rect.height > 2; };
+
 function scan() {
   for (const input of Array.from(document.querySelectorAll<HTMLInputElement>(`input[type=file]:not([${MARK}])`))) {
     const kind = input.files?.length ? null : asksFor(input);
     if (!kind) continue;
-    const shown = shownFor(input);
-    if (shown) addButton(input, shown, kind);
+    // The box is often hidden inside a list of choices (LinkedIn's saved resumes): then beside its visible label.
+    const shown = shownFor(input) ?? Array.from(input.labels ?? []).find(visible) ?? null;
+    if (shown) addButton({ input }, shown, kind);
+  }
+  // No upload box yet (LinkedIn's Easy Apply makes one only when its "Upload resume" is pressed): beside that button.
+  for (const el of Array.from(document.querySelectorAll<HTMLElement>(`button:not([${MARK}]), label:not([${MARK}]), [role=button]:not([${MARK}])`))) {
+    if (el.closest(`[${MARK}="button"]`) || (el as HTMLButtonElement).disabled || !visible(el)) continue;
+    const words = `${(el.innerText || el.textContent || "").replace(/\s+/g, " ").trim()} ${el.getAttribute("aria-label") ?? ""}`;
+    if (words.length > 120 || !UPLOAD_RESUME.test(words) || NOT_RESUME.test(words)) continue;
+    // A label for a box: the box itself, unless it was handled above.
+    const control = el instanceof HTMLLabelElement ? el.control : null;
+    if (control instanceof HTMLInputElement && control.type === "file") {
+      if (control.hasAttribute(MARK) || control.files?.length) continue;
+      addButton({ input: control }, el, "resume");
+      continue;
+    }
+    addButton({ button: el }, el, "resume");
   }
 }
 

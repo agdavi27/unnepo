@@ -5,7 +5,8 @@
  *
  * What gets blurred:
  *   - anything showing the admin's own name or email (the "terms" the panel saves with the switch),
- *   - any email address or phone number, and links to LinkedIn, GitHub and personal sites,
+ *   - any email address or phone number, document file names (a resume's name is the student's), and links to
+ *     LinkedIn, GitHub and personal sites,
  *   - form fields that hold personal details (name, email, phone, address, birthday, demographic questions),
  *   - elements a surface marks as personal: `[data-pii]` plus the selectors it passes in.
  * Only the page's look changes: nothing is rewritten, so React pages and filled forms keep working.
@@ -19,6 +20,8 @@ const STYLE = `[${ATTR}]{filter:blur(7px)!important;user-select:none!important}[
 const EMAIL = /[\w.+-]+@[\w-]+(\.[\w-]+)+/;
 const OUR_EMAIL = /@(www\.)?unnepo\.com\b/i;
 const PHONE = /(\+?\d{1,2}[\s.-]?)?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}\b/;
+// A document's file name ("Andrew Davis Resume.pdf"): resumes and letters carry the name, however it's spelled.
+const FILE_NAME = /\w ?\.(pdf|docx?|rtf|odt|pages)\b/i;
 const PROFILE_LINK = /(linkedin\.com\/in\/|github\.com\/[\w-]+|https?:\/\/(?!(www\.)?unnepo\.com)[\w-]+\.(me|dev|io|page|site)\b)/i;
 // A field about the person, by its name, id, autocomplete, label or placeholder.
 const PERSONAL_FIELD = /\b(first|last|middle|full|legal|preferred|given|family|sur|nick)[\s_-]?name|\bname\b|e-?mail|phone|mobile|\btel\b|address|street|\bcity\b|\bstate\b|\bzip|postal|county|birth|\bdob\b|\bssn\b|social security|linkedin|github|portfolio|website|\bgender|\brace\b|ethnic|hispanic|latin|veteran|disabilit|pronoun|sexual orientation/i;
@@ -67,7 +70,7 @@ export function startDemoMask(selectors: string[] = [], ownDocument = true): Mas
     if (termPattern?.test(text)) return true;
     const email = text.match(EMAIL);
     if (email && !OUR_EMAIL.test(email[0])) return true;
-    return PHONE.test(text) || PROFILE_LINK.test(text);
+    return PHONE.test(text) || PROFILE_LINK.test(text) || (text.length < 120 && FILE_NAME.test(text));
   };
 
   const fieldIsPersonal = (el: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement) => {
