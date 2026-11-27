@@ -216,10 +216,10 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, unlocks
     return (
       <div className="flex flex-col gap-4">
         <div className="flex items-center gap-3 pr-8">
-          <Avatar name={person.name} size={52} />
+          <span data-pii className="shrink-0"><Avatar name={person.name} size={52} /></span>
           <div className="min-w-0 flex-1">
             <h2 className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-lg font-semibold tracking-tight">
-              <span className="truncate">{person.name}</span>
+              <span data-pii className="truncate">{person.name}</span>
               <span className="rounded-full border border-[#26262C] px-1.5 font-mono text-[10px] font-normal text-[#B4B4BC]">{ROLE_LABEL[person.role] ?? person.role}</span>
             </h2>
             <p className="m-0 truncate text-sm text-[#8B8B94]">{[person.title, company].filter(Boolean).join(" · ")}</p>
@@ -303,10 +303,10 @@ export function PeoplePanel({ job, free, badge, note, emailsLeft = null, unlocks
           <li key={person.id}>
             <button type="button" onClick={() => setFocus(person.id)} aria-label={`Open ${person.name}`}
               className={`group flex w-full items-center gap-3 rounded-xl border bg-[#0A0A0C] px-3 py-3 text-left transition-colors hover:border-[#3A3A42] hover:bg-white/[0.03] ${start ? "border-[#2A3A5A]" : "border-[#1F1F24]"}`}>
-              <Avatar name={person.name} />
+              <span data-pii className="shrink-0"><Avatar name={person.name} /></span>
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
-                  <span className="truncate text-sm font-semibold">{person.name}</span>
+                  <span data-pii className="truncate text-sm font-semibold">{person.name}</span>
                   {start && <span className="flex-none font-mono text-[10px] uppercase tracking-[.6px] text-[#3D8BFF]">★ Start</span>}
                   {person.role === "job_poster" && <span className="flex-none rounded-full border border-[#26262C] px-1.5 font-mono text-[10px] text-[#B4B4BC]">Shown on job posting</span>}
                 </span>

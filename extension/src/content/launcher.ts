@@ -1,3 +1,4 @@
+import { demoMaskForPage } from "../shared/demo-mask";
 import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
 import { QUICK_BOARDS, watchApplyPresses } from "./quick-apply";
 import { watchEdits } from "./edits";
@@ -8,6 +9,9 @@ import { watchForms } from "./form-help";
 import { watchPasswordBoxes } from "./password-button";
 import { watchEmailApply } from "./email-apply";
 import { appliedList, appliedStatus, isAppliedListPage } from "./board-status";
+
+// Admin demo mode: blur personal info on this page and in Unnepo's cards on it.
+demoMaskForPage();
 
 /**
  * The little spider that drops down on the right of a job page, like a "fill with" button. It runs on

@@ -1,6 +1,10 @@
+import { demoMaskForPage } from "../shared/demo-mask";
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
 import type { TrackerContact, TrackerJob } from "../shared/types";
 import { companyGuess } from "@/lib/apply/company-name";
+
+// Admin demo mode: blur personal info on this page and in Unnepo's cards on it.
+demoMaskForPage();
 
 /**
  * Unnepo on the page, like Grammarly: a card in the bottom-right of a job page, in its own shadow root so the
