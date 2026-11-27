@@ -200,6 +200,12 @@ export async function weekUses(userId: string): Promise<UsageCounts> {
   return uses?.week === weekKey() ? uses.weekly ?? {} : {};
 }
 
+/** Today's counts (Eastern time): tailored resumes and the rest, for game mode. */
+export async function todayUses(userId: string): Promise<UsageCounts> {
+  const uses = (await applicationProfiles.get(userId))?.uses;
+  return uses?.day === dayKey() ? uses.daily ?? {} : {};
+}
+
 /** After a use that worked: one more, in the day's, week's and month's counts. Edits the student types themselves don't count. */
 export async function countUse(userId: string, kind: CountedKind) {
   // An account with no saved profile yet still counts, or it would never run out: its profile is built from the

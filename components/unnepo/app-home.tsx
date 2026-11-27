@@ -10,6 +10,7 @@ import { CREDIT_COST, ENTERPRISE_PLAN, PRO_COMPANIES_PER_MONTH, PUBLIC_PLANS, RE
 import type { planUsage } from "@/lib/apply/limits";
 import { Logo } from "@/components/brand/logo";
 import { SpiderSettings } from "@/components/unnepo/spider-settings";
+import { DailyBossPopup, GameSettingsCard } from "@/components/unnepo/daily-boss";
 import { JobsView } from "@/components/unnepo/jobs-view";
 import { GoalsView } from "@/components/unnepo/goals-view";
 import { ResourcesView, type GuideLink } from "@/components/unnepo/resources-view";
@@ -318,6 +319,8 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
           </div>
         </div>
       </header>
+      {/* Game mode's daily boss, bottom right (components/unnepo/daily-boss.tsx). */}
+      {data && !showOnboarding && <DailyBossPopup />}
       <main className="mx-auto flex max-w-[1920px] flex-col gap-8 overflow-x-clip px-3 pb-16 pt-6 sm:px-5">
         {error && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
@@ -383,6 +386,7 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
                 </button>
               </div>
             </section>
+            <GameSettingsCard titleClass={sectionTitle} />
             <SpiderSettings />
             <section id="plans" className="scroll-mt-24 space-y-4">
               <div className="flex flex-wrap items-end justify-between gap-3">

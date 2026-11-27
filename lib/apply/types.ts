@@ -296,6 +296,8 @@ export type ApplicationProfile = {
   jobFeed?: { seen: Record<string, string>; dismissed: string[]; round: number; saved?: SavedFeedJob[] };
   /** The spider the student picked on the Stats page (lib/spiders.ts); worn once it's unlocked. */
   spiderSkin?: string;
+  /** Game mode (lib/game/boss.ts): on or off, where the daily boss popup shows, and its XP target. */
+  game?: { on?: boolean; home?: boolean; panel?: boolean; target?: string };
   /** Light or dark, for the extension's panel and unnepo.com/home alike. Dark when unset. */
   theme?: "light" | "dark";
   /** CVs Unnepo has written for the student. */

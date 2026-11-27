@@ -64,7 +64,7 @@ a.plan-badge:hover { filter: brightness(1.1); }
 .spider.mad .mouth-shut, .spider.mad .mouth-open { display: none; }
 .spider.mad svg { animation: shake .45s steps(5); }
 
-.body { padding: 20px; display: flex; flex-direction: column; gap: 16px; flex: 1; min-width: 0; }
+.body { padding: 20px 20px calc(20px + var(--boss-room, 0px)); display: flex; flex-direction: column; gap: 16px; flex: 1; min-width: 0; }
 
 /* Today's goal */
 .goal { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted-2); }
@@ -1064,3 +1064,11 @@ button.detected-title:hover { text-decoration: underline; text-underline-offset:
 .fu-how summary:hover { color: var(--fg); }
 .fu-how p { margin: 8px 0 0; line-height: 1.5; }
 .dash-link { width: 100%; }
+
+/* Game mode: the daily boss popup, above the tabs (boss.ts sets how far up). */
+.boss-slot { position: fixed; right: 10px; z-index: 6; width: min(300px, calc(100vw - 20px)); display: flex; justify-content: flex-end; pointer-events: none; }
+.boss-slot > * { pointer-events: auto; }
+.boss-slot:empty { display: none; }
+.boss-off { display: flex; align-items: center; gap: 10px; padding: 4px 6px 4px 12px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--raise); font-size: 12px; color: var(--muted-3); box-shadow: 0 12px 30px -12px rgba(0,0,0,.6); }
+.boss-off .quiet-link { min-height: 32px; }
+.set-row.set-off { opacity: .45; cursor: default; }

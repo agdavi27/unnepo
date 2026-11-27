@@ -46,8 +46,8 @@ export async function claimInvites(userId: string, emailNormalized: string) {
   });
 }
 
-/** One student's week since `since`. Cover letters count from Monday (Eastern), as Free's limits do. */
-async function weekStats(userId: string, since: number): Promise<WeekStats> {
+/** One student's week since `since`. Cover letters count from Monday (Eastern), as Free's limits do. Also game mode's day (lib/game/service.ts). */
+export async function weekStats(userId: string, since: number): Promise<WeekStats> {
   const [apps, uses, stored] = await Promise.all([applications.list(userId), weekUses(userId), applicationProfiles.get(userId)]);
   const after = (at: string | null | undefined) => Boolean(at) && Date.parse(at!) >= since;
   const stats: WeekStats = { applied: 0, emails: 0, followUps: 0, letters: uses.letters ?? 0, replies: 0, interviews: 0 };
