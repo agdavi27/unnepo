@@ -229,10 +229,10 @@ describe("Tailor my resume to this job", () => {
     expect((await planUsage(userId)).resumes.left).toBe(2);
   });
 
-  it("fails plainly, without counting, when nothing holds up, so the saved resume is offered", async () => {
+  it("fails plainly, without counting, when nothing holds up after a second try", async () => {
     const userId = await studentWithResume();
     model.replies.push(JSON.stringify({ edits: { 0: "Patricia Doe, PhD" } }));
-    await expect(extensionTailoredResume(userId, { job })).rejects.toThrow(/saved resume/);
+    await expect(extensionTailoredResume(userId, { job })).rejects.toThrow(/Couldn.t tailor your resume this time/);
     expect((await planUsage(userId)).resumes.left).toBe(3);
     await expect(extensionTailoredResume(userId, {})).rejects.toThrow(/job posting/);
   });

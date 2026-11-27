@@ -1,5 +1,6 @@
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
 import { coveredUp, mountAbove } from "./top-layer";
+import { fixesFor, openPanel, type Failure, type Fix } from "./fixes";
 
 /**
  * "Write with unnepo" beside the cover letter question on an application form ("Attach your cover letter",
@@ -21,7 +22,7 @@ const CONTROL = "input:not([type=hidden]), textarea, select, button, [role=butto
 type PageState = { ok: boolean; free?: boolean; left?: number | null; highlights?: string[]; /** The student's own cover letter's name, if they saved one. */ mine?: string | null };
 /** A letter Unnepo wrote (a PDF), or the student's own (`mime` says, often a Word file; no `text`). */
 type Letter = { text: string; fileName: string; pdfBase64: string; mime?: string; upgrade?: string };
-type Wrote = { ok: boolean; doc?: Letter; error?: string };
+type Wrote = { ok: boolean; doc?: Letter; error?: string; code?: string; status?: number };
 
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
 const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]!);
@@ -237,7 +238,7 @@ function addButton(spot: Spot) {
   const button = root.querySelector<HTMLButtonElement>(".main")!;
   const menu = root.querySelector<HTMLElement>(".menu")!;
   const label = root.querySelector<HTMLElement>(".text")!;
-  const state = { busy: false, note: "", good: "" };
+  const state = { busy: false, note: "", good: "", fixes: [] as Fix[] };
   const set = (words: string, tone: "" | "ok" | "bad") => { label.textContent = words; button.className = `main ${tone}`; };
 
   const outside = (event: Event) => { if (!event.composedPath().includes(host) && !state.busy) closeMenu(); };
@@ -272,7 +273,16 @@ function addButton(spot: Spot) {
     row(state.busy ? "Attaching…" : "Attach my default cover letter", account.mine ? `Your saved letter, ${account.mine}` : "A short, general letter from your profile. Dear Hiring Team", () => void attachDefault(), state.busy);
     row("✦ Write a tailored cover letter", tailorHint, () => { closeMenu(); openPopup(spot.box); }, out || state.busy);
     if (state.note) line("note", state.note);
+    // What failed, made fixable right here.
+    if (!state.busy) for (const fix of state.fixes) row(fix.label, fix.hint, () => void runFix(fix));
     if (state.good) line("good", `✓ ${state.good}`);
+  }
+
+  async function runFix(fix: Fix) {
+    if (fix.kind === "reload") return location.reload();
+    if (fix.kind === "retry") return attachDefault();
+    closeMenu();
+    if (!(await openPanel())) set("Open Unnepo from the toolbar", "bad");
   }
 
   /** The student's own saved letter as it is; else Unnepo's short general one. A text box gets the words instead. */
@@ -280,6 +290,7 @@ function addButton(spot: Spot) {
     state.busy = true;
     state.note = "";
     state.good = "";
+    state.fixes = [];
     button.disabled = true;
     set("Attaching…", "");
     drawMenu();
@@ -287,11 +298,12 @@ function addButton(spot: Spot) {
     const typed = Boolean(where.text && !where.file);
     let placed = "";
     let problem = "";
+    let failure: Failure = {};
     if (account.mine && !typed) {
       type Got = { ok: boolean; file?: { name: string; mime: string; base64: string } | null; error?: string | null };
       const got = await ask<Got>({ type: "my-letter-file" }).catch((): Got => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
       if (got.ok && got.file) placed = await placeLetter(spot.box, { text: "", fileName: got.file.name, pdfBase64: got.file.base64, mime: got.file.mime });
-      else problem = got.error ?? "Couldn't get your cover letter from Unnepo.";
+      else { problem = got.error ?? "Couldn't get your cover letter from Unnepo."; failure = { error: problem }; }
     } else if (account.mine && typed) {
       problem = "This question wants the letter typed in, not a file. Paste yours into it, or write a tailored one.";
     } else {
@@ -299,13 +311,14 @@ function addButton(spot: Spot) {
       if (got.ok && got.doc) {
         if (typed) { putText(where.text!, got.doc.text); placed = "In the cover letter box"; }
         else placed = await placeLetter(spot.box, got.doc);
-      } else problem = got.error ?? "Couldn't get your default cover letter.";
+      } else { problem = got.error ?? "Couldn't get your default cover letter."; failure = { ...got, error: problem }; }
     }
     state.busy = false;
     button.disabled = false;
     const attached = placed === "Attached to the application" || placed === "In the cover letter box";
     state.good = placed && attached ? placed : "";
     state.note = problem || (placed && !attached ? placed : "");
+    if (failure.error) state.fixes = fixesFor(failure);
     set(attached ? "✓ Cover letter attached" : problem ? "Write with unnepo" : "Write with unnepo", attached ? "ok" : problem ? "bad" : "");
     if (attached) closeMenu();
     else drawMenu();
@@ -403,7 +416,7 @@ function openPopup(box: HTMLElement) {
 
   const ui = {
     step: 0 as number, choices: { format: "match", length: "standard", tone: "professional", picked: [] as string[], mention: "" },
-    phase: "ask" as "ask" | "writing" | "done", letter: null as Letter | null, edited: false, busy: "", note: "", placed: "",
+    phase: "ask" as "ask" | "writing" | "done", letter: null as Letter | null, edited: false, busy: "", note: "", placed: "", fixes: [] as Fix[],
   };
   const previousFocus = document.activeElement as HTMLElement | null;
   const close = () => {
@@ -433,7 +446,8 @@ function openPopup(box: HTMLElement) {
       ${highlights.length ? `<div class="chips" role="group" aria-label="Things from your resume">${highlights.map((item) => `<button type="button" class="chip${ui.choices.picked.includes(item) ? " on" : ""}" data-chip="${escape(item)}" aria-pressed="${ui.choices.picked.includes(item)}">${escape(item)}</button>`).join("")}</div>` : ""}
       <textarea id="mention" rows="2" maxlength="400" aria-label="Anything else to mention (optional)" placeholder="${highlights.length ? "Anything else? Optional" : "Optional: a project, why this company, a skill to lead with…"}">${escape(ui.choices.mention)}</textarea>
       ${ui.note ? `<p class="note" role="status">${escape(ui.note)}</p>` : ""}
-      <div class="row" style="justify-content: space-between">${back}<button type="button" class="btn" data-act="write" ${out ? "disabled" : ""}>✦ Write cover letter${account.free && typeof account.left === "number" ? ` · ${account.left} left` : ""}</button></div>
+      ${ui.fixes.filter((fix) => fix.kind !== "retry").map((fix, index) => `<button type="button" class="opt" data-fix="${index}">${escape(fix.label)}<small>${escape(fix.hint)}</small></button>`).join("")}
+      <div class="row" style="justify-content: space-between">${back}<button type="button" class="btn" data-act="write" ${out ? "disabled" : ""}>${ui.fixes.some((fix) => fix.kind === "retry") ? "↻ Try again" : "✦ Write cover letter"}${account.free && typeof account.left === "number" ? ` · ${account.left} left` : ""}</button></div>
       ${out ? `<p class="note">No cover letters left today on Free. Pro has no limit.</p>` : ""}`;
   }
 
@@ -494,6 +508,7 @@ function openPopup(box: HTMLElement) {
     ui.choices.mention = mention;
     ui.phase = "writing";
     ui.note = "";
+    ui.fixes = [];
     draw();
     const { format, length, tone, picked } = ui.choices;
     const result = await ask<Wrote>({ type: "letter-page-write", options: { format, length, tone, mention: [...picked, mention.trim()].filter(Boolean).join("; ") } }).catch((): Wrote => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
@@ -503,6 +518,7 @@ function openPopup(box: HTMLElement) {
     } else {
       ui.phase = "ask";
       ui.note = result.error ?? "Couldn't write the cover letter.";
+      ui.fixes = fixesFor({ ...result, error: ui.note });
     }
     draw();
     // One fewer left on Free: the count in the corner changes without redrawing the letter being read.
@@ -522,7 +538,7 @@ function openPopup(box: HTMLElement) {
       return draw();
     }
     if (name === "write") return write();
-    if (name === "again") { Object.assign(ui, { phase: "ask", step: 0, letter: null, edited: false, note: "", placed: "" }); return draw(); }
+    if (name === "again") { Object.assign(ui, { phase: "ask", step: 0, letter: null, edited: false, note: "", placed: "", fixes: [] }); return draw(); }
     if (name === "copy") {
       const typed = root.getElementById("letter") as HTMLTextAreaElement | null;
       const text = typed?.value ?? ui.letter?.text ?? "";
@@ -553,6 +569,13 @@ function openPopup(box: HTMLElement) {
 
   root.addEventListener("click", (event) => {
     const target = event.target as Element;
+    const fixButton = target.closest<HTMLElement>("[data-fix]");
+    if (fixButton) {
+      const fix = ui.fixes.filter((item) => item.kind !== "retry")[Number(fixButton.dataset.fix)];
+      if (fix?.kind === "reload") return location.reload();
+      if (fix?.kind === "panel") { close(); void openPanel(); }
+      return;
+    }
     const pick = target.closest<HTMLElement>("[data-pick]");
     if (pick) {
       const [name, value] = (pick.dataset.pick ?? "").split(":") as ["format" | "length" | "tone", string];

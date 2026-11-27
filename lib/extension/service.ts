@@ -232,8 +232,9 @@ export async function extensionGeneralLetter(userId: string) {
   const resumeId = resume?.id ?? null;
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
   const kept = stored.generalLetter && stored.generalLetter.resumeId === resumeId ? stored.generalLetter.text : "";
-  const text = kept || (await writeCoverLetter(userId, { title: "", company: "", department: null, description: "", requirements: [] }, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, { length: "brief", tone: "professional" }));
-  if (!text) throw new ServiceError("Couldn't write your default cover letter. Add your resume in Unnepo first.", "cover_letter", 409);
+  const write = () => writeCoverLetter(userId, { title: "", company: "", department: null, description: "", requirements: [] }, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, { length: "brief", tone: "professional" });
+  const text = kept || (await write()) || (await write());
+  if (!text) throw new ServiceError("Couldn't write your default cover letter this time.", "cover_letter", 409);
   if (!kept) await applicationProfiles.change(userId, () => ({ generalLetter: { text, resumeId, at: nowIso() } }), async () => stored);
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
   return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64") };
@@ -787,7 +788,9 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   // A new letter from AI counts toward Free's daily number; the student's own edits and a reused letter don't.
   const fresh = !own && !reused;
   if (fresh) await assertCoverLetterAllowed(userId);
-  const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, style));
+  const writer = { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded };
+  // One quiet second try, as for a tailored resume.
+  const text = own || reused || (await writeCoverLetter(userId, job, writer, style)) || (await writeCoverLetter(userId, job, writer, style));
   if (fresh && text) await countCoverLetter(userId);
   if (!text) throw new ServiceError("Couldn't write a cover letter this time. Try again in a moment.", "cover_letter", 409);
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
@@ -828,8 +831,9 @@ export async function extensionTailoredResume(userId: string, raw: unknown) {
   const job = app ?? { title: read!.title, company: read!.company, description: read!.description, requirements: [] as string[] };
   const reused = body.fresh !== true && kept?.plan && kept.resumeId === resume.id ? kept.plan : null;
   if (!reused) await assertUseAllowed(userId, "resumes");
-  const plan = reused ?? (await writeTailorPlan(userId, job, layout.lines));
-  if (!plan) throw new ServiceError("Couldn't tailor your resume this time. Attach your saved resume instead.", "tailor", 502);
+  // One quiet second try: an answer that doesn't hold up the first time usually does the next.
+  const plan = reused ?? (await writeTailorPlan(userId, job, layout.lines)) ?? (await writeTailorPlan(userId, job, layout.lines));
+  if (!plan) throw new ServiceError("Couldn't tailor your resume this time.", "tailor", 502);
   if (!reused) await countUse(userId, "resumes");
   if (app && !reused) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), tailoredResume: { resumeId: resume.id, plan, at: nowIso() } } });
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name || "Resume";
