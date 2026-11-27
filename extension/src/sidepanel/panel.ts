@@ -15,6 +15,7 @@ import { UPGRADE_URL } from "@/lib/plan";
 import { startWalkthrough, walkthroughOnce } from "./walkthrough";
 import { drawBoss, gameSettingsCard, onGameChange, wireGameSettings } from "./boss";
 import { DEMO_KEY, demoTerms, startDemoMask, type DemoMode } from "../shared/demo-mask";
+import { pokeLine, pokeMs } from "@/lib/spider-pokes";
 
 startTheme();
 onGameChange(() => void render());
@@ -53,9 +54,8 @@ const extensionVersion = () => chrome.runtime.getManifest().version_name ?? chro
 const ask = <T>(message: unknown) => chrome.runtime.sendMessage(message) as Promise<T>;
 const short = (text: string, max = 60) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
 
-/** What he says when he's poked, worse each time, and how long he stays mad: the same as on the front page. */
-const OUCH = ["Ouch!", "Hey! Quit poking me.", "I have eight legs and I'm not afraid to use them.", "OK, that's it. I'm telling the recruiters."];
-const MAD_MS = 2200;
+/** What he says when he's poked, worse each time (lib/spider-pokes.ts, the same as on the front page), in a new order each time the panel opens. */
+const POKE_SEED = Math.random();
 
 /** The spider's line: types out while his mouth moves, then moves on to the next. Poking him interrupts it. */
 const speech = (() => {
@@ -100,7 +100,7 @@ const speech = (() => {
 
   spider.addEventListener("click", () => {
     pokes += 1;
-    const ouch = OUCH[Math.min(pokes, OUCH.length) - 1];
+    const ouch = pokeLine(pokes, POKE_SEED);
     clearTimeout(calm);
     calm = 0;
     typed.textContent = ouch;
@@ -117,7 +117,7 @@ const speech = (() => {
       line_.classList.toggle("alert", alerting);
       shown = reduce ? (lines[line] ?? "").length : 0;
       draw();
-    }, MAD_MS);
+    }, pokeMs(ouch));
   });
 
   return (next: string[], alert = false) => {
