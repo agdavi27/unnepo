@@ -220,6 +220,25 @@ export async function defaultCoverLetterFile(userId: string) {
   return { bytes, fileName: letter.fileName, mime: letter.mime };
 }
 
+/**
+ * "Attach my default cover letter" for a student who saved none of their own: a very short, general letter from
+ * their resume and profile, opening "Dear Hiring Team,", that suits any employer. Written once and kept, so it's the
+ * same letter every time and costs nothing after; written again only when they apply with another resume. It
+ * doesn't count toward Free's letters for the day.
+ */
+export async function extensionGeneralLetter(userId: string) {
+  const [info, stored, resume] = await Promise.all([student(userId), applicationProfiles.get(userId), activeResume(userId)]);
+  if (!stored) throw new ServiceError("Finish setting up your profile first.", "profile", 400);
+  const resumeId = resume?.id ?? null;
+  const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
+  const kept = stored.generalLetter && stored.generalLetter.resumeId === resumeId ? stored.generalLetter.text : "";
+  const text = kept || (await writeCoverLetter(userId, { title: "", company: "", department: null, description: "", requirements: [] }, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, { length: "brief", tone: "professional" }));
+  if (!text) throw new ServiceError("Couldn't write your default cover letter. Add your resume in Unnepo first.", "cover_letter", 409);
+  if (!kept) await applicationProfiles.change(userId, () => ({ generalLetter: { text, resumeId, at: nowIso() } }), async () => stored);
+  const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
+  return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64") };
+}
+
 /** A job the extension is on. Unnepo reads it when it can; otherwise it keeps what the page showed. */
 /** LinkedIn's "Meet the hiring team" person as the extension read it, checked. */
 export function pagePoster(raw: unknown): PostedRecruiter | null {

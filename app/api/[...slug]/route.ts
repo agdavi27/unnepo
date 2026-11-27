@@ -22,7 +22,7 @@ import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { friendAction, listFriends } from "@/lib/social/friends";
 import { writeApplyEmail } from "@/lib/apply/apply-email";
-import { extensionAttempts, extensionCoverLetter, extensionTailoredResume, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionQuickFill, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSaveTranscript, extensionSubmission, extensionTranscript, extensionUndoSubmission, extensionWrite, defaultCoverLetterFile, defaultCoverLetterInfo, removeDefaultCoverLetter, saveDefaultCoverLetter } from "@/lib/extension/service";
+import { extensionAttempts, extensionCoverLetter, extensionTailoredResume, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionQuickFill, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSaveTranscript, extensionSubmission, extensionTranscript, extensionUndoSubmission, extensionWrite, defaultCoverLetterFile, extensionGeneralLetter, defaultCoverLetterInfo, removeDefaultCoverLetter, saveDefaultCoverLetter } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
 import { choosePosting, findPostingNow } from "@/lib/apply/find-posting";
 import { contactBounced, revealContact, applyState, createApplication, deleteApplication, jobDescription, receiptImage, markApplied, retryContacts, saveApplicationProfile, setCompany, updateJobDetails, addJobByHand, answerMaybe, setOutcome, setJobHidden, updateAnswers, updateOutreach, writeContactEmail } from "@/lib/apply/service";
@@ -585,6 +585,11 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   if (action === "apply-email" && method === "POST") {
     if (!rateLimit(`extension-apply-email:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of emails in an hour. Try again later.", "rate_limited", 429);
     return json(await writeApplyEmail(user.id, await request.json()));
+  }
+  // "Attach my default cover letter" when the student saved none: written once from the profile, then kept.
+  if (action === "general-letter" && method === "POST") {
+    if (!rateLimit(`extension-letter:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of cover letters in an hour. Try again later.", "rate_limited", 429);
+    return json(await extensionGeneralLetter(user.id));
   }
   if (action === "cover-letter" && method === "POST") {
     // Free, but each one is an AI call: a sensible cap per hour.
