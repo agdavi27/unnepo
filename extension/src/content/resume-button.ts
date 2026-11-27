@@ -1,5 +1,6 @@
 import type { FileData } from "../shared/types";
 import { fixesFor, openPanel, type Fix } from "./fixes";
+import { pinFont } from "./top-layer";
 
 /**
  * A small "Attach with Unnepo" button beside each resume upload box on a job page (a file box whose label or
@@ -109,6 +110,7 @@ function addButton(target: Target, after: HTMLElement, kind: Kind) {
   };
   const host = document.createElement("span");
   host.setAttribute(MARK, "button");
+  pinFont(host, `500 12.5px/1.1 -apple-system, system-ui, "Segoe UI", sans-serif`);
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = `
     <style>

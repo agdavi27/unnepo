@@ -98,7 +98,7 @@ function show(found: ApplyEmail, mailer: NonNullable<State["mailer"]>) {
   const host = document.createElement("div");
   host.setAttribute("data-unnepo-email-apply", "");
   const root = host.attachShadow({ mode: "closed" });
-  keepOnTop(host);
+  keepOnTop(host, `13.5px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif`);
   let spider = spiderRects(0);
   const ui: { step: "ask" | "writing" | "ready" | "opened"; subject: string; body: string; error: string; shown: boolean } = { step: "ask", subject: "", body: "", error: "", shown: false };
   /** Which resume goes with the email: the saved one, or one tailored to this job (and how that went). */

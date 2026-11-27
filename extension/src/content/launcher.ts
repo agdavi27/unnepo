@@ -102,7 +102,7 @@ function show() {
     try { sessionStorage.setItem(DISMISSED, "1"); } catch { /* storage off: it just hides for now */ }
     host.remove();
   });
-  keepOnTop(host);
+  keepOnTop(host, "13px/1.3 system-ui, -apple-system, sans-serif");
 }
 
 function dismissed() {

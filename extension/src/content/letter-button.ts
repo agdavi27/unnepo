@@ -1,5 +1,5 @@
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
-import { coveredUp, keepOnTop } from "./top-layer";
+import { coveredUp, keepOnTop, pinFont } from "./top-layer";
 import { fixesFor, openPanel, type Failure, type Fix } from "./fixes";
 
 /**
@@ -233,6 +233,7 @@ function addButton(spot: Spot) {
   spot.box.setAttribute(MARK, "");
   const host = document.createElement("span");
   host.setAttribute(MARK, "button");
+  pinFont(host, `500 12.5px/1.1 -apple-system, system-ui, "Segoe UI", sans-serif`);
   const root = host.attachShadow({ mode: "closed" });
   root.innerHTML = buttonHtml();
   const button = root.querySelector<HTMLButtonElement>(".main")!;
@@ -708,7 +709,7 @@ function openPopup(box: HTMLElement, options: { preview?: boolean; onPlaced?: (p
   // Site shortcuts don't fire while typing in the popup.
   for (const type of ["keydown", "keyup", "keypress"]) root.addEventListener(type, (event) => event.stopPropagation());
 
-  keepOnTop(host);
+  keepOnTop(host, `13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif`);
   draw();
   if (preview) {
     // Behind the site's own window there's nothing to see: the menu's Attach still works without it.

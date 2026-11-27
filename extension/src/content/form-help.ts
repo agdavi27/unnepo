@@ -401,7 +401,7 @@ export function watchForms(isJobPage: () => boolean) {
       if (button && !(button as HTMLButtonElement).disabled) void act(button.dataset.act ?? "");
     });
     // In front of everything, even a site window (LinkedIn's Easy Apply) opened after it.
-    keepOnTop(host);
+    keepOnTop(host, `13px/1.3 system-ui, -apple-system, "Segoe UI", sans-serif`);
     return { host, root };
   }
 

@@ -5,6 +5,8 @@
  * is read or sent until a chip is pressed; the links come from the student's Unnepo profile.
  */
 
+import { pinFont } from "./top-layer";
+
 type Kind = "linkedin" | "github" | "portfolio";
 type Links = Partial<Record<Kind, string>>;
 
@@ -74,6 +76,7 @@ function addChip(input: HTMLInputElement, kind: Kind, link: string, label: HTMLE
   input.setAttribute(MARK, "");
   const host = document.createElement("span");
   host.setAttribute(MARK, "chip");
+  pinFont(host, "600 12px/1 system-ui, -apple-system, sans-serif");
   const root = host.attachShadow({ mode: "closed" });
   const draw = () => {
     const done = same(input.value, link);

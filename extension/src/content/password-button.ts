@@ -6,6 +6,7 @@
  */
 
 import { typeInto } from "./dom";
+import { pinFont } from "./top-layer";
 
 const MARK = "data-unnepo-password";
 
@@ -35,6 +36,7 @@ function addChip(input: HTMLInputElement) {
   for (const box of group) box.setAttribute(MARK, "");
   const host = document.createElement("span");
   host.setAttribute(MARK, "chip");
+  pinFont(host, "600 12px/1 system-ui, -apple-system, sans-serif");
   const root = host.attachShadow({ mode: "closed" });
   const draw = (state: "ready" | "busy" | "done" | "off") => {
     const words = { ready: "🔑 Fill with unnepo", busy: "Filling…", done: "✓ Password in", off: "Couldn't get it: try again" }[state];
