@@ -198,6 +198,16 @@ function onUnnepo(state: PanelState) {
   try { return Boolean(state.tab && new URL(state.tab.url).origin === new URL(state.apiBase).origin); } catch { return false; }
 }
 
+/** unnepo.com/home: the website already shows everything the panel does there, so the panel closes itself. */
+function onUnnepoHome(state: PanelState) {
+  try {
+    const page = new URL(state.tab!.url);
+    const site = new URL(state.apiBase);
+    const host = (url: URL) => url.hostname.replace(/^www\./, "");
+    return page.protocol === site.protocol && host(page) === host(site) && /^\/home(\/|$)/.test(page.pathname);
+  } catch { return false; }
+}
+
 /** A job is on the tab: a posting, an application form, or one Unnepo is working on. */
 function jobFound(state: PanelState) {
   const { job, page, tab } = state;
@@ -2038,6 +2048,10 @@ async function render() {
 
 /** Draws the panel. False when it left the page as it was, because the student is typing in it. */
 function draw(state: PanelState): boolean {
+  if (onUnnepoHome(state)) {
+    window.close();
+    return false;
+  }
   usesNow = state.me?.usage ?? null;
   // A letter belongs to one job: opening another job (another tab, or another one in Handshake's search) closes it.
   // Keyed by the job's name, not the address, so the steps of one application keep it.
