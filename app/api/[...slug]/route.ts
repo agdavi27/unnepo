@@ -589,7 +589,7 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
   // "Attach my default cover letter" when the student saved none: written once from the profile, then kept.
   if (action === "general-letter" && method === "POST") {
     if (!rateLimit(`extension-letter:${user.id}`, 30, 60 * 60 * 1000)) throw new ServiceError("That's a lot of cover letters in an hour. Try again later.", "rate_limited", 429);
-    return json(await extensionGeneralLetter(user.id));
+    return json(await extensionGeneralLetter(user.id, await request.json().catch(() => ({}))));
   }
   if (action === "cover-letter" && method === "POST") {
     // Free, but each one is an AI call: a sensible cap per hour.

@@ -224,18 +224,24 @@ export async function defaultCoverLetterFile(userId: string) {
  * "Attach my default cover letter" for a student who saved none of their own: a very short, general letter from
  * their resume and profile, opening "Dear Hiring Team,", that suits any employer. Written once and kept, so it's the
  * same letter every time and costs nothing after; written again only when they apply with another resume. It
- * doesn't count toward Free's letters for the day.
+ * doesn't count toward Free's letters for the day. `text` saves the student's edit of it, kept as theirs from then on.
  */
-export async function extensionGeneralLetter(userId: string) {
+export async function extensionGeneralLetter(userId: string, raw: unknown = {}) {
+  const body = (raw ?? {}) as { text?: unknown };
   const [info, stored, resume] = await Promise.all([student(userId), applicationProfiles.get(userId), activeResume(userId)]);
   if (!stored) throw new ServiceError("Finish setting up your profile first.", "profile", 400);
   const resumeId = resume?.id ?? null;
   const name = [info.profile.firstName, info.profile.lastName].filter(Boolean).join(" ") || info.user.name;
-  const kept = stored.generalLetter && stored.generalLetter.resumeId === resumeId ? stored.generalLetter.text : "";
+  // The student's own edit (the preview's Save): kept as their default from now on, with any resume.
+  const own = typeof body.text === "string" ? body.text.replace(/\r\n/g, "\n").trim().slice(0, 6000) : "";
+  if (typeof body.text === "string" && !own) throw new ServiceError("The cover letter is empty.", "text", 400);
+  const saved = stored.generalLetter;
+  const kept = saved && (saved.edited || saved.resumeId === resumeId) ? saved.text : "";
   const write = () => writeCoverLetter(userId, { title: "", company: "", department: null, description: "", requirements: [] }, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, { length: "brief", tone: "professional" });
-  const text = kept || (await write()) || (await write());
+  const text = own || kept || (await write()) || (await write());
   if (!text) throw new ServiceError("Couldn't write your default cover letter this time.", "cover_letter", 409);
-  if (!kept) await applicationProfiles.change(userId, () => ({ generalLetter: { text, resumeId, at: nowIso() } }), async () => stored);
+  if (own) await applicationProfiles.change(userId, () => ({ generalLetter: { text, resumeId, at: nowIso(), edited: true } }), async () => stored);
+  else if (!kept) await applicationProfiles.change(userId, () => ({ generalLetter: { text, resumeId, at: nowIso() } }), async () => stored);
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
   return { text, fileName: `${name} Cover Letter.pdf`, pdfBase64: pdf.toString("base64") };
 }

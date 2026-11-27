@@ -238,7 +238,7 @@ function addButton(spot: Spot) {
   const button = root.querySelector<HTMLButtonElement>(".main")!;
   const menu = root.querySelector<HTMLElement>(".menu")!;
   const label = root.querySelector<HTMLElement>(".text")!;
-  const state = { busy: false, note: "", good: "", fixes: [] as Fix[] };
+  const state = { busy: false, note: "", good: "", fixes: [] as Fix[], attached: false };
   const set = (words: string, tone: "" | "ok" | "bad") => { label.textContent = words; button.className = `main ${tone}`; };
 
   const outside = (event: Event) => { if (!event.composedPath().includes(host) && !state.busy) closeMenu(); };
@@ -271,11 +271,42 @@ function addButton(spot: Spot) {
     const out = account.free && typeof account.left === "number" && account.left <= 0;
     const tailorHint = out ? "None left today on Free. Pro has no limit." : account.free && typeof account.left === "number" ? `Fits it to this job. ${account.left} left today` : "Fits it to this job, with a few quick questions";
     row(state.busy ? "Attaching…" : "Attach my default cover letter", account.mine ? `Your saved letter, ${account.mine}` : "A short, general letter from your profile. Dear Hiring Team", () => void attachDefault(), state.busy);
+    // A quick look first (or after attaching): the letter itself, to read, edit and save. Their own file opens as a PDF.
+    row(state.attached ? "View the attached letter" : "Preview my default letter", account.mine ? "Opens your saved letter in a new tab" : state.attached ? "Read it, or edit and attach it again" : "Read it first. Edit and save it as yours", () => void previewDefault(), state.busy);
     row("✦ Write a tailored cover letter", tailorHint, () => { closeMenu(); openPopup(spot.box); }, out || state.busy);
     if (state.note) line("note", state.note);
     // What failed, made fixable right here.
     if (!state.busy) for (const fix of state.fixes) row(fix.label, fix.hint, () => void runFix(fix));
     if (state.good) line("good", `✓ ${state.good}`);
+  }
+
+  async function previewDefault() {
+    closeMenu();
+    if (!account.mine) {
+      openPopup(spot.box, { preview: true, onPlaced: (placed) => {
+        const attached = placed === "Attached to the application" || placed === "In the cover letter box";
+        if (!attached) return;
+        state.attached = true;
+        state.note = "";
+        state.fixes = [];
+        set("✓ Cover letter attached", "ok");
+      } });
+      return;
+    }
+    type Got = { ok: boolean; file?: { name: string; mime: string; base64: string } | null; error?: string | null };
+    const got = await ask<Got>({ type: "my-letter-file" }).catch((): Got => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
+    if (!got.ok || !got.file) {
+      state.note = got.error ?? "Couldn't get your cover letter from Unnepo.";
+      state.fixes = fixesFor({ error: state.note });
+      drawMenu();
+      menu.hidden = false;
+      document.addEventListener("click", outside, true);
+      return;
+    }
+    const bytes = Uint8Array.from(atob(got.file.base64), (char) => char.charCodeAt(0));
+    const url = URL.createObjectURL(new Blob([bytes], { type: got.file.mime || "application/pdf" }));
+    window.open(url, "_blank", "noopener");
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
   }
 
   async function runFix(fix: Fix) {
@@ -320,7 +351,7 @@ function addButton(spot: Spot) {
     state.note = problem || (placed && !attached ? placed : "");
     if (failure.error) state.fixes = fixesFor(failure);
     set(attached ? "✓ Cover letter attached" : problem ? "Write with unnepo" : "Write with unnepo", attached ? "ok" : problem ? "bad" : "");
-    if (attached) closeMenu();
+    if (attached) { state.attached = true; closeMenu(); }
     else drawMenu();
   }
 
@@ -403,8 +434,14 @@ const POPUP_STYLE = (reduce: boolean) => `
 
 let openHost: HTMLElement | null = null;
 
-function openPopup(box: HTMLElement) {
+/**
+ * The letter window. Tailored (the default): the questions, then the letter written for this job. `preview`: the
+ * student's default letter to read before (or after) attaching it, with Edit and Save to make it their own.
+ * `onPlaced` tells the page's button when a letter went into the form.
+ */
+function openPopup(box: HTMLElement, options: { preview?: boolean; onPlaced?: (placed: string) => void } = {}) {
   if (openHost) return;
+  const preview = Boolean(options.preview);
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
   const host = document.createElement("div");
   host.setAttribute("data-unnepo-letter-popup", "");
@@ -416,7 +453,8 @@ function openPopup(box: HTMLElement) {
 
   const ui = {
     step: 0 as number, choices: { format: "match", length: "standard", tone: "professional", picked: [] as string[], mention: "" },
-    phase: "ask" as "ask" | "writing" | "done", letter: null as Letter | null, edited: false, busy: "", note: "", placed: "", fixes: [] as Fix[],
+    phase: (preview ? "loading" : "ask") as "ask" | "writing" | "done" | "loading", letter: null as Letter | null, edited: false, busy: "", note: "", placed: "", fixes: [] as Fix[],
+    editing: false, saved: "",
   };
   const previousFocus = document.activeElement as HTMLElement | null;
   const close = () => {
@@ -428,7 +466,8 @@ function openPopup(box: HTMLElement) {
   const onKey = (event: KeyboardEvent) => { if (event.key === "Escape" && ui.phase !== "writing") { event.stopPropagation(); close(); } };
   document.addEventListener("keydown", onKey, true);
 
-  const countLine = () => (account.free && typeof account.left === "number" ? `<span class="count">${account.left} left today</span>` : "");
+  // The default letter is free: no count on its preview.
+  const countLine = () => (!preview && account.free && typeof account.left === "number" ? `<span class="count">${account.left} left today</span>` : "");
 
   function askBody() {
     const name = STEPS[ui.step];
@@ -457,6 +496,22 @@ function openPopup(box: HTMLElement) {
     const primary = where.file || where.drop || where.button ? ["attach", "Attach to application"] : where.text ? ["paste", "Put it in the box"] : ["download", "Download PDF"];
     const hint = where.file || where.drop || where.button ? "Attaches it as a PDF to the cover letter upload." : where.text ? "Puts the text in the cover letter box." : "This form uploads through its own button: download it, then pick it there.";
     const busy = Boolean(ui.busy);
+    if (preview) {
+      return `<h2>Your default cover letter</h2>
+      <div class="sub">${ui.editing ? "Change anything, then Save. It stays your default for every job." : "A short, general letter for any job. Edit it to make it yours."}</div>
+      <textarea class="letter" id="letter" aria-label="Your default cover letter" ${busy || !ui.editing ? "readonly" : ""}>${escape(letter.text)}</textarea>
+      ${ui.note ? `<p class="note" role="status">${escape(ui.note)}</p>` : ""}
+      ${ui.saved && !ui.placed ? `<p class="good" role="status">✓ ${escape(ui.saved)}</p>` : ""}
+      ${ui.placed ? `<p class="good" role="status">✓ ${escape(ui.placed)}</p>` : ""}
+      <div class="row">
+        <button type="button" class="btn wide${ui.placed ? " ok" : ""}" data-act="${primary[0]}" ${busy ? "disabled" : ""}>${ui.busy === primary[0] ? "Saving…" : primary[1]}</button>
+        ${ui.editing
+          ? `<button type="button" class="btn ghost" data-act="save" ${busy ? "disabled" : ""}>${ui.busy === "save" ? "Saving…" : "Save"}</button>`
+          : `<button type="button" class="btn ghost" data-act="edit" ${busy ? "disabled" : ""}>Edit</button>`}
+        <button type="button" class="btn ghost" data-act="copy" ${busy ? "disabled" : ""}>Copy</button>
+      </div>
+      ${ui.placed ? `<div class="row" style="justify-content: flex-end"><button type="button" class="btn ghost" data-act="close">Done</button></div>` : ""}`;
+    }
     return `<h2>Your cover letter</h2>
       <div class="sub">Click into it to change anything. ${hint}</div>
       <textarea class="letter" id="letter" aria-label="Your cover letter" ${busy ? "readonly" : ""}>${escape(letter.text)}</textarea>
@@ -477,18 +532,19 @@ function openPopup(box: HTMLElement) {
     const enter = drawn ? "" : " enter";
     drawn = true;
     const focusedId = (root.activeElement as HTMLElement | null)?.id;
-    const body = ui.phase === "writing"
-      ? `<div class="writing" role="status">${spiderSvg()}<div class="bar"><i></i></div><span class="sub">Writing your cover letter…</span></div>`
-      : ui.phase === "done" ? doneBody() : askBody();
+    const body = ui.phase === "writing" || ui.phase === "loading"
+      ? `<div class="writing" role="status">${spiderSvg()}<div class="bar"><i></i></div><span class="sub">${ui.phase === "loading" ? "Getting your default cover letter…" : "Writing your cover letter…"}</span></div>`
+      : ui.phase === "done" ? doneBody() : preview ? failedBody() : askBody();
     root.innerHTML = `<style>${POPUP_STYLE(reduce)}</style>
       <div class="scrim${enter}" data-act="scrim">
-        <div class="card${enter}" role="dialog" aria-modal="true" aria-label="Write a cover letter with Unnepo">
+        <div class="card${enter}" role="dialog" aria-modal="true" aria-label="${preview ? "Your default cover letter" : "Write a cover letter with Unnepo"}">
           <div class="head">${spiderSvg()}<span class="brand">unnepo<span>.</span></span>${countLine()}<button type="button" class="icon" data-act="close" aria-label="Close">×</button></div>
           <div class="main">${body}</div>
         </div>
       </div>`;
     const again = focusedId ? root.getElementById(focusedId) : null;
-    (again ?? root.querySelector<HTMLElement>(".opt.on, .opt, .btn, textarea"))?.focus();
+    // The preview's letter is read-only until Edit: its Attach button gets focus instead.
+    (again ?? root.querySelector<HTMLElement>(preview && !ui.editing ? ".btn, .opt" : ".opt.on, .opt, .btn, textarea"))?.focus();
   }
 
   /** The letter as the student left it; edited text is saved first so the PDF has their changes. */
@@ -496,11 +552,36 @@ function openPopup(box: HTMLElement) {
     const typed = root.getElementById("letter") as HTMLTextAreaElement | null;
     if (typed && ui.letter && typed.value !== ui.letter.text) { ui.letter = { ...ui.letter, text: typed.value }; ui.edited = true; }
     if (!ui.edited || !ui.letter) return ui.letter;
-    const saved = await ask<Wrote>({ type: "letter-page-write", options: { text: ui.letter.text } }).catch((): Wrote => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
+    const saved = await ask<Wrote>(preview ? { type: "general-letter", text: ui.letter.text, attach: false } : { type: "letter-page-write", options: { text: ui.letter.text } }).catch((): Wrote => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
     if (!saved.ok || !saved.doc) { ui.note = saved.error ?? "Couldn't save your edits."; return null; }
     ui.letter = { ...saved.doc, upgrade: ui.letter.upgrade };
     ui.edited = false;
     return ui.letter;
+  }
+
+  /** The default letter for the preview: the student's saved one, else Unnepo's short general one. */
+  async function load() {
+    ui.phase = "loading";
+    ui.note = "";
+    ui.fixes = [];
+    draw();
+    const got = await ask<Wrote>({ type: "general-letter", attach: false }).catch((): Wrote => ({ ok: false, error: "Unnepo was updated. Refresh this page" }));
+    if (got.ok && got.doc) {
+      ui.letter = got.doc;
+      ui.phase = "done";
+    } else {
+      ui.phase = "ask";
+      ui.note = got.error ?? "Couldn't get your default cover letter.";
+      ui.fixes = fixesFor({ ...got, error: ui.note });
+    }
+    draw();
+  }
+
+  /** The preview couldn't get the letter: why, and what fixes it. */
+  function failedBody() {
+    return `<h2>Your default cover letter</h2>
+      <p class="note" role="status">${escape(ui.note)}</p>
+      ${ui.fixes.map((fix, index) => `<button type="button" class="opt" data-fix="${index}">${escape(fix.label)}<small>${escape(fix.hint)}</small></button>`).join("")}`;
   }
 
   async function write() {
@@ -538,6 +619,24 @@ function openPopup(box: HTMLElement) {
       return draw();
     }
     if (name === "write") return write();
+    if (name === "edit") {
+      ui.editing = true;
+      ui.saved = "";
+      draw();
+      const typed = root.getElementById("letter") as HTMLTextAreaElement | null;
+      typed?.focus();
+      typed?.setSelectionRange(typed.value.length, typed.value.length);
+      return;
+    }
+    if (name === "save") {
+      ui.busy = "save";
+      ui.note = "";
+      draw();
+      const letter = await current();
+      ui.busy = "";
+      if (letter) { ui.editing = false; ui.saved = "Saved as your default cover letter"; }
+      return draw();
+    }
     if (name === "again") { Object.assign(ui, { phase: "ask", step: 0, letter: null, edited: false, note: "", placed: "", fixes: [] }); return draw(); }
     if (name === "copy") {
       const typed = root.getElementById("letter") as HTMLTextAreaElement | null;
@@ -549,7 +648,7 @@ function openPopup(box: HTMLElement) {
     if (name === "paste") {
       const typed = root.getElementById("letter") as HTMLTextAreaElement | null;
       const where = targetsFor(box);
-      if (where.text) { putText(where.text, typed?.value ?? ui.letter?.text ?? ""); ui.placed = "In the cover letter box"; }
+      if (where.text) { putText(where.text, typed?.value ?? ui.letter?.text ?? ""); ui.placed = "In the cover letter box"; options.onPlaced?.(ui.placed); }
       return draw();
     }
     // The PDF: edits are saved first so it has them.
@@ -560,7 +659,9 @@ function openPopup(box: HTMLElement) {
       const letter = await current();
       ui.busy = "";
       if (letter) {
-        if (name === "attach") ui.placed = await placeLetter(box, letter);
+        // Attaching saved any edits, so the preview's Edit is done too.
+        if (preview) ui.editing = false;
+        if (name === "attach") { ui.placed = await placeLetter(box, letter); options.onPlaced?.(ui.placed); }
         else { download(letter); ui.placed = "Downloaded. Upload it with the form's button"; }
       }
       return draw();
@@ -571,7 +672,9 @@ function openPopup(box: HTMLElement) {
     const target = event.target as Element;
     const fixButton = target.closest<HTMLElement>("[data-fix]");
     if (fixButton) {
-      const fix = ui.fixes.filter((item) => item.kind !== "retry")[Number(fixButton.dataset.fix)];
+      // The writer offers Try again on its own Write button; the preview lists every fix.
+      const fix = (preview ? ui.fixes : ui.fixes.filter((item) => item.kind !== "retry"))[Number(fixButton.dataset.fix)];
+      if (fix?.kind === "retry") return void load();
       if (fix?.kind === "reload") return location.reload();
       if (fix?.kind === "panel") { close(); void openPanel(); }
       return;
@@ -607,6 +710,11 @@ function openPopup(box: HTMLElement) {
 
   mountAbove(host);
   draw();
+  if (preview) {
+    // Behind the site's own window there's nothing to see: the menu's Attach still works without it.
+    if (coveredUp(host)) return close();
+    return void load();
+  }
   // Still hidden behind the site's own window: write the letter in the side panel instead. This runs inside the
   // click, so Chrome lets the panel open.
   if (coveredUp(host)) {
