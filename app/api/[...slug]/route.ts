@@ -21,6 +21,7 @@ import { generateCv } from "@/lib/apply/cv";
 import { checkSchool } from "@/lib/school-plans";
 import { hasExtensionToken, issueExtensionToken, requireExtensionUser, revokeExtensionToken } from "@/lib/extension/auth";
 import { friendAction, listFriends } from "@/lib/social/friends";
+import { gameToday, saveGame } from "@/lib/game/service";
 import { writeApplyEmail } from "@/lib/apply/apply-email";
 import { extensionAttempts, extensionCoverLetter, extensionTailoredResume, extensionJob, extensionJobs, extensionPeople, extensionStatus, extensionTracker, extensionLearn, extensionMap, extensionMe, extensionQuickFill, extensionSetup, extensionActivity, extensionMaybe, extensionProfile, extensionResume, extensionSaveTranscript, extensionSubmission, extensionTranscript, extensionUndoSubmission, extensionWrite, defaultCoverLetterFile, extensionGeneralLetter, defaultCoverLetterInfo, removeDefaultCoverLetter, saveDefaultCoverLetter } from "@/lib/extension/service";
 import { fillFromLink, readJobLink } from "@/lib/apply/job-link";
@@ -255,6 +256,9 @@ async function handle(request: Request, slug: string[]) {
   if (root === "apply") {
     const method = request.method;
     if (!action && method === "GET") return json(await applyState(user.id));
+    // Game mode: today's counts for the daily boss, and its settings.
+    if (action === "game" && method === "GET") return json(await gameToday(user.id, new URL(request.url).searchParams.get("since")));
+    if (action === "game" && method === "POST") return json(await saveGame(user.id, await request.json()));
     if (action === "receipt" && method === "GET") {
       const bytes = await receiptImage(user.id, new URL(request.url).searchParams.get("applicationId") ?? "");
       return new Response(Buffer.from(bytes), { headers: { "Content-Type": "image/jpeg", "Cache-Control": "private, max-age=3600" } });
@@ -486,6 +490,8 @@ async function extensionRoute(request: Request, action: string | undefined, sub:
     return json({ ok: true });
   }
   if (action === "me" && method === "GET") return json(await extensionMe(user.id));
+  if (action === "game" && method === "GET") return json(await gameToday(user.id, new URL(request.url).searchParams.get("since")));
+  if (action === "game" && method === "POST") return json(await saveGame(user.id, await request.json()));
   if (action === "plan-preview" && method === "POST") return json(await setPlanPreview(user.id, await request.json()));
   if (action === "reset-today" && method === "POST") return json(await resetTodayUses(user.id));
   if (action === "setup" && method === "POST") return json(await extensionSetup(user.id, await request.json()));

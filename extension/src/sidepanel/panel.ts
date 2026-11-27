@@ -13,9 +13,11 @@ import { dueCount } from "../shared/reminders";
 import { accountTheme, chooseTheme, onThemeChange, startTheme, theme } from "../shared/theme";
 import { UPGRADE_URL } from "@/lib/plan";
 import { startWalkthrough, walkthroughOnce } from "./walkthrough";
+import { drawBoss, gameSettingsCard, onGameChange, wireGameSettings } from "./boss";
 import { DEMO_KEY, demoTerms, startDemoMask, type DemoMode } from "../shared/demo-mask";
 
 startTheme();
+onGameChange(() => void render());
 
 /**
  * The side panel: a typing line and a hanging spider, then one page at a time. A job on the tab shows Autofill;
@@ -597,6 +599,7 @@ function pageView(state: PanelState) {
     // Me: you first (plan, what's left today, profile), friends as a strip, the switches, then one quiet line.
     settings: () => `${profileCard(state)}
       ${trackingSettings(state)}
+      ${gameSettingsCard()}
       <button type="button" class="btn me-tour" id="show-tour">Show me how it works</button>
       <div class="me-foot">
         <span><button type="button" class="quiet" data-popup="activity">Activity</button><span aria-hidden="true">·</span><button type="button" class="quiet" data-go="feedback">Feedback</button></span>
@@ -2098,6 +2101,8 @@ function draw(state: PanelState): boolean {
   if (listBox) listBox.scrollTop = listAt;
   focusPopup();
   moveSpider(state, shown, wasAt);
+  // Game mode's daily boss, above the tabs. Hidden while autofill runs.
+  drawBoss(state.connected && !shown, state.me?.goal?.appliedAt?.length ?? 0);
   const slot = document.getElementById("password-slot");
   passwordSection.hidden = !slot;
   // Forgotten on signing out.
@@ -2161,6 +2166,7 @@ function draw(state: PanelState): boolean {
     if (job && view === "linkedin") wireGuessedPage(app, job);
     else if (job) wireJobPage(app, job);
     wireTracking();
+    wireGameSettings(app);
   }
   document.getElementById("use-code")?.addEventListener("click", async () => {
     const code = (document.getElementById("code") as HTMLInputElement).value.trim();

@@ -2680,6 +2680,21 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
         } catch (error) {
           return reply(failed(error, "Couldn't load your friends."));
         }
+      // Game mode: today's counts for the daily boss (since the start of the student's day) and its settings.
+      case "game":
+        if (!fromExtension(sender)) return reply({ ok: false });
+        try {
+          return reply({ ok: true, ...(await api<Record<string, unknown>>("GET", `game?since=${encodeURIComponent(String(message.since ?? ""))}`)) });
+        } catch (error) {
+          return reply(failed(error, "Couldn't load today's boss."));
+        }
+      case "game-settings":
+        if (!fromExtension(sender)) return reply({ ok: false });
+        try {
+          return reply({ ok: true, ...(await api<Record<string, unknown>>("POST", "game", message.body ?? {})) });
+        } catch (error) {
+          return reply(failed(error, "Couldn't save game mode."));
+        }
       // Add a friend by email, accept or decline a request, remove a friend.
       case "friend-action":
         if (!fromExtension(sender)) return reply({ ok: false });
