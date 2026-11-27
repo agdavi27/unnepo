@@ -2196,8 +2196,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       case "general-letter": {
         if (!fromOwnContent(sender)) return reply({ ok: false });
         try {
-          const doc = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "general-letter", {});
-          void log("Attached your default cover letter from the button on the page.");
+          // `text`: the student's edit from the preview, saved as their default.
+          const doc = await api<{ text: string; fileName: string; pdfBase64: string }>("POST", "general-letter", typeof message.text === "string" ? { text: message.text.slice(0, 6000) } : {});
+          if (message.attach !== false) void log("Attached your default cover letter from the button on the page.");
           return reply({ ok: true, doc });
         } catch (error) {
           return reply(failedCall(error, "Couldn't get your default cover letter."));
