@@ -121,9 +121,11 @@ slot.addEventListener("click", (event) => {
   }
   paint();
 });
-// Clicking anywhere else closes the ⋯ menu.
+// Clicking anywhere else closes the ⋯ menu. A click inside the popup redraws it, so by the time the click gets
+// here the button pressed is gone from the page: that's not a click elsewhere.
 document.addEventListener("click", (event) => {
-  if (game.ui.more && !slot.contains(event.target as Node)) {
+  const target = event.target as Node;
+  if (game.ui.more && target.isConnected && !slot.contains(target)) {
     game.ui = { ...game.ui, more: false };
     paint();
   }
