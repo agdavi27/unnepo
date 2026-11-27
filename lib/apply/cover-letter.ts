@@ -90,12 +90,20 @@ function styleNotes(style: CoverLetterStyle) {
   return notes.join("\n");
 }
 
+async function letterFailed(userId: string, reason: string) {
+  console.error(`[ai] cover_letter unusable: ${reason}`);
+  await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: false, latencyMs: 0, costCents: 0, estimated: true, error: reason, createdAt: nowIso() }).catch(() => undefined);
+}
+
 /** The model letters are written with: ANTHROPIC_LETTER_MODEL when set (a stronger model writes better letters), else the fast one. */
 export const letterModel = () => process.env.ANTHROPIC_LETTER_MODEL || process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5";
 
 /** One model call writes the letter from the student's resume and the posting. Null when AI isn't set up or there's no resume. */
 export async function writeCoverLetter(userId: string, app: Pick<JobApplication, "title" | "company" | "department" | "description" | "requirements">, student: CoverLetterStudent, style: CoverLetterStyle = {}) {
-  if (!student.resumeText.trim() && !student.profile.trim()) return null;
+  if (!student.resumeText.trim() && !student.profile.trim()) {
+    await letterFailed(userId, "The student has no resume text and no profile to write from.");
+    return null;
+  }
   const apiKey = await readAnthropicKey();
   if (!apiKey) {
     console.error("[ai] cover_letter failed: no Anthropic key on the server");
@@ -133,7 +141,12 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
     const costCents = (inputTokens * config.fastInputCentsPerMillion + outputTokens * config.fastOutputCentsPerMillion) / 1_000_000;
     await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
     await repo.insertGeneration({ id: id(), userId, purpose: "cover_letter", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
-    if (response.stop_reason === "refusal" || text.length < 200 || /\[[^\]]*\]/.test(text)) return null;
+    // A letter that can't be used as it is: said why, so the admin page shows it.
+    const unusable = response.stop_reason === "refusal" ? "The model refused." : text.length < 200 ? `The letter came back too short (${text.length} characters).` : /\[[^\]]*\]/.test(text) ? `The letter had a blank to fill in: ${text.match(/\[[^\]]*\]/)?.[0]}` : "";
+    if (unusable) {
+      await letterFailed(userId, unusable);
+      return null;
+    }
     return text.slice(0, 4000);
   } catch (error) {
     console.error(`[ai] cover_letter failed (${letterModel()}): ${error instanceof Error ? error.message : error}`);

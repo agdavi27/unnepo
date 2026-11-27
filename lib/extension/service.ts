@@ -789,7 +789,7 @@ export async function extensionCoverLetter(userId: string, raw: unknown) {
   if (fresh) await assertCoverLetterAllowed(userId);
   const text = own || reused || (await writeCoverLetter(userId, job, { name, resumeText: info.resumeText, profile: info.profileText, excluded: info.excluded }, style));
   if (fresh && text) await countCoverLetter(userId);
-  if (!text) throw new ServiceError("Couldn't write a cover letter. Add your resume and profile first.", "cover_letter", 409);
+  if (!text) throw new ServiceError("Couldn't write a cover letter this time. Try again in a moment.", "cover_letter", 409);
   // The newest letter is the one autofill attaches when the form asks for a cover letter.
   if (app && text !== app.fillReport?.coverLetter) await applications.update(userId, app.id, { fillReport: { ...(app.fillReport ?? { filled: [], failed: [], liveViewUrl: null, screenshotAt: null }), coverLetter: text } });
   const pdf = await coverLetterPdf(text, { name, contact: [info.profile.email, info.profile.phone, info.profile.city, info.profile.linkedin.replace(/^https?:\/\/(www\.)?/, "")] });
