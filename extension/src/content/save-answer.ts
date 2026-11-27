@@ -1,4 +1,5 @@
 import { sectionOf } from "./scan";
+import { keepOnTop } from "./top-layer";
 
 /**
  * "Save to Unnepo" beside an answer the student typed themselves. When they finish typing in a box (a question
@@ -89,7 +90,7 @@ export function watchTypedAnswers() {
     const button = root.querySelector("button")!;
     button.addEventListener("mousedown", (event) => event.preventDefault());
     button.addEventListener("click", () => void save(el, button));
-    document.documentElement.append(host);
+    keepOnTop(host);
     place();
     // Left alone, it goes after a while; the answer stays in the box either way.
     hideTimer = window.setTimeout(hide, 20_000);

@@ -4,6 +4,7 @@ import { H, spiderRects, storedSpiderColors, W } from "../shared/sprite";
 import { isDropdownInput, typeInto } from "./dom";
 import { uploadResumeNow } from "./generic";
 import { findMarked, isEmpty, linkedinJob, openedJob, scanFields, scanPage, structuredJobs } from "./scan";
+import { keepOnTop } from "./top-layer";
 
 /**
  * The job box and "Begin applying" in the panel. Three things happen on the page:
@@ -121,7 +122,7 @@ function ensureLayer() {
     @keyframes legs2 { 0%, 49% { opacity: 0; } 50%, 100% { opacity: 1; } }`}
     .q.done { opacity: 0; }
   </style>`;
-  document.documentElement.appendChild(layer);
+  keepOnTop(layer);
   window.addEventListener("scroll", schedulePlace, { passive: true, capture: true });
   window.addEventListener("resize", schedulePlace, { passive: true });
   return layerRoot;

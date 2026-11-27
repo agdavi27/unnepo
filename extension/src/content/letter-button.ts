@@ -1,5 +1,5 @@
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
-import { coveredUp, mountAbove } from "./top-layer";
+import { coveredUp, keepOnTop } from "./top-layer";
 import { fixesFor, openPanel, type Failure, type Fix } from "./fixes";
 
 /**
@@ -708,7 +708,7 @@ function openPopup(box: HTMLElement, options: { preview?: boolean; onPlaced?: (p
   // Site shortcuts don't fire while typing in the popup.
   for (const type of ["keydown", "keyup", "keypress"]) root.addEventListener(type, (event) => event.stopPropagation());
 
-  mountAbove(host);
+  keepOnTop(host);
   draw();
   if (preview) {
     // Behind the site's own window there's nothing to see: the menu's Attach still works without it.

@@ -1,6 +1,7 @@
 import { H, W, spiderRects, storedSpiderColors } from "../shared/sprite";
 import { isComplexQuestion } from "./question-kinds";
 import { watchTypedAnswers } from "./save-answer";
+import { keepOnTop } from "./top-layer";
 
 /**
  * Unnepo on an application form, like Grammarly. Boxes it can fill from the profile get a soft blue outline,
@@ -399,7 +400,8 @@ export function watchForms(isJobPage: () => boolean) {
       const button = target.closest<HTMLElement>("[data-act]");
       if (button && !(button as HTMLButtonElement).disabled) void act(button.dataset.act ?? "");
     });
-    document.documentElement.append(host);
+    // In front of everything, even a site window (LinkedIn's Easy Apply) opened after it.
+    keepOnTop(host);
     return { host, root };
   }
 
