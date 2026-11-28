@@ -2,20 +2,15 @@ import { FOLLOW_UPS_AT_MOST } from "@/lib/apply/follow-ups";
 
 /**
  * The student's emails to people at a company where they applied. The first email to anyone (recruiter, hiring
- * manager, alum or someone on the team) follows one fixed format, the student's own:
+ * manager, alum or someone on the team) is three sentences, no warm-up and no filler:
  *
  *   Subject: Thank you! - [Role]
  *
  *   Hi [Name],
  *
- *   I hope you're having a great week! I recently applied to the [Role] role on your team and just wanted to reach
- *   out to express my sincerest enthusiasm (please excuse the cold email!)
- *
- *   I'm incredibly interested in the work you all are doing in [part of the field] -- I recently checked out
- *   [initiative] and was super inspired by it. I believe this role is an incredible fit for my experience in [1],
- *   [2], and [3].
- *
- *   Thank you in advance for your consideration!
+ *   I just applied for the [Role] role at [Company]. I've been following your team's work in [part of the field],
+ *   especially [initiative]. My experience in [1], [2], and [3] lines up with what the role needs, and I'd
+ *   appreciate it if you took a look at my application.
  *
  *   Best,
  *   [Student]
@@ -37,12 +32,6 @@ export function audienceOf(role: string): Audience {
   if (role === "alumni") return "alum";
   return "peer";
 }
-
-// The two places the format the student supplied was cut off. Each is a best completion; change it here.
-/** Ends the first paragraph, after "…to express my sincerest enthusiasm ". The source text stopped at "(please excuse". */
-export const OPENER_TAIL = "(please excuse the cold email!)";
-/** Joins the initiative to the skills in the second paragraph. The source text stopped at "was super inspi" and resumed at "this role is an incredible fit". */
-export const INSPIRED_BRIDGE = "was super inspired by it. I believe this role is an incredible fit for my experience";
 
 export type OutreachFields = {
   /** The contact's first name. */
@@ -95,22 +84,21 @@ export function subjectFor(f: Pick<OutreachFields, "role">) {
   return `Thank you! - ${shortRole(tidy(f.role))}`.slice(0, 200);
 }
 
-/** The first email, to anyone at the company. */
+/** The first email, to anyone at the company: three sentences. */
 export function outreachEmail(fields: OutreachFields) {
   const role = shortRole(tidy(fields.role ?? ""));
   const company = tidy(fields.company ?? "");
   const field = slot(fields.field);
   const initiative = slot(fields.initiative, 14);
   const skills = [...new Set((fields.skills ?? []).map((skill) => slot(skill, 6)).filter(Boolean))].slice(0, 3);
-  const interest = field ? `the work you all are doing in ${field}` : company ? `the work you all are doing at ${company}` : "the work you all are doing";
-  // No real initiative to name: the posting itself is something the student did read, so that's what they checked out.
-  const checkedOut = initiative || `what the ${role} posting says about the team`;
-  const fit = skills.length ? `${INSPIRED_BRIDGE} in ${list(skills)}.` : `${INSPIRED_BRIDGE}.`;
+  const applied = `I just applied for the ${role} role${company ? ` at ${company}` : ""}.`;
+  const work = field ? `your team's work in ${field}` : company ? `the work your team is doing at ${company}` : "the work your team is doing";
+  // No real initiative to name: the sentence stops at the team's work rather than make one up.
+  const following = `I've been following ${work}${initiative ? `, especially ${initiative}` : ""}.`;
+  const fit = skills.length ? `My experience in ${list(skills)} lines up with what the role needs` : "My background lines up with what the role needs";
   const body = [
     `Hi ${tidy(fields.firstName ?? "") || "there"},`,
-    `I hope you're having a great week! I recently applied to the ${role} role on your team and just wanted to reach out to express my sincerest enthusiasm ${OPENER_TAIL}`,
-    `I'm incredibly interested in ${interest} -- I recently checked out ${checkedOut} and ${fit}`,
-    "Thank you in advance for your consideration!",
+    `${applied} ${following} ${fit}, and I'd appreciate it if you took a look at my application.`,
     `Best,\n${tidy(fields.studentName ?? "")}`,
   ].join("\n\n");
   return { subject: subjectFor({ role }), body };
