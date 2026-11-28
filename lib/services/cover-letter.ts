@@ -90,7 +90,7 @@ async function maybeAnthropic(userId: string, fallback: string, facts: string[],
     const response = await client.messages.create({
       model: process.env.ANTHROPIC_FAST_MODEL || "claude-haiku-4-5",
       max_tokens: 500,
-      system: "Write a student cover letter from the facts given: a greeting, one paragraph of three or four sentences, and a sign-off. Straight to the point, no filler or warm-up. Do not invent employers, metrics, or skills. Return only the letter.",
+      system: "Write a student cover letter from the facts given: a greeting, one paragraph of three or four sentences ending with a direct ask for a short call, and a sign-off. Straight to the point, no filler or warm-up. Do not invent employers, metrics, or skills. Return only the letter.",
       messages: [{ role: "user", content: `Tone: ${input.tone}\nCompany: ${input.company}\nRole: ${input.role}\nPosting:\n${input.description.slice(0, 1500)}\nFacts:\n${facts.join("\n")}\nFallback:\n${fallback}` }],
     });
     const text = response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n").trim();

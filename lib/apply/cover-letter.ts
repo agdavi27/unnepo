@@ -21,7 +21,7 @@ What makes a letter work (from hiring research; see docs/cover-letter-formats.md
 - Hiring managers flag letters as AI-written by impersonal, polished-but-empty phrasing and by not engaging with the actual posting. Use the student's concrete nouns (course names, project names, organizations, tools, numbers) and the posting's own key terms where they truly apply, in plain words, without copying its sentences.
 - For students, classes, projects, clubs, research, part-time jobs and volunteering all count as experience. Describe them as real work: what the student was responsible for, what they did, and what came of it. Never apologize for little experience or point out what's missing.
 - If the student or posting names a referral, a person, or a connection to the company, use it early, in one sentence, only as given.
-- The last sentence says what they'd bring and asks to talk, plainly. No begging, no "thank you for your time and consideration", no restating the letter.
+- The last sentence is a direct ask: request a short call or interview about this role, as a question or a plain request ("Could we set up a short call to talk about the role?"). Never end on a statement, a thank-you or "I hope to hear from you". No begging, no "thank you for your time and consideration", no restating the letter.
 
 How it should sound:
 - Like a real person wrote it: a capable student talking plainly to a recruiter they respect. Professional, but not stiff. Everyday words over formal ones ("use" not "utilize", "help" not "facilitate"). Contractions are fine. No slang, no exclamation marks.
@@ -35,7 +35,7 @@ How it should sound:
 export const COVER_LETTER_PROMPT = `You write a cover letter for a college student applying to a job.
 ${LETTER_VOICE}
 
-Shape: "Dear Hiring Team," then ONE paragraph of three or four sentences, then "Sincerely," and the student's full name on the next line. First sentence: the exact role and the student's single strongest match for it. Middle: the one or two real experiences that answer the posting's main requirements, with what the student did and what came of it. Last: what they'd bring and a plain ask to talk.
+Shape: "Dear Hiring Team," then ONE paragraph of three or four sentences, then "Sincerely," and the student's full name on the next line. First sentence: the exact role and the student's single strongest match for it. Middle: the one or two real experiences that answer the posting's main requirements, with what the student did and what came of it. Last: a direct ask for a short call or interview.
 Hard limit: four sentences in the body, about 60 to 90 words. Plain text, blank line between greeting, body and sign-off. No addresses, no date, no placeholders in brackets, no markdown.
 Return only the letter.`;
 
@@ -64,10 +64,10 @@ export type CoverLetterStyle = {
 export const LETTER_FORMATS = ["match", "problem", "achievement", "story"] as const;
 export type LetterFormat = (typeof LETTER_FORMATS)[number];
 const FORMATS: Record<LetterFormat, string> = {
-  match: "Format: requirements match. Sentence 1: the role and the one reason the student fits. Sentences 2 and 3: the posting's top one or two requirements, each answered with the student's real evidence. Last sentence: ask to talk.",
-  problem: "Format: problem-solution. Sentence 1: the need this role exists to handle, in the posting's terms (only what the posting says). Sentence 2: when the student handled something like it, what they did and what came of it. Sentence 3 (optional): one more piece of evidence. Last sentence: what they'd take on and a request to talk.",
-  achievement: "Format: achievement first. Sentence 1: the student's single most relevant, concrete result (a number or visible outcome, only if the resume gives it). Sentence 2: why that matters for this role. Sentence 3 (optional): one more matching result. Last sentence: ask to talk.",
-  story: "Format: short story hook. Sentence 1: a real, specific moment from the student's experience that shows the skill this role needs most (only what the resume, profile or notes support). Sentence 2: what came of it and how it connects to this role. Last sentence: ask to talk. Three sentences, four at most.",
+  match: "Format: requirements match. Sentence 1: the role and the one reason the student fits. Sentences 2 and 3: the posting's top one or two requirements, each answered with the student's real evidence. Last sentence: a direct ask for a short call or interview.",
+  problem: "Format: problem-solution. Sentence 1: the need this role exists to handle, in the posting's terms (only what the posting says). Sentence 2: when the student handled something like it, what they did and what came of it. Sentence 3 (optional): one more piece of evidence. Last sentence: what they'd take on, and a direct ask for a short call.",
+  achievement: "Format: achievement first. Sentence 1: the student's single most relevant, concrete result (a number or visible outcome, only if the resume gives it). Sentence 2: why that matters for this role. Sentence 3 (optional): one more matching result. Last sentence: a direct ask for a short call or interview.",
+  story: "Format: short story hook. Sentence 1: a real, specific moment from the student's experience that shows the skill this role needs most (only what the resume, profile or notes support). Sentence 2: what came of it and how it connects to this role. Last sentence: a direct ask for a short call or interview. Three sentences, four at most.",
 };
 
 /** Every letter is three or four sentences; the length choice only moves within that. */
