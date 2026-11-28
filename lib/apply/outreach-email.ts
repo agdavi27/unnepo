@@ -9,8 +9,9 @@ import { FOLLOW_UPS_AT_MOST } from "@/lib/apply/follow-ups";
  *   Hi [Name],
  *
  *   I just applied for the [Role] role at [Company]. I've been following your team's work in [part of the field],
- *   especially [initiative]. My experience in [1], [2], and [3] lines up with what the role needs, and I'd
- *   appreciate it if you took a look at my application.
+ *   especially [initiative]. My experience in [1], [2], and [3] lines up with what the role needs. [The ask.]
+ *
+ * The ask fits who it's to: a recruiter is asked what would help their review; anyone else, for 10 minutes.
  *
  *   Best,
  *   [Student]
@@ -46,7 +47,16 @@ export type OutreachFields = {
   initiative: string;
   /** Up to three skills or experiences the posting names that the student's resume shows. Each checked by `slot`. */
   skills: string[];
+  /** Who it's to, for the ask at the end. Someone on the team when not given. */
+  audience?: Audience;
 };
+
+/** The email's last sentence: one clear, small ask. */
+export function askFor(audience: Audience = "peer") {
+  return audience === "recruiter"
+    ? "Is there anything else I can send to help your review?"
+    : "Would you have 10 minutes in the next couple of weeks to tell me more about the team?";
+}
 
 /** Words that mark an AI-written sentence or phrase as a template or as written by AI. One with these is dropped. */
 export const BANNED = /\b(hope (this|you)|reaching out|reach out|came across|my name is|passionate|excited|thrilled|delve|leverage|innovative|cutting[- ]edge|pick your brain|aligns? perfectly|look forward|just (following|checking)|circling back|bump(ing)? this|synerg|dynamic|i am writing)\b/i;
@@ -84,7 +94,7 @@ export function subjectFor(f: Pick<OutreachFields, "role">) {
   return `Thank you! - ${shortRole(tidy(f.role))}`.slice(0, 200);
 }
 
-/** The first email, to anyone at the company: three sentences. */
+/** The first email, to anyone at the company: three sentences and an ask. */
 export function outreachEmail(fields: OutreachFields) {
   const role = shortRole(tidy(fields.role ?? ""));
   const company = tidy(fields.company ?? "");
@@ -98,7 +108,7 @@ export function outreachEmail(fields: OutreachFields) {
   const fit = skills.length ? `My experience in ${list(skills)} lines up with what the role needs` : "My background lines up with what the role needs";
   const body = [
     `Hi ${tidy(fields.firstName ?? "") || "there"},`,
-    `${applied} ${following} ${fit}, and I'd appreciate it if you took a look at my application.`,
+    `${applied} ${following} ${fit}. ${askFor(fields.audience)}`,
     `Best,\n${tidy(fields.studentName ?? "")}`,
   ].join("\n\n");
   return { subject: subjectFor({ role }), body };

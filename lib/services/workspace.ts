@@ -303,7 +303,7 @@ ${LETTER_VOICE}
 - Lead with the highlights the student picked. Use the resume to fill in their details, not to add new topics.
 - Never mention anything the student asked to avoid.
 
-Shape: a greeting ("Dear Hiring Team," unless the posting names the person), one paragraph of three or four sentences (never more), and a sign-off with the student's full name. Follow the tone and length asked for. No placeholders in brackets.
+Shape: a greeting ("Dear Hiring Team," unless the posting names the person), one paragraph of three or four sentences (never more) whose last sentence directly asks for a short call or interview, and a sign-off with the student's full name. Follow the tone and length asked for. No placeholders in brackets.
 Return only JSON with the key body.`;
 
 /** Writes a cover letter for one job from the student's selected highlights and resume text. */
