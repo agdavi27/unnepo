@@ -167,14 +167,14 @@ function start() {
   }
 
   /**
-   * Who shows: the person the job listing named (free, it came with the page), then Free's one unlocked person with
-   * an email, or Pro's first two.
+   * Who shows: the person the job listing named (free, it came with the page), then Free's one unlocked person or
+   * Pro's first two. Only people with an email show: someone with no email can't be written to.
    */
   function people(data: CardState) {
-    const list = data.job?.contacts ?? [];
+    const list = (data.job?.contacts ?? []).filter((person) => person.email);
     const poster = list.find((person) => person.role === "job_poster");
     const others = list.filter((person) => person !== poster);
-    const rest = data.free ? others.filter((person) => person.email).slice(0, 1) : others.slice(0, 2);
+    const rest = others.slice(0, data.free ? 1 : 2);
     return poster ? [poster, ...rest] : rest;
   }
 
@@ -417,7 +417,8 @@ function start() {
         return void busy(`email:${id}`, async () => {
           type Wrote = { ok: boolean; error?: string; mailto?: string; cut?: boolean; body?: string };
           const result = await ask<Wrote>({ type: "card-email", applicationId: card.applicationId, contactId: id }).catch((): Wrote => ({ ok: false, error: "Couldn't reach Unnepo." }));
-          if (!result.ok) { card.note = result.error ?? "Couldn't write the email."; return; }
+          // Their email didn't check out: they're off the list, so the card is read again to drop them.
+          if (!result.ok) { card.note = result.error ?? "Couldn't write the email."; await load(true); return; }
           card.opened.add(id);
           if (result.cut && result.body) {
             await navigator.clipboard.writeText(result.body).catch(() => undefined);

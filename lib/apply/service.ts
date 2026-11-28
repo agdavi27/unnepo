@@ -952,6 +952,8 @@ export async function writeContactEmail(userId: string, raw: unknown) {
     const checked = await checkBeforeWriting(userId, contact.name, domain, contact.email).catch(() => null);
     if (checked && (checked.email !== contact.email || checked.emailSource !== contact.emailSource)) writeTo = (await applicationContacts.update(userId, contact.id, checked)) ?? contact;
   }
+  // No email to send to (the guess didn't check out): nothing is written, and no email is used up.
+  if (!writeTo.email) throw new ServiceError(`${contact.name.split(" ")[0]}'s email didn't check out, so they're off your list. Find more people to try someone else.`, "no_email", 409);
   if (body.followUp === true && (await isFree(userId))) throw new ServiceError("Follow-up emails written for you are part of Pro.", "plan", 402);
   // Which follow-up this is: one after each the student marked sent. Two at most; the second is Outreach Season's.
   const followUpsSent = (app.fillReport?.outreachLog ?? []).filter((entry) => entry.contactId === contact.id && entry.kind === "follow_up").length;

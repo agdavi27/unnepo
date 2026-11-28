@@ -432,7 +432,7 @@ function peopleCard(job: TrackerJob) {
     : "";
   // The corner says how many unlocks are left: "2 of 2 unlocks left today" on Free, "12 of 100 companies left this month" on Pro.
   const badge = store.tracker?.peopleBadge;
-  const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${job.contacts.length ? ` · ${shownPeople(job).length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
+  const head = `<div class="row-between"><span class="eyebrow">People at ${escape(short(company, 28))}${shownPeople(job).length ? ` · ${shownPeople(job).length}` : ""}</span>${badge ? `<span class="people-count${/^0 /.test(badge) ? " out" : ""}">${escape(badge)}</span>` : ""}</div>`;
   if (!isAppliedJob(job)) {
     return `<section class="page people" aria-label="People">${head}${posted}<p class="note">Once you apply, Unnepo finds who to email here: recruiters, the team, and people from your school.</p></section>`;
   }
@@ -445,7 +445,7 @@ function peopleCard(job: TrackerJob) {
       <p class="small">Unnepo found ${escape(parts.join(", ") || `${preview.rows.length} people`)} at ${escape(company)}.</p>
       <ul class="people-list">${preview.rows.map((row) => freeRow(null, row.title, row.role)).join("")}</ul></section>`;
   }
-  const known = job.contacts.length ? peopleList(job) : "";
+  const known = shownPeople(job).length ? peopleList(job) : "";
   // Free, not unlocked yet: Unlock spends one of the day's unlocks, and says how many are left.
   if (store.tracker?.free && job.contactsStatus === "idle" && !job.contacts.length) {
     const left = store.tracker.peopleLeft ?? 0;
@@ -470,7 +470,7 @@ function peopleCard(job: TrackerJob) {
   if ((job.contactsStatus === "finding" || job.contactsStatus === "writing") && !stale) {
     return `<section class="page people" aria-label="People">${head}${posted}${known}${findingPeople(job, company)}</section>`;
   }
-  const none = !job.contacts.length;
+  const none = !shownPeople(job).length;
   const linkedIn = (label: string, keywords: string) => `<a class="link" href="https://www.linkedin.com/search/results/people/?${new URLSearchParams({ keywords })}" target="_blank" rel="noreferrer">${label} on LinkedIn ↗</a>`;
   return `
     <section class="page people" aria-label="People">${head}${posted}
@@ -487,8 +487,14 @@ function peopleCard(job: TrackerJob) {
 export function freePick<T extends { role: string; email: string | null }>(contacts: T[]) {
   return contacts.find((person) => person.role === "job_poster") ?? contacts.find((person) => person.email) ?? contacts[0];
 }
-/** The people on a job's list as Free sees them (one), or Pro's three (a list from before was longer). */
-const shownPeople = (job: TrackerJob) => (store.tracker?.free && job.contacts.length ? [freePick(job.contacts)] : job.contacts.slice(0, 3));
+/**
+ * The people on a job's list as Free sees them (one), or Pro's three (a list from before was longer). Only people with
+ * an email show: someone with no email can't be written to.
+ */
+const shownPeople = (job: TrackerJob) => {
+  const reachable = job.contacts.filter((person) => person.email);
+  return store.tracker?.free && reachable.length ? [freePick(reachable)] : reachable.slice(0, 3);
+};
 
 function peopleList(job: TrackerJob) {
   const people = shownPeople(job);
