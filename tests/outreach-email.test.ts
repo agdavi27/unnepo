@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BANNED, INSPIRED_BRIDGE, OPENER_TAIL, followUpEmail, jobIdOf, outreachEmail, shortRole, slot, subjectFor, usable, wordCount } from "@/lib/apply/outreach-email";
+import { BANNED, followUpEmail, jobIdOf, outreachEmail, shortRole, slot, subjectFor, usable, wordCount } from "@/lib/apply/outreach-email";
 import { composeLink, withoutJobId } from "@/lib/apply/compose-link";
 
 const base = {
@@ -10,21 +10,19 @@ const base = {
 const words = (text: string) => wordCount(text.replace(/^Hi [^,]+,|(Thank you|Best),\n.*$/g, ""));
 
 describe("outreachEmail", () => {
-  it("follows the student's format exactly, with the AI filling only the slots", () => {
+  it("is three sentences, with the AI filling only the slots", () => {
     const email = outreachEmail(base);
     expect(email.subject).toBe("Thank you! - Sports Analyst");
     expect(email.body).toBe([
       "Hi Jane,",
-      `I hope you're having a great week! I recently applied to the Sports Analyst role on your team and just wanted to reach out to express my sincerest enthusiasm ${OPENER_TAIL}`,
-      `I'm incredibly interested in the work you all are doing in live sports media analytics -- I recently checked out WPP Media's Open Intelligence platform and ${INSPIRED_BRIDGE} in SQL, statistical modeling, and client presentations.`,
-      "Thank you in advance for your consideration!",
+      "I just applied for the Sports Analyst role at WPP Media. I've been following your team's work in live sports media analytics, especially WPP Media's Open Intelligence platform. My experience in SQL, statistical modeling, and client presentations lines up with what the role needs, and I'd appreciate it if you took a look at my application.",
       "Best,\nDrew Davis",
     ].join("\n\n"));
   });
 
-  it("never invents an initiative: with none, it names the posting the student read", () => {
+  it("never invents an initiative: with none, the sentence stops at the team's work", () => {
     const email = outreachEmail({ ...base, initiative: "" });
-    expect(email.body).toContain("I recently checked out what the Sports Analyst posting says about the team and was super inspired by it.");
+    expect(email.body).toContain("I've been following your team's work in live sports media analytics. My experience");
   });
 
   it("drops a slot that's long, gushes, or is a placeholder, for a plain wording", () => {
@@ -34,17 +32,19 @@ describe("outreachEmail", () => {
     expect(slot(Array(20).fill("word").join(" "))).toBe("");
     expect(slot("  sports analytics. ")).toBe("sports analytics");
     const email = outreachEmail({ ...base, field: "the innovative world of sports", initiative: "N/A", skills: ["SQL", "", "SQL", "[skill]"] });
-    expect(email.body).toContain("I'm incredibly interested in the work you all are doing at WPP Media -- ");
-    expect(email.body).toContain("for my experience in SQL.");
+    expect(email.body).toContain("I've been following the work your team is doing at WPP Media. ");
+    expect(email.body).toContain("My experience in SQL lines up");
     const none = outreachEmail({ ...base, skills: [] });
-    expect(none.body).toContain("an incredible fit for my experience.");
-    expect(outreachEmail({ ...base, skills: ["SQL", "Excel"] }).body).toContain("in SQL and Excel.");
+    expect(none.body).toContain("My background lines up with what the role needs");
+    expect(outreachEmail({ ...base, skills: ["SQL", "Excel"] }).body).toContain("in SQL and Excel lines up");
   });
 
-  it("is five blocks and stays short", () => {
+  it("is three blocks, three sentences, and short", () => {
     const email = outreachEmail(base);
-    expect(email.body.split("\n\n")).toHaveLength(5);
-    expect(words(email.body)).toBeLessThanOrEqual(110);
+    expect(email.body.split("\n\n")).toHaveLength(3);
+    expect(email.body.split("\n\n")[1].match(/[.!?](\s|$)/g)).toHaveLength(3);
+    expect(BANNED.test(email.body)).toBe(false);
+    expect(words(email.body)).toBeLessThanOrEqual(70);
   });
 
   it("keeps a long posting title out of the subject", () => {

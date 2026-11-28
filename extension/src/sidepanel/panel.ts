@@ -875,7 +875,7 @@ function coverPopup(state: PanelState) {
     return popupShell("Your cover letter", `${writingSpider()}${letter ? writtenLetter(busy, forJob) : ""}${note}`);
   }
   const highlights = state.me?.highlights ?? [];
-  const steps = [...(forJob ? [] : ["paste"]), "format", "length", "tone", "mention"];
+  const steps = [...(forJob ? [] : ["paste"]), "format", "tone", "mention"];
   const step = Math.min(popup!.step, steps.length - 1);
   popup!.step = step;
   const title = state.job?.title || state.page?.title;

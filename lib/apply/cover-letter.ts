@@ -21,13 +21,13 @@ What makes a letter work (from hiring research; see docs/cover-letter-formats.md
 - Hiring managers flag letters as AI-written by impersonal, polished-but-empty phrasing and by not engaging with the actual posting. Use the student's concrete nouns (course names, project names, organizations, tools, numbers) and the posting's own key terms where they truly apply, in plain words, without copying its sentences.
 - For students, classes, projects, clubs, research, part-time jobs and volunteering all count as experience. Describe them as real work: what the student was responsible for, what they did, and what came of it. Never apologize for little experience or point out what's missing.
 - If the student or posting names a referral, a person, or a connection to the company, use it early, in one sentence, only as given.
-- Close with one confident, specific sentence on what they'd bring to this team, and a plain request to talk. No begging, no "thank you for your time and consideration" filler, no restating the whole letter.
+- The last sentence says what they'd bring and asks to talk, plainly. No begging, no "thank you for your time and consideration", no restating the letter.
 
 How it should sound:
 - Like a real person wrote it: a capable student talking plainly to a recruiter they respect. Professional, but not stiff. Everyday words over formal ones ("use" not "utilize", "help" not "facilitate"). Contractions are fine. No slang, no exclamation marks.
-- Short and to the point. Every sentence earns its place: if cutting it loses nothing, cut it. No warm-up sentences, no summaries of what was just said.
+- Three or four sentences, never more. Every sentence carries a fact about the job or the student: if cutting it loses nothing, cut it. No warm-up ("I hope", "I'm reaching out"), no summaries, no sentence that only says the student is interested or a good fit.
 - Show, don't claim: describe what the student actually did and what came of it ("built the intake form 40 volunteers now use") instead of adjectives about themselves ("hardworking", "detail-oriented", "passionate").
-- Vary sentence length. Short paragraphs, two to four sentences each. Each paragraph makes one point.
+- Plain, short sentences, each making one point. No stacked clauses or lists of adjectives.
 - Never use these: "I am writing to express my interest", "I am excited to apply", "I believe I would be a great fit", "passion"/"passionate", "leverage", "synergy", "dynamic", "fast-paced environment", "hit the ground running", "unique opportunity", "honed", "delve", "testament", "tapestry", "I am confident that", "thrilled", "furthermore", "moreover", "additionally", "align with", "I would welcome the opportunity", em dashes.
 - Don't restate the resume line by line or list every skill. Depth on one or two experiences beats a tour of five.
 - Don't copy sentences from the job posting.`;
@@ -35,8 +35,8 @@ How it should sound:
 export const COVER_LETTER_PROMPT = `You write a cover letter for a college student applying to a job.
 ${LETTER_VOICE}
 
-Shape: "Dear Hiring Team," then three short paragraphs. First (two sentences): the role, who the student is (school, year, major when known) and the clearest reason they fit. Second: one or two real experiences that answer the posting's main requirements, with what the student did and what came of it. Third (one or two sentences): what they'd bring and a plain ask to talk. Then "Sincerely," and the student's full name on the next line.
-About 150 to 200 words. Shorter is better than padded. Plain text, paragraphs separated by a blank line. No addresses, no date, no placeholders in brackets, no markdown.
+Shape: "Dear Hiring Team," then ONE paragraph of three or four sentences, then "Sincerely," and the student's full name on the next line. First sentence: the exact role and the student's single strongest match for it. Middle: the one or two real experiences that answer the posting's main requirements, with what the student did and what came of it. Last: what they'd bring and a plain ask to talk.
+Hard limit: four sentences in the body, about 60 to 90 words. Plain text, blank line between greeting, body and sign-off. No addresses, no date, no placeholders in brackets, no markdown.
 Return only the letter.`;
 
 export type CoverLetterStudent = { name: string; resumeText: string; profile: string; /** Topics the student asked never to bring up. */ excluded?: string };
@@ -64,17 +64,18 @@ export type CoverLetterStyle = {
 export const LETTER_FORMATS = ["match", "problem", "achievement", "story"] as const;
 export type LetterFormat = (typeof LETTER_FORMATS)[number];
 const FORMATS: Record<LetterFormat, string> = {
-  match: "Format: requirements match. Open with the role and the one-sentence reason the student fits. In the body, take the two or three requirements the posting stresses most and answer each with the student's real evidence, one short paragraph (or one tight sentence each) per requirement, in the order the posting lists them. Close by asking for a conversation.",
-  problem: "Format: problem-solution. Open by naming, in the posting's terms, the need or challenge this role exists to handle (only what the posting says). Then show how the student has already handled something like it, with what they did and what came of it. Then one more piece of evidence. Close with what they'd take on first and a request to talk.",
-  achievement: "Format: achievement first. Open with the student's single most relevant, concrete result (a number or a visible outcome, only if the resume gives it), then tie it to the role in the next sentence. The body gives one or two more results that match the posting's requirements. Close briefly.",
-  story: "Format: short story hook. Open with two or three sentences of a real, specific moment from the student's experience that shows the skill this role needs most (only what the resume, profile or notes support). Then connect it to the role and the company in plain words, add one more piece of evidence for the posting's main requirement, and close briefly.",
+  match: "Format: requirements match. Sentence 1: the role and the one reason the student fits. Sentences 2 and 3: the posting's top one or two requirements, each answered with the student's real evidence. Last sentence: ask to talk.",
+  problem: "Format: problem-solution. Sentence 1: the need this role exists to handle, in the posting's terms (only what the posting says). Sentence 2: when the student handled something like it, what they did and what came of it. Sentence 3 (optional): one more piece of evidence. Last sentence: what they'd take on and a request to talk.",
+  achievement: "Format: achievement first. Sentence 1: the student's single most relevant, concrete result (a number or visible outcome, only if the resume gives it). Sentence 2: why that matters for this role. Sentence 3 (optional): one more matching result. Last sentence: ask to talk.",
+  story: "Format: short story hook. Sentence 1: a real, specific moment from the student's experience that shows the skill this role needs most (only what the resume, profile or notes support). Sentence 2: what came of it and how it connects to this role. Last sentence: ask to talk. Three sentences, four at most.",
 };
 
+/** Every letter is three or four sentences; the length choice only moves within that. */
 const LENGTHS: Record<NonNullable<CoverLetterStyle["length"]>, string> = {
-  brief: "About 70 to 100 words in all: two short paragraphs, then the close. Broad: who the student is (school, year and major when known) and their one or two strongest real experiences, said in a way that suits any employer in their field.",
-  short: "Under 150 words: two short paragraphs plus the close.",
-  standard: "About 150 to 200 words.",
-  detailed: "About 250 to 300 words, still fitting on one page.",
+  brief: "Three sentences, about 50 to 70 words. Broad: who the student is (school, year and major when known) and their one strongest real experience, said in a way that suits any employer in their field.",
+  short: "Three sentences, about 50 to 70 words.",
+  standard: "Three or four sentences, about 60 to 90 words.",
+  detailed: "Four sentences, about 80 to 100 words, with the most specific evidence the resume gives.",
 };
 
 /** The student's choices as instructions for the model. Their own words count as facts they gave. */
@@ -142,7 +143,7 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
     await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
     await repo.insertGeneration({ id: id(), userId, purpose: "cover_letter", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
     // A letter that can't be used as it is: said why, so the admin page shows it.
-    const unusable = response.stop_reason === "refusal" ? "The model refused." : text.length < 200 ? `The letter came back too short (${text.length} characters).` : /\[[^\]]*\]/.test(text) ? `The letter had a blank to fill in: ${text.match(/\[[^\]]*\]/)?.[0]}` : "";
+    const unusable = response.stop_reason === "refusal" ? "The model refused." : text.length < 120 ? `The letter came back too short (${text.length} characters).` : /\[[^\]]*\]/.test(text) ? `The letter had a blank to fill in: ${text.match(/\[[^\]]*\]/)?.[0]}` : "";
     if (unusable) {
       await letterFailed(userId, unusable);
       return null;

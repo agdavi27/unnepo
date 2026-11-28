@@ -296,14 +296,14 @@ const LETTER_TONES: Record<string, string> = {
   confident: "confident and direct",
   enthusiastic: "enthusiastic but grounded",
 };
-const LETTER_LENGTHS: Record<string, string> = { short: "under 150 words", standard: "about 150 to 200 words", detailed: "about 250 to 300 words" };
+const LETTER_LENGTHS: Record<string, string> = { short: "three sentences, about 50 to 70 words", standard: "three or four sentences, about 60 to 90 words", detailed: "four sentences, about 80 to 100 words" };
 
 const COVER_LETTER_PROMPT = `You write cover letters for college students applying to jobs and internships.
 ${LETTER_VOICE}
 - Lead with the highlights the student picked. Use the resume to fill in their details, not to add new topics.
 - Never mention anything the student asked to avoid.
 
-Shape: a greeting ("Dear Hiring Team," unless the posting names the person), three short paragraphs, and a sign-off with the student's full name. Follow the tone and length asked for. No placeholders in brackets.
+Shape: a greeting ("Dear Hiring Team," unless the posting names the person), one paragraph of three or four sentences (never more), and a sign-off with the student's full name. Follow the tone and length asked for. No placeholders in brackets.
 Return only JSON with the key body.`;
 
 /** Writes a cover letter for one job from the student's selected highlights and resume text. */

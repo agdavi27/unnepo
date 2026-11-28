@@ -376,7 +376,7 @@ function addButton(spot: Spot) {
 
 /* ---------------- The popup ---------------- */
 
-const STEPS = ["format", "length", "tone", "mention"] as const;
+const STEPS = ["format", "tone", "mention"] as const;
 const CHOICES: Record<"format" | "length" | "tone", { q: string; options: [string, string, string][] }> = {
   format: { q: "How should it be built?", options: [["match", "Match the job (recommended)", "Answers the posting's top asks, one by one"], ["problem", "Problem, then solution", "Names what the role needs, shows you've done it"], ["achievement", "Lead with a win", "Opens with your strongest result"], ["story", "Short story", "Opens with a real moment from your experience"]] },
   length: { q: "How long should it be?", options: [["short", "Short", "A few lines"], ["standard", "Standard", "The usual cover letter"], ["detailed", "Detailed", "More on your experience"]] },

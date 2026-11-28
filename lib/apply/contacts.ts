@@ -827,7 +827,7 @@ function recruiterWhy(app: JobApplication, person: Contact) {
  */
 export const OUTREACH_PIECES_PROMPT = `You fill in the blanks of short emails from a college student to people at a company where the student just applied. The rest of each email is already written, in this fixed form:
 
-"I'm incredibly interested in the work you all are doing in [field] -- I recently checked out [initiative] and was super inspired by it. I believe this role is an incredible fit for my experience in [skill 1], [skill 2], and [skill 3]."
+"I've been following your team's work in [field], especially [initiative]. My experience in [skill 1], [skill 2], and [skill 3] lines up with what the role needs."
 
 For each person, write:
 field: a noun phrase of 2 to 8 words naming the specific part of the field this team works in, taken from the posting (for example "live sports media analytics" or "middle-market healthcare M&A"). Not the company name alone, and no praise.
