@@ -13,7 +13,7 @@ import { parseLocation, splitLocations, splitProfileList } from "@/lib/profile/l
 import { highlightProfileWithModel, organizeQuizWithModel, quizSourceText } from "@/lib/profile/quiz-model";
 import { ServiceError } from "@/lib/errors";
 import { applicationProfiles, applications } from "@/lib/apply/store";
-import { LETTER_VOICE, letterModel, rewriteLetterPart } from "@/lib/apply/cover-letter";
+import { assembleLetter, LETTER_VOICE, letterModel, rewriteLetterPart } from "@/lib/apply/cover-letter";
 import { assertUseAllowed, countUse } from "@/lib/apply/limits";
 import { student } from "@/lib/apply/service";
 import { assertCoverLetterAllowed, countCoverLetter, coverLettersLeft, hasUnlimitedCredits, planUsage } from "@/lib/apply/limits";
@@ -296,14 +296,14 @@ const LETTER_TONES: Record<string, string> = {
   confident: "confident and direct",
   enthusiastic: "enthusiastic but grounded",
 };
-const LETTER_LENGTHS: Record<string, string> = { short: "three sentences, about 50 to 70 words", standard: "three or four sentences, about 60 to 90 words", detailed: "four sentences, about 80 to 100 words" };
+const LETTER_LENGTHS: Record<string, string> = { short: "two sentences, about 35 to 50 words", standard: "two or three sentences, about 40 to 70 words", detailed: "three sentences, about 60 to 80 words" };
 
 const COVER_LETTER_PROMPT = `You write cover letters for college students applying to jobs and internships.
 ${LETTER_VOICE}
 - Lead with the highlights the student picked. Use the resume to fill in their details, not to add new topics.
 - Never mention anything the student asked to avoid.
 
-Shape: a greeting ("Dear Hiring Team," unless the posting names the person), one paragraph of three or four sentences (never more) whose last sentence says the student is excited about the role and invites the reader to reach out with any questions about their application, and a sign-off with the student's full name. Follow the tone and length asked for. No placeholders in brackets.
+Write only the middle of the letter: two or three sentences (who the student is and the role, then the real experience that best answers the posting). The greeting, the closing sentence and the sign-off are added for you, so don't write them. Follow the tone and length asked for. No placeholders in brackets.
 Return only JSON with the key body.`;
 
 /** Writes a cover letter for one job from the student's selected highlights and resume text. */
@@ -370,7 +370,8 @@ export async function generateWorkspaceCoverLetter(userId: string, raw: unknown)
       messages: [{ role: "user", content: prompt }],
     });
     if (response.stop_reason === "refusal") throw new Error("refusal");
-    letter = parseEmailJson(response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n")).body;
+    const middle = parseEmailJson(response.content.map((block) => (block.type === "text" ? block.text : "")).join("\n")).body;
+    letter = middle.trim() ? assembleLetter(middle, user?.name || "Student").letter : "";
     inputTokens = response.usage?.input_tokens ?? 0;
     outputTokens = response.usage?.output_tokens ?? 0;
     if (!letter) throw new Error("empty_letter");

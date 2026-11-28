@@ -1,6 +1,7 @@
 import { serverConfig } from "@/lib/config";
 import { id, nowIso, readAnthropicKey, repo } from "@/lib/db/file-store";
 import type { JobApplication } from "@/lib/apply/types";
+import { CLOSING } from "@/lib/apply/outreach-email";
 
 /**
  * How a letter should read, shared by the web app and the extension. Accurate first (only what the student's own
@@ -21,23 +22,44 @@ What makes a letter work (from hiring research; see docs/cover-letter-formats.md
 - Hiring managers flag letters as AI-written by impersonal, polished-but-empty phrasing and by not engaging with the actual posting. Use the student's concrete nouns (course names, project names, organizations, tools, numbers) and the posting's own key terms where they truly apply, in plain words, without copying its sentences.
 - For students, classes, projects, clubs, research, part-time jobs and volunteering all count as experience. Describe them as real work: what the student was responsible for, what they did, and what came of it. Never apologize for little experience or point out what's missing.
 - If the student or posting names a referral, a person, or a connection to the company, use it early, in one sentence, only as given.
-- The last sentence says, in a few plain words, that the student is excited about this role, and invites the reader to reach out with any questions about their application (for example "I'm really excited about this role, so please reach out if you have any questions about my application."). This is the one place "excited" and "reach out" are allowed. Never end on a thank-you or "I hope to hear from you". No begging, no "thank you for your time and consideration", no restating the letter.
+- Don't write a closing line: the letter's last sentence (excitement about the role and an invitation to reach out with questions) is added for you. Never end on a thank-you, "I hope to hear from you", a request, or a restatement of the letter.
 
 How it should sound:
 - Like a real person wrote it: a capable student talking plainly to a recruiter they respect. Professional, but not stiff. Everyday words over formal ones ("use" not "utilize", "help" not "facilitate"). Contractions are fine. No slang, no exclamation marks.
-- Three or four sentences, never more. Every sentence carries a fact about the job or the student: if cutting it loses nothing, cut it. No warm-up ("I hope", "I'm reaching out"), no summaries, no sentence that only says the student is interested or a good fit.
+- Two or three sentences of your own, never more. Every sentence carries a fact about the job or the student: if cutting it loses nothing, cut it. No warm-up ("I hope", "I'm reaching out"), no summaries, no sentence that only says the student is interested or a good fit.
 - Show, don't claim: describe what the student actually did and what came of it ("built the intake form 40 volunteers now use") instead of adjectives about themselves ("hardworking", "detail-oriented", "passionate").
 - Plain, short sentences, each making one point. No stacked clauses or lists of adjectives.
 - Never use these: "I am writing to express my interest", "I am excited to apply", "I believe I would be a great fit", "passion"/"passionate", "leverage", "synergy", "dynamic", "fast-paced environment", "hit the ground running", "unique opportunity", "honed", "delve", "testament", "tapestry", "I am confident that", "thrilled", "furthermore", "moreover", "additionally", "align with", "I would welcome the opportunity", em dashes.
 - Don't restate the resume line by line or list every skill. Depth on one or two experiences beats a tour of five.
 - Don't copy sentences from the job posting.`;
 
-export const COVER_LETTER_PROMPT = `You write a cover letter for a college student applying to a job.
+/**
+ * A letter has the email's shape: the AI writes only the two or three sentences in the middle; the greeting, the
+ * closing sentence (the same one the outreach email ends on) and the sign-off are added here (`assembleLetter`).
+ */
+export const COVER_LETTER_PROMPT = `You write the middle of a short cover letter for a college student applying to a job.
 ${LETTER_VOICE}
 
-Shape: "Dear Hiring Team," then ONE paragraph of three or four sentences, then "Sincerely," and the student's full name on the next line. First sentence: the exact role and the student's single strongest match for it. Middle: the one or two real experiences that answer the posting's main requirements, with what the student did and what came of it. Last: excitement about the role and an invitation to reach out with questions.
-Hard limit: four sentences in the body, about 60 to 90 words. Plain text, blank line between greeting, body and sign-off. No addresses, no date, no placeholders in brackets, no markdown.
-Return only the letter.`;
+Write two or three sentences, about 40 to 70 words. First sentence: who the student is (school, year and major when known) and the exact role they applied for. Then one or two sentences on the real experience that best answers what the posting asks for: what the student did and what came of it.
+The letter is then put together as: "Dear Hiring Team," / your sentences followed by "${CLOSING}" / "Sincerely," and the student's name. So don't write a greeting, a closing sentence or a sign-off.
+
+Example of the voice and length (facts are made up; use only the student's real ones):
+I'm a junior at Colby College studying Economics, and I just applied for the Sports Analyst role at WPP Media. As president of the Colby Data Club, I built SQL dashboards that 40 students use every week to track club finances. Last summer I built a ticket-sales forecast for the Portland Sea Dogs and presented it to their front office.
+
+Plain text, one paragraph, no placeholders in brackets, no markdown. Return only your sentences.`;
+
+const SIGN_OFF = /\n\s*(sincerely|best|best regards|kind regards|regards|warmly|thank you|thanks|respectfully)[,.!]?\s*(\n[^\n]*)?\s*$/i;
+/** A sentence the model added to close the letter on its own: dropped, since the closing is ours. */
+const OWN_CLOSE = /\b(reach out|excited|look forward|hear from you|thank you|thanks for|consideration|questions about)\b/i;
+
+/** The full letter from the model's middle sentences: greeting, those sentences, the fixed closing and the sign-off. */
+export function assembleLetter(middle: string, name: string) {
+  const text = middle.trim().replace(/^(dear|hi|hello|to whom)\b[^\n]*\n+/i, "").replace(SIGN_OFF, "").split(CLOSING).join(" ");
+  const sentences = text.replace(/\s+/g, " ").trim().match(/[^.!?]+[.!?]+["”’)]*|[^.!?]+$/g)?.map((sentence) => sentence.trim()).filter(Boolean) ?? [];
+  while (sentences.length > 1 && OWN_CLOSE.test(sentences.at(-1)!)) sentences.pop();
+  const body = sentences.slice(0, 3).join(" ");
+  return { body, letter: `Dear Hiring Team,\n\n${body} ${CLOSING}\n\nSincerely,\n${name.trim()}` };
+}
 
 export type CoverLetterStudent = { name: string; resumeText: string; profile: string; /** Topics the student asked never to bring up. */ excluded?: string };
 
@@ -64,29 +86,29 @@ export type CoverLetterStyle = {
 export const LETTER_FORMATS = ["match", "problem", "achievement", "story"] as const;
 export type LetterFormat = (typeof LETTER_FORMATS)[number];
 const FORMATS: Record<LetterFormat, string> = {
-  match: "Format: requirements match. Sentence 1: the role and the one reason the student fits. Sentences 2 and 3: the posting's top one or two requirements, each answered with the student's real evidence. Last sentence: excitement about the role and an invitation to reach out with questions.",
-  problem: "Format: problem-solution. Sentence 1: the need this role exists to handle, in the posting's terms (only what the posting says). Sentence 2: when the student handled something like it, what they did and what came of it. Sentence 3 (optional): one more piece of evidence. Last sentence: excitement about the role and an invitation to reach out with questions.",
-  achievement: "Format: achievement first. Sentence 1: the student's single most relevant, concrete result (a number or visible outcome, only if the resume gives it). Sentence 2: why that matters for this role. Sentence 3 (optional): one more matching result. Last sentence: excitement about the role and an invitation to reach out with questions.",
-  story: "Format: short story hook. Sentence 1: a real, specific moment from the student's experience that shows the skill this role needs most (only what the resume, profile or notes support). Sentence 2: what came of it and how it connects to this role. Last sentence: excitement about the role and an invitation to reach out with questions. Three sentences, four at most.",
+  match: "Format: requirements match. Sentence 1: who the student is and the role. Sentences 2 and 3: the posting's top one or two requirements, each answered with the student's real evidence.",
+  problem: "Format: problem-solution. Sentence 1: the role and the need it exists to handle, in the posting's terms (only what the posting says). Sentence 2: when the student handled something like it, what they did and what came of it. Sentence 3 (optional): one more piece of evidence.",
+  achievement: "Format: achievement first. Sentence 1: the role and the student's single most relevant, concrete result (a number or visible outcome, only if the resume gives it). Sentence 2: why that matters for this role. Sentence 3 (optional): one more matching result.",
+  story: "Format: short story hook. Sentence 1: a real, specific moment from the student's experience that shows the skill this role needs most (only what the resume, profile or notes support). Sentence 2: what came of it and how it connects to the role they applied for.",
 };
 
-/** Every letter is three or four sentences; the length choice only moves within that. */
+/** Every letter is two or three sentences plus the closing; the length choice only moves within that. */
 const LENGTHS: Record<NonNullable<CoverLetterStyle["length"]>, string> = {
-  brief: "Three sentences, about 50 to 70 words. Broad: who the student is (school, year and major when known) and their one strongest real experience, said in a way that suits any employer in their field.",
-  short: "Three sentences, about 50 to 70 words.",
-  standard: "Three or four sentences, about 60 to 90 words.",
-  detailed: "Four sentences, about 80 to 100 words, with the most specific evidence the resume gives.",
+  brief: "Two sentences, about 35 to 50 words. Broad: who the student is (school, year and major when known) and their one strongest real experience, said in a way that suits any employer in their field.",
+  short: "Two sentences, about 35 to 50 words.",
+  standard: "Two or three sentences, about 40 to 70 words.",
+  detailed: "Three sentences, about 60 to 80 words, with the most specific evidence the resume gives.",
 };
 
 /** The student's choices as instructions for the model. Their own words count as facts they gave. */
 function styleNotes(style: CoverLetterStyle) {
   const notes: string[] = [];
   if (style.length) notes.push(`Length for this letter (this replaces the usual length): ${LENGTHS[style.length]}`);
-  if (style.format) notes.push(`${FORMATS[style.format]} (This replaces the usual shape, but keep the greeting, sign-off and length.)`);
+  if (style.format) notes.push(`${FORMATS[style.format]} (This replaces the usual shape, but keep the length.)`);
   if (style.tone) notes.push(`Tone: ${style.tone}.`);
   if (style.mention?.trim()) notes.push(`The student asked you to mention this, in their own words (it counts as something they told you): "${style.mention.trim()}"`);
   if (style.previous?.trim() && style.edit?.trim()) {
-    notes.push(`This is a revision. The current letter:\n${style.previous.trim()}\n\nThe student wants these changes: "${style.edit.trim()}"\nKeep what they didn't ask to change. Return the whole revised letter.`);
+    notes.push(`This is a revision. The current letter:\n${style.previous.trim()}\n\nThe student wants these changes: "${style.edit.trim()}"\nKeep what they didn't ask to change. Return only the revised middle sentences (no greeting, closing sentence or sign-off: those are added again).`);
   }
   return notes.join("\n");
 }
@@ -143,12 +165,13 @@ export async function writeCoverLetter(userId: string, app: Pick<JobApplication,
     await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: true, latencyMs: Date.now() - started, costCents, estimated: true, error: null, createdAt: nowIso() });
     await repo.insertGeneration({ id: id(), userId, purpose: "cover_letter", model, inputTokens, outputTokens, costCents, estimated: true, createdAt: nowIso() });
     // A letter that can't be used as it is: said why, so the admin page shows it.
-    const unusable = response.stop_reason === "refusal" ? "The model refused." : text.length < 120 ? `The letter came back too short (${text.length} characters).` : /\[[^\]]*\]/.test(text) ? `The letter had a blank to fill in: ${text.match(/\[[^\]]*\]/)?.[0]}` : "";
+    const { body, letter } = assembleLetter(text, student.name);
+    const unusable = response.stop_reason === "refusal" ? "The model refused." : body.length < 30 ? `The letter came back too short (${body.length} characters).` : /\[[^\]]*\]/.test(body) ? `The letter had a blank to fill in: ${body.match(/\[[^\]]*\]/)?.[0]}` : "";
     if (unusable) {
       await letterFailed(userId, unusable);
       return null;
     }
-    return text.slice(0, 4000);
+    return letter.slice(0, 4000);
   } catch (error) {
     console.error(`[ai] cover_letter failed (${letterModel()}): ${error instanceof Error ? error.message : error}`);
     await repo.insertUsage({ id: id(), userId, provider: "anthropic", operation: "cover_letter", success: false, latencyMs: Date.now() - started, costCents: 0, estimated: true, error: error instanceof Error ? error.message : "anthropic_failed", createdAt: nowIso() });

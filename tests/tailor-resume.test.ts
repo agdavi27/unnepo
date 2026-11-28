@@ -1,3 +1,4 @@
+import { CLOSING } from "@/lib/apply/outreach-email";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import JSZip from "jszip";
 import { coverLetterPdf } from "@/lib/apply/cover-letter";
@@ -239,8 +240,9 @@ describe("Tailor my resume to this job", () => {
 
   it("keeps the default cover letter, and the student's edit of it, without writing it again", async () => {
     const userId = await studentWithResume();
-    const written = "Dear Hiring Team,\n\nI am a data-minded student who builds clean dashboards and enjoys turning messy numbers into clear decisions for a team. I would bring care, curiosity and steady follow-through to your work.\n\nSincerely,\nPat Doe";
-    model.replies.push(written);
+    const middle = "I am a data-minded student who builds clean dashboards and enjoys turning messy numbers into clear decisions for a team. I led the Colby Data Club's dashboards for 40 students.";
+    const written = `Dear Hiring Team,\n\n${middle} ${CLOSING}\n\nSincerely,\nPat Doe`;
+    model.replies.push(middle);
     const first = await extensionGeneralLetter(userId);
     expect(first.text).toBe(written);
     expect(first.pdfBase64.length).toBeGreaterThan(100);
