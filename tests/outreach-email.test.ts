@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { BANNED, CLOSING, followUpEmail, jobIdOf, outreachEmail, shortRole, slot, subjectFor, usable, wordCount } from "@/lib/apply/outreach-email";
 import { composeLink, withoutJobId } from "@/lib/apply/compose-link";
+import { assembleLetter } from "@/lib/apply/cover-letter";
 
 const base = {
   firstName: "Jane", studentName: "Drew Davis", role: "Sports Analyst", company: "WPP Media",
@@ -100,5 +101,17 @@ describe("withoutJobId", () => {
     expect(withoutJobId("at Acme (Requisition ID: R-20451) and")).toBe("at Acme and");
     expect(withoutJobId("at Acme (NYC office) and")).toBe("at Acme (NYC office) and");
     expect(decodeURIComponent(composeLink("gmail", "a@b.co", "Hi", "at Acme (Job ID JR-104233) and").url)).not.toContain("JR-104233");
+  });
+});
+
+describe("assembleLetter", () => {
+  it("wraps the AI's middle sentences in the fixed greeting, closing and sign-off", () => {
+    const middle = "I'm a junior at Colby studying Economics, and I just applied for the Sports Analyst role. I built SQL dashboards 40 students use.";
+    expect(assembleLetter(middle, "Drew Davis").letter).toBe(`Dear Hiring Team,\n\n${middle} ${CLOSING}\n\nSincerely,\nDrew Davis`);
+  });
+
+  it("drops a greeting, sign-off or closing line the AI wrote anyway, and caps it at three sentences", () => {
+    const messy = "Dear Ms. Smith,\n\nOne. Two. Three. Four.\n\nI look forward to hearing from you.\n\nSincerely,\nDrew";
+    expect(assembleLetter(messy, "Drew Davis").letter).toBe(`Dear Hiring Team,\n\nOne. Two. Three. ${CLOSING}\n\nSincerely,\nDrew Davis`);
   });
 });

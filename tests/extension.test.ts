@@ -771,7 +771,7 @@ describe("cover letters from the panel", () => {
     model.replies.push(letter("First."));
     const first = await (await call("POST", "cover-letter", token, { applicationId: job.application.id, length: "short", tone: "warm", mention: "I grew up using Globex products" })).json();
     expect(first.text).toContain("First.");
-    expect(model.lastPrompt).toContain("Three sentences, about 50 to 70 words");
+    expect(model.lastPrompt).toContain("Two sentences, about 35 to 50 words");
     expect(model.lastPrompt).toContain("Tone: warm.");
     expect(model.lastPrompt).toContain("I grew up using Globex products");
     expect(Buffer.from(first.pdfBase64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
