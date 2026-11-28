@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BANNED, askFor, followUpEmail, jobIdOf, outreachEmail, shortRole, slot, subjectFor, usable, wordCount } from "@/lib/apply/outreach-email";
+import { BANNED, CLOSING, followUpEmail, jobIdOf, outreachEmail, shortRole, slot, subjectFor, usable, wordCount } from "@/lib/apply/outreach-email";
 import { composeLink, withoutJobId } from "@/lib/apply/compose-link";
 
 const base = {
@@ -15,7 +15,7 @@ describe("outreachEmail", () => {
     expect(email.subject).toBe("Thank you! - Sports Analyst");
     expect(email.body).toBe([
       "Hi Jane,",
-      "I just applied for the Sports Analyst role at WPP Media. I've been following your team's work in live sports media analytics, especially WPP Media's Open Intelligence platform. My experience in SQL, statistical modeling, and client presentations lines up with what the role needs. Would you have 10 minutes in the next couple of weeks to tell me more about the team?",
+      "I just applied for the Sports Analyst role at WPP Media. I've been following your team's work in live sports media analytics, especially WPP Media's Open Intelligence platform. My experience in SQL, statistical modeling, and client presentations lines up with what the role needs. I'm really excited about the chance to join the team, so please reach out if you have any questions about my application.",
       "Best,\nDrew Davis",
     ].join("\n\n"));
   });
@@ -39,18 +39,16 @@ describe("outreachEmail", () => {
     expect(outreachEmail({ ...base, skills: ["SQL", "Excel"] }).body).toContain("in SQL and Excel lines up");
   });
 
-  it("ends with an ask that fits who it's to", () => {
-    expect(outreachEmail({ ...base, audience: "recruiter" }).body).toContain(`needs. ${askFor("recruiter")}\n\nBest,`);
-    expect(outreachEmail({ ...base, audience: "manager" }).body).toContain(`needs. ${askFor("manager")}\n\nBest,`);
-    expect(askFor("recruiter")).toMatch(/\?$/);
+  it("ends by saying the student is excited and inviting questions", () => {
+    expect(outreachEmail(base).body).toContain(`needs. ${CLOSING}\n\nBest,`);
   });
 
   it("is three blocks, four sentences, and short", () => {
     const email = outreachEmail(base);
     expect(email.body.split("\n\n")).toHaveLength(3);
     expect(email.body.split("\n\n")[1].match(/[.!?](\s|$)/g)).toHaveLength(4);
-    expect(BANNED.test(email.body)).toBe(false);
-    expect(words(email.body)).toBeLessThanOrEqual(85);
+    expect(BANNED.test(email.body.replace(CLOSING, ""))).toBe(false);
+    expect(words(email.body)).toBeLessThanOrEqual(90);
   });
 
   it("keeps a long posting title out of the subject", () => {

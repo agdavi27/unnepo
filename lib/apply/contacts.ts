@@ -893,7 +893,7 @@ export async function writeOutreachEmails(userId: string, app: JobApplication, p
     const audience = audienceOf(person.role);
     if (options.followUp) return followUpEmail({ firstName: firstName(person), studentName: student.name, role: app.title, audience, subject: options.followUp.subject, number: 1, detail: String(pieces?.followUp ?? "").slice(0, 200) });
     return outreachEmail({
-      firstName: firstName(person), studentName: student.name, role: app.title, company: app.company, audience,
+      firstName: firstName(person), studentName: student.name, role: app.title, company: app.company,
       field: String(pieces?.field ?? "").slice(0, 200),
       initiative: String(pieces?.initiative ?? "").slice(0, 200),
       skills: Array.isArray(pieces?.skills) ? pieces.skills.map((skill) => String(skill ?? "").slice(0, 80)) : [],
