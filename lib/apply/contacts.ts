@@ -4,7 +4,7 @@ import type { Contact } from "@/lib/db/types";
 import { contactFetch } from "@/lib/providers/contacts/http";
 import { ServiceError } from "@/lib/errors";
 import { safeGet } from "@/lib/apply/safe-fetch";
-import { HUNTER_CENTS, buildEmail, checkerReady, confirmFormat, formatFromEmails, guessEmail, hunterCheck, hunterCount, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, siteEmails, type EmailFormat, type KnownEmail } from "@/lib/apply/email-guess";
+import { HUNTER_CENTS, buildEmail, checkEmail, checkerReady, confirmFormat, formatFromEmails, guessEmail, hunterCheck, hunterCount, hunterDomain, hunterReady, learnFormat, nameParts, patternOf, siteEmails, type EmailFormat, type KnownEmail } from "@/lib/apply/email-guess";
 import { sameCompany } from "@/lib/apply/match";
 import { audienceOf, followUpEmail, outreachEmail } from "@/lib/apply/outreach-email";
 import { lastNamesFromWeb, peopleFromWeb } from "@/lib/apply/people-web";
@@ -782,14 +782,25 @@ export async function revealHiddenPerson(userId: string, app: JobApplication, hi
   };
 }
 
-/** Before an email is written to someone whose address was never checked: check it now. "bad": it won't arrive. */
+/**
+ * Before an email is written to someone whose address was never checked: the address itself is checked now. Null
+ * keeps it as it is. Only a checker that says the address is invalid takes it away, and then the company's other
+ * common formats are tried first. A checker that failed, ran out of budget, or couldn't tell never drops anyone.
+ */
 export async function checkBeforeWriting(userId: string, name: string, domain: string, current: string): Promise<{ email: string | null; emailSource: FoundPerson["emailSource"] } | null> {
-  if (!checkerReady() || !fullName(name)) return null;
-  const format = await learnFormat(userId, domain, [], [name], { useHunter: false }).catch(() => null);
-  if (!format) return null;
-  const guess = await guessEmail(userId, name, domain, format, [current], { checks: 3 }).catch(() => null);
-  if (!guess) return { email: null, emailSource: null };
-  return { email: guess.email, emailSource: guess.verified ? guess.source : guess.uncheckable ? "cant_check" : "likely" };
+  if (!checkerReady()) return null;
+  const status = await checkEmail(userId, current).catch(() => null);
+  if (status === "valid") return { email: current, emailSource: "pattern" };
+  if (status === "accept_all") return { email: current, emailSource: "cant_check" };
+  if (status !== "invalid") return null;
+  // It won't arrive: another common format for their name, checked, or no email.
+  if (!fullName(name)) return { email: null, emailSource: null };
+  const formats: EmailFormat = { pattern: null, acceptAll: false, source: "none", known: [] };
+  const other = await guessEmail(userId, name, domain, formats, [], { checks: 3 }).catch(() => undefined);
+  // The checker failed partway: what it already said stands.
+  if (other === undefined) return { email: null, emailSource: null };
+  if (other && other.email !== current.toLowerCase() && (other.verified || other.uncheckable)) return { email: other.email, emailSource: other.verified ? other.source : "cant_check" };
+  return { email: null, emailSource: null };
 }
 
 /** A blurred name ("Sam Le***e") matched to a real one Hunter lists at the company: same first name, and a last name that fits the letters shown. */
