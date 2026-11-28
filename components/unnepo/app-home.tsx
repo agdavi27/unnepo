@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { useRouter } from "next/navigation";
 import type { Highlight, Profile } from "@/components/unnepo/UnnepoForms";
 import { ResumeFirst } from "@/components/onboarding/resume-first";
+import { OnboardingPaywall, type PaywallChoice } from "@/components/onboarding/paywall";
 import { forgetGift, pendingGift, rememberGift } from "@/lib/gift/pending";
 import { CREDIT_COST, ENTERPRISE_PLAN, PRO_COMPANIES_PER_MONTH, PUBLIC_PLANS, REFUND_DAYS } from "@/lib/config";
 import type { planUsage } from "@/lib/apply/limits";
@@ -72,6 +73,8 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [billingBusy, setBillingBusy] = useState(false);
+  // The plans screen that ends onboarding for a student on Free; the X closes it and they carry on with Free.
+  const [paywall, setPaywall] = useState(false);
   // A gift code from /gift/redeem's link (/home?tab=settings&gift=UNN-…), kept here since the address is tidied at once.
   const [giftFromLink, setGiftFromLink] = useState("");
   function giftUsed(message: string) {
@@ -211,7 +214,7 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
   }
 
   /** Off to Stripe. The buttons stay disabled until the page leaves, so a double click can't start two checkouts. */
-  async function goToBilling(path: "checkout" | "portal", body: Record<string, string> = {}) {
+  async function goToBilling(path: "checkout" | "portal", body: Record<string, string> = {}): Promise<boolean> {
     setBillingBusy(true);
     try {
       const response = await fetch(`/api/billing/${path}`, {
@@ -222,13 +225,24 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
       const payload = await response.json().catch(() => ({}));
       if (payload.url) {
         window.location.assign(payload.url);
-        return;
+        return true;
       }
       setNotice(payload.error || "Billing isn't available right now. Try again in a bit.");
     } catch {
       setNotice("Billing isn't available right now. Try again in a bit.");
     }
     setBillingBusy(false);
+    return false;
+  }
+
+  /** A plan picked on the plans screen that ends onboarding: off to the same checkout the Upgrade page uses. */
+  async function choosePaywallPlan(choice: PaywallChoice) {
+    if (admin) {
+      setPaywall(false);
+      return void switchPlanView("pro");
+    }
+    const left = await goToBilling("checkout", choice === "outreach" ? { plan: "outreach" } : { plan: "pro", billing: choice });
+    if (!left) setPaywall(false);
   }
 
   /** Admins: work as Free or Pro (null: the real plan) without going to Stripe. */
@@ -254,6 +268,7 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
   const sectionTitle = "text-xs font-semibold uppercase tracking-[0.16em] text-faint";
 
   const admin = Boolean(data?.admin);
+  const closePaywall = useCallback(() => setPaywall(false), []);
   // Free with the trial over: the Upgrade to Pro page shows in the menu.
   const onFree = Boolean(data?.credits.usage?.free);
   const planView = data?.credits.usage?.preview ?? null;
@@ -346,9 +361,10 @@ export function AppHome({ start = "jobs", guides = [] }: { start?: View; guides?
           <ResumeFirst
             key={editing ? "edit" : "onboarding"}
             mode={data.ready ? "edit" : "onboarding"}
-            onDone={() => { setEditing(false); void load(); }}
+            onDone={() => { if (!data.ready) setPaywall(true); setEditing(false); void load(); }}
           />
         )}
+        {data && !showOnboarding && paywall && onFree && <OnboardingPaywall busy={billingBusy} admin={admin} onChoose={(choice) => void choosePaywallPlan(choice)} onClose={closePaywall} />}
         {data && !showOnboarding && view === "jobs" && <JobsView />}
         {data && !showOnboarding && view === "goals" && <GoalsView />}
         {data && !showOnboarding && view === "resources" && <ResourcesView guides={guides} />}

@@ -374,6 +374,279 @@ const ALL_GAPS: Array<{ id: GapId; title: string }> = [
   { id: "standard", title: "Common questions" }, { id: "essays", title: "A little about you" }, { id: "account", title: "Job-site accounts" },
 ];
 
+/** Big tap targets, one per line: tapping one answers the question and moves on. */
+function Taps<T extends string | boolean | null>({ value, options, onPick }: { value: T | undefined; options: Array<[T, string]>; onPick: (value: T) => void }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      {options.map(([option, text]) => (
+        <button key={String(option)} type="button" aria-pressed={value === option} onClick={() => onPick(option)} className={`min-h-12 rounded-xl border px-4 text-left text-[15px] transition-colors ${value === option ? "border-white bg-white text-black" : "border-[#26262C] text-ink hover:border-zinc-500 hover:bg-white/5"}`}>{text}</button>
+      ))}
+    </div>
+  );
+}
+
+/** Quick picks under a text box: tapping one fills the box (or adds it to a list). */
+function Picks({ options, taken = [], onPick }: { options: string[]; taken?: string[]; onPick: (value: string) => void }) {
+  const left = options.filter((option) => !taken.some((other) => other.toLowerCase() === option.toLowerCase()));
+  if (!left.length) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {left.map((option) => (
+        <button key={option} type="button" onClick={() => onPick(option)} className="inline-flex min-h-9 items-center gap-1 rounded-full border border-[#26262C] px-3 text-[13px] text-[#B4B4BC] hover:border-zinc-500 hover:text-white">
+          <span aria-hidden="true" className="text-[#8B8B94]">+</span>{option}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Month-year choices from now on: "Dec 2026", "May 2027", … */
+function upcomingTerms(count: number, months: Array<[number, string]> = [[4, "May"], [11, "Dec"]], now = new Date()) {
+  const out: string[] = [];
+  for (let year = now.getFullYear(); out.length < count && year < now.getFullYear() + 8; year++) {
+    for (const [month, name] of months) if (new Date(year, month + 1, 0) >= now && out.length < count) out.push(`${name} ${year}`);
+  }
+  return out;
+}
+const seasonTerms = (count: number) => upcomingTerms(count, [[0, "Spring"], [5, "Summer"], [8, "Fall"]]);
+
+/**
+ * One question per screen in onboarding: the gap cards split up so each screen asks one thing. Tap questions move on
+ * as soon as they're answered.
+ */
+type Question = { key: string; title: string; hint?: string; tap?: boolean; optional?: boolean };
+
+function gapQuestions(id: GapId, p: StudentProfile): Question[] {
+  const school = p.education[0];
+  switch (id) {
+    case "work_auth": return [
+      { key: "auth_us", title: "Are you authorized to work in the US?", hint: "Almost every application asks. Unnepo only uses your own answer.", tap: true },
+      { key: "sponsor", title: "Will you need visa sponsorship, now or later?", tap: true },
+      { key: "over18", title: "Are you 18 or older?", tap: true },
+    ];
+    case "education": return [
+      ...(!school?.school?.trim() ? [{ key: "school", title: "Where do you go to school?" }] : []),
+      { key: "grad", title: "When do you graduate?", hint: "Pick one, or type your own." },
+      { key: "year", title: "What year are you in?", tap: true },
+      { key: "gpa", title: "What's your GPA?", hint: "Optional. Some forms ask; skip it if you'd rather.", optional: true },
+    ];
+    case "contact": return [
+      { key: "phone", title: "What's your phone number?", hint: "For the contact section of applications." },
+      { key: "where", title: "Where are you based?" },
+      { key: "relocate", title: "Would you move for the right job?", tap: true },
+    ];
+    case "links": return [
+      { key: "linkedin", title: "Your LinkedIn?", hint: "Optional. Paste your profile link.", optional: true },
+      { key: "other_links", title: "GitHub or a portfolio?", hint: "Optional.", optional: true },
+    ];
+    case "eeo": return [{ key: "eeo", title: "Voluntary self-identification", hint: "Many forms ask about gender, race, veteran and disability status. \"Decline to answer\" is already picked for all of them, and that's always fine.", optional: true }];
+    case "preferences": return [
+      { key: "roles", title: "What roles do you want?", hint: "Tap a suggestion or type your own.", optional: true },
+      { key: "job_type", title: "Internship or full-time?", tap: true, optional: true },
+      { key: "remote", title: "Remote or in person?", tap: true, optional: true },
+      { key: "locations", title: "Where do you want to work?", hint: "Tap any that fit.", optional: true },
+      { key: "start_term", title: "When do you want to start?", tap: true, optional: true },
+    ];
+    case "standard": return [
+      { key: "heard", title: "How do you usually find jobs?", hint: "Forms ask \"How did you hear about us?\"", tap: true, optional: true },
+      { key: "earliest", title: "When could you start at the earliest?", tap: true, optional: true },
+      { key: "in_person", title: "Open to working in person?", tap: true, optional: true },
+      { key: "salary", title: "Salary expectation?", hint: "Optional.", tap: true, optional: true },
+    ];
+    case "essays": return [
+      { key: "about", title: "Tell us about you in 2 or 3 sentences", hint: "Optional. Unnepo builds on it for essay questions and emails.", optional: true },
+      { key: "why", title: "Why are you interested in your field?", hint: "Optional.", optional: true },
+    ];
+    case "account": return [{ key: "account_email", title: "Which email should job sites use?", hint: "Workday and similar sites need an account. The extension makes them with this email. Your passwords stay on your computer." }];
+  }
+}
+
+const HEARD = ["Company website", "LinkedIn", "Handshake", "Indeed", "Career fair", "A friend or referral"];
+const PLACES = ["Remote", "New York", "Boston", "San Francisco", "Chicago", "Washington, DC", "Los Angeles"];
+
+/** The controls for one question. `next` moves on, saving `updated` first when a tap just changed the profile. */
+function QuestionBody({ q, profile: p, set, next }: { q: Question; profile: StudentProfile; set: (next: StudentProfile) => void; next: (updated?: StudentProfile) => void }) {
+  const [eeoOpen, setEeoOpen] = useState(false);
+  const school = p.education[0] ?? ({ school: "", degree: "", major: "", gradDate: "" } as Education);
+  const withSchool = (patch: Partial<Education>): StudentProfile => ({ ...p, education: [{ ...school, ...patch }, ...p.education.slice(1)] });
+  const tapTo = (updated: StudentProfile) => { set(updated); next(updated); };
+  switch (q.key) {
+    case "auth_us": return <Taps value={p.workAuth.authorizedUS} options={YES_NO} onPick={(value) => tapTo({ ...p, workAuth: { ...p.workAuth, authorizedUS: value } })} />;
+    case "sponsor": return <Taps value={p.workAuth.needsSponsorship} options={YES_NO} onPick={(value) => tapTo({ ...p, workAuth: { ...p.workAuth, needsSponsorship: value } })} />;
+    case "over18": return <Taps value={p.workAuth.over18} options={YES_NO} onPick={(value) => tapTo({ ...p, workAuth: { ...p.workAuth, over18: value } })} />;
+    case "school": return <Text title="School" value={school.school} onChange={(value) => set(withSchool({ school: value }))} placeholder="e.g. Colby College" />;
+    case "grad": return (
+      <div className="space-y-3">
+        <Taps value={school.gradDate} options={upcomingTerms(6).map((term) => [term, term] as [string, string])} onPick={(value) => tapTo(withSchool({ gradDate: value }))} />
+        <Text title="Or type it" value={school.gradDate} onChange={(value) => set(withSchool({ gradDate: value }))} placeholder="e.g. May 2027" />
+      </div>
+    );
+    case "year": return <Taps value={classYearOf(school) ?? undefined} options={CLASS_YEARS} onPick={(value) => tapTo(withSchool({ classYear: value }))} />;
+    case "gpa": return <Text title="GPA" value={school.gpa} onChange={(value) => set(withSchool({ gpa: value }))} placeholder="e.g. 3.6" />;
+    case "phone": return <Text title="Phone" type="tel" value={p.contact.phone} onChange={(value) => set({ ...p, contact: { ...p.contact, phone: value } })} placeholder="(207) 555-0142" />;
+    case "where": return (
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Text title="City" value={p.contact.city} onChange={(value) => set({ ...p, contact: { ...p.contact, city: value } })} placeholder="e.g. Waterville" />
+        <Text title="State" value={p.contact.state} onChange={(value) => set({ ...p, contact: { ...p.contact, state: value } })} placeholder="e.g. Maine" />
+      </div>
+    );
+    case "relocate": return <Taps value={p.contact.willingToRelocate ?? undefined} options={YES_NO} onPick={(value) => tapTo({ ...p, contact: { ...p.contact, willingToRelocate: value } })} />;
+    case "linkedin": return <Text title="LinkedIn" value={p.links.linkedin} onChange={(value) => set({ ...p, links: { ...p.links, linkedin: value } })} placeholder="linkedin.com/in/…" />;
+    case "other_links": return (
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Text title="GitHub" value={p.links.github} onChange={(value) => set({ ...p, links: { ...p.links, github: value } })} placeholder="github.com/…" />
+        <Text title="Portfolio" value={p.links.portfolio} onChange={(value) => set({ ...p, links: { ...p.links, portfolio: value } })} placeholder="yourname.com" />
+      </div>
+    );
+    case "eeo": return eeoOpen ? <GapFields id="eeo" profile={p} set={set} /> : (
+      <button type="button" className="text-sm text-[#9A9AA3] underline underline-offset-4 hover:text-white" onClick={() => setEeoOpen(true)}>I&apos;d like to answer these</button>
+    );
+    case "roles": return (
+      <div className="space-y-3">
+        <Tags title="Roles you want" values={p.preferences.roles ?? []} onChange={(values) => set({ ...p, preferences: { ...p.preferences, roles: values } })} placeholder="e.g. Data analyst, Product intern" />
+        <RoleIdeas taken={p.preferences.roles ?? []} onPick={(role) => set({ ...p, preferences: { ...p.preferences, roles: [...(p.preferences.roles ?? []), role] } })} />
+      </div>
+    );
+    case "job_type": return <Taps value={p.preferences.jobType} options={[["internship", "Internship"], ["full_time", "Full-time"], ["either", "Either"]]} onPick={(value) => tapTo({ ...p, preferences: { ...p.preferences, jobType: value } })} />;
+    case "remote": return <Taps value={p.preferences.remote} options={[["yes", "Remote"], ["no", "In person"], ["either", "Either is fine"]]} onPick={(value) => tapTo({ ...p, preferences: { ...p.preferences, remote: value } })} />;
+    case "locations": {
+      const places = [...new Set([p.contact.city?.trim(), ...PLACES].filter((place): place is string => Boolean(place)))];
+      const taken = p.preferences.locations ?? [];
+      return (
+        <div className="space-y-3">
+          <Tags title="Locations" values={taken} onChange={(values) => set({ ...p, preferences: { ...p.preferences, locations: values } })} placeholder="Type a city, or tap below" />
+          <Picks options={places} taken={taken} onPick={(place) => set({ ...p, preferences: { ...p.preferences, locations: [...taken, place] } })} />
+        </div>
+      );
+    }
+    case "start_term": return <Taps value={p.preferences.startTerm} options={[...seasonTerms(5), "As soon as possible"].map((term) => [term, term] as [string, string])} onPick={(value) => tapTo({ ...p, preferences: { ...p.preferences, startTerm: value } })} />;
+    case "heard": return <Taps value={p.standardAnswers.heardAbout} options={HEARD.map((item) => [item, item] as [string, string])} onPick={(value) => tapTo({ ...p, standardAnswers: { ...p.standardAnswers, heardAbout: value } })} />;
+    case "earliest": return <Taps value={p.standardAnswers.earliestStart} options={["Immediately", ...upcomingTerms(4, [[0, "January"], [4, "May"], [5, "June"]]), "After I graduate"].map((item) => [item, item] as [string, string])} onPick={(value) => tapTo({ ...p, standardAnswers: { ...p.standardAnswers, earliestStart: value } })} />;
+    case "in_person": return <Taps value={p.standardAnswers.inPerson ?? undefined} options={YES_NO} onPick={(value) => tapTo({ ...p, standardAnswers: { ...p.standardAnswers, inPerson: value } })} />;
+    case "salary": return (
+      <div className="space-y-3">
+        <Taps value={p.standardAnswers.salaryExpectation} options={[["Open to discussion", "Open to discussion"], ["Prefer not to say", "Prefer not to say"]]} onPick={(value) => tapTo({ ...p, standardAnswers: { ...p.standardAnswers, salaryExpectation: value } })} />
+        <Text title="Or type a number" value={p.standardAnswers.salaryExpectation} onChange={(value) => set({ ...p, standardAnswers: { ...p.standardAnswers, salaryExpectation: value } })} placeholder="e.g. $25/hour" />
+      </div>
+    );
+    case "about": return <Area title="About you" value={p.essays.aboutMe} onChange={(value) => set({ ...p, essays: { ...p.essays, aboutMe: value } })} placeholder="I'm a junior studying economics who…" />;
+    case "why": return <Area title="Why your field" value={p.essays.whyField} onChange={(value) => set({ ...p, essays: { ...p.essays, whyField: value } })} />;
+    case "account_email": return <Text title="Email for job-site accounts" type="email" value={p.accountEmail ?? p.contact.email} onChange={(value) => set({ ...p, accountEmail: value })} />;
+    default: return null;
+  }
+}
+
+/** "Check what we found", split into small screens. */
+const CHECK_SCREENS = [
+  { key: "you", title: "Is this you?", hint: "Fix anything that's off." },
+  { key: "school", title: "Your school", hint: "Tap a school to change it, or add yours." },
+  { key: "experience", title: "Your experience", hint: "Internships, research and campus jobs all count. None yet? That's fine, continue." },
+  { key: "projects", title: "Your projects", hint: "Optional. Class projects count." },
+  { key: "skills", title: "Your skills", hint: "Type a skill and press Enter." },
+  { key: "letter", title: "Have a cover letter already?", hint: "Optional. Unnepo can write one for each job instead." },
+] as const;
+type CheckKey = (typeof CHECK_SCREENS)[number]["key"];
+
+/** One item of a list (a school, a job, a project) as a one-line summary; tap it to edit. Opens by itself when it's missing something. */
+function ItemCard({ title, detail, flagged, startOpen, onRemove, children }: { title: string; detail: string; flagged: boolean; startOpen: boolean; onRemove: () => void; children: React.ReactNode }) {
+  const [open, setOpen] = useState(startOpen || flagged);
+  return (
+    <div className={`rounded-xl border ${flagged ? "border-[#F5A524]/60" : "border-[#17171B]"}`}>
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 px-4 py-3 text-left">
+        <span className="min-w-0 flex-1">
+          <span data-pii className="block truncate text-[15px] font-medium">{title}</span>
+          <span className="block truncate text-xs text-[#8B8B94]">{detail}</span>
+        </span>
+        {flagged ? <span className="shrink-0 text-[11px] text-[#F5A524]">needs dates</span> : <span className="shrink-0 text-xs text-[#9A9AA3]">{open ? "Done" : "Edit"}</span>}
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-[#17171B] p-4">
+          {children}
+          <button type="button" className="text-xs text-[#8B8B94] hover:text-red-300" onClick={onRemove}>Remove</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const span = (from: string | undefined, to: string | undefined) => `${from?.trim() || "?"} – ${to?.trim() || "?"}`;
+
+function CheckScreen({ screen, profile, set }: { screen: CheckKey; profile: StudentProfile; set: (next: StudentProfile) => void }) {
+  const tag = (path: string) => profile.sources[path] === "resume";
+  const contact = (key: keyof StudentProfile["contact"]) => (value: string) => set({ ...profile, contact: { ...profile.contact, [key]: value } });
+  const updateList = <K extends "education" | "experience" | "projects">(key: K, index: number, patch: Partial<StudentProfile[K][number]>) =>
+    set({ ...profile, [key]: profile[key].map((item, i) => (i === index ? { ...item, ...patch } : item)) });
+  const removeAt = (key: "education" | "experience" | "projects", index: number) => set({ ...profile, [key]: profile[key].filter((_, i) => i !== index) });
+  const add = "inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-dashed border-[#26262C] px-4 text-sm text-[#9A9AA3] hover:border-zinc-500 hover:text-white";
+  switch (screen) {
+    case "you": return (
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Text title="First name" value={profile.contact.firstName} onChange={contact("firstName")} tag={tag("contact.firstName")} />
+        <Text title="Last name" value={profile.contact.lastName} onChange={contact("lastName")} tag={tag("contact.lastName")} />
+        <Text title="Email" type="email" value={profile.contact.email} onChange={contact("email")} tag={tag("contact.email")} />
+        <Text title="Preferred name (optional)" value={profile.contact.preferredName} onChange={contact("preferredName")} />
+      </div>
+    );
+    case "school": {
+      const list = profile.education.length ? profile.education : [];
+      return (
+        <div className="space-y-3">
+          {list.map((item, i) => (
+            <ItemCard key={i} title={item.school || "New school"} detail={[degreeChoice(item.degree), item.major, span(item.startDate, item.gradDate)].filter(Boolean).join(" · ")} flagged={!item.startDate?.trim() || !item.gradDate?.trim()} startOpen={!item.school} onRemove={() => removeAt("education", i)}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Text title="School" value={item.school} onChange={(value) => updateList("education", i, { school: value })} tag={tag(`education.${i}.school`)} />
+                <Degree value={item.degree} onChange={(value) => updateList("education", i, { degree: value })} tag={tag(`education.${i}.degree`)} />
+                <Text title="Major" value={item.major} onChange={(value) => updateList("education", i, { major: value })} tag={tag(`education.${i}.major`)} />
+                <Text title="Minor (optional)" value={item.minor} onChange={(value) => updateList("education", i, { minor: value })} />
+                <Text title="Started (MM/YYYY)" value={item.startDate} onChange={(value) => updateList("education", i, { startDate: value })} placeholder="09/2023" needed />
+                <Text title="Graduate, or expect to (MM/YYYY)" value={item.gradDate} onChange={(value) => updateList("education", i, { gradDate: value })} placeholder="05/2027" needed />
+              </div>
+            </ItemCard>
+          ))}
+          <button type="button" className={add} onClick={() => set({ ...profile, education: [...profile.education, { school: "", degree: "", major: "", gradDate: "" } as Education] })}>+ {list.length ? "Add another school" : "Add your school"}</button>
+        </div>
+      );
+    }
+    case "experience": return (
+      <div className="space-y-3">
+        {profile.experience.map((item, i) => (
+          <ItemCard key={i} title={[item.title, item.company].filter(Boolean).join(" at ") || "New job"} detail={span(item.startDate, item.current ? "Present" : item.endDate)} flagged={!item.startDate?.trim() || (!item.current && !item.endDate?.trim())} startOpen={!item.title && !item.company} onRemove={() => removeAt("experience", i)}>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Text title="Title" value={item.title} onChange={(value) => updateList("experience", i, { title: value })} tag={tag(`experience.${i}.title`)} />
+              <Text title="Company" value={item.company} onChange={(value) => updateList("experience", i, { company: value })} tag={tag(`experience.${i}.company`)} />
+              <Text title="From (MM/YYYY)" value={item.startDate} onChange={(value) => updateList("experience", i, { startDate: value })} placeholder="05/2024" needed />
+              <Text title="To (MM/YYYY, or Present)" value={item.current ? "Present" : item.endDate} onChange={(value) => updateList("experience", i, { endDate: value, current: /present/i.test(value) })} placeholder="08/2024 or Present" needed />
+              <div className="sm:col-span-2"><Area title="What you did (one per line)" value={lines(item.bullets)} onChange={(value) => updateList("experience", i, { bullets: fromLines(value) })} tag={tag(`experience.${i}.bullets`)} /></div>
+            </div>
+          </ItemCard>
+        ))}
+        <button type="button" className={add} onClick={() => set({ ...profile, experience: [...profile.experience, { company: "", title: "", startDate: "", current: false, bullets: [] } as Experience] })}>+ Add a job</button>
+      </div>
+    );
+    case "projects": return (
+      <div className="space-y-3">
+        {profile.projects.map((item, i) => (
+          <ItemCard key={i} title={item.name || "New project"} detail={(item.tech ?? []).join(", ") || `${item.bullets.length} line${item.bullets.length === 1 ? "" : "s"}`} flagged={false} startOpen={!item.name} onRemove={() => removeAt("projects", i)}>
+            <Text title="Name" value={item.name} onChange={(value) => updateList("projects", i, { name: value })} tag={tag(`projects.${i}.name`)} />
+            <Text title="Link (optional)" value={item.url} onChange={(value) => updateList("projects", i, { url: value })} />
+            <Area title="What you built (one per line)" value={lines(item.bullets)} onChange={(value) => updateList("projects", i, { bullets: fromLines(value) })} tag={tag(`projects.${i}.bullets`)} />
+            <Tags title="Tech" values={item.tech ?? []} onChange={(values) => updateList("projects", i, { tech: values })} />
+          </ItemCard>
+        ))}
+        <button type="button" className={add} onClick={() => set({ ...profile, projects: [...profile.projects, { name: "", bullets: [] } as Project] })}>+ Add a project</button>
+      </div>
+    );
+    case "skills": return (
+      <div className="space-y-4">
+        <Tags title="Skills" values={profile.skills.technical ?? []} onChange={(values) => set({ ...profile, skills: { ...profile.skills, technical: values } })} tag={tag("skills.technical")} placeholder="e.g. Excel, Python, Figma" />
+        <Picks options={["Excel", "PowerPoint", "Python", "SQL", "Tableau", "Figma", "Google Analytics", "Salesforce"]} taken={profile.skills.technical ?? []} onPick={(skill) => set({ ...profile, skills: { ...profile.skills, technical: [...(profile.skills.technical ?? []), skill] } })} />
+        <Tags title="Languages you speak (optional)" values={profile.skills.languages ?? []} onChange={(values) => set({ ...profile, skills: { ...profile.skills, languages: values } })} tag={tag("skills.languages")} placeholder="e.g. Spanish" />
+      </div>
+    );
+    case "letter": return <DefaultCoverLetter bare />;
+  }
+}
+
 /**
  * Every resume the student uploaded, with the one Unnepo applies with checked. Picking another one changes only
  * the work experience below to that resume's; everything else stays.
@@ -410,7 +683,7 @@ function ResumePicker({ state, busy, onPick, onRemove }: { state: State; busy: s
  * The student's own cover letter, optional. When one is saved, "Write with unnepo" on a job form first offers to
  * attach it as-is; otherwise (or if they'd rather) Unnepo writes one for that job.
  */
-function DefaultCoverLetter() {
+function DefaultCoverLetter({ bare = false }: { bare?: boolean } = {}) {
   const [letter, setLetter] = useState<{ fileName: string; uploadedAt: string } | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState("");
@@ -438,9 +711,9 @@ function DefaultCoverLetter() {
 
   if (letter === undefined) return null;
   return (
-    <section className="space-y-3 border-t border-[#17171B] pt-6">
-      <h3 className={eyebrow}>Your cover letter <span className="normal-case tracking-normal text-[#6B6B74]">(optional)</span></h3>
-      <p className="text-sm text-[#9A9AA3]">Have a cover letter you send everywhere? Add it and Unnepo offers to attach it when a form asks for one. Or skip this: Unnepo can write one for each job.</p>
+    <section className={bare ? "space-y-3" : "space-y-3 border-t border-[#17171B] pt-6"}>
+      {!bare && <h3 className={eyebrow}>Your cover letter <span className="normal-case tracking-normal text-[#6B6B74]">(optional)</span></h3>}
+      {!bare && <p className="text-sm text-[#9A9AA3]">Have a cover letter you send everywhere? Add it and Unnepo offers to attach it when a form asks for one. Or skip this: Unnepo can write one for each job.</p>}
       <div className="flex flex-wrap items-center gap-3">
         <label className={`${secondary} cursor-pointer ${busy ? "pointer-events-none opacity-60" : ""}`}>
           {busy ? "Saving…" : letter ? "Replace" : "Add my cover letter"}
@@ -470,6 +743,9 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
   const [history, setHistory] = useState<Gap[]>([]);
   /** A gap card opened again with Back, shown instead of the next one missing. */
   const [revisit, setRevisit] = useState<Gap | null>(null);
+  /** Which "Check what we found" screen is showing, and which question of the gap card. */
+  const [check, setCheck] = useState(0);
+  const [sub, setSub] = useState(0);
 
   const take = useCallback((next: State) => {
     setState(next);
@@ -533,12 +809,12 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
     }
   }
 
-  async function save(patch: Partial<StudentProfile> = {}, confirm = false) {
-    if (!draft) return null;
+  async function save(patch: Partial<StudentProfile> = {}, confirm = false, base: StudentProfile | null = draft) {
+    if (!base) return null;
     setBusy("save");
     setProblem("");
     try {
-      const next = await api<State>("", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile: { ...draft, ...patch }, confirm }) });
+      const next = await api<State>("", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile: { ...base, ...patch }, confirm }) });
       take(next);
       return next;
     } catch (reason) {
@@ -552,29 +828,57 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
   if (!state || !draft) return problem ? <p role="alert" className="text-sm text-red-300">{problem}</p> : <SpiderLoader label="Loading your profile…" />;
   const gap = revisit ?? state.missing[0];
   const datesLeft = missingDates(draft);
+  const questions = gap ? gapQuestions(gap.id, draft) : [];
+  const question = questions[Math.min(sub, questions.length - 1)];
+  const questionsLeft = gap ? questions.length - sub + state.missing.filter((item) => item.id !== gap.id).reduce((sum, item) => sum + gapQuestions(item.id, draft).length, 0) : 0;
+  const screen = CHECK_SCREENS[check];
+  const screenDates = screen.key === "school" ? missingDates({ ...draft, experience: [] }) : screen.key === "experience" ? missingDates({ ...draft, education: [] }) : [];
 
   /** Saves the gap card showing (answered or skipped) and moves to the next one. */
-  async function finishGap(current: Gap) {
-    const next = await save({ done: [...new Set([...draft!.done, current.id])] });
+  async function finishGap(current: Gap, base: StudentProfile = draft!) {
+    const next = await save({ done: [...new Set([...base.done, current.id])] }, false, base);
     if (!next) return;
     setHistory((list) => [...list.filter((item) => item.id !== current.id), current]);
     setRevisit(null);
+    setSub(0);
     if (!next.missing.length) setStep("extension");
+  }
+
+  /** The next question of this gap card, or the next card once this one's done. */
+  function nextQuestion(updated?: StudentProfile) {
+    if (!gap) return;
+    setProblem("");
+    if (sub + 1 < gapQuestions(gap.id, updated ?? draft!).length) setSub(sub + 1);
+    else void finishGap(gap, updated ?? draft!);
+  }
+
+  async function nextCheck() {
+    setProblem("");
+    if (check + 1 < CHECK_SCREENS.length) {
+      setCheck(check + 1);
+      window.scrollTo({ top: 0 });
+      return;
+    }
+    const next = await save({}, true);
+    if (next) { setNote(""); setStep(next.missing.length ? "gaps" : "extension"); }
   }
 
   /** Back: the card before this one, the gap cards answered on this visit one at a time. */
   function goBack() {
     setProblem("");
     if (step === "finish") return setStep("extension");
-    if (step === "confirm") return setStep("upload");
+    if (step === "confirm") return check > 0 ? setCheck(check - 1) : setStep("upload");
+    if (step === "gaps" && sub > 0) return setSub(sub - 1);
     if (step === "gaps" || step === "extension") {
       const previous = history[history.length - 1];
+      setSub(0);
       if (previous) {
         setHistory(history.slice(0, -1));
         setRevisit(previous);
         setStep("gaps");
       } else {
         setRevisit(null);
+        setCheck(CHECK_SCREENS.length - 1);
         setStep("confirm");
       }
     }
@@ -588,9 +892,9 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
             <span aria-hidden="true">←</span> Back
           </button>
         )}
-        <p className={eyebrow}>{mode === "edit" ? "Your profile" : step === "upload" ? "Step 1 of 4" : step === "confirm" ? "Step 2 of 4" : step === "gaps" ? "Step 3 of 4" : step === "extension" ? "Step 4 of 4" : "All set"}</p>
+        <p className={eyebrow}>{mode === "edit" ? "Your profile" : step === "upload" ? "Step 1 of 4" : step === "confirm" ? `Step 2 of 4 · ${check + 1} of ${CHECK_SCREENS.length}` : step === "gaps" ? `Step 3 of 4 · about ${Math.max(1, Math.round((questionsLeft * 6) / 60))} min left` : step === "extension" ? "Step 4 of 4" : "All set"}</p>
         <h1 className="text-[32px] font-bold leading-tight tracking-[-1.2px] sm:text-[40px] sm:tracking-[-1.4px]">
-          {mode === "edit" ? "Everything Unnepo applies with" : step === "upload" ? "Start with your resume" : step === "confirm" ? "Check what we found" : step === "gaps" ? (gap?.title ?? "Almost done") : step === "extension" ? "Add the Unnepo extension" : "You're ready"}
+          {mode === "edit" ? "Everything Unnepo applies with" : step === "upload" ? "Start with your resume" : step === "confirm" ? screen.title : step === "gaps" ? (question?.title ?? gap?.title ?? "Almost done") : step === "extension" ? "Add the Unnepo extension" : "You're ready"}
         </h1>
         <Progress value={draft.completeness} />
       </div>
@@ -614,31 +918,37 @@ export function ResumeFirst({ mode, onDone }: { mode: "onboarding" | "edit"; onD
         </div>
       )}
 
-      {(step === "confirm" || mode === "edit") && (
+      {mode === "edit" && (
         <div className="space-y-8">
           <Sections profile={draft} set={setDraft} />
           <DefaultCoverLetter />
-          {mode === "onboarding" && (
-            <div className="flex flex-wrap gap-3 border-t border-[#17171B] pt-6">
-              <button type="button" className={primary} disabled={Boolean(busy) || datesLeft.length > 0} onClick={async () => { const next = await save({}, true); if (next) { setNote(""); setStep(next.missing.length ? "gaps" : "extension"); } }}>
-                {busy === "save" ? "Saving…" : "Looks right, continue"}
-              </button>
-              <DatesNeeded gaps={datesLeft} />
-            </div>
-          )}
         </div>
       )}
 
-      {step === "gaps" && mode === "onboarding" && gap && (
-        <div className="space-y-6 rounded-2xl border border-[#17171B] bg-[#0C0C0E] p-5 sm:p-6">
-          <p className="text-sm text-[#9A9AA3]">{gap.why}</p>
-          <GapFields key={gap.id} id={gap.id} profile={draft} set={setDraft} />
-          <div className="flex flex-wrap items-center gap-3">
-            <button type="button" className={primary} disabled={Boolean(busy)} onClick={() => void finishGap(gap)}>{busy === "save" ? "Saving…" : "Save and continue"}</button>
-            {gap.optional && <button type="button" className={secondary} disabled={Boolean(busy)} onClick={() => void finishGap(gap)}>Skip</button>}
-            <span className="text-xs text-[#8B8B94]">{state.missing.length} left</span>
+      {step === "confirm" && mode === "onboarding" && (
+        <div className="space-y-6">
+          <p className="-mt-4 text-sm text-[#9A9AA3]">{screen.hint}</p>
+          <CheckScreen key={screen.key} screen={screen.key} profile={draft} set={setDraft} />
+          <div className="flex flex-wrap items-center gap-3 border-t border-[#17171B] pt-6">
+            <button type="button" className={primary} disabled={Boolean(busy) || screenDates.length > 0 || (check === CHECK_SCREENS.length - 1 && datesLeft.length > 0)} onClick={() => void nextCheck()}>
+              {busy === "save" ? "Saving…" : screen.key === "letter" ? "Continue" : "Looks right"}
+            </button>
+            {(screen.key === "projects" || screen.key === "letter") && <button type="button" className={secondary} disabled={Boolean(busy)} onClick={() => void nextCheck()}>Skip</button>}
+            <DatesNeeded gaps={screenDates.length ? screenDates : check === CHECK_SCREENS.length - 1 ? datesLeft : []} />
           </div>
         </div>
+      )}
+
+      {step === "gaps" && mode === "onboarding" && gap && question && (
+        <form className="space-y-6" onSubmit={(event) => { event.preventDefault(); if (!busy) nextQuestion(); }}>
+          {question.hint && <p className="-mt-4 text-sm text-[#9A9AA3]">{question.hint}</p>}
+          <QuestionBody key={`${gap.id}:${question.key}`} q={question} profile={draft} set={setDraft} next={nextQuestion} />
+          <div className="flex flex-wrap items-center gap-3 border-t border-[#17171B] pt-6">
+            {(!question.tap || question.key === "salary") && <button type="submit" className={primary} disabled={Boolean(busy)}>{busy === "save" ? "Saving…" : question.key === "eeo" ? "Keep \u201cDecline to answer\u201d" : "Continue"}</button>}
+            {question.tap && busy === "save" && <span className="text-sm text-[#9A9AA3]">Saving…</span>}
+            {(question.optional || !question.tap) && question.key !== "eeo" && <button type="button" className={question.tap ? secondary : "text-sm text-[#9A9AA3] underline-offset-4 hover:text-white hover:underline"} disabled={Boolean(busy)} onClick={() => nextQuestion()}>{question.optional ? "Skip" : "Skip for now"}</button>}
+          </div>
+        </form>
       )}
 
       {mode === "edit" && (
